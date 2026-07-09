@@ -74,7 +74,8 @@
       grid-template-columns: 330px 1fr;
     }
 
-    .hidden { display: none !important; }
+    .hidden,
+    .view-hidden { display: none !important; }
 
     .sidebar {
       background: #203035;
@@ -253,6 +254,29 @@
       justify-content: flex-end;
     }
 
+    .view-switch {
+      display: inline-flex;
+      gap: 4px;
+      padding: 4px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #edf2ee;
+    }
+
+    .view-btn {
+      min-height: 34px;
+      border-radius: 6px;
+      padding: 7px 10px;
+      background: transparent;
+      color: var(--muted);
+      font-weight: 800;
+    }
+
+    .view-btn.active {
+      background: #203035;
+      color: #fff;
+    }
+
     .account-btn {
       display: inline-flex;
       align-items: center;
@@ -382,6 +406,35 @@
       display: grid;
       gap: 10px;
       align-content: start;
+    }
+
+    .todo-create {
+      display: grid;
+      grid-template-columns: 150px minmax(170px, 260px) 1fr auto;
+      gap: 10px;
+      align-items: end;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #f7faf7;
+    }
+
+    .todo-create label {
+      display: grid;
+      gap: 6px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .todo-create input {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 10px 11px;
+      color: var(--ink);
+      background: #fff;
+      outline: none;
     }
 
     .todo-head {
@@ -699,7 +752,8 @@
       .modal-grid,
       .status-switch,
       .boss-panel,
-      .todo-layout { grid-template-columns: 1fr; }
+      .todo-layout,
+      .todo-create { grid-template-columns: 1fr; }
       .result { grid-template-columns: 1fr; gap: 5px; }
     }
   </style>
@@ -720,7 +774,6 @@
         <input id="loginPassword" type="password" autocomplete="current-password" required>
       </label>
       <button class="primary" type="submit">Prijava</button>
-      <p class="small">Gesli: <strong>bojan / bojan123</strong> in <strong>ibro / ibro123</strong>.</p>
     </form>
   </section>
 
@@ -835,6 +888,10 @@
           <button class="icon-btn" id="nextMonth" type="button" title="Naslednji mesec">&rsaquo;</button>
         </div>
         <div class="tools">
+          <div class="view-switch" aria-label="Pogled">
+            <button class="view-btn active" id="calendarViewBtn" type="button">Koledar</button>
+            <button class="view-btn" id="todosViewBtn" type="button">Opravila</button>
+          </div>
           <input class="search" id="clientSearch" placeholder="I&#353;&#269;i stranko, material ali opis">
           <button class="secondary" id="todayBtn" type="button">Danes</button>
           <button class="secondary" id="exportCsv" type="button">Izvoz CSV</button>
@@ -845,7 +902,7 @@
         </div>
       </section>
 
-      <section class="stats">
+      <section class="stats calendar-view">
         <div class="stat"><strong id="statHours">0 h</strong><span>ure v tem mesecu</span></div>
         <div class="stat"><strong id="statKm">0 km</strong><span>kilometrina</span></div>
         <div class="stat"><strong id="statMaterial">0 EUR</strong><span>material</span></div>
@@ -853,16 +910,28 @@
         <div class="stat"><strong id="statTodos">0</strong><span>odprta opravila</span></div>
       </section>
 
-      <section class="panel boss-panel hidden" id="bossPanel">
+      <section class="panel boss-panel hidden calendar-view" id="bossPanel">
         <p>&#352;efovski pogled: vidi&#353; vse vnose, lahko i&#353;&#269;e&#353; po stranki in spremeni&#353; status na obra&#269;unano, garancijo ali drugo.</p>
         <button class="secondary" id="downloadBackup" type="button">Prenesi varnostno kopijo</button>
       </section>
 
-      <section class="panel search-panel" id="searchPanel"></section>
+      <section class="panel search-panel calendar-view" id="searchPanel"></section>
 
-      <section class="panel todo-layout">
+      <section class="panel todo-layout todos-view view-hidden">
         <div class="client-list" id="clientTodoList"></div>
         <div class="todo-panel">
+          <div class="todo-create">
+            <label>Datum
+              <input id="pageTodoDate" type="date">
+            </label>
+            <label>Stranka
+              <input id="pageTodoClient" list="clientList" placeholder="Stranka ali interno">
+            </label>
+            <label>Opravilo
+              <input id="pageTodoTitle" type="text" placeholder="Kaj je treba narediti">
+            </label>
+            <button class="primary" id="savePageTodo" type="button">Dodaj</button>
+          </div>
           <div class="todo-head">
             <strong id="todoPanelTitle">Vsa opravila</strong>
             <button class="secondary" id="clearClientFilter" type="button">Vse stranke</button>
@@ -871,7 +940,7 @@
         </div>
       </section>
 
-      <section class="panel calendar-shell">
+      <section class="panel calendar-shell calendar-view">
         <div class="weekdays">
           <div>Pon</div>
           <div>Tor</div>
@@ -995,6 +1064,7 @@
 
     const state = {
       current: new Date(),
+      view: "calendar",
       selectedStatus: "unbilled",
       entries: [],
       todos: [],
@@ -1021,6 +1091,7 @@
     async function boot() {
       $("quickDate").value = dateKey(new Date());
       $("todoDate").value = dateKey(new Date());
+      $("pageTodoDate").value = dateKey(new Date());
       if (location.protocol === "file:") {
         $("serverWarning").classList.remove("hidden");
         return;
@@ -1044,6 +1115,7 @@
       $("userRole").textContent = state.user.role === "boss" ? "Bojan" : "Ibro";
       $("bossPanel").classList.toggle("hidden", state.user.role !== "boss");
       updateAvatar("topAvatar", state.user);
+      setView(state.view);
       render();
     }
 
@@ -1182,6 +1254,16 @@
       };
     }
 
+    function todoFromPage() {
+      return {
+        date: $("pageTodoDate").value,
+        client: $("pageTodoClient").value.trim(),
+        title: $("pageTodoTitle").value.trim(),
+        notes: "",
+        done: false
+      };
+    }
+
     function validateEntry(entry) {
       if (!entry.date || !entry.start || !entry.end || !entry.client) {
         alert("Vpisi datum, uro od-do in stranko.");
@@ -1200,6 +1282,35 @@
         return false;
       }
       return true;
+    }
+
+    function setView(view) {
+      state.view = view;
+      document.querySelectorAll(".calendar-view").forEach((element) => {
+        element.classList.toggle("view-hidden", view !== "calendar");
+      });
+      document.querySelectorAll(".todos-view").forEach((element) => {
+        element.classList.toggle("view-hidden", view !== "todos");
+      });
+      $("calendarViewBtn").classList.toggle("active", view === "calendar");
+      $("todosViewBtn").classList.toggle("active", view === "todos");
+      if (view === "todos") renderTodos();
+    }
+
+    async function addTodo(todo, clearInputs = []) {
+      if (!validateTodo(todo)) return;
+      try {
+        await saveTodoToServer(todo);
+        state.selectedClient = todo.client;
+        clearInputs.forEach((id) => $(id).value = "");
+        if (todo.client) {
+          $("pageTodoClient").value = todo.client;
+          $("todoClient").value = todo.client;
+        }
+        setView("todos");
+      } catch (error) {
+        alert(error.message);
+      }
     }
 
     function render() {
@@ -1272,7 +1383,7 @@
             item.innerHTML = `${escapeHtml(todo.title)}${todo.client ? `<br><small>${escapeHtml(todo.client)}</small>` : ""}`;
             item.addEventListener("click", () => {
               state.selectedClient = todo.client || "";
-              renderTodos();
+              setView("todos");
             });
             day.appendChild(item);
           });
@@ -1672,13 +1783,16 @@
       $("quickMaterialCost").value = "";
     });
 
-    $("saveTodo").addEventListener("click", async () => {
-      const todo = todoFromQuick();
-      if (!validateTodo(todo)) return;
-      await saveTodoToServer(todo);
-      state.selectedClient = todo.client;
-      $("todoTitle").value = "";
+    $("saveTodo").addEventListener("click", () => {
+      addTodo(todoFromQuick(), ["todoTitle"]);
     });
+
+    $("savePageTodo").addEventListener("click", () => {
+      addTodo(todoFromPage(), ["pageTodoTitle"]);
+    });
+
+    $("calendarViewBtn").addEventListener("click", () => setView("calendar"));
+    $("todosViewBtn").addEventListener("click", () => setView("todos"));
 
     $("clearClientFilter").addEventListener("click", () => {
       state.selectedClient = "";
@@ -1698,6 +1812,7 @@
       state.current = new Date();
       $("quickDate").value = dateKey(new Date());
       $("todoDate").value = dateKey(new Date());
+      $("pageTodoDate").value = dateKey(new Date());
       render();
     });
     $("clientSearch").addEventListener("input", renderSearch);
