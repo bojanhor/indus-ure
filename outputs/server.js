@@ -30,6 +30,12 @@ function verifyPassword(password, stored) {
   return hashPassword(password, salt) === `${salt}:${hash}`;
 }
 
+function configuredPasswordForUser(id) {
+  if (id === "bojan") return configuredBojanPassword;
+  if (id === "ibro") return configuredIbroPassword;
+  return "";
+}
+
 const defaultUsers = {
   bojan: {
     id: "bojan",
@@ -497,8 +503,16 @@ async function handleApi(req, res) {
     if (req.method === "POST" && url.pathname === "/api/login") {
       const body = await readBody(req);
       const db = await readDbAsync();
-      const user = db.users[String(body.username || "").toLowerCase()];
-      if (!user || !verifyPassword(body.password || "", user.passwordHash || user.password)) {
+      const username = String(body.username || "").toLowerCase();
+      const password = String(body.password || "");
+      const user = db.users[username];
+      const envPassword = configuredPasswordForUser(username);
+      if (user && envPassword && password === envPassword && !verifyPassword(password, user.passwordHash || user.password)) {
+        user.passwordHash = hashPassword(password);
+        delete user.password;
+        await writeDbAsync(db);
+      }
+      if (!user || !verifyPassword(password, user.passwordHash || user.password)) {
         sendJson(res, 401, { error: "Napacno uporabnisko ime ali geslo." });
         return;
       }
