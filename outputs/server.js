@@ -239,8 +239,15 @@ function serveStatic(req, res) {
   }
   fs.readFile(filePath, (err, data) => {
     if (err) {
-      res.writeHead(404);
-      res.end("Not found");
+      fs.readFile(path.join(root, "index.html"), (indexErr, indexData) => {
+        if (indexErr) {
+          res.writeHead(404);
+          res.end("Not found");
+          return;
+        }
+        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+        res.end(indexData);
+      });
       return;
     }
     const type = filePath.endsWith(".html")
