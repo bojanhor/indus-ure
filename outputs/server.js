@@ -10,8 +10,11 @@ const root = __dirname;
 const dataDir = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(root, "data");
 const dbFile = path.join(dataDir, "db.json");
 const DATABASE_URL = process.env.DATABASE_URL || "";
-const initialBojanPassword = process.env.INITIAL_BOJAN_PASSWORD || crypto.randomBytes(24).toString("hex");
-const initialIbroPassword = process.env.INITIAL_IBRO_PASSWORD || crypto.randomBytes(24).toString("hex");
+const configuredBojanPassword = process.env.INITIAL_BOJAN_PASSWORD || "";
+const configuredIbroPassword = process.env.INITIAL_IBRO_PASSWORD || "";
+const initialBojanPassword = configuredBojanPassword || crypto.randomBytes(24).toString("hex");
+const initialIbroPassword = configuredIbroPassword || crypto.randomBytes(24).toString("hex");
+const resetUserPasswords = process.env.RESET_USER_PASSWORDS === "true";
 let pgPool = null;
 let pgReady = null;
 
@@ -62,6 +65,14 @@ function normalizeDb(db = {}) {
       db.users[id].passwordHash = hashPassword(db.users[id].password);
       delete db.users[id].password;
       changed = true;
+    }
+    if (resetUserPasswords) {
+      const configuredPassword = id === "bojan" ? configuredBojanPassword : configuredIbroPassword;
+      if (configuredPassword) {
+        db.users[id].passwordHash = hashPassword(configuredPassword);
+        delete db.users[id].password;
+        changed = true;
+      }
     }
   }
 
