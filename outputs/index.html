@@ -410,7 +410,7 @@
 
     .todo-create {
       display: grid;
-      grid-template-columns: 150px minmax(170px, 260px) 1fr auto;
+      grid-template-columns: 150px minmax(170px, 230px) minmax(140px, 170px) 1fr auto;
       gap: 10px;
       align-items: end;
       padding: 12px;
@@ -448,7 +448,7 @@
 
     .todo-item {
       display: grid;
-      grid-template-columns: auto 1fr auto;
+      grid-template-columns: auto 1fr auto auto auto;
       gap: 10px;
       align-items: start;
       border: 1px solid var(--line);
@@ -459,6 +459,39 @@
 
     .todo-item.done {
       opacity: 0.62;
+    }
+
+    .todo-item.dragging {
+      opacity: 0.45;
+      outline: 2px dashed var(--accent);
+    }
+
+    .drag-handle {
+      min-width: 34px;
+      min-height: 34px;
+      border-radius: 8px;
+      background: #edf2ee;
+      color: var(--muted);
+      cursor: grab;
+      font-weight: 900;
+    }
+
+    .todo-date,
+    .todo-status {
+      min-height: 34px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      color: var(--ink);
+      padding: 6px 8px;
+    }
+
+    .todo-tools {
+      display: flex;
+      gap: 7px;
+      align-items: center;
+      flex-wrap: wrap;
+      justify-content: flex-end;
     }
 
     .todo-item.done .todo-title {
@@ -854,7 +887,7 @@
       </div>
 
       <div class="control">
-        <label for="todoDate">Datum opravila</label>
+        <label for="todoDate">Fiksni datum opravila</label>
         <input id="todoDate" type="date">
       </div>
 
@@ -866,6 +899,14 @@
       <div class="control">
         <label for="todoTitle">Opravilo</label>
         <textarea id="todoTitle" placeholder="npr. Poklici stranko, naroci material, preveri napako"></textarea>
+      </div>
+
+      <div class="control">
+        <label for="todoStatus">Status opravila</label>
+        <select id="todoStatus">
+          <option value="open">Caka</option>
+          <option value="in_progress">V teku</option>
+        </select>
       </div>
 
       <button class="primary" id="saveTodo" type="button">Dodaj opravilo</button>
@@ -895,6 +936,7 @@
           <input class="search" id="clientSearch" placeholder="I&#353;&#269;i stranko, material ali opis">
           <button class="secondary" id="todayBtn" type="button">Danes</button>
           <button class="secondary" id="exportCsv" type="button">Izvoz CSV</button>
+          <button class="secondary" id="googleCalendar" type="button">Povezi Google</button>
           <button class="account-btn" id="accountBtn" type="button" title="Upravljanje ra&#269;una">
             <span class="avatar" id="topAvatar">?</span>
             <span>Ra&#269;un</span>
@@ -921,11 +963,17 @@
         <div class="client-list" id="clientTodoList"></div>
         <div class="todo-panel">
           <div class="todo-create">
-            <label>Datum
+            <label>Fiksni datum
               <input id="pageTodoDate" type="date">
             </label>
             <label>Stranka
               <input id="pageTodoClient" list="clientList" placeholder="Stranka ali interno">
+            </label>
+            <label>Status
+              <select id="pageTodoStatus">
+                <option value="open">Caka</option>
+                <option value="in_progress">V teku</option>
+              </select>
             </label>
             <label>Opravilo
               <input id="pageTodoTitle" type="text" placeholder="Kaj je treba narediti">
@@ -969,6 +1017,9 @@
           </label>
           <label>Stranka
             <input id="entryClient" list="clientList" required>
+          </label>
+          <label>Sodelavci
+            <input id="entryPeople" placeholder="npr. Bojan, Ibro">
           </label>
           <label>Od
             <input id="entryStart" type="time" required>
@@ -1090,8 +1141,8 @@
 
     async function boot() {
       $("quickDate").value = dateKey(new Date());
-      $("todoDate").value = dateKey(new Date());
-      $("pageTodoDate").value = dateKey(new Date());
+      $("todoDate").value = "";
+      $("pageTodoDate").value = "";
       if (location.protocol === "file:") {
         $("serverWarning").classList.remove("hidden");
         return;
@@ -1238,6 +1289,7 @@
         status: $("quickStatus").value,
         work: $("quickWork").value.trim(),
         material: $("quickMaterial").value.trim(),
+        people: "",
         km: Number($("quickKm").value || 0),
         materialCost: Number($("quickMaterialCost").value || 0),
         notes: ""
@@ -1250,6 +1302,8 @@
         client: $("todoClient").value.trim(),
         title: $("todoTitle").value.trim(),
         notes: "",
+        status: $("todoStatus").value,
+        order: nextTodoOrder(),
         done: false
       };
     }
@@ -1260,6 +1314,8 @@
         client: $("pageTodoClient").value.trim(),
         title: $("pageTodoTitle").value.trim(),
         notes: "",
+        status: $("pageTodoStatus").value,
+        order: nextTodoOrder(),
         done: false
       };
     }
@@ -1303,6 +1359,10 @@
         await saveTodoToServer(todo);
         state.selectedClient = todo.client;
         clearInputs.forEach((id) => $(id).value = "");
+        $("todoDate").value = "";
+        $("pageTodoDate").value = "";
+        $("todoStatus").value = "open";
+        $("pageTodoStatus").value = "open";
         if (todo.client) {
           $("pageTodoClient").value = todo.client;
           $("todoClient").value = todo.client;
@@ -1311,6 +1371,20 @@
       } catch (error) {
         alert(error.message);
       }
+    }
+
+    function nextTodoOrder() {
+      return state.todos.reduce((max, todo) => Math.max(max, Number(todo.order || 0)), 0) + 1;
+    }
+
+    function todoSort(a, b) {
+      if (Number(a.done) !== Number(b.done)) return Number(a.done) - Number(b.done);
+      if ((a.status === "in_progress") !== (b.status === "in_progress")) {
+        return a.status === "in_progress" ? -1 : 1;
+      }
+      if (!a.date && !b.date) return Number(a.order || 0) - Number(b.order || 0);
+      if (a.date && b.date) return String(a.date).localeCompare(String(b.date));
+      return a.date ? -1 : 1;
     }
 
     function render() {
@@ -1375,12 +1449,12 @@
 
         state.todos
           .filter((todo) => todo.date === key)
-          .sort((a, b) => Number(a.done) - Number(b.done))
+          .sort(todoSort)
           .forEach((todo) => {
             const item = document.createElement("button");
             item.type = "button";
             item.className = `day-todo ${todo.done ? "done" : ""}`;
-            item.innerHTML = `${escapeHtml(todo.title)}${todo.client ? `<br><small>${escapeHtml(todo.client)}</small>` : ""}`;
+            item.innerHTML = `${escapeHtml(todo.title)}${todo.client ? `<br><small>${escapeHtml(todo.client)}</small>` : ""}${todo.status === "in_progress" ? `<br><small>v teku</small>` : ""}`;
             item.addEventListener("click", () => {
               state.selectedClient = todo.client || "";
               setView("todos");
@@ -1465,7 +1539,7 @@
 
       const todos = state.todos
         .filter((todo) => !state.selectedClient || todo.client === state.selectedClient)
-        .sort((a, b) => Number(a.done) - Number(b.done) || String(a.date || "9999-99-99").localeCompare(String(b.date || "9999-99-99")));
+        .sort(todoSort);
 
       if (todos.length === 0) {
         items.innerHTML = `<p class="todo-meta">Ni opravil za ta izbor.</p>`;
@@ -1474,29 +1548,82 @@
 
       todos.forEach((todo) => {
         const item = document.createElement("div");
+        item.dataset.todoId = todo.id;
         item.className = `todo-item ${todo.done ? "done" : ""}`;
+        item.draggable = !todo.date && !todo.done;
         item.innerHTML = `
           <input type="checkbox" ${todo.done ? "checked" : ""} aria-label="Opravljeno">
           <div>
             <div class="todo-title">${escapeHtml(todo.title)}</div>
             <div class="todo-meta">
-              ${todo.date ? `<span class="todo-chip">${formatDate(todo.date)}</span>` : ""}
+              ${todo.date ? `<span class="todo-chip">${formatDate(todo.date)}</span>` : `<span class="todo-chip">brez datuma</span>`}
               ${todo.client ? `<span class="todo-chip">${escapeHtml(todo.client)}</span>` : ""}
+              ${todo.status === "in_progress" ? `<span class="todo-chip">v teku</span>` : ""}
               <span class="todo-chip">dodal: ${escapeHtml(todo.createdByName || "-")}</span>
             </div>
             ${todo.notes ? `<div class="todo-meta">${escapeHtml(todo.notes)}</div>` : ""}
           </div>
-          <button class="secondary" type="button">Izbrisi</button>
+          <div class="todo-tools">
+            <select class="todo-status" aria-label="Status opravila">
+              <option value="open" ${todo.status === "in_progress" ? "" : "selected"}>Caka</option>
+              <option value="in_progress" ${todo.status === "in_progress" ? "selected" : ""}>V teku</option>
+            </select>
+            <input class="todo-date" type="date" value="${escapeHtml(todo.date || "")}" aria-label="Fiksni datum">
+          </div>
+          <button class="secondary delete-todo" type="button">Izbrisi</button>
+          <button class="drag-handle" type="button" title="Povleci za vrstni red">::</button>
         `;
         item.querySelector("input").addEventListener("change", (event) => {
           saveTodoToServer({ ...todo, done: event.target.checked }).catch((error) => alert(error.message));
         });
-        item.querySelector("button").addEventListener("click", () => {
+        item.querySelector(".todo-status").addEventListener("change", (event) => {
+          saveTodoToServer({ ...todo, status: event.target.value }).catch((error) => alert(error.message));
+        });
+        item.querySelector(".todo-date").addEventListener("change", (event) => {
+          saveTodoToServer({ ...todo, date: event.target.value }).catch((error) => alert(error.message));
+        });
+        item.querySelector(".delete-todo").addEventListener("click", () => {
           if (!confirm("Izbrisem to opravilo?")) return;
           deleteTodoFromServer(todo.id).catch((error) => alert(error.message));
         });
+        item.addEventListener("dragstart", (event) => {
+          if (todo.date || todo.done) {
+            event.preventDefault();
+            return;
+          }
+          item.classList.add("dragging");
+          event.dataTransfer.setData("text/plain", todo.id);
+        });
+        item.addEventListener("dragend", () => item.classList.remove("dragging"));
+        item.addEventListener("dragover", (event) => {
+          if (todo.date || todo.done) return;
+          event.preventDefault();
+        });
+        item.addEventListener("drop", (event) => {
+          event.preventDefault();
+          reorderUndatedTodos(event.dataTransfer.getData("text/plain"), todo.id);
+        });
         items.appendChild(item);
       });
+    }
+
+    async function reorderUndatedTodos(sourceId, targetId) {
+      if (!sourceId || !targetId || sourceId === targetId) return;
+      const visible = state.todos
+        .filter((todo) => !todo.done && !todo.date && (!state.selectedClient || todo.client === state.selectedClient))
+        .sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
+      const from = visible.findIndex((todo) => todo.id === sourceId);
+      const to = visible.findIndex((todo) => todo.id === targetId);
+      if (from < 0 || to < 0) return;
+      const [moved] = visible.splice(from, 1);
+      visible.splice(to, 0, moved);
+      try {
+        for (let index = 0; index < visible.length; index++) {
+          await saveTodoToServer({ ...visible[index], order: index + 1 });
+        }
+      } catch (error) {
+        alert(error.message);
+      }
     }
 
     function renderSearch() {
@@ -1510,7 +1637,7 @@
       }
 
       const results = state.entries
-        .filter((entry) => [entry.client, entry.work, entry.material, entry.notes, entry.createdByName]
+        .filter((entry) => [entry.client, entry.people, entry.work, entry.material, entry.notes, entry.createdByName]
           .join(" ")
           .toLowerCase()
           .includes(query))
@@ -1529,7 +1656,7 @@
         item.innerHTML = `
           <strong>${formatDate(entry.date)}</strong>
           <span>${entry.start} - ${entry.end}</span>
-          <span>${escapeHtml(entry.client)}<br><small>${escapeHtml(entry.work || entry.material || "")} | dodal: ${escapeHtml(entry.createdByName || "-")}</small></span>
+          <span>${escapeHtml(entry.client)}<br><small>${escapeHtml(entry.work || entry.material || "")}${entry.people ? ` | ${escapeHtml(entry.people)}` : ""} | dodal: ${escapeHtml(entry.createdByName || "-")}</small></span>
           <span class="badge ${entry.status}">${statusLabels[entry.status]}</span>
         `;
         item.addEventListener("click", () => openDialog(entry));
@@ -1554,6 +1681,7 @@
       $("entryStart").value = entry.start || "08:00";
       $("entryEnd").value = entry.end || "16:00";
       $("entryClient").value = entry.client || "";
+      $("entryPeople").value = entry.people || "";
       $("entryKm").value = entry.km || "";
       $("entryMaterialCost").value = entry.materialCost || "";
       $("entryWork").value = entry.work || "";
@@ -1602,6 +1730,7 @@
         status: state.selectedStatus,
         work: $("entryWork").value.trim(),
         material: $("entryMaterial").value.trim(),
+        people: $("entryPeople").value.trim(),
         km: Number($("entryKm").value || 0),
         materialCost: Number($("entryMaterialCost").value || 0),
         notes: $("entryNotes").value.trim()
@@ -1630,7 +1759,7 @@
     }
 
     function exportCsv() {
-      const header = ["Datum", "Od", "Do", "Stranka", "Status", "Ure", "Km", "Material EUR", "Delo", "Material", "Opombe", "Dodal", "Spremenil"];
+      const header = ["Datum", "Od", "Do", "Stranka", "Sodelavci", "Status", "Ure", "Km", "Material EUR", "Delo", "Material", "Opombe", "Dodal", "Spremenil"];
       const rows = state.entries
         .slice()
         .sort((a, b) => `${a.date} ${a.start}`.localeCompare(`${b.date} ${b.start}`))
@@ -1639,6 +1768,7 @@
           entry.start,
           entry.end,
           entry.client,
+          entry.people || "",
           statusLabels[entry.status],
           duration(entry).toFixed(2),
           entry.km || 0,
@@ -1658,6 +1788,17 @@
 
     function downloadBackup() {
       downloadText(JSON.stringify({ entries: state.entries, todos: state.todos }, null, 2), `indus-ure-backup-${dateKey(new Date())}.json`, "application/json");
+    }
+
+    async function copyGoogleCalendarUrl() {
+      try {
+        const data = await api("/api/calendar-url");
+        await navigator.clipboard.writeText(data.url);
+        window.open("https://calendar.google.com/calendar/u/0/r/settings/addbyurl", "_blank", "noopener");
+        alert("Povezava je kopirana. V odprtem Google Calendar racunu izberi Add calendar > From URL in prilepi povezavo. To lahko naredita oba, vsak v svojem Google racunu.");
+      } catch (error) {
+        alert(error.message);
+      }
     }
 
     function downloadText(text, filename, type) {
@@ -1817,6 +1958,7 @@
     });
     $("clientSearch").addEventListener("input", renderSearch);
     $("exportCsv").addEventListener("click", exportCsv);
+    $("googleCalendar").addEventListener("click", copyGoogleCalendarUrl);
     $("downloadBackup").addEventListener("click", downloadBackup);
     $("entryForm").addEventListener("submit", (event) => {
       event.preventDefault();

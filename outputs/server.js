@@ -10,6 +10,8 @@ const root = __dirname;
 const dataDir = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(root, "data");
 const dbFile = path.join(dataDir, "db.json");
 const DATABASE_URL = process.env.DATABASE_URL || "";
+const initialBojanPassword = process.env.INITIAL_BOJAN_PASSWORD || crypto.randomBytes(24).toString("hex");
+const initialIbroPassword = process.env.INITIAL_IBRO_PASSWORD || crypto.randomBytes(24).toString("hex");
 let pgPool = null;
 let pgReady = null;
 
@@ -30,14 +32,14 @@ const defaultUsers = {
     id: "bojan",
     name: "Bojan",
     role: "boss",
-    passwordHash: hashPassword("bojan123", "bojan-default-salt"),
+    passwordHash: hashPassword(initialBojanPassword),
     avatar: ""
   },
   ibro: {
     id: "ibro",
     name: "Ibro",
     role: "worker",
-    passwordHash: hashPassword("ibro123", "ibro-default-salt"),
+    passwordHash: hashPassword(initialIbroPassword),
     avatar: ""
   }
 };
@@ -80,6 +82,11 @@ function normalizeDb(db = {}) {
     changed = true;
   }
 
+  if (!db.calendarToken || String(db.calendarToken).length < 24) {
+    db.calendarToken = crypto.randomBytes(24).toString("hex");
+    changed = true;
+  }
+
   db.entries = db.entries.map((entry) => {
     const next = { ...entry };
     if (next.createdBy === "delavec") {
@@ -104,6 +111,23 @@ function normalizeDb(db = {}) {
     }
     if (!Array.isArray(next.history)) {
       next.history = [];
+      changed = true;
+    }
+    if (typeof next.people !== "string") {
+      next.people = "";
+      changed = true;
+    }
+    return next;
+  });
+
+  db.todos = db.todos.map((todo, index) => {
+    const next = { ...todo };
+    if (!["open", "in_progress"].includes(next.status)) {
+      next.status = "open";
+      changed = true;
+    }
+    if (typeof next.order !== "number") {
+      next.order = index + 1;
       changed = true;
     }
     return next;
@@ -159,7 +183,7 @@ async function ensurePostgresDb() {
     if (existing.rowCount === 0) {
       await pool.query(
         "insert into app_state (id, data) values ($1, $2::jsonb)",
-        ["main", JSON.stringify({ users: defaultUsers, entries: [], todos: [] })]
+        ["main", JSON.stringify({ users: defaultUsers, entries: [], todos: [], calendarToken: crypto.randomBytes(24).toString("hex") })]
       );
       return;
     }
@@ -201,6 +225,20 @@ function sendJson(res, status, data) {
     "Cache-Control": "no-store"
   });
   res.end(JSON.stringify(data));
+}
+
+function absoluteBaseUrl(req) {
+  const proto = req.headers["x-forwarded-proto"] || (req.socket.encrypted ? "https" : "http");
+  const host = req.headers["x-forwarded-host"] || req.headers.host;
+  return `${proto}://${host}`;
+}
+
+function sendText(res, status, text, type) {
+  res.writeHead(status, {
+    "Content-Type": `${type}; charset=utf-8`,
+    "Cache-Control": "no-store"
+  });
+  res.end(text);
 }
 
 function readBody(req) {
@@ -268,6 +306,7 @@ function cleanEntry(input) {
     status: ["billed", "warranty", "unbilled", "errand"].includes(input.status) ? input.status : "unbilled",
     work: String(input.work || "").trim(),
     material: String(input.material || "").trim(),
+    people: String(input.people || "").trim(),
     km: Number(input.km || 0),
     materialCost: Number(input.materialCost || 0),
     notes: String(input.notes || "").trim()
@@ -288,6 +327,8 @@ function cleanTodo(input) {
     date: String(input.date || ""),
     client: String(input.client || "").trim(),
     notes: String(input.notes || "").trim(),
+    status: ["open", "in_progress"].includes(input.status) ? input.status : "open",
+    order: Number.isFinite(Number(input.order)) ? Number(input.order) : 0,
     done: Boolean(input.done)
   };
 }
@@ -296,6 +337,104 @@ function validateTodo(todo) {
   if (!todo.title) return "Manjka opis opravila.";
   if (todo.date && !/^\d{4}-\d{2}-\d{2}$/.test(todo.date)) return "Datum opravila ni pravilen.";
   return "";
+}
+
+function icsEscape(value) {
+  return String(value || "")
+    .replaceAll("\\", "\\\\")
+    .replaceAll(";", "\\;")
+    .replaceAll(",", "\\,")
+    .replaceAll("\r", "")
+    .replaceAll("\n", "\\n");
+}
+
+function icsDateTime(date, time) {
+  return `${date.replaceAll("-", "")}T${time.replace(":", "")}00`;
+}
+
+function icsDate(date) {
+  return String(date || "").replaceAll("-", "");
+}
+
+function addDays(date, days) {
+  const parsed = new Date(`${date}T00:00:00`);
+  parsed.setDate(parsed.getDate() + days);
+  return [
+    parsed.getFullYear(),
+    String(parsed.getMonth() + 1).padStart(2, "0"),
+    String(parsed.getDate()).padStart(2, "0")
+  ].join("");
+}
+
+function foldIcsLine(line) {
+  const chunks = [];
+  let rest = line;
+  while (rest.length > 72) {
+    chunks.push(rest.slice(0, 72));
+    rest = ` ${rest.slice(72)}`;
+  }
+  chunks.push(rest);
+  return chunks.join("\r\n");
+}
+
+function buildCalendarIcs(db) {
+  const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
+  const lines = [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//INDUS URE//Delovni koledar//SL",
+    "CALSCALE:GREGORIAN",
+    "METHOD:PUBLISH",
+    "X-WR-CALNAME:INDUS URE",
+    "X-WR-TIMEZONE:Europe/Ljubljana"
+  ];
+
+  for (const entry of db.entries || []) {
+    if (!entry.date || !entry.start || !entry.end) continue;
+    const description = [
+      entry.work ? `Delo: ${entry.work}` : "",
+      entry.material ? `Material: ${entry.material}` : "",
+      entry.people ? `Sodelavci: ${entry.people}` : "",
+      entry.km ? `Km: ${entry.km}` : "",
+      entry.materialCost ? `Material EUR: ${entry.materialCost}` : "",
+      entry.notes ? `Opombe: ${entry.notes}` : "",
+      entry.createdByName ? `Dodal: ${entry.createdByName}` : "",
+      entry.updatedByName ? `Spremenil: ${entry.updatedByName}` : ""
+    ].filter(Boolean).join("\n");
+    lines.push(
+      "BEGIN:VEVENT",
+      `UID:entry-${entry.id}@indus-ure`,
+      `DTSTAMP:${stamp}`,
+      `DTSTART;TZID=Europe/Ljubljana:${icsDateTime(entry.date, entry.start)}`,
+      `DTEND;TZID=Europe/Ljubljana:${icsDateTime(entry.date, entry.end)}`,
+      `SUMMARY:${icsEscape(`${entry.client || "Stranka"} - ${entry.work || entry.material || "Delo"}`)}`,
+      `DESCRIPTION:${icsEscape(description)}`,
+      "END:VEVENT"
+    );
+  }
+
+  for (const todo of db.todos || []) {
+    if (!todo.date || todo.done) continue;
+    const description = [
+      todo.client ? `Stranka: ${todo.client}` : "",
+      todo.status === "in_progress" ? "Status: v teku" : "",
+      todo.notes ? `Opombe: ${todo.notes}` : "",
+      todo.createdByName ? `Dodal: ${todo.createdByName}` : ""
+    ].filter(Boolean).join("\n");
+    lines.push(
+      "BEGIN:VEVENT",
+      `UID:todo-${todo.id}@indus-ure`,
+      `DTSTAMP:${stamp}`,
+      `DTSTART;VALUE=DATE:${icsDate(todo.date)}`,
+      `DTEND;VALUE=DATE:${addDays(todo.date, 1)}`,
+      `SUMMARY:${icsEscape(`TODO: ${todo.title}`)}`,
+      `DESCRIPTION:${icsEscape(description)}`,
+      "END:VEVENT"
+    );
+  }
+
+  lines.push("END:VCALENDAR");
+  return `${lines.map(foldIcsLine).join("\r\n")}\r\n`;
 }
 
 function serveStatic(req, res) {
@@ -334,6 +473,16 @@ async function handleApi(req, res) {
   const url = new URL(req.url, `http://${req.headers.host}`);
 
   try {
+    if (url.pathname === "/api/calendar-url" && req.method === "GET") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      const db = await readDbAsync();
+      sendJson(res, 200, {
+        url: `${absoluteBaseUrl(req)}/calendar.ics?token=${encodeURIComponent(db.calendarToken)}`
+      });
+      return;
+    }
+
     if (req.method === "POST" && url.pathname === "/api/login") {
       const body = await readBody(req);
       const db = await readDbAsync();
@@ -427,9 +576,11 @@ async function handleApi(req, res) {
       }
       const now = new Date().toISOString();
       const db = await readDbAsync();
+      const maxOrder = db.todos.reduce((max, item) => Math.max(max, Number(item.order || 0)), 0);
       db.todos.push({
         id: crypto.randomUUID(),
         ...todo,
+        order: todo.order || maxOrder + 1,
         createdBy: user.id,
         createdByName: user.name,
         createdAt: now,
@@ -558,6 +709,20 @@ async function handleApi(req, res) {
   }
 }
 
+async function handleCalendarFeed(req, res) {
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  try {
+    const db = await readDbAsync();
+    if (url.searchParams.get("token") !== db.calendarToken) {
+      sendText(res, 403, "Forbidden", "text/plain");
+      return;
+    }
+    sendText(res, 200, buildCalendarIcs(db), "text/calendar");
+  } catch (error) {
+    sendText(res, 500, error.message || "Napaka na strezniku.", "text/plain");
+  }
+}
+
 function networkUrls() {
   return Object.values(os.networkInterfaces())
     .flat()
@@ -579,11 +744,15 @@ async function start() {
       handleApi(req, res);
       return;
     }
+    if (req.url.startsWith("/calendar.ics")) {
+      handleCalendarFeed(req, res);
+      return;
+    }
     serveStatic(req, res);
   }).listen(PORT, HOST, () => {
     console.log(`INDUS URE lokalno: http://127.0.0.1:${PORT}`);
     for (const url of networkUrls()) console.log(`Na istem omrezju: ${url}`);
-    console.log("Uporabnika: bojan / bojan123 in ibro / ibro123");
+    console.log("Uporabnika: bojan in ibro");
   });
 }
 
