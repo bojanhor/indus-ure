@@ -9,6 +9,9 @@ const HOST = process.env.HOST || "0.0.0.0";
 const root = __dirname;
 const dataDir = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(root, "data");
 const dbFile = path.join(dataDir, "db.json");
+const DATABASE_URL = process.env.DATABASE_URL || "";
+let pgPool = null;
+let pgReady = null;
 
 function hashPassword(password, salt = crypto.randomBytes(16).toString("hex")) {
   const hash = crypto.pbkdf2Sync(String(password), salt, 120000, 32, "sha256").toString("hex");
@@ -41,14 +44,7 @@ const defaultUsers = {
 
 const sessions = new Map();
 
-function ensureDb() {
-  if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
-  if (!fs.existsSync(dbFile)) {
-    fs.writeFileSync(dbFile, JSON.stringify({ users: defaultUsers, entries: [], todos: [] }, null, 2), "utf8");
-    return;
-  }
-
-  const db = JSON.parse(fs.readFileSync(dbFile, "utf8"));
+function normalizeDb(db = {}) {
   let changed = false;
 
   if (!db.users) {
@@ -113,6 +109,17 @@ function ensureDb() {
     return next;
   });
 
+  return { db, changed };
+}
+
+function ensureDb() {
+  if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+  if (!fs.existsSync(dbFile)) {
+    fs.writeFileSync(dbFile, JSON.stringify({ users: defaultUsers, entries: [], todos: [] }, null, 2), "utf8");
+    return;
+  }
+
+  const { db, changed } = normalizeDb(JSON.parse(fs.readFileSync(dbFile, "utf8")));
   if (changed) writeDb(db);
 }
 
@@ -123,6 +130,69 @@ function readDb() {
 
 function writeDb(db) {
   fs.writeFileSync(dbFile, JSON.stringify(db, null, 2), "utf8");
+}
+
+function getPgPool() {
+  if (pgPool) return pgPool;
+  const { Pool } = require("pg");
+  const isLocal = /localhost|127\.0\.0\.1/.test(DATABASE_URL);
+  pgPool = new Pool({
+    connectionString: DATABASE_URL,
+    ssl: isLocal ? false : { rejectUnauthorized: false }
+  });
+  return pgPool;
+}
+
+async function ensurePostgresDb() {
+  if (!DATABASE_URL) return;
+  if (pgReady) return pgReady;
+  pgReady = (async () => {
+    const pool = getPgPool();
+    await pool.query(`
+      create table if not exists app_state (
+        id text primary key,
+        data jsonb not null,
+        updated_at timestamptz not null default now()
+      )
+    `);
+    const existing = await pool.query("select data from app_state where id = $1", ["main"]);
+    if (existing.rowCount === 0) {
+      await pool.query(
+        "insert into app_state (id, data) values ($1, $2::jsonb)",
+        ["main", JSON.stringify({ users: defaultUsers, entries: [], todos: [] })]
+      );
+      return;
+    }
+    const { db, changed } = normalizeDb(existing.rows[0].data);
+    if (changed) {
+      await pool.query(
+        "update app_state set data = $1::jsonb, updated_at = now() where id = $2",
+        [JSON.stringify(db), "main"]
+      );
+    }
+  })();
+  return pgReady;
+}
+
+async function readDbAsync() {
+  if (!DATABASE_URL) return readDb();
+  await ensurePostgresDb();
+  const result = await getPgPool().query("select data from app_state where id = $1", ["main"]);
+  const { db, changed } = normalizeDb(result.rows[0]?.data || {});
+  if (changed) await writeDbAsync(db);
+  return db;
+}
+
+async function writeDbAsync(db) {
+  if (!DATABASE_URL) {
+    writeDb(db);
+    return;
+  }
+  await ensurePostgresDb();
+  await getPgPool().query(
+    "update app_state set data = $1::jsonb, updated_at = now() where id = $2",
+    [JSON.stringify(db), "main"]
+  );
 }
 
 function sendJson(res, status, data) {
@@ -162,17 +232,17 @@ function publicUser(user) {
   };
 }
 
-function getSessionUser(req) {
+async function getSessionUser(req) {
   const auth = req.headers.authorization || "";
   const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
   const userId = sessions.get(token);
   if (!userId) return null;
-  const db = readDb();
+  const db = await readDbAsync();
   return db.users[userId] || null;
 }
 
-function requireUser(req, res) {
-  const user = getSessionUser(req);
+async function requireUser(req, res) {
+  const user = await getSessionUser(req);
   if (!user) {
     sendJson(res, 401, { error: "Prijava je potekla. Prijavi se se enkrat." });
     return null;
@@ -266,7 +336,7 @@ async function handleApi(req, res) {
   try {
     if (req.method === "POST" && url.pathname === "/api/login") {
       const body = await readBody(req);
-      const db = readDb();
+      const db = await readDbAsync();
       const user = db.users[String(body.username || "").toLowerCase()];
       if (!user || !verifyPassword(body.password || "", user.passwordHash || user.password)) {
         sendJson(res, 401, { error: "Napacno uporabnisko ime ali geslo." });
@@ -279,17 +349,17 @@ async function handleApi(req, res) {
     }
 
     if (url.pathname === "/api/me") {
-      const user = requireUser(req, res);
+      const user = await requireUser(req, res);
       if (!user) return;
       sendJson(res, 200, { user: publicUser(user) });
       return;
     }
 
     if (url.pathname === "/api/profile" && req.method === "PUT") {
-      const user = requireUser(req, res);
+      const user = await requireUser(req, res);
       if (!user) return;
       const body = await readBody(req);
-      const db = readDb();
+      const db = await readDbAsync();
       const current = db.users[user.id];
       const name = String(body.name || "").trim();
       const avatar = String(body.avatar || "");
@@ -303,16 +373,16 @@ async function handleApi(req, res) {
       }
       current.name = name;
       current.avatar = avatar.slice(0, 1_500_000);
-      writeDb(db);
+      await writeDbAsync(db);
       sendJson(res, 200, { user: publicUser(current) });
       return;
     }
 
     if (url.pathname === "/api/password" && req.method === "PUT") {
-      const user = requireUser(req, res);
+      const user = await requireUser(req, res);
       if (!user) return;
       const body = await readBody(req);
-      const db = readDb();
+      const db = await readDbAsync();
       const current = db.users[user.id];
       if (!verifyPassword(body.currentPassword || "", current.passwordHash || current.password)) {
         sendJson(res, 400, { error: "Trenutno geslo ni pravilno." });
@@ -325,29 +395,29 @@ async function handleApi(req, res) {
       }
       current.passwordHash = hashPassword(next);
       delete current.password;
-      writeDb(db);
+      await writeDbAsync(db);
       sendJson(res, 200, { ok: true });
       return;
     }
 
     if (url.pathname === "/api/entries" && req.method === "GET") {
-      const user = requireUser(req, res);
+      const user = await requireUser(req, res);
       if (!user) return;
-      const db = readDb();
+      const db = await readDbAsync();
       sendJson(res, 200, { entries: db.entries });
       return;
     }
 
     if (url.pathname === "/api/todos" && req.method === "GET") {
-      const user = requireUser(req, res);
+      const user = await requireUser(req, res);
       if (!user) return;
-      const db = readDb();
+      const db = await readDbAsync();
       sendJson(res, 200, { todos: db.todos });
       return;
     }
 
     if (url.pathname === "/api/todos" && req.method === "POST") {
-      const user = requireUser(req, res);
+      const user = await requireUser(req, res);
       if (!user) return;
       const todo = cleanTodo(await readBody(req));
       const validation = validateTodo(todo);
@@ -356,7 +426,7 @@ async function handleApi(req, res) {
         return;
       }
       const now = new Date().toISOString();
-      const db = readDb();
+      const db = await readDbAsync();
       db.todos.push({
         id: crypto.randomUUID(),
         ...todo,
@@ -368,13 +438,13 @@ async function handleApi(req, res) {
         updatedAt: now,
         history: [audit(user, "dodano opravilo")]
       });
-      writeDb(db);
+      await writeDbAsync(db);
       sendJson(res, 200, { todos: db.todos });
       return;
     }
 
     if (url.pathname === "/api/entries" && req.method === "POST") {
-      const user = requireUser(req, res);
+      const user = await requireUser(req, res);
       if (!user) return;
       const entry = cleanEntry(await readBody(req));
       const validation = validateEntry(entry);
@@ -383,7 +453,7 @@ async function handleApi(req, res) {
         return;
       }
       const now = new Date().toISOString();
-      const db = readDb();
+      const db = await readDbAsync();
       db.entries.push({
         id: crypto.randomUUID(),
         ...entry,
@@ -395,14 +465,14 @@ async function handleApi(req, res) {
         updatedAt: now,
         history: [audit(user, "dodano")]
       });
-      writeDb(db);
+      await writeDbAsync(db);
       sendJson(res, 200, { entries: db.entries });
       return;
     }
 
     const match = url.pathname.match(/^\/api\/entries\/([^/]+)$/);
     if (match && req.method === "PUT") {
-      const user = requireUser(req, res);
+      const user = await requireUser(req, res);
       if (!user) return;
       const id = decodeURIComponent(match[1]);
       const entry = cleanEntry(await readBody(req));
@@ -411,7 +481,7 @@ async function handleApi(req, res) {
         sendJson(res, 400, { error: validation });
         return;
       }
-      const db = readDb();
+      const db = await readDbAsync();
       const index = db.entries.findIndex((item) => item.id === id);
       if (index < 0) {
         sendJson(res, 404, { error: "Vnos ne obstaja." });
@@ -425,25 +495,25 @@ async function handleApi(req, res) {
         updatedAt: new Date().toISOString(),
         history: [...(db.entries[index].history || []), audit(user, "spremenjeno")]
       };
-      writeDb(db);
+      await writeDbAsync(db);
       sendJson(res, 200, { entries: db.entries });
       return;
     }
 
     if (match && req.method === "DELETE") {
-      const user = requireUser(req, res);
+      const user = await requireUser(req, res);
       if (!user) return;
       const id = decodeURIComponent(match[1]);
-      const db = readDb();
+      const db = await readDbAsync();
       db.entries = db.entries.filter((item) => item.id !== id);
-      writeDb(db);
+      await writeDbAsync(db);
       sendJson(res, 200, { entries: db.entries });
       return;
     }
 
     const todoMatch = url.pathname.match(/^\/api\/todos\/([^/]+)$/);
     if (todoMatch && req.method === "PUT") {
-      const user = requireUser(req, res);
+      const user = await requireUser(req, res);
       if (!user) return;
       const id = decodeURIComponent(todoMatch[1]);
       const todo = cleanTodo(await readBody(req));
@@ -452,7 +522,7 @@ async function handleApi(req, res) {
         sendJson(res, 400, { error: validation });
         return;
       }
-      const db = readDb();
+      const db = await readDbAsync();
       const index = db.todos.findIndex((item) => item.id === id);
       if (index < 0) {
         sendJson(res, 404, { error: "Opravilo ne obstaja." });
@@ -466,18 +536,18 @@ async function handleApi(req, res) {
         updatedAt: new Date().toISOString(),
         history: [...(db.todos[index].history || []), audit(user, todo.done ? "oznaceno opravljeno" : "spremenjeno opravilo")]
       };
-      writeDb(db);
+      await writeDbAsync(db);
       sendJson(res, 200, { todos: db.todos });
       return;
     }
 
     if (todoMatch && req.method === "DELETE") {
-      const user = requireUser(req, res);
+      const user = await requireUser(req, res);
       if (!user) return;
       const id = decodeURIComponent(todoMatch[1]);
-      const db = readDb();
+      const db = await readDbAsync();
       db.todos = db.todos.filter((item) => item.id !== id);
-      writeDb(db);
+      await writeDbAsync(db);
       sendJson(res, 200, { todos: db.todos });
       return;
     }
@@ -495,16 +565,29 @@ function networkUrls() {
     .map((item) => `http://${item.address}:${PORT}`);
 }
 
-ensureDb();
-
-http.createServer((req, res) => {
-  if (req.url.startsWith("/api/")) {
-    handleApi(req, res);
-    return;
+async function start() {
+  if (DATABASE_URL) {
+    await ensurePostgresDb();
+    console.log("Shranjevanje: Postgres baza prek DATABASE_URL");
+  } else {
+    ensureDb();
+    console.log(`Shranjevanje: lokalna datoteka ${dbFile}`);
   }
-  serveStatic(req, res);
-}).listen(PORT, HOST, () => {
-  console.log(`INDUS URE lokalno: http://127.0.0.1:${PORT}`);
-  for (const url of networkUrls()) console.log(`Na istem omrezju: ${url}`);
-  console.log("Uporabnika: bojan / bojan123 in ibro / ibro123");
+
+  http.createServer((req, res) => {
+    if (req.url.startsWith("/api/")) {
+      handleApi(req, res);
+      return;
+    }
+    serveStatic(req, res);
+  }).listen(PORT, HOST, () => {
+    console.log(`INDUS URE lokalno: http://127.0.0.1:${PORT}`);
+    for (const url of networkUrls()) console.log(`Na istem omrezju: ${url}`);
+    console.log("Uporabnika: bojan / bojan123 in ibro / ibro123");
+  });
+}
+
+start().catch((error) => {
+  console.error(error);
+  process.exit(1);
 });
