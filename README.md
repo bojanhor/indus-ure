@@ -33,6 +33,8 @@ Najlazje je GitHub + Render.
 
 Po objavi dobis javni HTTPS naslov.
 
+Opomba: trenutna Render nastavitev uporablja free plan brez diska, da ne zahteva kartice. Za trajno shranjevanje podatkov je kasneje potreben persistent disk ali zunanja baza.
+
 ## Podatki
 
 Lokalni podatki so v:

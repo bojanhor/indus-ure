@@ -19,8 +19,11 @@ Ker je dodan `render.yaml`, lahko na Render izberes `New` -> `Blueprint` in pove
 
 - build command
 - start command
-- `DATA_DIR=/var/data`
-- persistent disk
+- free web service
+
+Ta free nastavitev je dobra za prvi test brez kartice. Slabost: podatki se lahko izgubijo ob restartu ali redeployu, ker ni persistent diska.
+
+Za pravo redno uporabo kasneje dodaj placljiv persistent disk ali zunanjo bazo.
 
 ## Render nastavitev - rocno
 
@@ -29,13 +32,7 @@ V Render Dashboard izberi `New` -> `Web Service`, povezi GitHub repo in nastavi:
 - Runtime: `Node`
 - Build Command: `npm install`
 - Start Command: `npm start`
-- Environment variable:
-  - `DATA_DIR=/var/data`
-
-Ker se vnosi shranjujejo v datoteko, dodaj se persistent disk:
-
-- Mount path: `/var/data`
-- Size: najmanjsa mozna velikost je dovolj za zacetek
+- Plan: `Free`
 
 Render bo potem ustvaril javni HTTPS naslov, npr. `https://ime-aplikacije.onrender.com`.
 
