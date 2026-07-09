@@ -649,11 +649,26 @@ async function syncGoogleForUser(req, db, user) {
     timeMin: timeMin.toISOString(),
     maxResults: 2500,
     singleEvents: false,
-    showDeleted: false
+    showDeleted: true
   });
 
   for (const event of remote.data.items || []) {
     const privateProps = event.extendedProperties?.private || {};
+    if (event.status === "cancelled") {
+      const entryIndex = db.entries.findIndex((item) => item.syncUser === user.id && (item.googleEventId === event.id || item.id === privateProps.indusId));
+      if (entryIndex >= 0) {
+        db.entries.splice(entryIndex, 1);
+        pulled++;
+        continue;
+      }
+      const todoIndex = db.todos.findIndex((item) => item.syncUser === user.id && (item.googleEventId === event.id || item.id === privateProps.indusId));
+      if (todoIndex >= 0) {
+        db.todos.splice(todoIndex, 1);
+        pulled++;
+        continue;
+      }
+      continue;
+    }
     if (privateProps.indusId && privateProps.indusType === "entry") {
       const entry = db.entries.find((item) => item.id === privateProps.indusId && item.syncUser === user.id);
       if (entry && googleEventUpdatedLater(event, entry)) {
@@ -692,7 +707,7 @@ async function syncGoogleForUser(req, db, user) {
   for (const entry of db.entries.filter((item) => item.syncUser === user.id && item.date && item.start && item.end)) {
     const requestBody = entryToGoogleEvent(entry);
     if (entry.googleEventId) {
-      const updated = await calendar.events.update({ calendarId, eventId: entry.googleEventId, requestBody });
+      const updated = await calendar.events.patch({ calendarId, eventId: entry.googleEventId, requestBody });
       entry.googleUpdatedAt = updated.data.updated || now;
     } else {
       const created = await calendar.events.insert({ calendarId, requestBody });
@@ -705,7 +720,7 @@ async function syncGoogleForUser(req, db, user) {
   for (const todo of db.todos.filter((item) => item.syncUser === user.id && item.date && !item.done)) {
     const requestBody = todoToGoogleEvent(todo);
     if (todo.googleEventId) {
-      const updated = await calendar.events.update({ calendarId, eventId: todo.googleEventId, requestBody });
+      const updated = await calendar.events.patch({ calendarId, eventId: todo.googleEventId, requestBody });
       todo.googleUpdatedAt = updated.data.updated || now;
     } else {
       const created = await calendar.events.insert({ calendarId, requestBody });
@@ -718,6 +733,20 @@ async function syncGoogleForUser(req, db, user) {
   user.google.calendarId = calendarId;
   user.google.lastSyncAt = now;
   return { pushed, pulled, calendarName: user.google.calendarName || `INDUS URE - ${user.name}` };
+}
+
+async function deleteGoogleEventForItem(req, db, item) {
+  if (!googleReady() || !item?.googleEventId || !item.syncUser) return;
+  const user = db.users[item.syncUser];
+  if (!user?.google?.tokens || !user.google.calendarId) return;
+  try {
+    const { google } = require("googleapis");
+    const auth = googleClient(req, user.google.tokens);
+    const calendar = google.calendar({ version: "v3", auth });
+    await calendar.events.delete({ calendarId: user.google.calendarId, eventId: item.googleEventId });
+  } catch (error) {
+    if (![404, 410].includes(Number(error.code))) throw error;
+  }
 }
 
 function serveStatic(req, res) {
@@ -1020,6 +1049,8 @@ async function handleApi(req, res) {
       if (!user) return;
       const id = decodeURIComponent(match[1]);
       const db = await readDbAsync();
+      const entry = db.entries.find((item) => item.id === id);
+      await deleteGoogleEventForItem(req, db, entry);
       db.entries = db.entries.filter((item) => item.id !== id);
       await writeDbAsync(db);
       sendJson(res, 200, { entries: db.entries });
@@ -1062,6 +1093,8 @@ async function handleApi(req, res) {
       if (!user) return;
       const id = decodeURIComponent(todoMatch[1]);
       const db = await readDbAsync();
+      const todo = db.todos.find((item) => item.id === id);
+      await deleteGoogleEventForItem(req, db, todo);
       db.todos = db.todos.filter((item) => item.id !== id);
       await writeDbAsync(db);
       sendJson(res, 200, { todos: db.todos });
