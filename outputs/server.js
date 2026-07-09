@@ -15,6 +15,9 @@ const configuredIbroPassword = process.env.INITIAL_IBRO_PASSWORD || "";
 const initialBojanPassword = configuredBojanPassword || crypto.randomBytes(24).toString("hex");
 const initialIbroPassword = configuredIbroPassword || crypto.randomBytes(24).toString("hex");
 const resetUserPasswords = process.env.RESET_USER_PASSWORDS === "true";
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
+const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || "";
+const GOOGLE_REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI || "";
 let pgPool = null;
 let pgReady = null;
 
@@ -34,6 +37,10 @@ function configuredPasswordForUser(id) {
   if (id === "bojan") return configuredBojanPassword;
   if (id === "ibro") return configuredIbroPassword;
   return "";
+}
+
+function googleReady() {
+  return Boolean(GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET);
 }
 
 const defaultUsers = {
@@ -70,6 +77,10 @@ function normalizeDb(db = {}) {
     } else if (!db.users[id].passwordHash && db.users[id].password) {
       db.users[id].passwordHash = hashPassword(db.users[id].password);
       delete db.users[id].password;
+      changed = true;
+    }
+    if (!db.users[id].google) {
+      db.users[id].google = { tokens: null, calendarId: "", calendarName: "", connectedAt: "" };
       changed = true;
     }
     if (resetUserPasswords) {
@@ -134,6 +145,18 @@ function normalizeDb(db = {}) {
       next.people = "";
       changed = true;
     }
+    if (!next.syncUser) {
+      next.syncUser = next.createdBy || "ibro";
+      changed = true;
+    }
+    if (typeof next.googleEventId !== "string") {
+      next.googleEventId = "";
+      changed = true;
+    }
+    if (typeof next.googleUpdatedAt !== "string") {
+      next.googleUpdatedAt = "";
+      changed = true;
+    }
     return next;
   });
 
@@ -145,6 +168,18 @@ function normalizeDb(db = {}) {
     }
     if (typeof next.order !== "number") {
       next.order = index + 1;
+      changed = true;
+    }
+    if (!next.syncUser) {
+      next.syncUser = next.createdBy || "ibro";
+      changed = true;
+    }
+    if (typeof next.googleEventId !== "string") {
+      next.googleEventId = "";
+      changed = true;
+    }
+    if (typeof next.googleUpdatedAt !== "string") {
+      next.googleUpdatedAt = "";
       changed = true;
     }
     return next;
@@ -324,6 +359,7 @@ function cleanEntry(input) {
     work: String(input.work || "").trim(),
     material: String(input.material || "").trim(),
     people: String(input.people || "").trim(),
+    syncUser: ["bojan", "ibro"].includes(input.syncUser) ? input.syncUser : "",
     km: Number(input.km || 0),
     materialCost: Number(input.materialCost || 0),
     notes: String(input.notes || "").trim()
@@ -346,6 +382,7 @@ function cleanTodo(input) {
     notes: String(input.notes || "").trim(),
     status: ["open", "in_progress"].includes(input.status) ? input.status : "open",
     order: Number.isFinite(Number(input.order)) ? Number(input.order) : 0,
+    syncUser: ["bojan", "ibro"].includes(input.syncUser) ? input.syncUser : "",
     done: Boolean(input.done)
   };
 }
@@ -454,6 +491,235 @@ function buildCalendarIcs(db) {
   return `${lines.map(foldIcsLine).join("\r\n")}\r\n`;
 }
 
+function googleRedirectUri(req) {
+  return GOOGLE_REDIRECT_URI || `${absoluteBaseUrl(req)}/api/google/callback`;
+}
+
+function googleClient(req, tokens) {
+  const { google } = require("googleapis");
+  const client = new google.auth.OAuth2(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, googleRedirectUri(req));
+  if (tokens) client.setCredentials(tokens);
+  return client;
+}
+
+function googleEventDescription(lines) {
+  return ["INDUS URE", ...lines.filter(Boolean)].join("\n");
+}
+
+function entryToGoogleEvent(entry) {
+  return {
+    summary: `${entry.client || "Stranka"} - ${entry.work || entry.material || "Delo"}`,
+    description: googleEventDescription([
+      entry.work ? `Delo: ${entry.work}` : "",
+      entry.material ? `Material: ${entry.material}` : "",
+      entry.people ? `Sodelavci: ${entry.people}` : "",
+      entry.km ? `Km: ${entry.km}` : "",
+      entry.materialCost ? `Material EUR: ${entry.materialCost}` : "",
+      entry.notes ? `Opombe: ${entry.notes}` : ""
+    ]),
+    start: { dateTime: `${entry.date}T${entry.start}:00`, timeZone: "Europe/Ljubljana" },
+    end: { dateTime: `${entry.date}T${entry.end}:00`, timeZone: "Europe/Ljubljana" },
+    extendedProperties: { private: { indusId: entry.id, indusType: "entry", indusUser: entry.syncUser || entry.createdBy || "" } }
+  };
+}
+
+function todoToGoogleEvent(todo) {
+  return {
+    summary: `TODO: ${todo.title}`,
+    description: googleEventDescription([
+      todo.client ? `Stranka: ${todo.client}` : "",
+      todo.status === "in_progress" ? "Status: v teku" : "",
+      todo.notes ? `Opombe: ${todo.notes}` : ""
+    ]),
+    start: { date: todo.date },
+    end: { date: addDaysDashed(todo.date, 1) },
+    extendedProperties: { private: { indusId: todo.id, indusType: "todo", indusUser: todo.syncUser || todo.createdBy || "" } }
+  };
+}
+
+function addDaysDashed(date, days) {
+  const parsed = new Date(`${date}T00:00:00`);
+  parsed.setDate(parsed.getDate() + days);
+  return [
+    parsed.getFullYear(),
+    String(parsed.getMonth() + 1).padStart(2, "0"),
+    String(parsed.getDate()).padStart(2, "0")
+  ].join("-");
+}
+
+function googleEventUpdatedLater(event, item) {
+  if (!event.updated) return false;
+  if (!item.googleUpdatedAt) return true;
+  return new Date(event.updated).getTime() > new Date(item.googleUpdatedAt).getTime();
+}
+
+async function ensureGoogleCalendar(calendar, user) {
+  const name = `INDUS URE - ${user.name || user.id}`;
+  if (user.google?.calendarId) return user.google.calendarId;
+  const existing = await calendar.calendarList.list({ maxResults: 250 });
+  const found = (existing.data.items || []).find((item) => item.summary === name);
+  if (found) {
+    user.google.calendarId = found.id;
+    user.google.calendarName = found.summary;
+    return found.id;
+  }
+  const created = await calendar.calendars.insert({
+    requestBody: { summary: name, timeZone: "Europe/Ljubljana" }
+  });
+  user.google.calendarId = created.data.id;
+  user.google.calendarName = created.data.summary || name;
+  return user.google.calendarId;
+}
+
+function entryFromGoogleEvent(event, user) {
+  const start = event.start?.dateTime ? new Date(event.start.dateTime) : null;
+  const end = event.end?.dateTime ? new Date(event.end.dateTime) : null;
+  if (!start || !end) return null;
+  const date = [
+    start.getFullYear(),
+    String(start.getMonth() + 1).padStart(2, "0"),
+    String(start.getDate()).padStart(2, "0")
+  ].join("-");
+  const time = (value) => `${String(value.getHours()).padStart(2, "0")}:${String(value.getMinutes()).padStart(2, "0")}`;
+  return {
+    id: crypto.randomUUID(),
+    date,
+    start: time(start),
+    end: time(end),
+    client: event.summary || "Google dogodek",
+    status: "unbilled",
+    work: event.summary || "",
+    material: "",
+    people: "",
+    km: 0,
+    materialCost: 0,
+    notes: event.description || "",
+    syncUser: user.id,
+    googleEventId: event.id || "",
+    googleUpdatedAt: event.updated || "",
+    createdBy: user.id,
+    createdByName: user.name,
+    createdAt: new Date().toISOString(),
+    updatedBy: user.id,
+    updatedByName: user.name,
+    updatedAt: new Date().toISOString(),
+    history: [audit(user, "uvozeno iz Google")]
+  };
+}
+
+function todoFromGoogleEvent(event, user) {
+  if (!event.start?.date) return null;
+  return {
+    id: crypto.randomUUID(),
+    title: String(event.summary || "Google opravilo").replace(/^TODO:\s*/i, ""),
+    date: event.start.date,
+    client: "",
+    notes: event.description || "",
+    status: "open",
+    order: 0,
+    done: false,
+    syncUser: user.id,
+    googleEventId: event.id || "",
+    googleUpdatedAt: event.updated || "",
+    createdBy: user.id,
+    createdByName: user.name,
+    createdAt: new Date().toISOString(),
+    updatedBy: user.id,
+    updatedByName: user.name,
+    updatedAt: new Date().toISOString(),
+    history: [audit(user, "uvozeno iz Google")]
+  };
+}
+
+async function syncGoogleForUser(req, db, user) {
+  if (!googleReady()) throw new Error("Google OAuth se ni nastavljen.");
+  if (!user.google?.tokens) throw new Error("Najprej povezi svoj Google racun.");
+  const { google } = require("googleapis");
+  const auth = googleClient(req, user.google.tokens);
+  const calendar = google.calendar({ version: "v3", auth });
+  const calendarId = await ensureGoogleCalendar(calendar, user);
+  const now = new Date().toISOString();
+  let pushed = 0;
+  let pulled = 0;
+
+  const timeMin = new Date();
+  timeMin.setDate(timeMin.getDate() - 30);
+  const remote = await calendar.events.list({
+    calendarId,
+    timeMin: timeMin.toISOString(),
+    maxResults: 2500,
+    singleEvents: false,
+    showDeleted: false
+  });
+
+  for (const event of remote.data.items || []) {
+    const privateProps = event.extendedProperties?.private || {};
+    if (privateProps.indusId && privateProps.indusType === "entry") {
+      const entry = db.entries.find((item) => item.id === privateProps.indusId && item.syncUser === user.id);
+      if (entry && googleEventUpdatedLater(event, entry)) {
+        const imported = entryFromGoogleEvent(event, user);
+        if (imported) {
+          Object.assign(entry, { ...entry, date: imported.date, start: imported.start, end: imported.end, work: imported.work, notes: imported.notes, googleUpdatedAt: event.updated || "", updatedAt: now, updatedBy: user.id, updatedByName: user.name });
+          pulled++;
+        }
+      }
+      continue;
+    }
+    if (privateProps.indusId && privateProps.indusType === "todo") {
+      const todo = db.todos.find((item) => item.id === privateProps.indusId && item.syncUser === user.id);
+      if (todo && googleEventUpdatedLater(event, todo)) {
+        todo.title = String(event.summary || todo.title).replace(/^TODO:\s*/i, "");
+        todo.date = event.start?.date || todo.date;
+        todo.notes = event.description || todo.notes;
+        todo.googleUpdatedAt = event.updated || "";
+        todo.updatedAt = now;
+        todo.updatedBy = user.id;
+        todo.updatedByName = user.name;
+        pulled++;
+      }
+      continue;
+    }
+    if (event.id && !db.entries.some((item) => item.googleEventId === event.id) && !db.todos.some((item) => item.googleEventId === event.id)) {
+      const imported = event.start?.dateTime ? entryFromGoogleEvent(event, user) : todoFromGoogleEvent(event, user);
+      if (imported) {
+        if (event.start?.dateTime) db.entries.push(imported);
+        else db.todos.push(imported);
+        pulled++;
+      }
+    }
+  }
+
+  for (const entry of db.entries.filter((item) => item.syncUser === user.id && item.date && item.start && item.end)) {
+    const requestBody = entryToGoogleEvent(entry);
+    if (entry.googleEventId) {
+      const updated = await calendar.events.update({ calendarId, eventId: entry.googleEventId, requestBody });
+      entry.googleUpdatedAt = updated.data.updated || now;
+    } else {
+      const created = await calendar.events.insert({ calendarId, requestBody });
+      entry.googleEventId = created.data.id || "";
+      entry.googleUpdatedAt = created.data.updated || now;
+    }
+    pushed++;
+  }
+
+  for (const todo of db.todos.filter((item) => item.syncUser === user.id && item.date && !item.done)) {
+    const requestBody = todoToGoogleEvent(todo);
+    if (todo.googleEventId) {
+      const updated = await calendar.events.update({ calendarId, eventId: todo.googleEventId, requestBody });
+      todo.googleUpdatedAt = updated.data.updated || now;
+    } else {
+      const created = await calendar.events.insert({ calendarId, requestBody });
+      todo.googleEventId = created.data.id || "";
+      todo.googleUpdatedAt = created.data.updated || now;
+    }
+    pushed++;
+  }
+
+  user.google.calendarId = calendarId;
+  user.google.lastSyncAt = now;
+  return { pushed, pulled, calendarName: user.google.calendarName || `INDUS URE - ${user.name}` };
+}
+
 function serveStatic(req, res) {
   const url = new URL(req.url, `http://${req.headers.host}`);
   const pathname = url.pathname === "/" ? "/index.html" : url.pathname;
@@ -490,6 +756,76 @@ async function handleApi(req, res) {
   const url = new URL(req.url, `http://${req.headers.host}`);
 
   try {
+    if (url.pathname === "/api/google/status" && req.method === "GET") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      sendJson(res, 200, {
+        configured: googleReady(),
+        connected: Boolean(user.google?.tokens),
+        calendarName: user.google?.calendarName || "",
+        lastSyncAt: user.google?.lastSyncAt || ""
+      });
+      return;
+    }
+
+    if (url.pathname === "/api/google/auth-url" && req.method === "GET") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      if (!googleReady()) {
+        sendJson(res, 400, { error: "Google OAuth se ni nastavljen v Render Environment." });
+        return;
+      }
+      const auth = googleClient(req);
+      const authUrl = auth.generateAuthUrl({
+        access_type: "offline",
+        prompt: "consent",
+        state: (req.headers.authorization || "").replace(/^Bearer\s+/i, ""),
+        scope: [
+          "https://www.googleapis.com/auth/calendar",
+          "https://www.googleapis.com/auth/calendar.events"
+        ]
+      });
+      sendJson(res, 200, { url: authUrl });
+      return;
+    }
+
+    if (url.pathname === "/api/google/callback" && req.method === "GET") {
+      if (!googleReady()) {
+        sendText(res, 400, "Google OAuth ni nastavljen.", "text/plain");
+        return;
+      }
+      const token = url.searchParams.get("state") || "";
+      const userId = sessions.get(token);
+      if (!userId) {
+        sendText(res, 401, "Prijava je potekla. Zapri to okno, prijavi se v INDUS URE in poskusi znova.", "text/plain");
+        return;
+      }
+      const code = url.searchParams.get("code") || "";
+      const auth = googleClient(req);
+      const result = await auth.getToken(code);
+      const db = await readDbAsync();
+      const user = db.users[userId];
+      user.google = user.google || {};
+      user.google.tokens = result.tokens;
+      user.google.connectedAt = new Date().toISOString();
+      user.google.calendarId = user.google.calendarId || "";
+      user.google.calendarName = user.google.calendarName || "";
+      await writeDbAsync(db);
+      sendText(res, 200, "Google racun je povezan. Lahko zapres to okno in v INDUS URE kliknes Google sync.", "text/plain");
+      return;
+    }
+
+    if (url.pathname === "/api/google/sync" && req.method === "POST") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      const db = await readDbAsync();
+      const current = db.users[user.id];
+      const result = await syncGoogleForUser(req, db, current);
+      await writeDbAsync(db);
+      sendJson(res, 200, { ok: true, ...result, entries: db.entries, todos: db.todos });
+      return;
+    }
+
     if (url.pathname === "/api/calendar-url" && req.method === "GET") {
       const user = await requireUser(req, res);
       if (!user) return;
@@ -605,6 +941,7 @@ async function handleApi(req, res) {
       db.todos.push({
         id: crypto.randomUUID(),
         ...todo,
+        syncUser: todo.syncUser || user.id,
         order: todo.order || maxOrder + 1,
         createdBy: user.id,
         createdByName: user.name,
@@ -633,6 +970,7 @@ async function handleApi(req, res) {
       db.entries.push({
         id: crypto.randomUUID(),
         ...entry,
+        syncUser: entry.syncUser || user.id,
         createdBy: user.id,
         createdByName: user.name,
         createdAt: now,
@@ -666,6 +1004,7 @@ async function handleApi(req, res) {
       db.entries[index] = {
         ...db.entries[index],
         ...entry,
+        syncUser: entry.syncUser || db.entries[index].syncUser || user.id,
         updatedBy: user.id,
         updatedByName: user.name,
         updatedAt: new Date().toISOString(),
@@ -707,6 +1046,7 @@ async function handleApi(req, res) {
       db.todos[index] = {
         ...db.todos[index],
         ...todo,
+        syncUser: todo.syncUser || db.todos[index].syncUser || user.id,
         updatedBy: user.id,
         updatedByName: user.name,
         updatedAt: new Date().toISOString(),

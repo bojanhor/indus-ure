@@ -38,10 +38,14 @@ Render bo potem ustvaril javni HTTPS naslov, npr. `https://ime-aplikacije.onrend
 
 ## Uporabnika
 
-- `bojan` / `bojan123`
-- `ibro` / `ibro123`
+Uporabnika sta `bojan` in `ibro`.
 
-Po prvem deployu naj oba v aplikaciji zamenjata geslo pod `Racun`.
+Gesla nastavi v Render Environment:
+
+- `INITIAL_BOJAN_PASSWORD`
+- `INITIAL_IBRO_PASSWORD`
+
+Po prvem deployu lahko oba v aplikaciji zamenjata geslo pod `Racun`.
 
 ## Podatki
 

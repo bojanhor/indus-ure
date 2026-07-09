@@ -16,10 +16,12 @@ Nato odpri:
 http://127.0.0.1:8123
 ```
 
-Uporabnika:
+Uporabnika sta `bojan` in `ibro`.
 
-- `bojan` / `bojan123`
-- `ibro` / `ibro123`
+Gesla se nastavijo v Render Environment:
+
+- `INITIAL_BOJAN_PASSWORD`
+- `INITIAL_IBRO_PASSWORD`
 
 ## Objavo na splet
 

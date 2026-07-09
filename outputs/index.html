@@ -936,7 +936,7 @@
           <input class="search" id="clientSearch" placeholder="I&#353;&#269;i stranko, material ali opis">
           <button class="secondary" id="todayBtn" type="button">Danes</button>
           <button class="secondary" id="exportCsv" type="button">Izvoz CSV</button>
-          <button class="secondary" id="googleCalendar" type="button">Povezi Google</button>
+          <button class="secondary" id="googleCalendar" type="button">Google sync</button>
           <button class="account-btn" id="accountBtn" type="button" title="Upravljanje ra&#269;una">
             <span class="avatar" id="topAvatar">?</span>
             <span>Ra&#269;un</span>
@@ -1153,6 +1153,7 @@
         state.user = me.user;
         showApp();
         await loadAll();
+        syncGoogle(false);
       } catch {
         localStorage.removeItem(tokenKey);
         state.token = "";
@@ -1185,6 +1186,7 @@
       state.entries = data.entries;
       refreshClientList();
       render();
+      syncGoogle(false);
     }
 
     async function loadTodos() {
@@ -1192,6 +1194,7 @@
       state.todos = data.todos;
       refreshClientList();
       render();
+      syncGoogle(false);
     }
 
     async function loadAll() {
@@ -1290,6 +1293,7 @@
         work: $("quickWork").value.trim(),
         material: $("quickMaterial").value.trim(),
         people: "",
+        syncUser: state.user?.id || "",
         km: Number($("quickKm").value || 0),
         materialCost: Number($("quickMaterialCost").value || 0),
         notes: ""
@@ -1304,6 +1308,7 @@
         notes: "",
         status: $("todoStatus").value,
         order: nextTodoOrder(),
+        syncUser: state.user?.id || "",
         done: false
       };
     }
@@ -1316,6 +1321,7 @@
         notes: "",
         status: $("pageTodoStatus").value,
         order: nextTodoOrder(),
+        syncUser: state.user?.id || "",
         done: false
       };
     }
@@ -1731,6 +1737,7 @@
         work: $("entryWork").value.trim(),
         material: $("entryMaterial").value.trim(),
         people: $("entryPeople").value.trim(),
+        syncUser: ($("entryId").value ? (state.entries.find((item) => item.id === $("entryId").value)?.syncUser || "") : "") || state.user?.id || "",
         km: Number($("entryKm").value || 0),
         materialCost: Number($("entryMaterialCost").value || 0),
         notes: $("entryNotes").value.trim()
@@ -1790,14 +1797,27 @@
       downloadText(JSON.stringify({ entries: state.entries, todos: state.todos }, null, 2), `indus-ure-backup-${dateKey(new Date())}.json`, "application/json");
     }
 
-    async function copyGoogleCalendarUrl() {
+    async function syncGoogle(showSuccess = true) {
       try {
-        const data = await api("/api/calendar-url");
-        await navigator.clipboard.writeText(data.url);
-        window.open("https://calendar.google.com/calendar/u/0/r/settings/addbyurl", "_blank", "noopener");
-        alert("Povezava je kopirana. V odprtem Google Calendar racunu izberi Add calendar > From URL in prilepi povezavo. To lahko naredita oba, vsak v svojem Google racunu.");
+        const status = await api("/api/google/status");
+        if (!status.configured) {
+          alert("Google OAuth se ni nastavljen. Najprej moramo v Render dodati GOOGLE_CLIENT_ID in GOOGLE_CLIENT_SECRET.");
+          return;
+        }
+        if (!status.connected) {
+          const data = await api("/api/google/auth-url");
+          window.open(data.url, "_blank", "noopener");
+          alert("Odpre se Google prijava. Ko potrdis dostop, se vrni sem in klikni Google sync.");
+          return;
+        }
+        const data = await api("/api/google/sync", { method: "POST", body: JSON.stringify({}) });
+        state.entries = data.entries || state.entries;
+        state.todos = data.todos || state.todos;
+        refreshClientList();
+        render();
+        if (showSuccess) alert(`Google sync koncan. Poslano: ${data.pushed || 0}, prebrano iz Google: ${data.pulled || 0}.`);
       } catch (error) {
-        alert(error.message);
+        if (showSuccess) alert(error.message);
       }
     }
 
@@ -1878,6 +1898,7 @@
         localStorage.setItem(tokenKey, data.token);
         showApp();
         await loadAll();
+        syncGoogle(false);
         await migrateOldLocalEntries();
       } catch (error) {
         alert(error.message);
@@ -1958,7 +1979,7 @@
     });
     $("clientSearch").addEventListener("input", renderSearch);
     $("exportCsv").addEventListener("click", exportCsv);
-    $("googleCalendar").addEventListener("click", copyGoogleCalendarUrl);
+    $("googleCalendar").addEventListener("click", () => syncGoogle(true));
     $("downloadBackup").addEventListener("click", downloadBackup);
     $("entryForm").addEventListener("submit", (event) => {
       event.preventDefault();

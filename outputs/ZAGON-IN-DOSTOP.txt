@@ -1,8 +1,10 @@
 INDUS URE - ZAGON IN DOSTOP
 
 Uporabnika:
-- bojan / bojan123
-- ibro / ibro123
+- bojan
+- ibro
+
+Gesla se nastavijo prek Render Environment ali lokalnih okoljskih spremenljivk.
 
 Zagon na tem racunalniku:
 1. Odpri PowerShell v mapi outputs.
