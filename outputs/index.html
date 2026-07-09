@@ -1231,11 +1231,22 @@
     }
 
     async function deleteTodoFromServer(id) {
-      const data = await api(`/api/todos/${id}`, { method: "DELETE" });
-      state.todos = data.todos;
+      const previousTodos = state.todos.slice();
+      state.todos = state.todos.filter((todo) => todo.id !== id);
       refreshClientList();
       render();
-      syncGoogle(false);
+      try {
+        const data = await api(`/api/todos/${id}`, { method: "DELETE" });
+        state.todos = data.todos;
+        refreshClientList();
+        render();
+        syncGoogle(false);
+      } catch (error) {
+        state.todos = previousTodos;
+        refreshClientList();
+        render();
+        throw error;
+      }
     }
 
     async function saveProfileToServer(profile) {
@@ -1588,21 +1599,6 @@
         });
         item.querySelector(".todo-date").addEventListener("change", (event) => {
           saveTodoToServer({ ...todo, date: event.target.value }).catch((error) => alert(error.message));
-        });
-        item.querySelector(".delete-todo").addEventListener("click", async (event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          if (!confirm("Izbrisem to opravilo?")) return;
-          const button = event.currentTarget;
-          button.disabled = true;
-          button.textContent = "Brisem...";
-          try {
-            await deleteTodoFromServer(todo.id);
-          } catch (error) {
-            button.disabled = false;
-            button.textContent = "Izbrisi";
-            alert(error.message);
-          }
         });
         item.querySelector(".delete-todo").addEventListener("dragstart", (event) => event.preventDefault());
         item.addEventListener("dragstart", (event) => {
@@ -1972,6 +1968,25 @@
     $("clearClientFilter").addEventListener("click", () => {
       state.selectedClient = "";
       renderTodos();
+    });
+
+    $("todoItems").addEventListener("click", async (event) => {
+      const button = event.target.closest(".delete-todo");
+      if (!button) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const item = button.closest(".todo-item");
+      const id = item?.dataset.todoId;
+      if (!id) return;
+      button.disabled = true;
+      button.textContent = "Brisem...";
+      try {
+        await deleteTodoFromServer(id);
+      } catch (error) {
+        button.disabled = false;
+        button.textContent = "Izbrisi";
+        alert(error.message);
+      }
     });
 
     $("refreshBtn").addEventListener("click", loadAll);
