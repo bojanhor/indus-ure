@@ -1,0 +1,1720 @@
+<!doctype html>
+<html lang="sl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>INDUS URE</title>
+  <style>
+    :root {
+      --bg: #f6f7f2;
+      --panel: #ffffff;
+      --ink: #1f2a2e;
+      --muted: #6b7477;
+      --line: #d8ddd5;
+      --accent: #1f6f8b;
+      --accent-dark: #164f64;
+      --green: #2f8a4a;
+      --red: #c94949;
+      --orange: #de8b2f;
+      --blue: #357abd;
+      --shadow: 0 18px 45px rgba(32, 42, 46, 0.12);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: Arial, Helvetica, sans-serif;
+      color: var(--ink);
+      background: var(--bg);
+    }
+
+    button, input, select, textarea { font: inherit; }
+    button { border: 0; cursor: pointer; }
+    button:disabled { cursor: not-allowed; opacity: 0.55; }
+
+    .login-screen {
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 20px;
+      background:
+        linear-gradient(rgba(246, 247, 242, 0.86), rgba(246, 247, 242, 0.92)),
+        url("https://images.unsplash.com/photo-1504917595217-d4dc5ebe6122?auto=format&fit=crop&w=1800&q=80");
+      background-size: cover;
+      background-position: center;
+    }
+
+    .login-card {
+      width: min(440px, 100%);
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+      padding: 24px;
+      display: grid;
+      gap: 16px;
+    }
+
+    .login-card h1 {
+      margin: 0;
+      font-size: 28px;
+      letter-spacing: 0;
+    }
+
+    .login-card p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.45;
+    }
+
+    .app {
+      min-height: 100vh;
+      display: grid;
+      grid-template-columns: 330px 1fr;
+    }
+
+    .hidden { display: none !important; }
+
+    .sidebar {
+      background: #203035;
+      color: #f8faf6;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .brand {
+      display: grid;
+      gap: 5px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.16);
+    }
+
+    .brand h1 {
+      margin: 0;
+      font-size: 25px;
+      line-height: 1.1;
+      letter-spacing: 0;
+    }
+
+    .brand span,
+    .sidebar label,
+    .hint,
+    .small {
+      color: rgba(248, 250, 246, 0.72);
+      font-size: 13px;
+    }
+
+    .user-box {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      padding: 10px;
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.08);
+    }
+
+    .user-box strong { display: block; font-size: 14px; }
+    .user-box span { display: block; color: rgba(248, 250, 246, 0.7); font-size: 12px; }
+
+    .control {
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+    }
+
+    .control input,
+    .control select,
+    .control textarea,
+    .login-card input,
+    .login-card select {
+      width: 100%;
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      border-radius: 8px;
+      padding: 10px 11px;
+      color: #fff;
+      background: rgba(255, 255, 255, 0.08);
+      outline: none;
+    }
+
+    .login-card input,
+    .login-card select {
+      border-color: var(--line);
+      color: var(--ink);
+      background: #fbfcfa;
+    }
+
+    .control textarea {
+      min-height: 70px;
+      resize: vertical;
+    }
+
+    .control input::placeholder,
+    .control textarea::placeholder { color: rgba(255, 255, 255, 0.45); }
+
+    .row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    .primary,
+    .secondary,
+    .ghost,
+    .danger {
+      min-height: 42px;
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-weight: 700;
+    }
+
+    .primary { background: var(--accent); color: #fff; }
+    .primary:hover { background: var(--accent-dark); }
+    .secondary { background: #e4eee9; color: #203035; }
+    .ghost {
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      color: #fff;
+      background: transparent;
+    }
+    .danger { color: #fff; background: #9f3636; }
+
+    .legend { display: grid; gap: 8px; margin-top: 4px; }
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      font-size: 13px;
+      color: rgba(248, 250, 246, 0.84);
+    }
+
+    .dot {
+      width: 13px;
+      height: 13px;
+      border-radius: 4px;
+      flex: 0 0 auto;
+    }
+
+    .main {
+      padding: 22px;
+      display: grid;
+      grid-template-rows: auto auto auto 1fr;
+      gap: 16px;
+      min-width: 0;
+    }
+
+    .topbar,
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+    }
+
+    .topbar {
+      min-height: 76px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 14px 16px;
+    }
+
+    .month-title {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+    }
+
+    .month-title h2 {
+      margin: 0;
+      font-size: 24px;
+      line-height: 1.1;
+    }
+
+    .icon-btn {
+      width: 38px;
+      height: 38px;
+      border-radius: 8px;
+      background: #edf2ee;
+      color: var(--ink);
+      font-size: 21px;
+      line-height: 1;
+    }
+
+    .tools {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .account-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 42px;
+      border-radius: 8px;
+      padding: 7px 10px;
+      background: #edf2ee;
+      color: var(--ink);
+      font-weight: 700;
+    }
+
+    .avatar {
+      width: 30px;
+      height: 30px;
+      border-radius: 50%;
+      display: inline-grid;
+      place-items: center;
+      background: var(--accent);
+      color: #fff;
+      font-size: 13px;
+      font-weight: 800;
+      overflow: hidden;
+      flex: 0 0 auto;
+    }
+
+    .avatar img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+
+    .search {
+      min-width: 260px;
+      max-width: 420px;
+      width: 30vw;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 10px 12px;
+      outline: none;
+      background: #fbfcfa;
+      color: var(--ink);
+    }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(140px, 1fr));
+      gap: 12px;
+    }
+
+    .stat {
+      padding: 14px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+
+    .stat strong {
+      display: block;
+      font-size: 24px;
+      margin-bottom: 3px;
+    }
+
+    .stat span {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .boss-panel {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 12px;
+      align-items: center;
+      padding: 12px 14px;
+    }
+
+    .boss-panel p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .todo-layout {
+      display: grid;
+      grid-template-columns: 260px 1fr;
+      gap: 14px;
+      padding: 14px;
+    }
+
+    .client-list {
+      display: grid;
+      gap: 8px;
+      align-content: start;
+    }
+
+    .client-card {
+      width: 100%;
+      text-align: left;
+      background: #f5f8f4;
+      color: var(--ink);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 10px;
+      display: grid;
+      gap: 3px;
+    }
+
+    .client-card.active {
+      border-color: var(--accent);
+      box-shadow: inset 0 0 0 1px var(--accent);
+    }
+
+    .client-card strong,
+    .todo-head strong {
+      font-size: 14px;
+    }
+
+    .client-card span,
+    .todo-meta {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .todo-panel {
+      min-width: 0;
+      display: grid;
+      gap: 10px;
+      align-content: start;
+    }
+
+    .todo-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding-bottom: 4px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .todo-item {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      gap: 10px;
+      align-items: start;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 10px;
+      background: #fff;
+    }
+
+    .todo-item.done {
+      opacity: 0.62;
+    }
+
+    .todo-item.done .todo-title {
+      text-decoration: line-through;
+    }
+
+    .todo-title {
+      font-weight: 800;
+      margin-bottom: 3px;
+    }
+
+    .todo-chip {
+      display: inline-flex;
+      align-items: center;
+      min-height: 22px;
+      border-radius: 6px;
+      padding: 2px 6px;
+      background: #edf2ee;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .day-todo {
+      width: 100%;
+      text-align: left;
+      border-radius: 7px;
+      padding: 6px 7px;
+      color: #263238;
+      background: #e9edf6;
+      border-left: 4px solid #6d7fb5;
+      font-size: 12px;
+      min-height: 34px;
+    }
+
+    .day-todo.done {
+      opacity: 0.55;
+      text-decoration: line-through;
+    }
+
+    .calendar-shell {
+      overflow: hidden;
+      min-height: 620px;
+      display: grid;
+      grid-template-rows: auto 1fr;
+    }
+
+    .weekdays,
+    .calendar {
+      display: grid;
+      grid-template-columns: repeat(7, minmax(120px, 1fr));
+    }
+
+    .weekdays {
+      border-bottom: 1px solid var(--line);
+      background: #eef3ee;
+    }
+
+    .weekdays div {
+      padding: 10px 12px;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .calendar { min-height: 540px; }
+
+    .day {
+      min-height: 128px;
+      padding: 9px;
+      border-right: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+      background: #fff;
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+      overflow: hidden;
+    }
+
+    .day:nth-child(7n) { border-right: 0; }
+    .day.other { background: #f4f6f1; color: #9aa19c; }
+    .day.today { box-shadow: inset 0 0 0 2px var(--accent); }
+
+    .day-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      min-height: 24px;
+    }
+
+    .day-number { font-weight: 800; font-size: 15px; }
+
+    .quick-add {
+      width: 24px;
+      height: 24px;
+      border-radius: 7px;
+      color: var(--accent-dark);
+      background: #e3f0ee;
+      font-size: 18px;
+      line-height: 1;
+    }
+
+    .event {
+      width: 100%;
+      text-align: left;
+      border-radius: 7px;
+      padding: 7px 8px;
+      color: #fff;
+      display: grid;
+      gap: 3px;
+      min-height: 46px;
+    }
+
+    .event .time { font-size: 12px; font-weight: 800; opacity: 0.95; }
+    .event .client,
+    .event .summary {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .event .client { font-size: 13px; font-weight: 800; }
+    .event .summary { font-size: 12px; opacity: 0.9; }
+
+    .billed { background: var(--green); }
+    .warranty { background: var(--red); }
+    .unbilled { background: var(--orange); }
+    .errand { background: var(--blue); }
+
+    .search-panel {
+      display: none;
+      padding: 14px;
+      max-height: 360px;
+      overflow: auto;
+    }
+
+    .search-panel.active { display: block; }
+
+    .result {
+      width: 100%;
+      display: grid;
+      grid-template-columns: 120px 120px 1fr 130px;
+      gap: 12px;
+      align-items: center;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--line);
+      background: transparent;
+      color: var(--ink);
+      text-align: left;
+      font-size: 14px;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 7px;
+      min-height: 30px;
+      padding: 5px 8px;
+      color: #fff;
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    dialog {
+      width: min(720px, calc(100vw - 26px));
+      border: 0;
+      border-radius: 10px;
+      box-shadow: 0 28px 80px rgba(0, 0, 0, 0.25);
+      padding: 0;
+      color: var(--ink);
+    }
+
+    dialog::backdrop { background: rgba(17, 24, 28, 0.45); }
+
+    .modal-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      padding: 18px 20px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .modal-head h3 { margin: 0; font-size: 20px; }
+
+    .modal-body {
+      padding: 18px 20px 20px;
+      display: grid;
+      gap: 14px;
+    }
+
+    .modal-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .modal-body label,
+    .login-card label {
+      color: var(--muted);
+      font-size: 13px;
+      display: grid;
+      gap: 6px;
+    }
+
+    .modal-body input,
+    .modal-body select,
+    .modal-body textarea {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 10px 11px;
+      color: var(--ink);
+      background: #fff;
+      outline: none;
+    }
+
+    .modal-body textarea { min-height: 82px; resize: vertical; }
+
+    .audit-box {
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      color: var(--muted);
+      background: #f7f9f5;
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .profile-preview {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .actions {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+      padding-top: 2px;
+    }
+
+    .status-switch {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
+    }
+
+    .status-switch button {
+      min-height: 40px;
+      border-radius: 8px;
+      color: #fff;
+      font-weight: 800;
+      padding: 8px;
+      opacity: 0.72;
+    }
+
+    .status-switch button.active {
+      opacity: 1;
+      outline: 3px solid rgba(31, 42, 46, 0.18);
+    }
+
+    .offline {
+      padding: 10px 12px;
+      background: #fff4db;
+      color: #725119;
+      border: 1px solid #efce89;
+      border-radius: 8px;
+      font-size: 14px;
+    }
+
+    @media (max-width: 1100px) {
+      .app { grid-template-columns: 1fr; }
+      .sidebar { position: static; }
+      .stats { grid-template-columns: repeat(2, 1fr); }
+      .weekdays,
+      .calendar { grid-template-columns: repeat(7, minmax(104px, 1fr)); }
+      .calendar-shell { overflow-x: auto; }
+    }
+
+    @media (max-width: 760px) {
+      .main,
+      .sidebar { padding: 16px; }
+      .topbar { align-items: stretch; flex-direction: column; }
+      .tools { justify-content: stretch; }
+      .search,
+      .tools .secondary { width: 100%; max-width: none; }
+      .stats,
+      .modal-grid,
+      .status-switch,
+      .boss-panel,
+      .todo-layout { grid-template-columns: 1fr; }
+      .result { grid-template-columns: 1fr; gap: 5px; }
+    }
+  </style>
+</head>
+<body>
+  <section class="login-screen" id="loginScreen">
+    <form class="login-card" id="loginForm">
+      <h1>INDUS URE</h1>
+      <p>Skupni koledar za vnos ur, strank, materiala in kilometrine.</p>
+      <div class="offline hidden" id="serverWarning">Odpri stran prek lokalnega stre&#382;nika, ne direktno kot datoteko.</div>
+      <label>Uporabnik
+        <select id="loginUser">
+          <option value="ibro">Ibro</option>
+          <option value="bojan">Bojan</option>
+        </select>
+      </label>
+      <label>Geslo
+        <input id="loginPassword" type="password" autocomplete="current-password" required>
+      </label>
+      <button class="primary" type="submit">Prijava</button>
+      <p class="small">Gesli: <strong>bojan / bojan123</strong> in <strong>ibro / ibro123</strong>.</p>
+    </form>
+  </section>
+
+  <div class="app hidden" id="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <h1>INDUS URE</h1>
+        <span>Ure, stranke, material in kilometrina</span>
+      </div>
+
+      <div class="user-box">
+        <div>
+          <strong id="userName"></strong>
+          <span id="userRole"></span>
+        </div>
+        <button class="ghost" id="logoutBtn" type="button">Odjava</button>
+      </div>
+
+      <div class="control">
+        <label for="quickDate">Hitri vnos za datum</label>
+        <input id="quickDate" type="date">
+      </div>
+
+      <div class="row">
+        <div class="control">
+          <label for="quickStart">Od</label>
+          <input id="quickStart" type="time" value="08:00">
+        </div>
+        <div class="control">
+          <label for="quickEnd">Do</label>
+          <input id="quickEnd" type="time" value="16:00">
+        </div>
+      </div>
+
+      <div class="control">
+        <label for="quickClient">Stranka</label>
+        <input id="quickClient" list="clientList" placeholder="npr. Novak d.o.o.">
+        <datalist id="clientList"></datalist>
+      </div>
+
+      <div class="control">
+        <label for="quickStatus">Status</label>
+        <select id="quickStatus">
+          <option value="unbilled">Opravljeno / ni obra&#269;unano</option>
+          <option value="billed">&#381;e obra&#269;unano</option>
+          <option value="warranty">Garancija</option>
+          <option value="errand">Opravki</option>
+        </select>
+      </div>
+
+      <div class="control">
+        <label for="quickWork">Kaj si delal</label>
+        <textarea id="quickWork" placeholder="Kratek opis dela"></textarea>
+      </div>
+
+      <div class="row">
+        <div class="control">
+          <label for="quickKm">Km</label>
+          <input id="quickKm" type="number" min="0" step="0.1" placeholder="0">
+        </div>
+        <div class="control">
+          <label for="quickMaterialCost">Material EUR</label>
+          <input id="quickMaterialCost" type="number" min="0" step="0.01" placeholder="0">
+        </div>
+      </div>
+
+      <div class="control">
+        <label for="quickMaterial">Material</label>
+        <textarea id="quickMaterial" placeholder="npr. kabel 20 m, stikalo, vijaki"></textarea>
+      </div>
+
+      <button class="primary" id="saveQuick" type="button">Shrani v koledar</button>
+      <button class="ghost" id="refreshBtn" type="button">Osve&#382;i skupne podatke</button>
+
+      <div class="brand">
+        <h1>TODO</h1>
+        <span>Kaj je treba narediti</span>
+      </div>
+
+      <div class="control">
+        <label for="todoDate">Datum opravila</label>
+        <input id="todoDate" type="date">
+      </div>
+
+      <div class="control">
+        <label for="todoClient">Stranka</label>
+        <input id="todoClient" list="clientList" placeholder="Stranka ali interno">
+      </div>
+
+      <div class="control">
+        <label for="todoTitle">Opravilo</label>
+        <textarea id="todoTitle" placeholder="npr. Poklici stranko, naroci material, preveri napako"></textarea>
+      </div>
+
+      <button class="primary" id="saveTodo" type="button">Dodaj opravilo</button>
+
+      <div class="legend">
+        <div class="legend-item"><span class="dot billed"></span> &#381;e obra&#269;unano</div>
+        <div class="legend-item"><span class="dot warranty"></span> Garancija</div>
+        <div class="legend-item"><span class="dot unbilled"></span> Opravljeno / ni obra&#269;unano</div>
+        <div class="legend-item"><span class="dot errand"></span> Opravki, pot, malica</div>
+      </div>
+
+      <p class="hint">Podatki se zdaj shranjujejo v skupno datoteko na stre&#382;niku. &#352;ef in delavec gledata iste vnose.</p>
+    </aside>
+
+    <main class="main">
+      <section class="topbar">
+        <div class="month-title">
+          <button class="icon-btn" id="prevMonth" type="button" title="Prej&#353;nji mesec">&lsaquo;</button>
+          <h2 id="monthTitle"></h2>
+          <button class="icon-btn" id="nextMonth" type="button" title="Naslednji mesec">&rsaquo;</button>
+        </div>
+        <div class="tools">
+          <input class="search" id="clientSearch" placeholder="I&#353;&#269;i stranko, material ali opis">
+          <button class="secondary" id="todayBtn" type="button">Danes</button>
+          <button class="secondary" id="exportCsv" type="button">Izvoz CSV</button>
+          <button class="account-btn" id="accountBtn" type="button" title="Upravljanje ra&#269;una">
+            <span class="avatar" id="topAvatar">?</span>
+            <span>Ra&#269;un</span>
+          </button>
+        </div>
+      </section>
+
+      <section class="stats">
+        <div class="stat"><strong id="statHours">0 h</strong><span>ure v tem mesecu</span></div>
+        <div class="stat"><strong id="statKm">0 km</strong><span>kilometrina</span></div>
+        <div class="stat"><strong id="statMaterial">0 EUR</strong><span>material</span></div>
+        <div class="stat"><strong id="statUnbilled">0</strong><span>neobra&#269;unani vnosi</span></div>
+        <div class="stat"><strong id="statTodos">0</strong><span>odprta opravila</span></div>
+      </section>
+
+      <section class="panel boss-panel hidden" id="bossPanel">
+        <p>&#352;efovski pogled: vidi&#353; vse vnose, lahko i&#353;&#269;e&#353; po stranki in spremeni&#353; status na obra&#269;unano, garancijo ali drugo.</p>
+        <button class="secondary" id="downloadBackup" type="button">Prenesi varnostno kopijo</button>
+      </section>
+
+      <section class="panel search-panel" id="searchPanel"></section>
+
+      <section class="panel todo-layout">
+        <div class="client-list" id="clientTodoList"></div>
+        <div class="todo-panel">
+          <div class="todo-head">
+            <strong id="todoPanelTitle">Vsa opravila</strong>
+            <button class="secondary" id="clearClientFilter" type="button">Vse stranke</button>
+          </div>
+          <div id="todoItems"></div>
+        </div>
+      </section>
+
+      <section class="panel calendar-shell">
+        <div class="weekdays">
+          <div>Pon</div>
+          <div>Tor</div>
+          <div>Sre</div>
+          <div>&#268;et</div>
+          <div>Pet</div>
+          <div>Sob</div>
+          <div>Ned</div>
+        </div>
+        <div class="calendar" id="calendar"></div>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="entryDialog">
+    <form method="dialog" id="entryForm">
+      <div class="modal-head">
+        <h3 id="dialogTitle">Vnos dela</h3>
+        <button class="icon-btn" id="closeDialog" type="button" title="Zapri">&times;</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="entryId">
+        <div class="modal-grid">
+          <label>Datum
+            <input id="entryDate" type="date" required>
+          </label>
+          <label>Stranka
+            <input id="entryClient" list="clientList" required>
+          </label>
+          <label>Od
+            <input id="entryStart" type="time" required>
+          </label>
+          <label>Do
+            <input id="entryEnd" type="time" required>
+          </label>
+          <label>Kilometri
+            <input id="entryKm" type="number" min="0" step="0.1">
+          </label>
+          <label>Material EUR
+            <input id="entryMaterialCost" type="number" min="0" step="0.01">
+          </label>
+        </div>
+
+        <label>Status</label>
+        <div class="status-switch">
+          <button type="button" class="billed" data-status="billed">Obra&#269;unano</button>
+          <button type="button" class="warranty" data-status="warranty">Garancija</button>
+          <button type="button" class="unbilled" data-status="unbilled">Ni obra&#269;unano</button>
+          <button type="button" class="errand" data-status="errand">Opravki</button>
+        </div>
+
+        <label>Kaj si delal
+          <textarea id="entryWork" placeholder="Opis dela"></textarea>
+        </label>
+        <label>Porabljen material
+          <textarea id="entryMaterial" placeholder="Material, koli&#269;ina, opombe"></textarea>
+        </label>
+        <label>Opombe
+          <textarea id="entryNotes" placeholder="Dodatno za &#353;efa ali zase"></textarea>
+        </label>
+
+        <div class="audit-box hidden" id="entryAudit"></div>
+
+        <div class="actions">
+          <button type="button" class="danger" id="deleteEntry">Izbri&#353;i vnos</button>
+          <div>
+            <button type="button" class="secondary" id="duplicateEntry">Podvoji</button>
+            <button type="submit" class="primary">Shrani</button>
+          </div>
+        </div>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="accountDialog">
+    <form method="dialog" id="accountForm">
+      <div class="modal-head">
+        <h3>Upravljanje ra&#269;una</h3>
+        <button class="icon-btn" id="closeAccount" type="button" title="Zapri">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="profile-preview">
+          <span class="avatar" id="accountAvatar">?</span>
+          <div>
+            <strong id="accountUserTitle"></strong><br>
+            <span class="small">Sliko in geslo lahko spremeni samo prijavljen uporabnik.</span>
+          </div>
+        </div>
+        <label>Prikazano ime
+          <input id="accountName" type="text" required>
+        </label>
+        <label>Slika profila
+          <input id="accountImage" type="file" accept="image/*">
+        </label>
+        <button class="secondary" id="saveProfile" type="button">Shrani profil</button>
+        <label>Trenutno geslo
+          <input id="currentPassword" type="password" autocomplete="current-password">
+        </label>
+        <label>Novo geslo
+          <input id="newPassword" type="password" autocomplete="new-password">
+        </label>
+        <button class="primary" id="changePassword" type="button">Zamenjaj geslo</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script>
+    const tokenKey = "indus-ure-token";
+    const oldStorageKey = "delovni-koledar-v1";
+    const statusLabels = {
+      billed: "Ze obracunano",
+      warranty: "Garancija",
+      unbilled: "Opravljeno / ni obracunano",
+      errand: "Opravki"
+    };
+
+    const monthNames = [
+      "januar", "februar", "marec", "april", "maj", "junij",
+      "julij", "avgust", "september", "oktober", "november", "december"
+    ];
+
+    const state = {
+      current: new Date(),
+      selectedStatus: "unbilled",
+      entries: [],
+      todos: [],
+      selectedClient: "",
+      user: null,
+      token: localStorage.getItem(tokenKey) || ""
+    };
+
+    const $ = (id) => document.getElementById(id);
+
+    async function api(path, options = {}) {
+      const headers = {
+        "Content-Type": "application/json",
+        ...(options.headers || {})
+      };
+      if (state.token) headers.Authorization = `Bearer ${state.token}`;
+      const response = await fetch(path, { ...options, headers });
+      const text = await response.text();
+      const data = text ? JSON.parse(text) : null;
+      if (!response.ok) throw new Error(data?.error || "Napaka pri povezavi.");
+      return data;
+    }
+
+    async function boot() {
+      $("quickDate").value = dateKey(new Date());
+      $("todoDate").value = dateKey(new Date());
+      if (location.protocol === "file:") {
+        $("serverWarning").classList.remove("hidden");
+        return;
+      }
+      if (!state.token) return;
+      try {
+        const me = await api("/api/me");
+        state.user = me.user;
+        showApp();
+        await loadAll();
+      } catch {
+        localStorage.removeItem(tokenKey);
+        state.token = "";
+      }
+    }
+
+    function showApp() {
+      $("loginScreen").classList.add("hidden");
+      $("app").classList.remove("hidden");
+      $("userName").textContent = state.user.name;
+      $("userRole").textContent = state.user.role === "boss" ? "Bojan" : "Ibro";
+      $("bossPanel").classList.toggle("hidden", state.user.role !== "boss");
+      updateAvatar("topAvatar", state.user);
+      render();
+    }
+
+    function updateAvatar(id, user) {
+      const avatar = $(id);
+      if (!avatar || !user) return;
+      if (user.avatar) {
+        avatar.innerHTML = `<img src="${user.avatar}" alt="">`;
+      } else {
+        avatar.textContent = (user.name || user.id || "?").slice(0, 1).toUpperCase();
+      }
+    }
+
+    async function loadEntries() {
+      const data = await api("/api/entries");
+      state.entries = data.entries;
+      refreshClientList();
+      render();
+    }
+
+    async function loadTodos() {
+      const data = await api("/api/todos");
+      state.todos = data.todos;
+      refreshClientList();
+      render();
+    }
+
+    async function loadAll() {
+      const [entries, todos] = await Promise.all([api("/api/entries"), api("/api/todos")]);
+      state.entries = entries.entries;
+      state.todos = todos.todos;
+      refreshClientList();
+      render();
+    }
+
+    async function saveEntryToServer(entry) {
+      const method = entry.id ? "PUT" : "POST";
+      const path = entry.id ? `/api/entries/${entry.id}` : "/api/entries";
+      const data = await api(path, { method, body: JSON.stringify(entry) });
+      state.entries = data.entries;
+      refreshClientList();
+      render();
+    }
+
+    async function deleteEntryFromServer(id) {
+      const data = await api(`/api/entries/${id}`, { method: "DELETE" });
+      state.entries = data.entries;
+      refreshClientList();
+      render();
+    }
+
+    async function saveTodoToServer(todo) {
+      const method = todo.id ? "PUT" : "POST";
+      const path = todo.id ? `/api/todos/${todo.id}` : "/api/todos";
+      const data = await api(path, { method, body: JSON.stringify(todo) });
+      state.todos = data.todos;
+      refreshClientList();
+      render();
+    }
+
+    async function deleteTodoFromServer(id) {
+      const data = await api(`/api/todos/${id}`, { method: "DELETE" });
+      state.todos = data.todos;
+      refreshClientList();
+      render();
+    }
+
+    async function saveProfileToServer(profile) {
+      const data = await api("/api/profile", { method: "PUT", body: JSON.stringify(profile) });
+      state.user = data.user;
+      $("userName").textContent = state.user.name;
+      updateAvatar("topAvatar", state.user);
+      updateAvatar("accountAvatar", state.user);
+      $("accountUserTitle").textContent = `${state.user.name} (${state.user.id})`;
+    }
+
+    async function changePasswordOnServer(currentPassword, newPassword) {
+      await api("/api/password", {
+        method: "PUT",
+        body: JSON.stringify({ currentPassword, newPassword })
+      });
+    }
+
+    function dateKey(date) {
+      const y = date.getFullYear();
+      const m = String(date.getMonth() + 1).padStart(2, "0");
+      const d = String(date.getDate()).padStart(2, "0");
+      return `${y}-${m}-${d}`;
+    }
+
+    function parseDate(value) {
+      const [y, m, d] = value.split("-").map(Number);
+      return new Date(y, m - 1, d);
+    }
+
+    function minutes(time) {
+      if (!time) return 0;
+      const [h, m] = time.split(":").map(Number);
+      return h * 60 + m;
+    }
+
+    function duration(entry) {
+      const diff = minutes(entry.end) - minutes(entry.start);
+      return Math.max(0, diff) / 60;
+    }
+
+    function money(value) {
+      return Number(value || 0).toLocaleString("sl-SI", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      });
+    }
+
+    function entryFromQuick() {
+      return {
+        date: $("quickDate").value,
+        start: $("quickStart").value,
+        end: $("quickEnd").value,
+        client: $("quickClient").value.trim(),
+        status: $("quickStatus").value,
+        work: $("quickWork").value.trim(),
+        material: $("quickMaterial").value.trim(),
+        km: Number($("quickKm").value || 0),
+        materialCost: Number($("quickMaterialCost").value || 0),
+        notes: ""
+      };
+    }
+
+    function todoFromQuick() {
+      return {
+        date: $("todoDate").value,
+        client: $("todoClient").value.trim(),
+        title: $("todoTitle").value.trim(),
+        notes: "",
+        done: false
+      };
+    }
+
+    function validateEntry(entry) {
+      if (!entry.date || !entry.start || !entry.end || !entry.client) {
+        alert("Vpisi datum, uro od-do in stranko.");
+        return false;
+      }
+      if (minutes(entry.end) <= minutes(entry.start)) {
+        alert("Ura 'do' mora biti kasneje kot ura 'od'.");
+        return false;
+      }
+      return true;
+    }
+
+    function validateTodo(todo) {
+      if (!todo.title) {
+        alert("Vpisi, kaj je treba narediti.");
+        return false;
+      }
+      return true;
+    }
+
+    function render() {
+      if (!$("app").classList.contains("hidden")) {
+        renderMonth();
+        renderStats();
+        renderSearch();
+        renderTodos();
+      }
+    }
+
+    function renderMonth() {
+      const calendar = $("calendar");
+      calendar.innerHTML = "";
+
+      const year = state.current.getFullYear();
+      const month = state.current.getMonth();
+      $("monthTitle").textContent = `${monthNames[month]} ${year}`;
+
+      const first = new Date(year, month, 1);
+      const startOffset = (first.getDay() + 6) % 7;
+      const gridStart = new Date(year, month, 1 - startOffset);
+      const today = dateKey(new Date());
+
+      for (let i = 0; i < 42; i++) {
+        const dayDate = new Date(gridStart);
+        dayDate.setDate(gridStart.getDate() + i);
+        const key = dateKey(dayDate);
+        const day = document.createElement("div");
+        day.className = "day";
+        if (dayDate.getMonth() !== month) day.classList.add("other");
+        if (key === today) day.classList.add("today");
+
+        const head = document.createElement("div");
+        head.className = "day-head";
+        head.innerHTML = `<span class="day-number">${dayDate.getDate()}</span>`;
+
+        const add = document.createElement("button");
+        add.className = "quick-add";
+        add.type = "button";
+        add.textContent = "+";
+        add.title = "Dodaj vnos";
+        add.addEventListener("click", () => openDialog({ date: key }));
+        head.appendChild(add);
+        day.appendChild(head);
+
+        state.entries
+          .filter((entry) => entry.date === key)
+          .sort((a, b) => minutes(a.start) - minutes(b.start))
+          .forEach((entry) => {
+            const event = document.createElement("button");
+            event.type = "button";
+            event.className = `event ${entry.status}`;
+            event.innerHTML = `
+              <span class="time">${entry.start} - ${entry.end}</span>
+              <span class="client">${escapeHtml(entry.client)}</span>
+              <span class="summary">${escapeHtml(entry.work || entry.material || statusLabels[entry.status])}</span>
+            `;
+            event.addEventListener("click", () => openDialog(entry));
+            day.appendChild(event);
+          });
+
+        state.todos
+          .filter((todo) => todo.date === key)
+          .sort((a, b) => Number(a.done) - Number(b.done))
+          .forEach((todo) => {
+            const item = document.createElement("button");
+            item.type = "button";
+            item.className = `day-todo ${todo.done ? "done" : ""}`;
+            item.innerHTML = `${escapeHtml(todo.title)}${todo.client ? `<br><small>${escapeHtml(todo.client)}</small>` : ""}`;
+            item.addEventListener("click", () => {
+              state.selectedClient = todo.client || "";
+              renderTodos();
+            });
+            day.appendChild(item);
+          });
+
+        calendar.appendChild(day);
+      }
+    }
+
+    function renderStats() {
+      const year = state.current.getFullYear();
+      const month = state.current.getMonth();
+      const monthEntries = state.entries.filter((entry) => {
+        const d = parseDate(entry.date);
+        return d.getFullYear() === year && d.getMonth() === month;
+      });
+
+      const hours = monthEntries.reduce((sum, entry) => sum + duration(entry), 0);
+      const km = monthEntries.reduce((sum, entry) => sum + Number(entry.km || 0), 0);
+      const material = monthEntries.reduce((sum, entry) => sum + Number(entry.materialCost || 0), 0);
+      const unbilled = monthEntries.filter((entry) => entry.status === "unbilled").length;
+      const openTodos = state.todos.filter((todo) => !todo.done).length;
+
+      $("statHours").textContent = `${hours.toLocaleString("sl-SI", { maximumFractionDigits: 1 })} h`;
+      $("statKm").textContent = `${km.toLocaleString("sl-SI", { maximumFractionDigits: 1 })} km`;
+      $("statMaterial").textContent = `${money(material)} EUR`;
+      $("statUnbilled").textContent = unbilled;
+      $("statTodos").textContent = openTodos;
+    }
+
+    function renderTodos() {
+      renderClientTodoList();
+      renderTodoItems();
+    }
+
+    function todoClients() {
+      const names = new Set();
+      state.entries.forEach((entry) => {
+        if (entry.client) names.add(entry.client);
+      });
+      state.todos.forEach((todo) => {
+        if (todo.client) names.add(todo.client);
+      });
+      return [...names].sort((a, b) => a.localeCompare(b, "sl"));
+    }
+
+    function renderClientTodoList() {
+      const list = $("clientTodoList");
+      list.innerHTML = "";
+      const all = document.createElement("button");
+      all.type = "button";
+      all.className = `client-card ${state.selectedClient ? "" : "active"}`;
+      all.innerHTML = `<strong>Vse stranke</strong><span>${state.todos.filter((todo) => !todo.done).length} odprtih opravil</span>`;
+      all.addEventListener("click", () => {
+        state.selectedClient = "";
+        renderTodos();
+      });
+      list.appendChild(all);
+
+      todoClients().forEach((client) => {
+        const clientTodos = state.todos.filter((todo) => todo.client === client);
+        const open = clientTodos.filter((todo) => !todo.done).length;
+        const card = document.createElement("button");
+        card.type = "button";
+        card.className = `client-card ${state.selectedClient === client ? "active" : ""}`;
+        card.innerHTML = `<strong>${escapeHtml(client)}</strong><span>${open} odprtih, ${clientTodos.length} skupaj</span>`;
+        card.addEventListener("click", () => {
+          state.selectedClient = client;
+          renderTodos();
+        });
+        list.appendChild(card);
+      });
+    }
+
+    function renderTodoItems() {
+      const items = $("todoItems");
+      const title = $("todoPanelTitle");
+      title.textContent = state.selectedClient ? `Opravila: ${state.selectedClient}` : "Vsa opravila";
+      items.innerHTML = "";
+
+      const todos = state.todos
+        .filter((todo) => !state.selectedClient || todo.client === state.selectedClient)
+        .sort((a, b) => Number(a.done) - Number(b.done) || String(a.date || "9999-99-99").localeCompare(String(b.date || "9999-99-99")));
+
+      if (todos.length === 0) {
+        items.innerHTML = `<p class="todo-meta">Ni opravil za ta izbor.</p>`;
+        return;
+      }
+
+      todos.forEach((todo) => {
+        const item = document.createElement("div");
+        item.className = `todo-item ${todo.done ? "done" : ""}`;
+        item.innerHTML = `
+          <input type="checkbox" ${todo.done ? "checked" : ""} aria-label="Opravljeno">
+          <div>
+            <div class="todo-title">${escapeHtml(todo.title)}</div>
+            <div class="todo-meta">
+              ${todo.date ? `<span class="todo-chip">${formatDate(todo.date)}</span>` : ""}
+              ${todo.client ? `<span class="todo-chip">${escapeHtml(todo.client)}</span>` : ""}
+              <span class="todo-chip">dodal: ${escapeHtml(todo.createdByName || "-")}</span>
+            </div>
+            ${todo.notes ? `<div class="todo-meta">${escapeHtml(todo.notes)}</div>` : ""}
+          </div>
+          <button class="secondary" type="button">Izbrisi</button>
+        `;
+        item.querySelector("input").addEventListener("change", (event) => {
+          saveTodoToServer({ ...todo, done: event.target.checked }).catch((error) => alert(error.message));
+        });
+        item.querySelector("button").addEventListener("click", () => {
+          if (!confirm("Izbrisem to opravilo?")) return;
+          deleteTodoFromServer(todo.id).catch((error) => alert(error.message));
+        });
+        items.appendChild(item);
+      });
+    }
+
+    function renderSearch() {
+      const panel = $("searchPanel");
+      const query = $("clientSearch").value.trim().toLowerCase();
+      panel.innerHTML = "";
+
+      if (!query) {
+        panel.classList.remove("active");
+        return;
+      }
+
+      const results = state.entries
+        .filter((entry) => [entry.client, entry.work, entry.material, entry.notes, entry.createdByName]
+          .join(" ")
+          .toLowerCase()
+          .includes(query))
+        .sort((a, b) => `${b.date} ${b.start}`.localeCompare(`${a.date} ${a.start}`));
+
+      panel.classList.add("active");
+      if (results.length === 0) {
+        panel.innerHTML = "<p>Ni zadetkov za to iskanje.</p>";
+        return;
+      }
+
+      results.forEach((entry) => {
+        const item = document.createElement("button");
+        item.type = "button";
+        item.className = "result";
+        item.innerHTML = `
+          <strong>${formatDate(entry.date)}</strong>
+          <span>${entry.start} - ${entry.end}</span>
+          <span>${escapeHtml(entry.client)}<br><small>${escapeHtml(entry.work || entry.material || "")} | dodal: ${escapeHtml(entry.createdByName || "-")}</small></span>
+          <span class="badge ${entry.status}">${statusLabels[entry.status]}</span>
+        `;
+        item.addEventListener("click", () => openDialog(entry));
+        panel.appendChild(item);
+      });
+    }
+
+    function refreshClientList() {
+      const clients = [...new Set([
+        ...state.entries.map((entry) => entry.client).filter(Boolean),
+        ...state.todos.map((todo) => todo.client).filter(Boolean)
+      ])]
+        .sort((a, b) => a.localeCompare(b, "sl"));
+      $("clientList").innerHTML = clients.map((client) => `<option value="${escapeHtml(client)}"></option>`).join("");
+    }
+
+    function openDialog(entry = {}) {
+      const existing = Boolean(entry.id);
+      $("dialogTitle").textContent = existing ? "Uredi vnos" : "Nov vnos";
+      $("entryId").value = entry.id || "";
+      $("entryDate").value = entry.date || dateKey(new Date());
+      $("entryStart").value = entry.start || "08:00";
+      $("entryEnd").value = entry.end || "16:00";
+      $("entryClient").value = entry.client || "";
+      $("entryKm").value = entry.km || "";
+      $("entryMaterialCost").value = entry.materialCost || "";
+      $("entryWork").value = entry.work || "";
+      $("entryMaterial").value = entry.material || "";
+      $("entryNotes").value = entry.notes || "";
+      setDialogStatus(entry.status || "unbilled");
+      $("deleteEntry").style.display = existing ? "inline-flex" : "none";
+      $("duplicateEntry").style.display = existing ? "inline-flex" : "none";
+      renderAudit(entry);
+      $("entryDialog").showModal();
+    }
+
+    function renderAudit(entry) {
+      const audit = $("entryAudit");
+      if (!entry.id) {
+        audit.classList.add("hidden");
+        audit.textContent = "";
+        return;
+      }
+      audit.classList.remove("hidden");
+      const history = (entry.history || [])
+        .slice(-5)
+        .map((item) => `${item.action}: ${item.byName || item.by} (${formatDateTime(item.at)})`)
+        .join("<br>");
+      audit.innerHTML = `
+        Dodal: <strong>${escapeHtml(entry.createdByName || "-")}</strong> (${formatDateTime(entry.createdAt)})<br>
+        Zadnja sprememba: <strong>${escapeHtml(entry.updatedByName || entry.createdByName || "-")}</strong> (${formatDateTime(entry.updatedAt || entry.createdAt)})<br>
+        ${history ? `<br>${history}` : ""}
+      `;
+    }
+
+    function setDialogStatus(status) {
+      state.selectedStatus = status;
+      document.querySelectorAll(".status-switch button").forEach((button) => {
+        button.classList.toggle("active", button.dataset.status === status);
+      });
+    }
+
+    async function saveDialogEntry() {
+      const entry = {
+        id: $("entryId").value || undefined,
+        date: $("entryDate").value,
+        start: $("entryStart").value,
+        end: $("entryEnd").value,
+        client: $("entryClient").value.trim(),
+        status: state.selectedStatus,
+        work: $("entryWork").value.trim(),
+        material: $("entryMaterial").value.trim(),
+        km: Number($("entryKm").value || 0),
+        materialCost: Number($("entryMaterialCost").value || 0),
+        notes: $("entryNotes").value.trim()
+      };
+
+      if (!validateEntry(entry)) return;
+      await saveEntryToServer(entry);
+      state.current = parseDate(entry.date);
+      $("entryDialog").close();
+    }
+
+    async function duplicateDialogEntry() {
+      const id = $("entryId").value;
+      const original = state.entries.find((entry) => entry.id === id);
+      if (!original) return;
+      const copy = { ...original, id: undefined, status: "unbilled" };
+      await saveEntryToServer(copy);
+    }
+
+    async function deleteDialogEntry() {
+      const id = $("entryId").value;
+      if (!id) return;
+      if (!confirm("Izbrisem ta vnos?")) return;
+      await deleteEntryFromServer(id);
+      $("entryDialog").close();
+    }
+
+    function exportCsv() {
+      const header = ["Datum", "Od", "Do", "Stranka", "Status", "Ure", "Km", "Material EUR", "Delo", "Material", "Opombe", "Dodal", "Spremenil"];
+      const rows = state.entries
+        .slice()
+        .sort((a, b) => `${a.date} ${a.start}`.localeCompare(`${b.date} ${b.start}`))
+        .map((entry) => [
+          entry.date,
+          entry.start,
+          entry.end,
+          entry.client,
+          statusLabels[entry.status],
+          duration(entry).toFixed(2),
+          entry.km || 0,
+          entry.materialCost || 0,
+          entry.work || "",
+          entry.material || "",
+          entry.notes || "",
+          entry.createdByName || "",
+          entry.updatedByName || ""
+        ]);
+
+      const csv = [header, ...rows]
+        .map((row) => row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(";"))
+        .join("\n");
+      downloadText(csv, `indus-ure-${dateKey(new Date())}.csv`, "text/csv;charset=utf-8");
+    }
+
+    function downloadBackup() {
+      downloadText(JSON.stringify({ entries: state.entries, todos: state.todos }, null, 2), `indus-ure-backup-${dateKey(new Date())}.json`, "application/json");
+    }
+
+    function downloadText(text, filename, type) {
+      const blob = new Blob([text], { type });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      link.click();
+      URL.revokeObjectURL(url);
+    }
+
+    function formatDate(value) {
+      return parseDate(value).toLocaleDateString("sl-SI");
+    }
+
+    function formatDateTime(value) {
+      if (!value) return "-";
+      return new Date(value).toLocaleString("sl-SI");
+    }
+
+    function readImageAsDataUrl(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(new Error("Slike ni bilo mogoce prebrati."));
+        reader.readAsDataURL(file);
+      });
+    }
+
+    function escapeHtml(value) {
+      return String(value || "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    async function migrateOldLocalEntries() {
+      const old = localStorage.getItem(oldStorageKey);
+      if (!old) return;
+      try {
+        const entries = JSON.parse(old);
+        if (!Array.isArray(entries) || entries.length === 0) return;
+        if (!confirm("Nasel sem stare vnose iz prve verzije. Jih prenesem v skupno bazo?")) return;
+        for (const entry of entries) {
+          const { id, ...rest } = entry;
+          await saveEntryToServer(rest);
+        }
+        localStorage.removeItem(oldStorageKey);
+      } catch {}
+    }
+
+    function openAccountDialog() {
+      $("accountName").value = state.user.name || "";
+      $("accountImage").value = "";
+      $("currentPassword").value = "";
+      $("newPassword").value = "";
+      $("accountUserTitle").textContent = `${state.user.name} (${state.user.id})`;
+      updateAvatar("accountAvatar", state.user);
+      $("accountDialog").showModal();
+    }
+
+    $("loginForm").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      try {
+        const data = await api("/api/login", {
+          method: "POST",
+          body: JSON.stringify({
+            username: $("loginUser").value,
+            password: $("loginPassword").value
+          })
+        });
+        state.token = data.token;
+        state.user = data.user;
+        localStorage.setItem(tokenKey, data.token);
+        showApp();
+        await loadAll();
+        await migrateOldLocalEntries();
+      } catch (error) {
+        alert(error.message);
+      }
+    });
+
+    $("logoutBtn").addEventListener("click", () => {
+      localStorage.removeItem(tokenKey);
+      location.reload();
+    });
+
+    $("accountBtn").addEventListener("click", openAccountDialog);
+    $("closeAccount").addEventListener("click", () => $("accountDialog").close());
+    $("saveProfile").addEventListener("click", async () => {
+      try {
+        let avatar = state.user.avatar || "";
+        const file = $("accountImage").files[0];
+        if (file) avatar = await readImageAsDataUrl(file);
+        await saveProfileToServer({ name: $("accountName").value, avatar });
+        alert("Profil je shranjen.");
+      } catch (error) {
+        alert(error.message);
+      }
+    });
+    $("changePassword").addEventListener("click", async () => {
+      try {
+        await changePasswordOnServer($("currentPassword").value, $("newPassword").value);
+        $("currentPassword").value = "";
+        $("newPassword").value = "";
+        alert("Geslo je zamenjano.");
+      } catch (error) {
+        alert(error.message);
+      }
+    });
+
+    $("saveQuick").addEventListener("click", async () => {
+      const entry = entryFromQuick();
+      if (!validateEntry(entry)) return;
+      await saveEntryToServer(entry);
+      state.current = parseDate(entry.date);
+      $("quickWork").value = "";
+      $("quickMaterial").value = "";
+      $("quickKm").value = "";
+      $("quickMaterialCost").value = "";
+    });
+
+    $("saveTodo").addEventListener("click", async () => {
+      const todo = todoFromQuick();
+      if (!validateTodo(todo)) return;
+      await saveTodoToServer(todo);
+      state.selectedClient = todo.client;
+      $("todoTitle").value = "";
+    });
+
+    $("clearClientFilter").addEventListener("click", () => {
+      state.selectedClient = "";
+      renderTodos();
+    });
+
+    $("refreshBtn").addEventListener("click", loadAll);
+    $("prevMonth").addEventListener("click", () => {
+      state.current = new Date(state.current.getFullYear(), state.current.getMonth() - 1, 1);
+      render();
+    });
+    $("nextMonth").addEventListener("click", () => {
+      state.current = new Date(state.current.getFullYear(), state.current.getMonth() + 1, 1);
+      render();
+    });
+    $("todayBtn").addEventListener("click", () => {
+      state.current = new Date();
+      $("quickDate").value = dateKey(new Date());
+      $("todoDate").value = dateKey(new Date());
+      render();
+    });
+    $("clientSearch").addEventListener("input", renderSearch);
+    $("exportCsv").addEventListener("click", exportCsv);
+    $("downloadBackup").addEventListener("click", downloadBackup);
+    $("entryForm").addEventListener("submit", (event) => {
+      event.preventDefault();
+      saveDialogEntry().catch((error) => alert(error.message));
+    });
+    $("deleteEntry").addEventListener("click", () => deleteDialogEntry().catch((error) => alert(error.message)));
+    $("duplicateEntry").addEventListener("click", () => duplicateDialogEntry().catch((error) => alert(error.message)));
+    $("closeDialog").addEventListener("click", () => $("entryDialog").close());
+    document.querySelectorAll(".status-switch button").forEach((button) => {
+      button.addEventListener("click", () => setDialogStatus(button.dataset.status));
+    });
+
+    boot();
+  </script>
+</body>
+</html>

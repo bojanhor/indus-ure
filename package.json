@@ -1,0 +1,13 @@
+{
+  "name": "indus-ure",
+  "version": "1.0.0",
+  "private": true,
+  "description": "INDUS URE - skupni delovni koledar za Bojana in Ibra.",
+  "main": "outputs/server.js",
+  "scripts": {
+    "start": "node outputs/server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -1,0 +1,4 @@
+node_modules/
+.env
+outputs/data/db.json
+outputs/data/*.json
