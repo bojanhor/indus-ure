@@ -1235,6 +1235,7 @@
       state.todos = data.todos;
       refreshClientList();
       render();
+      syncGoogle(false);
     }
 
     async function saveProfileToServer(profile) {
@@ -1579,7 +1580,7 @@
           <button class="secondary delete-todo" type="button">Izbrisi</button>
           <button class="drag-handle" type="button" title="Povleci za vrstni red">::</button>
         `;
-        item.querySelector("input").addEventListener("change", (event) => {
+        item.querySelector('input[type="checkbox"]').addEventListener("change", (event) => {
           saveTodoToServer({ ...todo, done: event.target.checked }).catch((error) => alert(error.message));
         });
         item.querySelector(".todo-status").addEventListener("change", (event) => {
@@ -1588,10 +1589,22 @@
         item.querySelector(".todo-date").addEventListener("change", (event) => {
           saveTodoToServer({ ...todo, date: event.target.value }).catch((error) => alert(error.message));
         });
-        item.querySelector(".delete-todo").addEventListener("click", () => {
+        item.querySelector(".delete-todo").addEventListener("click", async (event) => {
+          event.preventDefault();
+          event.stopPropagation();
           if (!confirm("Izbrisem to opravilo?")) return;
-          deleteTodoFromServer(todo.id).catch((error) => alert(error.message));
+          const button = event.currentTarget;
+          button.disabled = true;
+          button.textContent = "Brisem...";
+          try {
+            await deleteTodoFromServer(todo.id);
+          } catch (error) {
+            button.disabled = false;
+            button.textContent = "Izbrisi";
+            alert(error.message);
+          }
         });
+        item.querySelector(".delete-todo").addEventListener("dragstart", (event) => event.preventDefault());
         item.addEventListener("dragstart", (event) => {
           if (todo.date || todo.done) {
             event.preventDefault();
