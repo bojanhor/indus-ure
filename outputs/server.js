@@ -736,16 +736,18 @@ async function syncGoogleForUser(req, db, user) {
 }
 
 async function deleteGoogleEventForItem(req, db, item) {
-  if (!googleReady() || !item?.googleEventId || !item.syncUser) return;
+  if (!googleReady() || !item?.googleEventId || !item.syncUser) return false;
   const user = db.users[item.syncUser];
-  if (!user?.google?.tokens || !user.google.calendarId) return;
+  if (!user?.google?.tokens || !user.google.calendarId) return false;
   try {
     const { google } = require("googleapis");
     const auth = googleClient(req, user.google.tokens);
     const calendar = google.calendar({ version: "v3", auth });
     await calendar.events.delete({ calendarId: user.google.calendarId, eventId: item.googleEventId });
+    return true;
   } catch (error) {
-    if (![404, 410].includes(Number(error.code))) throw error;
+    console.warn(`Google dogodka ni bilo mogoce izbrisati: ${error.message || error}`);
+    return false;
   }
 }
 
