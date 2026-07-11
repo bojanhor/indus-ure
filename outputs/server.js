@@ -64,6 +64,16 @@ const defaultUsers = {
 };
 
 const sessions = new Map();
+const pendingGoogleLogins = new Map();
+
+function allowedGoogleUsers(db) {
+  return Object.values(db.users || {}).filter((user) => user.email);
+}
+
+function userByEmail(db, email) {
+  const normalized = String(email || "").toLowerCase();
+  return allowedGoogleUsers(db).find((user) => String(user.email || "").toLowerCase() === normalized);
+}
 
 function normalizeDb(db = {}) {
   let changed = false;
@@ -865,6 +875,30 @@ async function handleApi(req, res) {
       return;
     }
 
+    if (url.pathname === "/api/auth/google-url" && req.method === "GET") {
+      if (!googleReady()) {
+        sendJson(res, 400, { error: "Google prijava se ni nastavljena v Render Environment." });
+        return;
+      }
+      const state = `login:${crypto.randomBytes(24).toString("hex")}`;
+      pendingGoogleLogins.set(state, Date.now());
+      const auth = googleClient(req);
+      const authUrl = auth.generateAuthUrl({
+        access_type: "offline",
+        prompt: "consent",
+        state,
+        scope: [
+          "openid",
+          "email",
+          "profile",
+          "https://www.googleapis.com/auth/calendar",
+          "https://www.googleapis.com/auth/calendar.events"
+        ]
+      });
+      sendJson(res, 200, { url: authUrl });
+      return;
+    }
+
     if (url.pathname === "/api/google/auth-url" && req.method === "GET") {
       const user = await requireUser(req, res);
       if (!user) return;
@@ -892,12 +926,61 @@ async function handleApi(req, res) {
         return;
       }
       const token = url.searchParams.get("state") || "";
+      const code = url.searchParams.get("code") || "";
+      if (token.startsWith("login:")) {
+        const startedAt = pendingGoogleLogins.get(token);
+        pendingGoogleLogins.delete(token);
+        if (!startedAt || Date.now() - startedAt > 10 * 60 * 1000) {
+          sendText(res, 401, "Prijava je potekla. Vrni se na INDUS URE in poskusi znova.", "text/plain");
+          return;
+        }
+        const auth = googleClient(req);
+        const result = await auth.getToken(code);
+        auth.setCredentials(result.tokens);
+        const { google } = require("googleapis");
+        const oauth2 = google.oauth2({ version: "v2", auth });
+        const profile = await oauth2.userinfo.get();
+        const email = String(profile.data.email || "").toLowerCase();
+        const db = await readDbAsync();
+        const user = userByEmail(db, email);
+        if (!user) {
+          sendText(res, 403, "Ta Google racun nima dostopa do INDUS URE. Dovoljena sta samo Ibro in Bojan.", "text/plain");
+          return;
+        }
+        user.google = user.google || {};
+        user.google.tokens = {
+          ...(user.google.tokens || {}),
+          ...result.tokens
+        };
+        user.google.connectedAt = new Date().toISOString();
+        user.google.calendarId = user.google.calendarId || "";
+        user.google.calendarName = user.google.calendarName || "";
+        const sessionToken = crypto.randomBytes(24).toString("hex");
+        sessions.set(sessionToken, user.id);
+        await writeDbAsync(db);
+        const html = `<!doctype html>
+<html lang="sl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>INDUS URE</title>
+</head>
+<body>
+  <p>Prijava je uspela. Odpiram INDUS URE...</p>
+  <script>
+    localStorage.setItem("indus-ure-token", ${JSON.stringify(sessionToken)});
+    location.replace("/");
+  </script>
+</body>
+</html>`;
+        sendText(res, 200, html, "text/html; charset=utf-8");
+        return;
+      }
       const userId = sessions.get(token);
       if (!userId) {
         sendText(res, 401, "Prijava je potekla. Zapri to okno, prijavi se v INDUS URE in poskusi znova.", "text/plain");
         return;
       }
-      const code = url.searchParams.get("code") || "";
       const auth = googleClient(req);
       const result = await auth.getToken(code);
       const db = await readDbAsync();
@@ -934,24 +1017,7 @@ async function handleApi(req, res) {
     }
 
     if (req.method === "POST" && url.pathname === "/api/login") {
-      const body = await readBody(req);
-      const db = await readDbAsync();
-      const username = String(body.username || "").toLowerCase();
-      const password = String(body.password || "");
-      const user = db.users[username] || Object.values(db.users).find((item) => String(item.email || "").toLowerCase() === username);
-      const envPassword = configuredPasswordForUser(user?.id || username);
-      if (user && envPassword && password === envPassword && !verifyPassword(password, user.passwordHash || user.password)) {
-        user.passwordHash = hashPassword(password);
-        delete user.password;
-        await writeDbAsync(db);
-      }
-      if (!user || !verifyPassword(password, user.passwordHash || user.password)) {
-        sendJson(res, 401, { error: "Napacno uporabnisko ime ali geslo." });
-        return;
-      }
-      const token = crypto.randomBytes(24).toString("hex");
-      sessions.set(token, user.id);
-      sendJson(res, 200, { token, user: publicUser(user) });
+      sendJson(res, 410, { error: "Prijava z geslom je izklopljena. Uporabi Google prijavo." });
       return;
     }
 
@@ -986,24 +1052,7 @@ async function handleApi(req, res) {
     }
 
     if (url.pathname === "/api/password" && req.method === "PUT") {
-      const user = await requireUser(req, res);
-      if (!user) return;
-      const body = await readBody(req);
-      const db = await readDbAsync();
-      const current = db.users[user.id];
-      if (!verifyPassword(body.currentPassword || "", current.passwordHash || current.password)) {
-        sendJson(res, 400, { error: "Trenutno geslo ni pravilno." });
-        return;
-      }
-      const next = String(body.newPassword || "");
-      if (next.length < 6) {
-        sendJson(res, 400, { error: "Novo geslo mora imeti vsaj 6 znakov." });
-        return;
-      }
-      current.passwordHash = hashPassword(next);
-      delete current.password;
-      await writeDbAsync(db);
-      sendJson(res, 200, { ok: true });
+      sendJson(res, 410, { error: "Gesla se ne spreminja v aplikaciji. Prijava je vezana na Google racun." });
       return;
     }
 

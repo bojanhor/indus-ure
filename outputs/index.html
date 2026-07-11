@@ -27,9 +27,14 @@
       font-family: Arial, Helvetica, sans-serif;
       color: var(--ink);
       background: var(--bg);
+      overflow-x: hidden;
+      -webkit-text-size-adjust: 100%;
     }
 
-    button, input, select, textarea { font: inherit; }
+    button, input, select, textarea {
+      font: inherit;
+      font-size: 16px;
+    }
     button { border: 0; cursor: pointer; }
     button:disabled { cursor: not-allowed; opacity: 0.55; }
 
@@ -56,6 +61,18 @@
       gap: 16px;
     }
 
+    .login-logo {
+      width: 52px;
+      height: 52px;
+      border-radius: 8px;
+      display: grid;
+      place-items: center;
+      background: #203035;
+      color: #fff;
+      font-weight: 800;
+      letter-spacing: 0;
+    }
+
     .login-card h1 {
       margin: 0;
       font-size: 28px;
@@ -65,6 +82,16 @@
     .login-card p {
       margin: 0;
       color: var(--muted);
+      line-height: 1.45;
+    }
+
+    .login-note {
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #f8faf7;
+      color: var(--muted);
+      font-size: 14px;
       line-height: 1.45;
     }
 
@@ -174,6 +201,28 @@
 
     .primary { background: var(--accent); color: #fff; }
     .primary:hover { background: var(--accent-dark); }
+    .google-button {
+      min-height: 48px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      color: var(--ink);
+      font-weight: 800;
+    }
+    .google-mark {
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      color: #fff;
+      background: #4285f4;
+      font-weight: 800;
+    }
     .secondary { background: #e4eee9; color: #203035; }
     .ghost {
       border: 1px solid rgba(255, 255, 255, 0.18);
@@ -775,6 +824,16 @@
     }
 
     @media (max-width: 760px) {
+      .login-screen {
+        min-height: 100svh;
+        padding: 14px;
+      }
+      .login-card {
+        padding: 20px;
+      }
+      .login-card h1 {
+        font-size: 25px;
+      }
       .main,
       .sidebar { padding: 16px; }
       .topbar { align-items: stretch; flex-direction: column; }
@@ -794,19 +853,15 @@
 <body>
   <section class="login-screen" id="loginScreen">
     <form class="login-card" id="loginForm">
+      <div class="login-logo">IU</div>
       <h1>INDUS URE</h1>
-      <p>Skupni koledar za vnos ur, strank, materiala in kilometrine.</p>
+      <p>Dobrodo&#353;li v skupni koledar za ure, stranke, material, kilometrino in opravila.</p>
       <div class="offline hidden" id="serverWarning">Odpri stran prek lokalnega stre&#382;nika, ne direktno kot datoteko.</div>
-      <label>Uporabnik
-        <select id="loginUser">
-          <option value="ibrahim.etemaj04@gmail.com">ibrahim.etemaj04@gmail.com</option>
-          <option value="bojan@indus.si">bojan@indus.si</option>
-        </select>
-      </label>
-      <label>Geslo
-        <input id="loginPassword" type="password" autocomplete="current-password" required>
-      </label>
-      <button class="primary" type="submit">Prijava</button>
+      <button class="google-button" id="googleLoginBtn" type="submit">
+        <span class="google-mark">G</span>
+        <span>Prijavi se z Googlom</span>
+      </button>
+      <div class="login-note">Dostop imata samo Ibro in Bojan z dovoljenima Google ra&#269;unoma.</div>
     </form>
   </section>
 
@@ -1094,7 +1149,7 @@
           <span class="avatar" id="accountAvatar">?</span>
           <div>
             <strong id="accountUserTitle"></strong><br>
-            <span class="small">Sliko in geslo lahko spremeni samo prijavljen uporabnik.</span>
+            <span class="small">Prijava je vezana na tvoj Google ra&#269;un.</span>
           </div>
         </div>
         <label>Prikazano ime
@@ -1104,13 +1159,6 @@
           <input id="accountImage" type="file" accept="image/*">
         </label>
         <button class="secondary" id="saveProfile" type="button">Shrani profil</button>
-        <label>Trenutno geslo
-          <input id="currentPassword" type="password" autocomplete="current-password">
-        </label>
-        <label>Novo geslo
-          <input id="newPassword" type="password" autocomplete="new-password">
-        </label>
-        <button class="primary" id="changePassword" type="button">Zamenjaj geslo</button>
       </div>
     </form>
   </dialog>
@@ -1282,13 +1330,6 @@
       updateAvatar("topAvatar", state.user);
       updateAvatar("accountAvatar", state.user);
       $("accountUserTitle").textContent = `${state.user.name} (${state.user.id})`;
-    }
-
-    async function changePasswordOnServer(currentPassword, newPassword) {
-      await api("/api/password", {
-        method: "PUT",
-        body: JSON.stringify({ currentPassword, newPassword })
-      });
     }
 
     function dateKey(date) {
@@ -1964,8 +2005,6 @@
     function openAccountDialog() {
       $("accountName").value = state.user.name || "";
       $("accountImage").value = "";
-      $("currentPassword").value = "";
-      $("newPassword").value = "";
       $("accountUserTitle").textContent = `${state.user.name} (${state.user.id})`;
       updateAvatar("accountAvatar", state.user);
       $("accountDialog").showModal();
@@ -1974,21 +2013,11 @@
     $("loginForm").addEventListener("submit", async (event) => {
       event.preventDefault();
       try {
-        const data = await api("/api/login", {
-          method: "POST",
-          body: JSON.stringify({
-            username: $("loginUser").value,
-            password: $("loginPassword").value
-          })
-        });
-        state.token = data.token;
-        state.user = data.user;
-        localStorage.setItem(tokenKey, data.token);
-        showApp();
-        await loadAll();
-        syncGoogle(false);
-        await migrateOldLocalEntries();
+        $("googleLoginBtn").disabled = true;
+        const data = await api("/api/auth/google-url");
+        location.href = data.url;
       } catch (error) {
+        $("googleLoginBtn").disabled = false;
         alert(error.message);
       }
     });
@@ -2011,17 +2040,6 @@
         alert(error.message);
       }
     });
-    $("changePassword").addEventListener("click", async () => {
-      try {
-        await changePasswordOnServer($("currentPassword").value, $("newPassword").value);
-        $("currentPassword").value = "";
-        $("newPassword").value = "";
-        alert("Geslo je zamenjano.");
-      } catch (error) {
-        alert(error.message);
-      }
-    });
-
     $("saveQuick").addEventListener("click", async () => {
       const entry = entryFromQuick();
       if (!validateEntry(entry)) return;
