@@ -127,6 +127,11 @@ function normalizeDb(db = {}) {
     changed = true;
   }
 
+  if (!Array.isArray(db.debts)) {
+    db.debts = [];
+    changed = true;
+  }
+
   if (!Array.isArray(db.clients)) {
     db.clients = [];
     changed = true;
@@ -229,6 +234,20 @@ function normalizeDb(db = {}) {
     return next;
   });
 
+  db.debts = db.debts.map((debt) => ({
+    id: debt.id || crypto.randomUUID(),
+    month: /^\d{4}-\d{2}$/.test(String(debt.month || "")) ? String(debt.month) : new Date().toISOString().slice(0, 7),
+    person: ["ibro", "bojan"].includes(debt.person) ? debt.person : "ibro",
+    amount: Number(debt.amount || 0),
+    reason: String(debt.reason || "").trim(),
+    createdBy: debt.createdBy || "system",
+    createdByName: debt.createdByName || "",
+    createdAt: debt.createdAt || new Date().toISOString(),
+    updatedBy: debt.updatedBy || debt.createdBy || "system",
+    updatedByName: debt.updatedByName || debt.createdByName || "",
+    updatedAt: debt.updatedAt || debt.createdAt || new Date().toISOString()
+  })).filter((debt) => debt.amount || debt.reason);
+
   return { db, changed };
 }
 
@@ -254,7 +273,7 @@ function readSeedClients() {
 function ensureDb() {
   if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
   if (!fs.existsSync(dbFile)) {
-    fs.writeFileSync(dbFile, JSON.stringify({ users: defaultUsers, entries: [], todos: [], clients: readSeedClients() }, null, 2), "utf8");
+    fs.writeFileSync(dbFile, JSON.stringify({ users: defaultUsers, entries: [], todos: [], debts: [], clients: readSeedClients() }, null, 2), "utf8");
     return;
   }
 
@@ -298,7 +317,7 @@ async function ensurePostgresDb() {
     if (existing.rowCount === 0) {
       await pool.query(
         "insert into app_state (id, data) values ($1, $2::jsonb)",
-        ["main", JSON.stringify({ users: defaultUsers, entries: [], todos: [], clients: readSeedClients(), calendarToken: crypto.randomBytes(24).toString("hex") })]
+        ["main", JSON.stringify({ users: defaultUsers, entries: [], todos: [], debts: [], clients: readSeedClients(), calendarToken: crypto.randomBytes(24).toString("hex") })]
       );
       return;
     }
@@ -458,8 +477,24 @@ function cleanClient(input) {
   };
 }
 
+function cleanDebt(input) {
+  return {
+    month: String(input.month || "").trim(),
+    person: ["ibro", "bojan"].includes(input.person) ? input.person : "ibro",
+    amount: Number(input.amount || 0),
+    reason: String(input.reason || "").trim()
+  };
+}
+
 function validateClient(client) {
   if (!client.name) return "Manjka naziv stranke.";
+  return "";
+}
+
+function validateDebt(debt) {
+  if (!/^\d{4}-\d{2}$/.test(debt.month)) return "Mesec dolga ni pravilen.";
+  if (!Number.isFinite(debt.amount) || debt.amount <= 0) return "Vnesi znesek dolga.";
+  if (!debt.reason) return "Vnesi zakaj je nastal dolg.";
   return "";
 }
 
@@ -526,7 +561,6 @@ function buildCalendarIcs(db) {
       entry.material ? `Material: ${entry.material}` : "",
       entry.people ? `Sodelavci: ${entry.people}` : "",
       entry.km ? `Km: ${entry.km}` : "",
-      entry.materialCost ? `Material EUR: ${entry.materialCost}` : "",
       entry.notes ? `Opombe: ${entry.notes}` : "",
       entry.createdByName ? `Dodal: ${entry.createdByName}` : "",
       entry.updatedByName ? `Spremenil: ${entry.updatedByName}` : ""
@@ -590,7 +624,6 @@ function entryToGoogleEvent(entry) {
       entry.material ? `Material: ${entry.material}` : "",
       entry.people ? `Sodelavci: ${entry.people}` : "",
       entry.km ? `Km: ${entry.km}` : "",
-      entry.materialCost ? `Material EUR: ${entry.materialCost}` : "",
       entry.notes ? `Opombe: ${entry.notes}` : ""
     ]),
     start: { dateTime: `${entry.date}T${entry.start}:00`, timeZone: "Europe/Ljubljana" },
@@ -1080,6 +1113,40 @@ async function handleApi(req, res) {
       return;
     }
 
+    if (url.pathname === "/api/debts" && req.method === "GET") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      const db = await readDbAsync();
+      sendJson(res, 200, { debts: db.debts || [] });
+      return;
+    }
+
+    if (url.pathname === "/api/debts" && req.method === "POST") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      const debt = cleanDebt(await readBody(req));
+      const validation = validateDebt(debt);
+      if (validation) {
+        sendJson(res, 400, { error: validation });
+        return;
+      }
+      const db = await readDbAsync();
+      const now = new Date().toISOString();
+      db.debts.push({
+        id: crypto.randomUUID(),
+        ...debt,
+        createdBy: user.id,
+        createdByName: user.name,
+        createdAt: now,
+        updatedBy: user.id,
+        updatedByName: user.name,
+        updatedAt: now
+      });
+      await writeDbAsync(db);
+      sendJson(res, 200, { debts: db.debts });
+      return;
+    }
+
     if (url.pathname === "/api/clients" && req.method === "POST") {
       const user = await requireUser(req, res);
       if (!user) return;
@@ -1103,6 +1170,46 @@ async function handleApi(req, res) {
       }
       await writeDbAsync(db);
       sendJson(res, 200, { clients: db.clients });
+      return;
+    }
+
+    const debtMatch = url.pathname.match(/^\/api\/debts\/([^/]+)$/);
+    if (debtMatch && req.method === "PUT") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      const id = decodeURIComponent(debtMatch[1]);
+      const debt = cleanDebt(await readBody(req));
+      const validation = validateDebt(debt);
+      if (validation) {
+        sendJson(res, 400, { error: validation });
+        return;
+      }
+      const db = await readDbAsync();
+      const index = db.debts.findIndex((item) => item.id === id);
+      if (index < 0) {
+        sendJson(res, 404, { error: "Dolg ne obstaja." });
+        return;
+      }
+      db.debts[index] = {
+        ...db.debts[index],
+        ...debt,
+        updatedBy: user.id,
+        updatedByName: user.name,
+        updatedAt: new Date().toISOString()
+      };
+      await writeDbAsync(db);
+      sendJson(res, 200, { debts: db.debts });
+      return;
+    }
+
+    if (debtMatch && req.method === "DELETE") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      const id = decodeURIComponent(debtMatch[1]);
+      const db = await readDbAsync();
+      db.debts = db.debts.filter((item) => item.id !== id);
+      await writeDbAsync(db);
+      sendJson(res, 200, { debts: db.debts });
       return;
     }
 

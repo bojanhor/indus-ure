@@ -40,30 +40,43 @@
 
     .login-screen {
       min-height: 100vh;
-      display: grid;
-      place-items: center;
+      display: flex;
+      align-items: center;
+      justify-content: center;
       padding: 20px;
       background:
-        linear-gradient(rgba(246, 247, 242, 0.86), rgba(246, 247, 242, 0.92)),
+        linear-gradient(rgba(246, 247, 242, 0.76), rgba(246, 247, 242, 0.86)),
         url("https://images.unsplash.com/photo-1504917595217-d4dc5ebe6122?auto=format&fit=crop&w=1800&q=80");
       background-size: cover;
       background-position: center;
+      position: relative;
+    }
+
+    .login-brand {
+      position: absolute;
+      top: 18px;
+      left: 20px;
+      color: #203035;
+      font-weight: 900;
+      letter-spacing: 0;
+      font-size: 17px;
     }
 
     .login-card {
-      width: min(440px, 100%);
+      width: min(360px, 100%);
       background: var(--panel);
       border: 1px solid var(--line);
       border-radius: 8px;
       box-shadow: var(--shadow);
-      padding: 24px;
+      padding: 26px;
       display: grid;
-      gap: 16px;
+      gap: 18px;
+      text-align: center;
     }
 
     .login-logo {
-      width: 52px;
-      height: 52px;
+      width: 58px;
+      height: 58px;
       border-radius: 8px;
       display: grid;
       place-items: center;
@@ -71,28 +84,13 @@
       color: #fff;
       font-weight: 800;
       letter-spacing: 0;
+      margin: 0 auto;
     }
 
     .login-card h1 {
       margin: 0;
-      font-size: 28px;
+      font-size: 31px;
       letter-spacing: 0;
-    }
-
-    .login-card p {
-      margin: 0;
-      color: var(--muted);
-      line-height: 1.45;
-    }
-
-    .login-note {
-      padding: 12px;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: #f8faf7;
-      color: var(--muted);
-      font-size: 14px;
-      line-height: 1.45;
     }
 
     .app {
@@ -393,6 +391,15 @@
     .stat span {
       color: var(--muted);
       font-size: 13px;
+    }
+
+    .stat.clickable {
+      text-align: left;
+      cursor: pointer;
+    }
+
+    .stat.clickable:hover {
+      border-color: var(--accent);
     }
 
     .boss-panel {
@@ -805,6 +812,37 @@
       outline: 3px solid rgba(31, 42, 46, 0.18);
     }
 
+    .debt-list {
+      display: grid;
+      gap: 10px;
+    }
+
+    .debt-item {
+      display: grid;
+      grid-template-columns: 1fr auto auto;
+      gap: 10px;
+      align-items: center;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #f8faf7;
+    }
+
+    .debt-item strong { display: block; }
+
+    .debt-item span {
+      display: block;
+      color: var(--muted);
+      font-size: 13px;
+      margin-top: 3px;
+    }
+
+    .month-debt-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 10px;
+    }
+
     .offline {
       padding: 10px 12px;
       background: #fff4db;
@@ -828,6 +866,11 @@
         min-height: 100svh;
         padding: 14px;
       }
+      .login-brand {
+        top: 12px;
+        left: 14px;
+        font-size: 14px;
+      }
       .login-card {
         padding: 20px;
       }
@@ -836,14 +879,59 @@
       }
       .main,
       .sidebar { padding: 16px; }
+      .app {
+        display: block;
+      }
+      .sidebar {
+        gap: 12px;
+      }
       .topbar { align-items: stretch; flex-direction: column; }
-      .tools { justify-content: stretch; }
+      .tools {
+        justify-content: stretch;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+      }
+      .view-switch,
+      .search,
+      .account-btn {
+        grid-column: 1 / -1;
+      }
       .search,
       .tools .secondary { width: 100%; max-width: none; }
-      .stats,
+      .stats {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+      }
+      .stat {
+        padding: 10px;
+      }
+      .stat strong {
+        font-size: 19px;
+      }
+      .calendar-shell {
+        margin-left: -16px;
+        margin-right: -16px;
+        border-left: 0;
+        border-right: 0;
+        border-radius: 0;
+      }
+      .todo-item {
+        grid-template-columns: auto 1fr;
+      }
+      .todo-tools,
+      .todo-item .secondary,
+      .drag-handle {
+        grid-column: 2;
+        justify-content: stretch;
+      }
+      .todo-date,
+      .todo-status {
+        width: 100%;
+      }
       .modal-grid,
       .status-switch,
       .boss-panel,
+      .month-debt-grid,
       .todo-layout,
       .todo-create { grid-template-columns: 1fr; }
       .result { grid-template-columns: 1fr; gap: 5px; }
@@ -852,16 +940,15 @@
 </head>
 <body>
   <section class="login-screen" id="loginScreen">
+    <div class="login-brand">INDUS&gt;housetech</div>
     <form class="login-card" id="loginForm">
       <div class="login-logo">IU</div>
       <h1>INDUS URE</h1>
-      <p>Dobrodo&#353;li v skupni koledar za ure, stranke, material, kilometrino in opravila.</p>
       <div class="offline hidden" id="serverWarning">Odpri stran prek lokalnega stre&#382;nika, ne direktno kot datoteko.</div>
       <button class="google-button" id="googleLoginBtn" type="submit">
         <span class="google-mark">G</span>
         <span>Prijavi se z Googlom</span>
       </button>
-      <div class="login-note">Dostop imata samo Ibro in Bojan z dovoljenima Google ra&#269;unoma.</div>
     </form>
   </section>
 
@@ -921,10 +1008,6 @@
         <div class="control">
           <label for="quickKm">Km</label>
           <input id="quickKm" type="number" min="0" step="0.1" placeholder="0">
-        </div>
-        <div class="control">
-          <label for="quickMaterialCost">Material EUR</label>
-          <input id="quickMaterialCost" type="number" min="0" step="0.01" placeholder="0">
         </div>
       </div>
 
@@ -1019,7 +1102,7 @@
       <section class="stats calendar-view">
         <div class="stat"><strong id="statHours">0 h</strong><span>ure v tem mesecu</span></div>
         <div class="stat"><strong id="statKm">0 km</strong><span>kilometrina</span></div>
-        <div class="stat"><strong id="statMaterial">0 EUR</strong><span>material</span></div>
+        <button class="stat clickable" id="monthDebts" type="button"><strong id="statDebts">0 EUR</strong><span>dolgovi ta mesec</span></button>
         <div class="stat"><strong id="statUnbilled">0</strong><span>neobra&#269;unani vnosi</span></div>
         <div class="stat"><strong id="statTodos">0</strong><span>odprta opravila</span></div>
       </section>
@@ -1083,6 +1166,7 @@
       </div>
       <div class="modal-body">
         <input type="hidden" id="entryId">
+        <input type="hidden" id="entryTodoId">
         <div class="modal-grid">
           <label>Datum
             <input id="entryDate" type="date" required>
@@ -1101,9 +1185,6 @@
           </label>
           <label>Kilometri
             <input id="entryKm" type="number" min="0" step="0.1">
-          </label>
-          <label>Material EUR
-            <input id="entryMaterialCost" type="number" min="0" step="0.01">
           </label>
         </div>
 
@@ -1163,6 +1244,40 @@
     </form>
   </dialog>
 
+  <dialog id="debtDialog">
+    <form method="dialog" id="debtForm">
+      <div class="modal-head">
+        <h3>Dolgovi za mesec</h3>
+        <button class="icon-btn" id="closeDebt" type="button" title="Zapri">&times;</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="debtId">
+        <div class="month-debt-grid">
+          <label>Mesec
+            <input id="debtMonth" type="month">
+          </label>
+          <label>Kdo
+            <select id="debtPerson">
+              <option value="ibro">Ibro dolg</option>
+              <option value="bojan">Bojan dolg</option>
+            </select>
+          </label>
+          <label>Znesek EUR
+            <input id="debtAmount" type="number" min="0" step="0.01" placeholder="0">
+          </label>
+        </div>
+        <label>Zakaj je nastal dolg
+          <textarea id="debtReason" placeholder="npr. material, gotovina, poravnava"></textarea>
+        </label>
+        <div class="actions">
+          <button class="danger" id="deleteDebt" type="button">Izbri&#353;i dolg</button>
+          <button class="primary" id="saveDebt" type="button">Shrani dolg</button>
+        </div>
+        <div class="debt-list" id="debtList"></div>
+      </div>
+    </form>
+  </dialog>
+
   <script>
     const tokenKey = "indus-ure-token";
     const oldStorageKey = "delovni-koledar-v1";
@@ -1184,6 +1299,7 @@
       selectedStatus: "unbilled",
       entries: [],
       todos: [],
+      debts: [],
       clients: [],
       selectedClient: "",
       user: null,
@@ -1264,12 +1380,29 @@
     }
 
     async function loadAll() {
-      const [entries, todos, clients] = await Promise.all([api("/api/entries"), api("/api/todos"), api("/api/clients")]);
+      const [entries, todos, debts, clients] = await Promise.all([api("/api/entries"), api("/api/todos"), api("/api/debts"), api("/api/clients")]);
       state.entries = entries.entries;
       state.todos = todos.todos;
+      state.debts = debts.debts;
       state.clients = clients.clients;
       refreshClientList();
       render();
+    }
+
+    async function saveDebtToServer(debt) {
+      const method = debt.id ? "PUT" : "POST";
+      const path = debt.id ? `/api/debts/${debt.id}` : "/api/debts";
+      const data = await api(path, { method, body: JSON.stringify(debt) });
+      state.debts = data.debts;
+      render();
+      renderDebtDialog();
+    }
+
+    async function deleteDebtFromServer(id) {
+      const data = await api(`/api/debts/${id}`, { method: "DELETE" });
+      state.debts = data.debts;
+      render();
+      renderDebtDialog();
     }
 
     async function saveClientToServer(client) {
@@ -1355,6 +1488,37 @@
       return Math.max(0, diff) / 60;
     }
 
+    function uniqueHours(entries) {
+      const byDate = new Map();
+      entries.forEach((entry) => {
+        if (!entry.date || !entry.start || !entry.end) return;
+        const start = minutes(entry.start);
+        const end = minutes(entry.end);
+        if (end <= start) return;
+        if (!byDate.has(entry.date)) byDate.set(entry.date, []);
+        byDate.get(entry.date).push([start, end]);
+      });
+      let total = 0;
+      byDate.forEach((intervals) => {
+        intervals.sort((a, b) => a[0] - b[0]);
+        let current = null;
+        intervals.forEach(([start, end]) => {
+          if (!current) {
+            current = [start, end];
+            return;
+          }
+          if (start <= current[1]) {
+            current[1] = Math.max(current[1], end);
+          } else {
+            total += current[1] - current[0];
+            current = [start, end];
+          }
+        });
+        if (current) total += current[1] - current[0];
+      });
+      return total / 60;
+    }
+
     function money(value) {
       return Number(value || 0).toLocaleString("sl-SI", {
         minimumFractionDigits: 2,
@@ -1374,7 +1538,7 @@
         people: "",
         syncUser: state.user?.id || "",
         km: Number($("quickKm").value || 0),
-        materialCost: Number($("quickMaterialCost").value || 0),
+        materialCost: 0,
         notes: ""
       };
     }
@@ -1541,8 +1705,15 @@
             item.className = `day-todo ${todo.done ? "done" : ""}`;
             item.innerHTML = `${escapeHtml(todo.title)}${todo.client ? `<br><small>${escapeHtml(todo.client)}</small>` : ""}${todo.status === "in_progress" ? `<br><small>v teku</small>` : ""}`;
             item.addEventListener("click", () => {
-              state.selectedClient = todo.client || "";
-              setView("todos");
+              openDialog({
+                date: todo.date,
+                client: todo.client || "",
+                work: todo.title,
+                notes: todo.notes || "",
+                start: "08:00",
+                end: "16:00",
+                todoId: todo.id
+              });
             });
             day.appendChild(item);
           });
@@ -1559,15 +1730,18 @@
         return d.getFullYear() === year && d.getMonth() === month;
       });
 
-      const hours = monthEntries.reduce((sum, entry) => sum + duration(entry), 0);
+      const monthKey = `${year}-${String(month + 1).padStart(2, "0")}`;
+      const hours = uniqueHours(monthEntries);
       const km = monthEntries.reduce((sum, entry) => sum + Number(entry.km || 0), 0);
-      const material = monthEntries.reduce((sum, entry) => sum + Number(entry.materialCost || 0), 0);
+      const debts = state.debts
+        .filter((debt) => debt.month === monthKey)
+        .reduce((sum, debt) => sum + Number(debt.amount || 0), 0);
       const unbilled = monthEntries.filter((entry) => entry.status === "unbilled").length;
       const openTodos = state.todos.filter((todo) => !todo.done).length;
 
       $("statHours").textContent = `${hours.toLocaleString("sl-SI", { maximumFractionDigits: 1 })} h`;
       $("statKm").textContent = `${km.toLocaleString("sl-SI", { maximumFractionDigits: 1 })} km`;
-      $("statMaterial").textContent = `${money(material)} EUR`;
+      $("statDebts").textContent = `${money(debts)} EUR`;
       $("statUnbilled").textContent = unbilled;
       $("statTodos").textContent = openTodos;
     }
@@ -1808,17 +1982,59 @@
       ].join("");
     }
 
+    function currentMonthKey() {
+      return `${state.current.getFullYear()}-${String(state.current.getMonth() + 1).padStart(2, "0")}`;
+    }
+
+    function personLabel(person) {
+      return person === "bojan" ? "Bojan dolg" : "Ibro dolg";
+    }
+
+    function openDebtDialog(debt = {}) {
+      $("debtId").value = debt.id || "";
+      $("debtMonth").value = debt.month || currentMonthKey();
+      $("debtPerson").value = debt.person || state.user?.id || "ibro";
+      $("debtAmount").value = debt.amount || "";
+      $("debtReason").value = debt.reason || "";
+      $("deleteDebt").style.display = debt.id ? "inline-flex" : "none";
+      renderDebtDialog();
+      $("debtDialog").showModal();
+    }
+
+    function renderDebtDialog() {
+      const list = $("debtList");
+      if (!list) return;
+      const month = $("debtMonth")?.value || currentMonthKey();
+      const debts = state.debts
+        .filter((debt) => debt.month === month)
+        .sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
+      if (debts.length === 0) {
+        list.innerHTML = `<p class="todo-meta">Za ta mesec se ni dolgov.</p>`;
+        return;
+      }
+      list.innerHTML = debts.map((debt) => `
+        <div class="debt-item" data-debt-id="${escapeHtml(debt.id)}">
+          <div>
+            <strong>${escapeHtml(personLabel(debt.person))}: ${money(debt.amount)} EUR</strong>
+            <span>${escapeHtml(debt.reason)}</span>
+          </div>
+          <button class="secondary edit-debt" type="button">Uredi</button>
+          <button class="danger remove-debt" type="button">Izbrisi</button>
+        </div>
+      `).join("");
+    }
+
     function openDialog(entry = {}) {
       const existing = Boolean(entry.id);
       $("dialogTitle").textContent = existing ? "Uredi vnos" : "Nov vnos";
       $("entryId").value = entry.id || "";
+      $("entryTodoId").value = entry.todoId || "";
       $("entryDate").value = entry.date || dateKey(new Date());
       $("entryStart").value = entry.start || "08:00";
       $("entryEnd").value = entry.end || "16:00";
       $("entryClient").value = entry.client || "";
       $("entryPeople").value = entry.people || "";
       $("entryKm").value = entry.km || "";
-      $("entryMaterialCost").value = entry.materialCost || "";
       $("entryWork").value = entry.work || "";
       $("entryMaterial").value = entry.material || "";
       $("entryNotes").value = entry.notes || "";
@@ -1868,12 +2084,17 @@
         people: $("entryPeople").value.trim(),
         syncUser: ($("entryId").value ? (state.entries.find((item) => item.id === $("entryId").value)?.syncUser || "") : "") || state.user?.id || "",
         km: Number($("entryKm").value || 0),
-        materialCost: Number($("entryMaterialCost").value || 0),
+        materialCost: 0,
         notes: $("entryNotes").value.trim()
       };
 
       if (!validateEntry(entry)) return;
       await saveEntryToServer(entry);
+      const todoId = $("entryTodoId").value;
+      if (todoId) {
+        const todo = state.todos.find((item) => item.id === todoId);
+        if (todo) await saveTodoToServer({ ...todo, done: true });
+      }
       state.current = parseDate(entry.date);
       $("entryDialog").close();
     }
@@ -1895,7 +2116,7 @@
     }
 
     function exportCsv() {
-      const header = ["Datum", "Od", "Do", "Stranka", "Sodelavci", "Status", "Ure", "Km", "Material EUR", "Delo", "Material", "Opombe", "Dodal", "Spremenil"];
+      const header = ["Datum", "Od", "Do", "Stranka", "Sodelavci", "Status", "Ure", "Km", "Delo", "Material", "Opombe", "Dodal", "Spremenil"];
       const rows = state.entries
         .slice()
         .sort((a, b) => `${a.date} ${a.start}`.localeCompare(`${b.date} ${b.start}`))
@@ -1908,7 +2129,6 @@
           statusLabels[entry.status],
           duration(entry).toFixed(2),
           entry.km || 0,
-          entry.materialCost || 0,
           entry.work || "",
           entry.material || "",
           entry.notes || "",
@@ -1923,7 +2143,7 @@
     }
 
     function downloadBackup() {
-      downloadText(JSON.stringify({ entries: state.entries, todos: state.todos, clients: state.clients }, null, 2), `indus-ure-backup-${dateKey(new Date())}.json`, "application/json");
+      downloadText(JSON.stringify({ entries: state.entries, todos: state.todos, debts: state.debts, clients: state.clients }, null, 2), `indus-ure-backup-${dateKey(new Date())}.json`, "application/json");
     }
 
     async function syncGoogle(showSuccess = true) {
@@ -2048,7 +2268,55 @@
       $("quickWork").value = "";
       $("quickMaterial").value = "";
       $("quickKm").value = "";
-      $("quickMaterialCost").value = "";
+    });
+
+    $("monthDebts").addEventListener("click", () => openDebtDialog());
+    $("closeDebt").addEventListener("click", () => $("debtDialog").close());
+    $("debtMonth").addEventListener("change", renderDebtDialog);
+    $("saveDebt").addEventListener("click", async () => {
+      try {
+        await saveDebtToServer({
+          id: $("debtId").value || undefined,
+          month: $("debtMonth").value,
+          person: $("debtPerson").value,
+          amount: Number($("debtAmount").value || 0),
+          reason: $("debtReason").value.trim()
+        });
+        $("debtId").value = "";
+        $("debtAmount").value = "";
+        $("debtReason").value = "";
+      } catch (error) {
+        alert(error.message);
+      }
+    });
+    $("deleteDebt").addEventListener("click", async () => {
+      const id = $("debtId").value;
+      if (!id) return;
+      if (!confirm("Izbrisem ta dolg?")) return;
+      await deleteDebtFromServer(id);
+      $("debtId").value = "";
+      $("debtAmount").value = "";
+      $("debtReason").value = "";
+      $("deleteDebt").style.display = "none";
+    });
+    $("debtList").addEventListener("click", async (event) => {
+      const item = event.target.closest(".debt-item");
+      if (!item) return;
+      const debt = state.debts.find((row) => row.id === item.dataset.debtId);
+      if (!debt) return;
+      if (event.target.closest(".remove-debt")) {
+        if (!confirm("Izbrisem ta dolg?")) return;
+        await deleteDebtFromServer(debt.id);
+        return;
+      }
+      if (event.target.closest(".edit-debt") || item) {
+        $("debtId").value = debt.id;
+        $("debtMonth").value = debt.month;
+        $("debtPerson").value = debt.person;
+        $("debtAmount").value = debt.amount || "";
+        $("debtReason").value = debt.reason || "";
+        $("deleteDebt").style.display = "inline-flex";
+      }
     });
 
     $("saveTodo").addEventListener("click", () => {
