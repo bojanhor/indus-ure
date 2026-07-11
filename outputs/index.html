@@ -196,6 +196,31 @@
       gap: 10px;
     }
 
+    .quick-presets {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    .quick-presets button {
+      min-height: 36px;
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.1);
+      color: #fff;
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      font-weight: 800;
+    }
+
+    dialog .quick-presets button {
+      background: #e4eee9;
+      color: #203035;
+      border-color: var(--line);
+    }
+
+    .control.internal input {
+      opacity: 0.62;
+    }
+
     .primary,
     .secondary,
     .ghost,
@@ -1008,6 +1033,7 @@
       <div class="control">
         <label for="quickClient">Stranka</label>
         <input id="quickClient" list="clientList" placeholder="npr. Novak d.o.o.">
+        <span class="small">Pri modrih opravkih se stranka ne shrani.</span>
         <datalist id="clientList"></datalist>
       </div>
 
@@ -1019,6 +1045,11 @@
           <option value="warranty">Garancija</option>
           <option value="errand">Opravki</option>
         </select>
+      </div>
+
+      <div class="quick-presets">
+        <button id="quickLunch" type="button">Malica</button>
+        <button id="quickTravel" type="button">Pot</button>
       </div>
 
       <div class="control">
@@ -1218,6 +1249,11 @@
           <button type="button" class="errand" data-status="errand">Opravki</button>
         </div>
 
+        <div class="quick-presets">
+          <button id="entryLunch" type="button">Malica</button>
+          <button id="entryTravel" type="button">Pot</button>
+        </div>
+
         <label>Kaj si delal
           <textarea id="entryWork" placeholder="Opis dela"></textarea>
         </label>
@@ -1347,6 +1383,7 @@
       $("quickDate").value = dateKey(new Date());
       $("todoDate").value = "";
       $("pageTodoDate").value = "";
+      updateQuickErrandMode();
       if (location.protocol === "file:") {
         $("serverWarning").classList.remove("hidden");
         return;
@@ -1549,12 +1586,13 @@
     }
 
     function entryFromQuick() {
+      const status = $("quickStatus").value;
       return {
         date: $("quickDate").value,
         start: $("quickStart").value,
         end: $("quickEnd").value,
-        client: normalizeClientName($("quickClient").value),
-        status: $("quickStatus").value,
+        client: status === "errand" ? "" : normalizeClientName($("quickClient").value),
+        status,
         work: $("quickWork").value.trim(),
         material: $("quickMaterial").value.trim(),
         people: "",
@@ -1592,8 +1630,12 @@
     }
 
     function validateEntry(entry) {
-      if (!entry.date || !entry.start || !entry.end || !entry.client) {
-        alert("Vpisi datum, uro od-do in stranko.");
+      if (!entry.date || !entry.start || !entry.end) {
+        alert("Vpisi datum in uro od-do.");
+        return false;
+      }
+      if (entry.status !== "errand" && !entry.client) {
+        alert("Vpisi stranko.");
         return false;
       }
       if (minutes(entry.end) <= minutes(entry.start)) {
@@ -1711,7 +1753,7 @@
             event.className = `event ${entry.status}`;
             event.innerHTML = `
               <span class="time">${entry.start} - ${entry.end}</span>
-              <span class="client">${escapeHtml(entry.client)}</span>
+              ${entry.status === "errand" ? "" : `<span class="client">${escapeHtml(entry.client)}</span>`}
               <span class="summary">${escapeHtml(entry.work || entry.material || statusLabels[entry.status])}</span>
             `;
             event.addEventListener("click", () => openDialog(entry));
@@ -1776,7 +1818,7 @@
     function todoClients() {
       const names = new Set();
       state.entries.forEach((entry) => {
-        if (entry.client) names.add(entry.client);
+        if (entry.status !== "errand" && entry.client) names.add(entry.client);
       });
       state.todos.forEach((todo) => {
         if (todo.client) names.add(todo.client);
@@ -1977,10 +2019,11 @@
         const item = document.createElement("button");
         item.type = "button";
         item.className = "result";
+        const resultTitle = entry.status === "errand" ? (entry.work || entry.material || statusLabels[entry.status]) : entry.client;
         item.innerHTML = `
           <strong>${formatDate(entry.date)}</strong>
           <span>${entry.start} - ${entry.end}</span>
-          <span>${escapeHtml(entry.client)}<br><small>${escapeHtml(entry.work || entry.material || "")}${entry.people ? ` | ${escapeHtml(entry.people)}` : ""} | dodal: ${escapeHtml(entry.createdByName || "-")}</small></span>
+          <span>${escapeHtml(resultTitle)}<br><small>${escapeHtml(entry.status === "errand" ? "interni opravek" : (entry.work || entry.material || ""))}${entry.people ? ` | ${escapeHtml(entry.people)}` : ""} | dodal: ${escapeHtml(entry.createdByName || "-")}</small></span>
           <span class="badge ${entry.status}">${statusLabels[entry.status]}</span>
         `;
         item.addEventListener("click", () => openDialog(entry));
@@ -1991,7 +2034,7 @@
     function refreshClientList() {
       const clients = [...new Set([
         ...state.clients.map((client) => client.name).filter(Boolean),
-        ...state.entries.map((entry) => entry.client).filter(Boolean),
+        ...state.entries.filter((entry) => entry.status !== "errand").map((entry) => entry.client).filter(Boolean),
         ...state.todos.map((todo) => todo.client).filter(Boolean)
       ])]
         .sort((a, b) => a.localeCompare(b, "sl"));
@@ -2061,6 +2104,7 @@
       $("entryMaterial").value = entry.material || "";
       $("entryNotes").value = entry.notes || "";
       setDialogStatus(entry.status || "unbilled");
+      updateEntryClientMode();
       $("deleteEntry").style.display = existing ? "inline-flex" : "none";
       $("duplicateEntry").style.display = existing ? "inline-flex" : "none";
       renderAudit(entry);
@@ -2091,16 +2135,27 @@
       document.querySelectorAll(".status-switch button").forEach((button) => {
         button.classList.toggle("active", button.dataset.status === status);
       });
+      updateEntryClientMode();
+    }
+
+    function updateEntryClientMode() {
+      const isErrand = state.selectedStatus === "errand";
+      const input = $("entryClient");
+      input.required = !isErrand;
+      input.disabled = isErrand;
+      if (isErrand) input.value = "";
+      input.parentElement?.classList.toggle("internal", isErrand);
     }
 
     async function saveDialogEntry() {
+      const status = state.selectedStatus;
       const entry = {
         id: $("entryId").value || undefined,
         date: $("entryDate").value,
         start: $("entryStart").value,
         end: $("entryEnd").value,
-        client: normalizeClientName($("entryClient").value),
-        status: state.selectedStatus,
+        client: status === "errand" ? "" : normalizeClientName($("entryClient").value),
+        status,
         work: $("entryWork").value.trim(),
         material: $("entryMaterial").value.trim(),
         people: $("entryPeople").value.trim(),
@@ -2252,6 +2307,28 @@
       $("accountDialog").showModal();
     }
 
+    function updateQuickErrandMode() {
+      const isErrand = $("quickStatus").value === "errand";
+      $("quickClient").disabled = isErrand;
+      if (isErrand) $("quickClient").value = "";
+      $("quickClient").closest(".control")?.classList.toggle("internal", isErrand);
+    }
+
+    function applyErrandPreset(label) {
+      $("quickStatus").value = "errand";
+      $("quickClient").value = "";
+      $("quickWork").value = label;
+      $("quickMaterial").value = "";
+      updateQuickErrandMode();
+    }
+
+    function applyEntryErrandPreset(label) {
+      setDialogStatus("errand");
+      $("entryWork").value = label;
+      $("entryMaterial").value = "";
+      $("entryClient").value = "";
+    }
+
     $("loginForm").addEventListener("submit", async (event) => {
       event.preventDefault();
       try {
@@ -2291,6 +2368,9 @@
       $("quickMaterial").value = "";
       $("quickKm").value = "";
     });
+    $("quickStatus").addEventListener("change", updateQuickErrandMode);
+    $("quickLunch").addEventListener("click", () => applyErrandPreset("Malica"));
+    $("quickTravel").addEventListener("click", () => applyErrandPreset("Pot"));
 
     $("monthDebts").addEventListener("click", () => openDebtDialog());
     $("closeDebt").addEventListener("click", () => $("debtDialog").close());
@@ -2423,6 +2503,8 @@
     document.querySelectorAll(".status-switch button").forEach((button) => {
       button.addEventListener("click", () => setDialogStatus(button.dataset.status));
     });
+    $("entryLunch").addEventListener("click", () => applyEntryErrandPreset("Malica"));
+    $("entryTravel").addEventListener("click", () => applyEntryErrandPreset("Pot"));
 
     boot();
   </script>

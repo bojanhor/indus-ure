@@ -433,7 +433,7 @@ function audit(user, action) {
 }
 
 function cleanEntry(input) {
-  return {
+  const entry = {
     date: String(input.date || ""),
     start: String(input.start || ""),
     end: String(input.end || ""),
@@ -447,10 +447,13 @@ function cleanEntry(input) {
     materialCost: Number(input.materialCost || 0),
     notes: String(input.notes || "").trim()
   };
+  if (entry.status === "errand") entry.client = "";
+  return entry;
 }
 
 function validateEntry(entry) {
-  if (!entry.date || !entry.start || !entry.end || !entry.client) return "Manjka datum, cas ali stranka.";
+  if (!entry.date || !entry.start || !entry.end) return "Manjka datum ali cas.";
+  if (entry.status !== "errand" && !entry.client) return "Manjka stranka.";
   if (!/^\d{4}-\d{2}-\d{2}$/.test(entry.date)) return "Datum ni pravilen.";
   if (!/^\d{2}:\d{2}$/.test(entry.start) || !/^\d{2}:\d{2}$/.test(entry.end)) return "Cas ni pravilen.";
   if (entry.end <= entry.start) return "Ura do mora biti kasneje kot ura od.";
@@ -571,7 +574,7 @@ function buildCalendarIcs(db) {
       `DTSTAMP:${stamp}`,
       `DTSTART;TZID=Europe/Ljubljana:${icsDateTime(entry.date, entry.start)}`,
       `DTEND;TZID=Europe/Ljubljana:${icsDateTime(entry.date, entry.end)}`,
-      `SUMMARY:${icsEscape(`${entry.client || "Stranka"} - ${entry.work || entry.material || "Delo"}`)}`,
+      `SUMMARY:${icsEscape(entrySummary(entry))}`,
       `DESCRIPTION:${icsEscape(description)}`,
       "END:VEVENT"
     );
@@ -616,9 +619,15 @@ function googleEventDescription(lines) {
   return ["INDUS URE", ...lines.filter(Boolean)].join("\n");
 }
 
+function entrySummary(entry) {
+  const title = entry.work || entry.material || "Delo";
+  if (entry.status === "errand") return title || "Opravki";
+  return `${entry.client || "Stranka"} - ${title}`;
+}
+
 function entryToGoogleEvent(entry) {
   return {
-    summary: `${entry.client || "Stranka"} - ${entry.work || entry.material || "Delo"}`,
+    summary: entrySummary(entry),
     description: googleEventDescription([
       entry.work ? `Delo: ${entry.work}` : "",
       entry.material ? `Material: ${entry.material}` : "",
