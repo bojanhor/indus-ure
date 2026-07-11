@@ -9,6 +9,7 @@ const HOST = process.env.HOST || "0.0.0.0";
 const root = __dirname;
 const dataDir = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(root, "data");
 const dbFile = path.join(dataDir, "db.json");
+const clientsSeedFile = path.join(root, "clients-seed.json");
 const DATABASE_URL = process.env.DATABASE_URL || "";
 const configuredBojanPassword = process.env.INITIAL_BOJAN_PASSWORD || "";
 const configuredIbroPassword = process.env.INITIAL_IBRO_PASSWORD || "";
@@ -46,6 +47,7 @@ function googleReady() {
 const defaultUsers = {
   bojan: {
     id: "bojan",
+    email: "bojan@indus.si",
     name: "Bojan",
     role: "boss",
     passwordHash: hashPassword(initialBojanPassword),
@@ -53,6 +55,7 @@ const defaultUsers = {
   },
   ibro: {
     id: "ibro",
+    email: "ibrahim.etemaj04@gmail.com",
     name: "Ibro",
     role: "worker",
     passwordHash: hashPassword(initialIbroPassword),
@@ -77,6 +80,10 @@ function normalizeDb(db = {}) {
     } else if (!db.users[id].passwordHash && db.users[id].password) {
       db.users[id].passwordHash = hashPassword(db.users[id].password);
       delete db.users[id].password;
+      changed = true;
+    }
+    if (!db.users[id].email) {
+      db.users[id].email = user.email;
       changed = true;
     }
     if (!db.users[id].google) {
@@ -109,6 +116,33 @@ function normalizeDb(db = {}) {
     db.todos = [];
     changed = true;
   }
+
+  if (!Array.isArray(db.clients)) {
+    db.clients = [];
+    changed = true;
+  }
+
+  const seedClients = readSeedClients();
+  if (seedClients.length > 0) {
+    const existing = new Set(db.clients.map((client) => String(client.name || "").toLowerCase()).filter(Boolean));
+    for (const client of seedClients) {
+      if (!existing.has(client.name.toLowerCase())) {
+        db.clients.push(client);
+        existing.add(client.name.toLowerCase());
+        changed = true;
+      }
+    }
+  }
+
+  db.clients = db.clients
+    .map((client) => ({
+      id: client.id || crypto.randomUUID(),
+      name: String(client.name || "").trim(),
+      search: String(client.search || client.name || "").trim(),
+      createdBy: client.createdBy || "system",
+      createdAt: client.createdAt || new Date().toISOString()
+    }))
+    .filter((client) => client.name);
 
   if (!db.calendarToken || String(db.calendarToken).length < 24) {
     db.calendarToken = crypto.randomBytes(24).toString("hex");
@@ -188,10 +222,29 @@ function normalizeDb(db = {}) {
   return { db, changed };
 }
 
+function readSeedClients() {
+  try {
+    if (!fs.existsSync(clientsSeedFile)) return [];
+    const clients = JSON.parse(fs.readFileSync(clientsSeedFile, "utf8").replace(/^\uFEFF/, ""));
+    if (!Array.isArray(clients)) return [];
+    return clients
+      .map((client) => ({
+        id: client.id || crypto.randomUUID(),
+        name: String(client.name || "").trim(),
+        search: String(client.search || client.name || "").trim(),
+        createdBy: "import",
+        createdAt: new Date().toISOString()
+      }))
+      .filter((client) => client.name);
+  } catch {
+    return [];
+  }
+}
+
 function ensureDb() {
   if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
   if (!fs.existsSync(dbFile)) {
-    fs.writeFileSync(dbFile, JSON.stringify({ users: defaultUsers, entries: [], todos: [] }, null, 2), "utf8");
+    fs.writeFileSync(dbFile, JSON.stringify({ users: defaultUsers, entries: [], todos: [], clients: readSeedClients() }, null, 2), "utf8");
     return;
   }
 
@@ -235,7 +288,7 @@ async function ensurePostgresDb() {
     if (existing.rowCount === 0) {
       await pool.query(
         "insert into app_state (id, data) values ($1, $2::jsonb)",
-        ["main", JSON.stringify({ users: defaultUsers, entries: [], todos: [], calendarToken: crypto.randomBytes(24).toString("hex") })]
+        ["main", JSON.stringify({ users: defaultUsers, entries: [], todos: [], clients: readSeedClients(), calendarToken: crypto.randomBytes(24).toString("hex") })]
       );
       return;
     }
@@ -316,6 +369,7 @@ function readBody(req) {
 function publicUser(user) {
   return {
     id: user.id,
+    email: user.email || "",
     name: user.name,
     role: user.role,
     avatar: user.avatar || ""
@@ -385,6 +439,18 @@ function cleanTodo(input) {
     syncUser: ["bojan", "ibro"].includes(input.syncUser) ? input.syncUser : "",
     done: Boolean(input.done)
   };
+}
+
+function cleanClient(input) {
+  return {
+    name: String(input.name || "").trim(),
+    search: String(input.search || input.name || "").trim()
+  };
+}
+
+function validateClient(client) {
+  if (!client.name) return "Manjka naziv stranke.";
+  return "";
 }
 
 function validateTodo(todo) {
@@ -872,8 +938,8 @@ async function handleApi(req, res) {
       const db = await readDbAsync();
       const username = String(body.username || "").toLowerCase();
       const password = String(body.password || "");
-      const user = db.users[username];
-      const envPassword = configuredPasswordForUser(username);
+      const user = db.users[username] || Object.values(db.users).find((item) => String(item.email || "").toLowerCase() === username);
+      const envPassword = configuredPasswordForUser(user?.id || username);
       if (user && envPassword && password === envPassword && !verifyPassword(password, user.passwordHash || user.password)) {
         user.passwordHash = hashPassword(password);
         delete user.password;
@@ -954,6 +1020,40 @@ async function handleApi(req, res) {
       if (!user) return;
       const db = await readDbAsync();
       sendJson(res, 200, { todos: db.todos });
+      return;
+    }
+
+    if (url.pathname === "/api/clients" && req.method === "GET") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      const db = await readDbAsync();
+      sendJson(res, 200, { clients: db.clients || [] });
+      return;
+    }
+
+    if (url.pathname === "/api/clients" && req.method === "POST") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      const client = cleanClient(await readBody(req));
+      const validation = validateClient(client);
+      if (validation) {
+        sendJson(res, 400, { error: validation });
+        return;
+      }
+      const db = await readDbAsync();
+      const existing = (db.clients || []).find((item) => item.name.toLowerCase() === client.name.toLowerCase());
+      if (existing) {
+        existing.search = client.search || existing.search || existing.name;
+      } else {
+        db.clients.push({
+          id: crypto.randomUUID(),
+          ...client,
+          createdBy: user.id,
+          createdAt: new Date().toISOString()
+        });
+      }
+      await writeDbAsync(db);
+      sendJson(res, 200, { clients: db.clients });
       return;
     }
 

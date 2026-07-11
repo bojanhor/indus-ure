@@ -799,8 +799,8 @@
       <div class="offline hidden" id="serverWarning">Odpri stran prek lokalnega stre&#382;nika, ne direktno kot datoteko.</div>
       <label>Uporabnik
         <select id="loginUser">
-          <option value="ibro">Ibro</option>
-          <option value="bojan">Bojan</option>
+          <option value="ibrahim.etemaj04@gmail.com">ibrahim.etemaj04@gmail.com</option>
+          <option value="bojan@indus.si">bojan@indus.si</option>
         </select>
       </label>
       <label>Geslo
@@ -910,6 +910,23 @@
       </div>
 
       <button class="primary" id="saveTodo" type="button">Dodaj opravilo</button>
+
+      <div class="brand">
+        <h1>STRANKE</h1>
+        <span>Dodaj novo stranko v bazo</span>
+      </div>
+
+      <div class="control">
+        <label for="newClientName">Naziv stranke</label>
+        <input id="newClientName" placeholder="Uradni naziv stranke">
+      </div>
+
+      <div class="control">
+        <label for="newClientSearch">Iskanje</label>
+        <input id="newClientSearch" placeholder="vzdevki, kontakt, kratice">
+      </div>
+
+      <button class="ghost" id="saveClient" type="button">Dodaj stranko</button>
 
       <div class="legend">
         <div class="legend-item"><span class="dot billed"></span> &#381;e obra&#269;unano</div>
@@ -1119,6 +1136,7 @@
       selectedStatus: "unbilled",
       entries: [],
       todos: [],
+      clients: [],
       selectedClient: "",
       user: null,
       token: localStorage.getItem(tokenKey) || ""
@@ -1198,11 +1216,19 @@
     }
 
     async function loadAll() {
-      const [entries, todos] = await Promise.all([api("/api/entries"), api("/api/todos")]);
+      const [entries, todos, clients] = await Promise.all([api("/api/entries"), api("/api/todos"), api("/api/clients")]);
       state.entries = entries.entries;
       state.todos = todos.todos;
+      state.clients = clients.clients;
       refreshClientList();
       render();
+    }
+
+    async function saveClientToServer(client) {
+      const data = await api("/api/clients", { method: "POST", body: JSON.stringify(client) });
+      state.clients = data.clients;
+      refreshClientList();
+      renderSearch();
     }
 
     async function saveEntryToServer(entry) {
@@ -1300,7 +1326,7 @@
         date: $("quickDate").value,
         start: $("quickStart").value,
         end: $("quickEnd").value,
-        client: $("quickClient").value.trim(),
+        client: normalizeClientName($("quickClient").value),
         status: $("quickStatus").value,
         work: $("quickWork").value.trim(),
         material: $("quickMaterial").value.trim(),
@@ -1315,7 +1341,7 @@
     function todoFromQuick() {
       return {
         date: $("todoDate").value,
-        client: $("todoClient").value.trim(),
+        client: normalizeClientName($("todoClient").value),
         title: $("todoTitle").value.trim(),
         notes: "",
         status: $("todoStatus").value,
@@ -1328,7 +1354,7 @@
     function todoFromPage() {
       return {
         date: $("pageTodoDate").value,
-        client: $("pageTodoClient").value.trim(),
+        client: normalizeClientName($("pageTodoClient").value),
         title: $("pageTodoTitle").value.trim(),
         notes: "",
         status: $("pageTodoStatus").value,
@@ -1641,6 +1667,28 @@
       }
     }
 
+    function normalizeText(value) {
+      return String(value || "")
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .trim();
+    }
+
+    function clientMatches(client, query) {
+      const haystack = normalizeText(`${client.name} ${client.search}`);
+      return haystack.includes(normalizeText(query));
+    }
+
+    function normalizeClientName(value) {
+      const input = String(value || "").trim();
+      if (!input) return "";
+      const exact = state.clients.find((client) => normalizeText(client.name) === normalizeText(input) || normalizeText(client.search) === normalizeText(input));
+      if (exact) return exact.name;
+      const partial = state.clients.find((client) => clientMatches(client, input));
+      return partial ? partial.name : input;
+    }
+
     function renderSearch() {
       const panel = $("searchPanel");
       const query = $("clientSearch").value.trim().toLowerCase();
@@ -1651,6 +1699,30 @@
         return;
       }
 
+      const clientResults = state.clients
+        .filter((client) => clientMatches(client, query))
+        .slice(0, 12);
+
+      clientResults.forEach((client) => {
+        const item = document.createElement("button");
+        item.type = "button";
+        item.className = "result";
+        item.innerHTML = `
+          <strong>Stranka</strong>
+          <span></span>
+          <span>${escapeHtml(client.name)}<br><small>${escapeHtml(client.search || "")}</small></span>
+          <span class="todo-chip">baza strank</span>
+        `;
+        item.addEventListener("click", () => {
+          $("quickClient").value = client.name;
+          $("todoClient").value = client.name;
+          $("pageTodoClient").value = client.name;
+          state.selectedClient = client.name;
+          setView("todos");
+        });
+        panel.appendChild(item);
+      });
+
       const results = state.entries
         .filter((entry) => [entry.client, entry.people, entry.work, entry.material, entry.notes, entry.createdByName]
           .join(" ")
@@ -1659,7 +1731,7 @@
         .sort((a, b) => `${b.date} ${b.start}`.localeCompare(`${a.date} ${a.start}`));
 
       panel.classList.add("active");
-      if (results.length === 0) {
+      if (results.length === 0 && clientResults.length === 0) {
         panel.innerHTML = "<p>Ni zadetkov za to iskanje.</p>";
         return;
       }
@@ -1681,11 +1753,18 @@
 
     function refreshClientList() {
       const clients = [...new Set([
+        ...state.clients.map((client) => client.name).filter(Boolean),
         ...state.entries.map((entry) => entry.client).filter(Boolean),
         ...state.todos.map((todo) => todo.client).filter(Boolean)
       ])]
         .sort((a, b) => a.localeCompare(b, "sl"));
-      $("clientList").innerHTML = clients.map((client) => `<option value="${escapeHtml(client)}"></option>`).join("");
+      const aliases = state.clients
+        .filter((client) => client.search && client.search !== client.name)
+        .map((client) => `<option value="${escapeHtml(client.search)}" label="${escapeHtml(client.name)}"></option>`);
+      $("clientList").innerHTML = [
+        ...clients.map((client) => `<option value="${escapeHtml(client)}"></option>`),
+        ...aliases
+      ].join("");
     }
 
     function openDialog(entry = {}) {
@@ -1741,7 +1820,7 @@
         date: $("entryDate").value,
         start: $("entryStart").value,
         end: $("entryEnd").value,
-        client: $("entryClient").value.trim(),
+        client: normalizeClientName($("entryClient").value),
         status: state.selectedStatus,
         work: $("entryWork").value.trim(),
         material: $("entryMaterial").value.trim(),
@@ -1803,7 +1882,7 @@
     }
 
     function downloadBackup() {
-      downloadText(JSON.stringify({ entries: state.entries, todos: state.todos }, null, 2), `indus-ure-backup-${dateKey(new Date())}.json`, "application/json");
+      downloadText(JSON.stringify({ entries: state.entries, todos: state.todos, clients: state.clients }, null, 2), `indus-ure-backup-${dateKey(new Date())}.json`, "application/json");
     }
 
     async function syncGoogle(showSuccess = true) {
@@ -1956,6 +2035,23 @@
 
     $("saveTodo").addEventListener("click", () => {
       addTodo(todoFromQuick(), ["todoTitle"]);
+    });
+
+    $("saveClient").addEventListener("click", async () => {
+      const name = $("newClientName").value.trim();
+      const search = $("newClientSearch").value.trim();
+      if (!name) {
+        alert("Vpisi naziv stranke.");
+        return;
+      }
+      try {
+        await saveClientToServer({ name, search });
+        $("newClientName").value = "";
+        $("newClientSearch").value = "";
+        alert("Stranka je dodana.");
+      } catch (error) {
+        alert(error.message);
+      }
     });
 
     $("savePageTodo").addEventListener("click", () => {
