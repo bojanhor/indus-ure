@@ -44,11 +44,14 @@
       align-items: center;
       justify-content: flex-start;
       padding: 84px clamp(18px, 6vw, 86px) 42px;
+      background-color: #0d1b1f;
       background:
         linear-gradient(90deg, rgba(13, 27, 31, 0.9) 0%, rgba(20, 47, 54, 0.78) 42%, rgba(20, 47, 54, 0.18) 74%),
         url("assets/indus-hero-electro.png");
-      background-size: cover;
+      background-size: cover, contain;
+      background-repeat: no-repeat;
       background-position: center right;
+      background-color: #0d1b1f;
       position: relative;
       color: #f8faf6;
     }
@@ -96,34 +99,6 @@
       line-height: 0.86;
       color: #fff;
       text-shadow: 0 18px 46px rgba(0, 0, 0, 0.34);
-      letter-spacing: 0;
-    }
-
-    .login-subtitle {
-      width: min(460px, 100%);
-      color: rgba(248, 250, 246, 0.84);
-      font-size: clamp(16px, 2.1vw, 22px);
-      line-height: 1.35;
-      margin: -6px 0 4px;
-    }
-
-    .login-techline {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-    }
-
-    .login-techline span {
-      min-height: 30px;
-      display: inline-flex;
-      align-items: center;
-      border: 1px solid rgba(248, 250, 246, 0.2);
-      border-radius: 8px;
-      padding: 5px 9px;
-      color: rgba(248, 250, 246, 0.82);
-      background: rgba(248, 250, 246, 0.08);
-      font-size: 13px;
-      font-weight: 800;
       letter-spacing: 0;
     }
 
@@ -905,8 +880,9 @@
         background:
           linear-gradient(180deg, rgba(13, 27, 31, 0.34) 0%, rgba(13, 27, 31, 0.9) 58%, rgba(13, 27, 31, 0.96) 100%),
           url("assets/indus-hero-electro.png");
-        background-size: cover;
-        background-position: center;
+        background-size: cover, auto 72%;
+        background-repeat: no-repeat;
+        background-position: center, center top;
       }
       .login-brand {
         top: 12px;
@@ -919,12 +895,6 @@
       }
       .login-card h1 {
         font-size: clamp(48px, 18vw, 76px);
-      }
-      .login-subtitle {
-        font-size: 16px;
-      }
-      .login-techline span {
-        font-size: 12px;
       }
       .google-button {
         width: 100%;
@@ -996,13 +966,6 @@
     <form class="login-card" id="loginForm">
       <div class="login-logo">IU</div>
       <h1>INDUS URE</h1>
-      <p class="login-subtitle">Elektro servis, avtomatika, frekven&#269;niki in terensko delo v enem koledarju.</p>
-      <div class="login-techline" aria-label="Podrocja dela">
-        <span>elektro omare</span>
-        <span>frekven&#269;niki</span>
-        <span>servis</span>
-        <span>housetech</span>
-      </div>
       <div class="offline hidden" id="serverWarning">Odpri stran prek lokalnega stre&#382;nika, ne direktno kot datoteko.</div>
       <button class="google-button" id="googleLoginBtn" type="submit">
         <span class="google-mark">G</span>
