@@ -56,16 +56,6 @@
       color: #f8faf6;
     }
 
-    .login-brand {
-      position: absolute;
-      top: 24px;
-      left: clamp(18px, 6vw, 86px);
-      color: rgba(248, 250, 246, 0.88);
-      font-weight: 900;
-      letter-spacing: 0;
-      font-size: 17px;
-    }
-
     .login-card {
       width: min(520px, 100%);
       background: transparent;
@@ -909,11 +899,6 @@
         background-repeat: no-repeat;
         background-position: center, center top;
       }
-      .login-brand {
-        top: 12px;
-        left: 18px;
-        font-size: 14px;
-      }
       .login-card {
         width: 100%;
         gap: 16px;
@@ -987,7 +972,6 @@
 </head>
 <body>
   <section class="login-screen" id="loginScreen">
-    <div class="login-brand">INDUS&gt;housetech</div>
     <form class="login-card" id="loginForm">
       <div class="login-logo">IU</div>
       <h1>INDUS URE</h1>
@@ -1155,9 +1139,9 @@
       <section class="stats calendar-view">
         <div class="stat"><strong id="statHours">0 h</strong><span>ure v tem mesecu</span></div>
         <div class="stat"><strong id="statKm">0 km</strong><span>kilometrina</span></div>
-        <button class="stat clickable" id="monthDebts" type="button"><strong id="statDebts">0 EUR</strong><span>dolgovi ta mesec</span></button>
+        <button class="stat clickable debt-stat" data-debt-person="ibro" type="button"><strong id="statDebtIbro">0 EUR</strong><span>Ibro dolg</span></button>
+        <button class="stat clickable debt-stat" data-debt-person="bojan" type="button"><strong id="statDebtBojan">0 EUR</strong><span>Bojan dolg</span></button>
         <div class="stat"><strong id="statUnbilled">0</strong><span>neobra&#269;unani vnosi</span></div>
-        <div class="stat"><strong id="statTodos">0</strong><span>odprta opravila</span></div>
       </section>
 
       <section class="panel boss-panel hidden calendar-view" id="bossPanel">
@@ -1797,17 +1781,19 @@
       const monthKey = `${year}-${String(month + 1).padStart(2, "0")}`;
       const hours = uniqueHours(monthEntries);
       const km = monthEntries.reduce((sum, entry) => sum + Number(entry.km || 0), 0);
-      const debts = state.debts
-        .filter((debt) => debt.month === monthKey)
+      const ibroDebt = state.debts
+        .filter((debt) => debt.month === monthKey && debt.person === "ibro")
+        .reduce((sum, debt) => sum + Number(debt.amount || 0), 0);
+      const bojanDebt = state.debts
+        .filter((debt) => debt.month === monthKey && debt.person === "bojan")
         .reduce((sum, debt) => sum + Number(debt.amount || 0), 0);
       const unbilled = monthEntries.filter((entry) => entry.status === "unbilled").length;
-      const openTodos = state.todos.filter((todo) => !todo.done).length;
 
       $("statHours").textContent = `${hours.toLocaleString("sl-SI", { maximumFractionDigits: 1 })} h`;
       $("statKm").textContent = `${km.toLocaleString("sl-SI", { maximumFractionDigits: 1 })} km`;
-      $("statDebts").textContent = `${money(debts)} EUR`;
+      $("statDebtIbro").textContent = `${money(ibroDebt)} EUR`;
+      $("statDebtBojan").textContent = `${money(bojanDebt)} EUR`;
       $("statUnbilled").textContent = unbilled;
-      $("statTodos").textContent = openTodos;
     }
 
     function renderTodos() {
@@ -2372,7 +2358,9 @@
     $("quickLunch").addEventListener("click", () => applyErrandPreset("Malica"));
     $("quickTravel").addEventListener("click", () => applyErrandPreset("Pot"));
 
-    $("monthDebts").addEventListener("click", () => openDebtDialog());
+    document.querySelectorAll(".debt-stat").forEach((button) => {
+      button.addEventListener("click", () => openDebtDialog({ person: button.dataset.debtPerson || "ibro" }));
+    });
     $("closeDebt").addEventListener("click", () => $("debtDialog").close());
     $("debtMonth").addEventListener("change", renderDebtDialog);
     $("saveDebt").addEventListener("click", async () => {
