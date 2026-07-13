@@ -231,6 +231,21 @@ function normalizeDb(db = {}) {
       next.googleUpdatedAt = "";
       changed = true;
     }
+    if (!Array.isArray(next.photos)) {
+      next.photos = [];
+      changed = true;
+    }
+    next.photos = next.photos
+      .map((photo) => ({
+        id: photo.id || crypto.randomUUID(),
+        name: String(photo.name || "fotografija").slice(0, 120),
+        data: String(photo.data || ""),
+        createdBy: photo.createdBy || next.createdBy || "system",
+        createdByName: photo.createdByName || next.createdByName || "",
+        createdAt: photo.createdAt || new Date().toISOString()
+      }))
+      .filter((photo) => photo.data.startsWith("data:image/"))
+      .slice(0, 8);
     return next;
   });
 
@@ -380,7 +395,7 @@ function readBody(req) {
     let body = "";
     req.on("data", (chunk) => {
       body += chunk;
-      if (body.length > 2_500_000) {
+      if (body.length > 6_000_000) {
         reject(new Error("Zahteva je prevelika."));
         req.destroy();
       }
@@ -403,6 +418,16 @@ function publicUser(user) {
     role: user.role,
     avatar: user.avatar || ""
   };
+}
+
+function visibleEntriesForUser(db, user) {
+  return db.entries || [];
+}
+
+function canManageEntry(user, entry) {
+  if (!entry) return false;
+  if (user.role === "boss") return true;
+  return (entry.syncUser || entry.createdBy) === user.id;
 }
 
 async function getSessionUser(req) {
@@ -438,7 +463,7 @@ function cleanEntry(input) {
     start: String(input.start || ""),
     end: String(input.end || ""),
     client: String(input.client || "").trim(),
-    status: ["billed", "warranty", "unbilled", "errand"].includes(input.status) ? input.status : "unbilled",
+    status: ["billed", "warranty", "unbilled", "errand", "vacation"].includes(input.status) ? input.status : "unbilled",
     work: String(input.work || "").trim(),
     material: String(input.material || "").trim(),
     people: String(input.people || "").trim(),
@@ -447,13 +472,18 @@ function cleanEntry(input) {
     materialCost: Number(input.materialCost || 0),
     notes: String(input.notes || "").trim()
   };
-  if (entry.status === "errand") entry.client = "";
+  if (["errand", "vacation"].includes(entry.status)) entry.client = "";
+  if (entry.status === "vacation") {
+    entry.start = entry.start || "00:00";
+    entry.end = entry.end || "23:59";
+    entry.km = 0;
+  }
   return entry;
 }
 
 function validateEntry(entry) {
   if (!entry.date || !entry.start || !entry.end) return "Manjka datum ali cas.";
-  if (entry.status !== "errand" && !entry.client) return "Manjka stranka.";
+  if (!["errand", "vacation"].includes(entry.status) && !entry.client) return "Manjka stranka.";
   if (!/^\d{4}-\d{2}-\d{2}$/.test(entry.date)) return "Datum ni pravilen.";
   if (!/^\d{2}:\d{2}$/.test(entry.start) || !/^\d{2}:\d{2}$/.test(entry.end)) return "Cas ni pravilen.";
   if (entry.end <= entry.start) return "Ura do mora biti kasneje kot ura od.";
@@ -461,6 +491,7 @@ function validateEntry(entry) {
 }
 
 function cleanTodo(input) {
+  const photos = Array.isArray(input.photos) ? input.photos : [];
   return {
     title: String(input.title || "").trim(),
     date: String(input.date || ""),
@@ -469,7 +500,18 @@ function cleanTodo(input) {
     status: ["open", "in_progress"].includes(input.status) ? input.status : "open",
     order: Number.isFinite(Number(input.order)) ? Number(input.order) : 0,
     syncUser: ["bojan", "ibro"].includes(input.syncUser) ? input.syncUser : "",
-    done: Boolean(input.done)
+    done: Boolean(input.done),
+    photos: photos
+      .map((photo) => ({
+        id: photo.id || crypto.randomUUID(),
+        name: String(photo.name || "fotografija").slice(0, 120),
+        data: String(photo.data || ""),
+        createdBy: photo.createdBy || "",
+        createdByName: photo.createdByName || "",
+        createdAt: photo.createdAt || new Date().toISOString()
+      }))
+      .filter((photo) => photo.data.startsWith("data:image/"))
+      .slice(0, 8)
   };
 }
 
@@ -504,7 +546,17 @@ function validateDebt(debt) {
 function validateTodo(todo) {
   if (!todo.title) return "Manjka opis opravila.";
   if (todo.date && !/^\d{4}-\d{2}-\d{2}$/.test(todo.date)) return "Datum opravila ni pravilen.";
+  if ((todo.photos || []).some((photo) => photo.data.length > 700_000)) return "Ena fotografija je prevelika.";
   return "";
+}
+
+function stampTodoPhotos(todo, user) {
+  return (todo.photos || []).map((photo) => ({
+    ...photo,
+    createdBy: photo.createdBy || user.id,
+    createdByName: photo.createdByName || user.name,
+    createdAt: photo.createdAt || new Date().toISOString()
+  }));
 }
 
 function icsEscape(value) {
@@ -568,12 +620,13 @@ function buildCalendarIcs(db) {
       entry.createdByName ? `Dodal: ${entry.createdByName}` : "",
       entry.updatedByName ? `Spremenil: ${entry.updatedByName}` : ""
     ].filter(Boolean).join("\n");
+    lines.push("BEGIN:VEVENT", `UID:entry-${entry.id}@indus-ure`, `DTSTAMP:${stamp}`);
+    if (entry.status === "vacation") {
+      lines.push(`DTSTART;VALUE=DATE:${icsDate(entry.date)}`, `DTEND;VALUE=DATE:${addDays(entry.date, 1)}`);
+    } else {
+      lines.push(`DTSTART;TZID=Europe/Ljubljana:${icsDateTime(entry.date, entry.start)}`, `DTEND;TZID=Europe/Ljubljana:${icsDateTime(entry.date, entry.end)}`);
+    }
     lines.push(
-      "BEGIN:VEVENT",
-      `UID:entry-${entry.id}@indus-ure`,
-      `DTSTAMP:${stamp}`,
-      `DTSTART;TZID=Europe/Ljubljana:${icsDateTime(entry.date, entry.start)}`,
-      `DTEND;TZID=Europe/Ljubljana:${icsDateTime(entry.date, entry.end)}`,
       `SUMMARY:${icsEscape(entrySummary(entry))}`,
       `DESCRIPTION:${icsEscape(description)}`,
       "END:VEVENT"
@@ -622,11 +675,12 @@ function googleEventDescription(lines) {
 function entrySummary(entry) {
   const title = entry.work || entry.material || "Delo";
   if (entry.status === "errand") return title || "Opravki";
+  if (entry.status === "vacation") return title || "Dopust";
   return `${entry.client || "Stranka"} - ${title}`;
 }
 
 function entryToGoogleEvent(entry) {
-  return {
+  const event = {
     summary: entrySummary(entry),
     description: googleEventDescription([
       entry.work ? `Delo: ${entry.work}` : "",
@@ -635,9 +689,17 @@ function entryToGoogleEvent(entry) {
       entry.km ? `Km: ${entry.km}` : "",
       entry.notes ? `Opombe: ${entry.notes}` : ""
     ]),
-    start: { dateTime: `${entry.date}T${entry.start}:00`, timeZone: "Europe/Ljubljana" },
-    end: { dateTime: `${entry.date}T${entry.end}:00`, timeZone: "Europe/Ljubljana" },
     extendedProperties: { private: { indusId: entry.id, indusType: "entry", indusUser: entry.syncUser || entry.createdBy || "" } }
+  };
+  if (entry.status === "vacation") {
+    event.start = { date: entry.date };
+    event.end = { date: addDaysDashed(entry.date, 1) };
+    return event;
+  }
+  return {
+    ...event,
+    start: { dateTime: `${entry.date}T${entry.start}:00`, timeZone: "Europe/Ljubljana" },
+    end: { dateTime: `${entry.date}T${entry.end}:00`, timeZone: "Europe/Ljubljana" }
   };
 }
 
@@ -1044,7 +1106,7 @@ async function handleApi(req, res) {
       const current = db.users[user.id];
       const result = await syncGoogleForUser(req, db, current);
       await writeDbAsync(db);
-      sendJson(res, 200, { ok: true, ...result, entries: db.entries, todos: db.todos });
+      sendJson(res, 200, { ok: true, ...result, entries: visibleEntriesForUser(db, current), todos: db.todos });
       return;
     }
 
@@ -1102,7 +1164,7 @@ async function handleApi(req, res) {
       const user = await requireUser(req, res);
       if (!user) return;
       const db = await readDbAsync();
-      sendJson(res, 200, { entries: db.entries });
+      sendJson(res, 200, { entries: visibleEntriesForUser(db, user) });
       return;
     }
 
@@ -1237,6 +1299,7 @@ async function handleApi(req, res) {
       db.todos.push({
         id: crypto.randomUUID(),
         ...todo,
+        photos: stampTodoPhotos(todo, user),
         syncUser: todo.syncUser || user.id,
         order: todo.order || maxOrder + 1,
         createdBy: user.id,
@@ -1276,7 +1339,7 @@ async function handleApi(req, res) {
         history: [audit(user, "dodano")]
       });
       await writeDbAsync(db);
-      sendJson(res, 200, { entries: db.entries });
+      sendJson(res, 200, { entries: visibleEntriesForUser(db, user) });
       return;
     }
 
@@ -1297,6 +1360,10 @@ async function handleApi(req, res) {
         sendJson(res, 404, { error: "Vnos ne obstaja." });
         return;
       }
+      if (!canManageEntry(user, db.entries[index])) {
+        sendJson(res, 403, { error: "Tega vnosa ne mores spreminjati." });
+        return;
+      }
       db.entries[index] = {
         ...db.entries[index],
         ...entry,
@@ -1307,7 +1374,7 @@ async function handleApi(req, res) {
         history: [...(db.entries[index].history || []), audit(user, "spremenjeno")]
       };
       await writeDbAsync(db);
-      sendJson(res, 200, { entries: db.entries });
+      sendJson(res, 200, { entries: visibleEntriesForUser(db, user) });
       return;
     }
 
@@ -1317,10 +1384,14 @@ async function handleApi(req, res) {
       const id = decodeURIComponent(match[1]);
       const db = await readDbAsync();
       const entry = db.entries.find((item) => item.id === id);
+      if (!canManageEntry(user, entry)) {
+        sendJson(res, 403, { error: "Tega vnosa ne mores izbrisati." });
+        return;
+      }
       await deleteGoogleEventForItem(req, db, entry);
       db.entries = db.entries.filter((item) => item.id !== id);
       await writeDbAsync(db);
-      sendJson(res, 200, { entries: db.entries });
+      sendJson(res, 200, { entries: visibleEntriesForUser(db, user) });
       return;
     }
 
@@ -1344,6 +1415,7 @@ async function handleApi(req, res) {
       db.todos[index] = {
         ...db.todos[index],
         ...todo,
+        photos: stampTodoPhotos(todo, user),
         syncUser: todo.syncUser || db.todos[index].syncUser || user.id,
         updatedBy: user.id,
         updatedByName: user.name,

@@ -17,6 +17,7 @@
       --red: #c94949;
       --orange: #de8b2f;
       --blue: #357abd;
+      --purple: #7656b7;
       --shadow: 0 18px 45px rgba(32, 42, 46, 0.12);
     }
 
@@ -597,6 +598,60 @@
       font-weight: 700;
     }
 
+    .photos-panel {
+      padding: 14px;
+      display: grid;
+      gap: 14px;
+      align-content: start;
+    }
+
+    .photo-gallery {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      gap: 12px;
+    }
+
+    .photo-card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+      background: #fff;
+      display: grid;
+      gap: 8px;
+      padding-bottom: 10px;
+    }
+
+    .photo-card img {
+      width: 100%;
+      aspect-ratio: 4 / 3;
+      object-fit: cover;
+      display: block;
+      background: #edf2ee;
+    }
+
+    .photo-card div {
+      padding: 0 10px;
+      display: grid;
+      gap: 3px;
+    }
+
+    .photo-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .add-photo {
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .hidden-file {
+      display: none;
+    }
+
     .day-todo {
       width: 100%;
       text-align: left;
@@ -702,6 +757,12 @@
     .warranty { background: var(--red); }
     .unbilled { background: var(--orange); }
     .errand { background: var(--blue); }
+    .vacation { background: var(--purple); }
+
+    .day.has-vacation {
+      background: #f3effb;
+      box-shadow: inset 0 0 0 2px rgba(118, 86, 183, 0.55);
+    }
 
     .search-panel {
       display: none;
@@ -820,7 +881,7 @@
 
     .status-switch {
       display: grid;
-      grid-template-columns: repeat(4, 1fr);
+      grid-template-columns: repeat(5, 1fr);
       gap: 8px;
     }
 
@@ -928,6 +989,10 @@
       .account-btn {
         grid-column: 1 / -1;
       }
+      .view-switch {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
       .search,
       .tools .secondary { width: 100%; max-width: none; }
       .stats {
@@ -949,16 +1014,25 @@
       }
       .todo-item {
         grid-template-columns: auto 1fr;
+        gap: 8px;
+        padding: 12px;
       }
       .todo-tools,
       .todo-item .secondary,
+      .todo-item .add-photo,
       .drag-handle {
         grid-column: 2;
         justify-content: stretch;
       }
+      .photo-actions {
+        grid-column: 2;
+      }
       .todo-date,
       .todo-status {
         width: 100%;
+      }
+      .photo-gallery {
+        grid-template-columns: 1fr;
       }
       .modal-grid,
       .status-switch,
@@ -1028,6 +1102,7 @@
           <option value="billed">&#381;e obra&#269;unano</option>
           <option value="warranty">Garancija</option>
           <option value="errand">Opravki</option>
+          <option value="vacation">Dopust</option>
         </select>
       </div>
 
@@ -1056,58 +1131,12 @@
       <button class="primary" id="saveQuick" type="button">Shrani v koledar</button>
       <button class="ghost" id="refreshBtn" type="button">Osve&#382;i skupne podatke</button>
 
-      <div class="brand">
-        <h1>TODO</h1>
-        <span>Kaj je treba narediti</span>
-      </div>
-
-      <div class="control">
-        <label for="todoDate">Fiksni datum opravila</label>
-        <input id="todoDate" type="date">
-      </div>
-
-      <div class="control">
-        <label for="todoClient">Stranka</label>
-        <input id="todoClient" list="clientList" placeholder="Stranka ali interno">
-      </div>
-
-      <div class="control">
-        <label for="todoTitle">Opravilo</label>
-        <textarea id="todoTitle" placeholder="npr. Poklici stranko, naroci material, preveri napako"></textarea>
-      </div>
-
-      <div class="control">
-        <label for="todoStatus">Status opravila</label>
-        <select id="todoStatus">
-          <option value="open">Caka</option>
-          <option value="in_progress">V teku</option>
-        </select>
-      </div>
-
-      <button class="primary" id="saveTodo" type="button">Dodaj opravilo</button>
-
-      <div class="brand">
-        <h1>STRANKE</h1>
-        <span>Dodaj novo stranko v bazo</span>
-      </div>
-
-      <div class="control">
-        <label for="newClientName">Naziv stranke</label>
-        <input id="newClientName" placeholder="Uradni naziv stranke">
-      </div>
-
-      <div class="control">
-        <label for="newClientSearch">Iskanje</label>
-        <input id="newClientSearch" placeholder="vzdevki, kontakt, kratice">
-      </div>
-
-      <button class="ghost" id="saveClient" type="button">Dodaj stranko</button>
-
       <div class="legend">
         <div class="legend-item"><span class="dot billed"></span> &#381;e obra&#269;unano</div>
         <div class="legend-item"><span class="dot warranty"></span> Garancija</div>
         <div class="legend-item"><span class="dot unbilled"></span> Opravljeno / ni obra&#269;unano</div>
         <div class="legend-item"><span class="dot errand"></span> Opravki, pot, malica</div>
+        <div class="legend-item"><span class="dot vacation"></span> Dopust</div>
       </div>
 
       <p class="hint">Podatki se zdaj shranjujejo v skupno datoteko na stre&#382;niku. &#352;ef in delavec gledata iste vnose.</p>
@@ -1124,6 +1153,7 @@
           <div class="view-switch" aria-label="Pogled">
             <button class="view-btn active" id="calendarViewBtn" type="button">Koledar</button>
             <button class="view-btn" id="todosViewBtn" type="button">Opravila</button>
+            <button class="view-btn" id="photosViewBtn" type="button">Fotografije</button>
           </div>
           <input class="search" id="clientSearch" placeholder="I&#353;&#269;i stranko, material ali opis">
           <button class="secondary" id="todayBtn" type="button">Danes</button>
@@ -1137,7 +1167,8 @@
       </section>
 
       <section class="stats calendar-view">
-        <div class="stat"><strong id="statHours">0 h</strong><span>ure v tem mesecu</span></div>
+        <div class="stat"><strong id="statHoursIbro">0 h</strong><span>Ibro ure</span></div>
+        <div class="stat" id="statHoursBojanBox"><strong id="statHoursBojan">0 h</strong><span>Bojan ure</span></div>
         <div class="stat"><strong id="statKm">0 km</strong><span>kilometrina</span></div>
         <button class="stat clickable debt-stat" data-debt-person="ibro" type="button"><strong id="statDebtIbro">0 EUR</strong><span>Ibro dolg</span></button>
         <button class="stat clickable debt-stat" data-debt-person="bojan" type="button"><strong id="statDebtBojan">0 EUR</strong><span>Bojan dolg</span></button>
@@ -1178,6 +1209,14 @@
           </div>
           <div id="todoItems"></div>
         </div>
+      </section>
+
+      <section class="panel photos-panel photos-view view-hidden">
+        <div class="todo-head">
+          <strong id="photosPanelTitle">Fotografije opravil</strong>
+          <button class="secondary" id="backToTodos" type="button">Nazaj na opravila</button>
+        </div>
+        <div id="photoGallery" class="photo-gallery"></div>
       </section>
 
       <section class="panel calendar-shell calendar-view">
@@ -1231,6 +1270,7 @@
           <button type="button" class="warranty" data-status="warranty">Garancija</button>
           <button type="button" class="unbilled" data-status="unbilled">Ni obra&#269;unano</button>
           <button type="button" class="errand" data-status="errand">Opravki</button>
+          <button type="button" class="vacation" data-status="vacation">Dopust</button>
         </div>
 
         <div class="quick-presets">
@@ -1327,7 +1367,8 @@
       billed: "Ze obracunano",
       warranty: "Garancija",
       unbilled: "Opravljeno / ni obracunano",
-      errand: "Opravki"
+      errand: "Opravki",
+      vacation: "Dopust"
     };
 
     const monthNames = [
@@ -1344,6 +1385,7 @@
       debts: [],
       clients: [],
       selectedClient: "",
+      selectedPhotoTodoId: "",
       user: null,
       token: localStorage.getItem(tokenKey) || ""
     };
@@ -1365,7 +1407,6 @@
 
     async function boot() {
       $("quickDate").value = dateKey(new Date());
-      $("todoDate").value = "";
       $("pageTodoDate").value = "";
       updateQuickErrandMode();
       if (location.protocol === "file:") {
@@ -1573,30 +1614,17 @@
       const status = $("quickStatus").value;
       return {
         date: $("quickDate").value,
-        start: $("quickStart").value,
-        end: $("quickEnd").value,
-        client: status === "errand" ? "" : normalizeClientName($("quickClient").value),
+        start: status === "vacation" ? "00:00" : $("quickStart").value,
+        end: status === "vacation" ? "23:59" : $("quickEnd").value,
+        client: ["errand", "vacation"].includes(status) ? "" : normalizeClientName($("quickClient").value),
         status,
-        work: $("quickWork").value.trim(),
+        work: status === "vacation" ? ($("quickWork").value.trim() || "Dopust") : $("quickWork").value.trim(),
         material: $("quickMaterial").value.trim(),
         people: "",
         syncUser: state.user?.id || "",
-        km: Number($("quickKm").value || 0),
+        km: status === "vacation" ? 0 : Number($("quickKm").value || 0),
         materialCost: 0,
         notes: ""
-      };
-    }
-
-    function todoFromQuick() {
-      return {
-        date: $("todoDate").value,
-        client: normalizeClientName($("todoClient").value),
-        title: $("todoTitle").value.trim(),
-        notes: "",
-        status: $("todoStatus").value,
-        order: nextTodoOrder(),
-        syncUser: state.user?.id || "",
-        done: false
       };
     }
 
@@ -1618,7 +1646,7 @@
         alert("Vpisi datum in uro od-do.");
         return false;
       }
-      if (entry.status !== "errand" && !entry.client) {
+      if (!["errand", "vacation"].includes(entry.status) && !entry.client) {
         alert("Vpisi stranko.");
         return false;
       }
@@ -1645,9 +1673,14 @@
       document.querySelectorAll(".todos-view").forEach((element) => {
         element.classList.toggle("view-hidden", view !== "todos");
       });
+      document.querySelectorAll(".photos-view").forEach((element) => {
+        element.classList.toggle("view-hidden", view !== "photos");
+      });
       $("calendarViewBtn").classList.toggle("active", view === "calendar");
       $("todosViewBtn").classList.toggle("active", view === "todos");
+      $("photosViewBtn").classList.toggle("active", view === "photos");
       if (view === "todos") renderTodos();
+      if (view === "photos") renderPhotos();
     }
 
     async function addTodo(todo, clearInputs = []) {
@@ -1656,13 +1689,10 @@
         await saveTodoToServer(todo);
         state.selectedClient = todo.client;
         clearInputs.forEach((id) => $(id).value = "");
-        $("todoDate").value = "";
         $("pageTodoDate").value = "";
-        $("todoStatus").value = "open";
         $("pageTodoStatus").value = "open";
         if (todo.client) {
           $("pageTodoClient").value = todo.client;
-          $("todoClient").value = todo.client;
         }
         setView("todos");
       } catch (error) {
@@ -1690,6 +1720,7 @@
         renderStats();
         renderSearch();
         renderTodos();
+        renderPhotos();
       }
     }
 
@@ -1714,6 +1745,9 @@
         day.className = "day";
         if (dayDate.getMonth() !== month) day.classList.add("other");
         if (key === today) day.classList.add("today");
+        if (state.entries.some((entry) => entry.date === key && entry.status === "vacation")) {
+          day.classList.add("has-vacation");
+        }
 
         const head = document.createElement("div");
         head.className = "day-head";
@@ -1736,8 +1770,8 @@
             event.type = "button";
             event.className = `event ${entry.status}`;
             event.innerHTML = `
-              <span class="time">${entry.start} - ${entry.end}</span>
-              ${entry.status === "errand" ? "" : `<span class="client">${escapeHtml(entry.client)}</span>`}
+              <span class="time">${entry.status === "vacation" ? "cel dan" : `${entry.start} - ${entry.end}`}</span>
+              ${["errand", "vacation"].includes(entry.status) ? "" : `<span class="client">${escapeHtml(entry.client)}</span>`}
               <span class="summary">${escapeHtml(entry.work || entry.material || statusLabels[entry.status])}</span>
             `;
             event.addEventListener("click", () => openDialog(entry));
@@ -1779,8 +1813,10 @@
       });
 
       const monthKey = `${year}-${String(month + 1).padStart(2, "0")}`;
-      const hours = uniqueHours(monthEntries);
-      const km = monthEntries.reduce((sum, entry) => sum + Number(entry.km || 0), 0);
+      const hourEntries = monthEntries.filter((entry) => entry.status !== "vacation");
+      const ibroHours = uniqueHours(hourEntries.filter((entry) => (entry.syncUser || entry.createdBy) === "ibro"));
+      const bojanHours = uniqueHours(hourEntries.filter((entry) => (entry.syncUser || entry.createdBy) === "bojan"));
+      const km = hourEntries.reduce((sum, entry) => sum + Number(entry.km || 0), 0);
       const ibroDebt = state.debts
         .filter((debt) => debt.month === monthKey && debt.person === "ibro")
         .reduce((sum, debt) => sum + Number(debt.amount || 0), 0);
@@ -1789,7 +1825,9 @@
         .reduce((sum, debt) => sum + Number(debt.amount || 0), 0);
       const unbilled = monthEntries.filter((entry) => entry.status === "unbilled").length;
 
-      $("statHours").textContent = `${hours.toLocaleString("sl-SI", { maximumFractionDigits: 1 })} h`;
+      $("statHoursIbro").textContent = `${ibroHours.toLocaleString("sl-SI", { maximumFractionDigits: 1 })} h`;
+      $("statHoursBojan").textContent = `${bojanHours.toLocaleString("sl-SI", { maximumFractionDigits: 1 })} h`;
+      $("statHoursBojanBox").classList.toggle("hidden", state.user?.role !== "boss");
       $("statKm").textContent = `${km.toLocaleString("sl-SI", { maximumFractionDigits: 1 })} km`;
       $("statDebtIbro").textContent = `${money(ibroDebt)} EUR`;
       $("statDebtBojan").textContent = `${money(bojanDebt)} EUR`;
@@ -1804,7 +1842,7 @@
     function todoClients() {
       const names = new Set();
       state.entries.forEach((entry) => {
-        if (entry.status !== "errand" && entry.client) names.add(entry.client);
+        if (!["errand", "vacation"].includes(entry.status) && entry.client) names.add(entry.client);
       });
       state.todos.forEach((todo) => {
         if (todo.client) names.add(todo.client);
@@ -1868,6 +1906,7 @@
               ${todo.date ? `<span class="todo-chip">${formatDate(todo.date)}</span>` : `<span class="todo-chip">brez datuma</span>`}
               ${todo.client ? `<span class="todo-chip">${escapeHtml(todo.client)}</span>` : ""}
               ${todo.status === "in_progress" ? `<span class="todo-chip">v teku</span>` : ""}
+              ${(todo.photos || []).length ? `<span class="todo-chip">${(todo.photos || []).length} foto</span>` : ""}
               <span class="todo-chip">dodal: ${escapeHtml(todo.createdByName || "-")}</span>
             </div>
             ${todo.notes ? `<div class="todo-meta">${escapeHtml(todo.notes)}</div>` : ""}
@@ -1878,6 +1917,8 @@
               <option value="in_progress" ${todo.status === "in_progress" ? "selected" : ""}>V teku</option>
             </select>
             <input class="todo-date" type="date" value="${escapeHtml(todo.date || "")}" aria-label="Fiksni datum">
+            <button class="secondary show-photos" type="button">Fotografije</button>
+            <label class="secondary add-photo">Dodaj foto<input class="hidden-file todo-photo-input" type="file" accept="image/*" multiple></label>
           </div>
           <button class="secondary delete-todo" type="button">Izbrisi</button>
           <button class="drag-handle" type="button" title="Povleci za vrstni red">::</button>
@@ -1890,6 +1931,28 @@
         });
         item.querySelector(".todo-date").addEventListener("change", (event) => {
           saveTodoToServer({ ...todo, date: event.target.value }).catch((error) => alert(error.message));
+        });
+        item.querySelector(".show-photos").addEventListener("click", () => {
+          state.selectedPhotoTodoId = todo.id;
+          setView("photos");
+        });
+        item.querySelector(".todo-photo-input").addEventListener("change", async (event) => {
+          try {
+            const remaining = Math.max(0, 8 - (todo.photos || []).length);
+            const files = [...event.target.files].slice(0, remaining);
+            const photos = [];
+            for (const file of files) {
+              photos.push(await resizeImageAsDataUrl(file));
+            }
+            if (photos.length === 0) return;
+            await saveTodoToServer({ ...todo, photos: [...(todo.photos || []), ...photos] });
+            state.selectedPhotoTodoId = todo.id;
+            setView("photos");
+          } catch (error) {
+            alert(error.message);
+          } finally {
+            event.target.value = "";
+          }
         });
         item.querySelector(".delete-todo").addEventListener("dragstart", (event) => event.preventDefault());
         item.addEventListener("dragstart", (event) => {
@@ -1911,6 +1974,30 @@
         });
         items.appendChild(item);
       });
+    }
+
+    function renderPhotos() {
+      const gallery = $("photoGallery");
+      if (!gallery) return;
+      const todosWithPhotos = state.todos.filter((todo) => (todo.photos || []).length > 0);
+      const selected = state.todos.find((todo) => todo.id === state.selectedPhotoTodoId) || todosWithPhotos[0];
+      $("photosPanelTitle").textContent = selected ? `Fotografije: ${selected.title}` : "Fotografije opravil";
+
+      if (!selected || !(selected.photos || []).length) {
+        gallery.innerHTML = `<p class="todo-meta">Ni dodanih fotografij. Fotografijo dodas pri opravilu.</p>`;
+        return;
+      }
+
+      gallery.innerHTML = selected.photos.map((photo) => `
+        <article class="photo-card">
+          <img src="${photo.data}" alt="${escapeHtml(photo.name || "Fotografija")}">
+          <div>
+            <strong>${escapeHtml(photo.name || "Fotografija")}</strong>
+            <span class="todo-meta">dodal: ${escapeHtml(photo.createdByName || "-")}</span>
+            <button class="danger remove-photo" type="button" data-photo-id="${escapeHtml(photo.id)}">Izbrisi</button>
+          </div>
+        </article>
+      `).join("");
     }
 
     async function reorderUndatedTodos(sourceId, targetId) {
@@ -1980,7 +2067,6 @@
         `;
         item.addEventListener("click", () => {
           $("quickClient").value = client.name;
-          $("todoClient").value = client.name;
           $("pageTodoClient").value = client.name;
           state.selectedClient = client.name;
           setView("todos");
@@ -2005,11 +2091,12 @@
         const item = document.createElement("button");
         item.type = "button";
         item.className = "result";
-        const resultTitle = entry.status === "errand" ? (entry.work || entry.material || statusLabels[entry.status]) : entry.client;
+        const internal = ["errand", "vacation"].includes(entry.status);
+        const resultTitle = internal ? (entry.work || entry.material || statusLabels[entry.status]) : entry.client;
         item.innerHTML = `
           <strong>${formatDate(entry.date)}</strong>
-          <span>${entry.start} - ${entry.end}</span>
-          <span>${escapeHtml(resultTitle)}<br><small>${escapeHtml(entry.status === "errand" ? "interni opravek" : (entry.work || entry.material || ""))}${entry.people ? ` | ${escapeHtml(entry.people)}` : ""} | dodal: ${escapeHtml(entry.createdByName || "-")}</small></span>
+          <span>${entry.status === "vacation" ? "cel dan" : `${entry.start} - ${entry.end}`}</span>
+          <span>${escapeHtml(resultTitle)}<br><small>${escapeHtml(internal ? statusLabels[entry.status] : (entry.work || entry.material || ""))}${entry.people ? ` | ${escapeHtml(entry.people)}` : ""} | dodal: ${escapeHtml(entry.createdByName || "-")}</small></span>
           <span class="badge ${entry.status}">${statusLabels[entry.status]}</span>
         `;
         item.addEventListener("click", () => openDialog(entry));
@@ -2020,7 +2107,7 @@
     function refreshClientList() {
       const clients = [...new Set([
         ...state.clients.map((client) => client.name).filter(Boolean),
-        ...state.entries.filter((entry) => entry.status !== "errand").map((entry) => entry.client).filter(Boolean),
+        ...state.entries.filter((entry) => !["errand", "vacation"].includes(entry.status)).map((entry) => entry.client).filter(Boolean),
         ...state.todos.map((todo) => todo.client).filter(Boolean)
       ])]
         .sort((a, b) => a.localeCompare(b, "sl"));
@@ -2125,12 +2212,12 @@
     }
 
     function updateEntryClientMode() {
-      const isErrand = state.selectedStatus === "errand";
+      const isInternal = ["errand", "vacation"].includes(state.selectedStatus);
       const input = $("entryClient");
-      input.required = !isErrand;
-      input.disabled = isErrand;
-      if (isErrand) input.value = "";
-      input.parentElement?.classList.toggle("internal", isErrand);
+      input.required = !isInternal;
+      input.disabled = isInternal;
+      if (isInternal) input.value = "";
+      input.parentElement?.classList.toggle("internal", isInternal);
     }
 
     async function saveDialogEntry() {
@@ -2138,15 +2225,15 @@
       const entry = {
         id: $("entryId").value || undefined,
         date: $("entryDate").value,
-        start: $("entryStart").value,
-        end: $("entryEnd").value,
-        client: status === "errand" ? "" : normalizeClientName($("entryClient").value),
+        start: status === "vacation" ? "00:00" : $("entryStart").value,
+        end: status === "vacation" ? "23:59" : $("entryEnd").value,
+        client: ["errand", "vacation"].includes(status) ? "" : normalizeClientName($("entryClient").value),
         status,
-        work: $("entryWork").value.trim(),
+        work: status === "vacation" ? ($("entryWork").value.trim() || "Dopust") : $("entryWork").value.trim(),
         material: $("entryMaterial").value.trim(),
         people: $("entryPeople").value.trim(),
         syncUser: ($("entryId").value ? (state.entries.find((item) => item.id === $("entryId").value)?.syncUser || "") : "") || state.user?.id || "",
-        km: Number($("entryKm").value || 0),
+        km: status === "vacation" ? 0 : Number($("entryKm").value || 0),
         materialCost: 0,
         notes: $("entryNotes").value.trim()
       };
@@ -2190,7 +2277,7 @@
           entry.client,
           entry.people || "",
           statusLabels[entry.status],
-          duration(entry).toFixed(2),
+          entry.status === "vacation" ? "0.00" : duration(entry).toFixed(2),
           entry.km || 0,
           entry.work || "",
           entry.material || "",
@@ -2261,6 +2348,40 @@
       });
     }
 
+    function resizeImageAsDataUrl(file) {
+      return new Promise((resolve, reject) => {
+        if (!file.type.startsWith("image/")) {
+          reject(new Error("Izberi slikovno datoteko."));
+          return;
+        }
+        const reader = new FileReader();
+        reader.onload = () => {
+          const image = new Image();
+          image.onload = () => {
+            const maxSide = 1280;
+            const scale = Math.min(1, maxSide / Math.max(image.width, image.height));
+            const canvas = document.createElement("canvas");
+            canvas.width = Math.max(1, Math.round(image.width * scale));
+            canvas.height = Math.max(1, Math.round(image.height * scale));
+            const context = canvas.getContext("2d");
+            context.drawImage(image, 0, 0, canvas.width, canvas.height);
+            resolve({
+              id: window.crypto?.randomUUID ? window.crypto.randomUUID() : `${Date.now()}-${Math.random()}`,
+              name: file.name,
+              data: canvas.toDataURL("image/jpeg", 0.78),
+              createdBy: state.user?.id || "",
+              createdByName: state.user?.name || "",
+              createdAt: new Date().toISOString()
+            });
+          };
+          image.onerror = () => reject(new Error("Slike ni bilo mogoce naloziti."));
+          image.src = reader.result;
+        };
+        reader.onerror = () => reject(new Error("Slike ni bilo mogoce prebrati."));
+        reader.readAsDataURL(file);
+      });
+    }
+
     function escapeHtml(value) {
       return String(value || "")
         .replaceAll("&", "&amp;")
@@ -2294,10 +2415,10 @@
     }
 
     function updateQuickErrandMode() {
-      const isErrand = $("quickStatus").value === "errand";
-      $("quickClient").disabled = isErrand;
-      if (isErrand) $("quickClient").value = "";
-      $("quickClient").closest(".control")?.classList.toggle("internal", isErrand);
+      const isInternal = ["errand", "vacation"].includes($("quickStatus").value);
+      $("quickClient").disabled = isInternal;
+      if (isInternal) $("quickClient").value = "";
+      $("quickClient").closest(".control")?.classList.toggle("internal", isInternal);
     }
 
     function applyErrandPreset(label) {
@@ -2409,33 +2530,14 @@
       }
     });
 
-    $("saveTodo").addEventListener("click", () => {
-      addTodo(todoFromQuick(), ["todoTitle"]);
-    });
-
-    $("saveClient").addEventListener("click", async () => {
-      const name = $("newClientName").value.trim();
-      const search = $("newClientSearch").value.trim();
-      if (!name) {
-        alert("Vpisi naziv stranke.");
-        return;
-      }
-      try {
-        await saveClientToServer({ name, search });
-        $("newClientName").value = "";
-        $("newClientSearch").value = "";
-        alert("Stranka je dodana.");
-      } catch (error) {
-        alert(error.message);
-      }
-    });
-
     $("savePageTodo").addEventListener("click", () => {
       addTodo(todoFromPage(), ["pageTodoTitle"]);
     });
 
     $("calendarViewBtn").addEventListener("click", () => setView("calendar"));
     $("todosViewBtn").addEventListener("click", () => setView("todos"));
+    $("photosViewBtn").addEventListener("click", () => setView("photos"));
+    $("backToTodos").addEventListener("click", () => setView("todos"));
 
     $("clearClientFilter").addEventListener("click", () => {
       state.selectedClient = "";
@@ -2461,6 +2563,20 @@
       }
     });
 
+    $("photoGallery").addEventListener("click", async (event) => {
+      const button = event.target.closest(".remove-photo");
+      if (!button) return;
+      const todo = state.todos.find((item) => item.id === state.selectedPhotoTodoId) || state.todos.find((item) => (item.photos || []).some((photo) => photo.id === button.dataset.photoId));
+      if (!todo) return;
+      if (!confirm("Izbrisem to fotografijo?")) return;
+      await saveTodoToServer({
+        ...todo,
+        photos: (todo.photos || []).filter((photo) => photo.id !== button.dataset.photoId)
+      });
+      state.selectedPhotoTodoId = todo.id;
+      renderPhotos();
+    });
+
     $("refreshBtn").addEventListener("click", loadAll);
     $("prevMonth").addEventListener("click", () => {
       state.current = new Date(state.current.getFullYear(), state.current.getMonth() - 1, 1);
@@ -2473,7 +2589,6 @@
     $("todayBtn").addEventListener("click", () => {
       state.current = new Date();
       $("quickDate").value = dateKey(new Date());
-      $("todoDate").value = dateKey(new Date());
       $("pageTodoDate").value = dateKey(new Date());
       render();
     });
