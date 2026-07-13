@@ -641,6 +641,14 @@
       flex-wrap: wrap;
     }
 
+    .todo-photos-inline {
+      grid-column: 1 / -1;
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+      gap: 10px;
+      padding-top: 8px;
+    }
+
     .add-photo {
       cursor: pointer;
       display: inline-flex;
@@ -650,6 +658,66 @@
 
     .hidden-file {
       display: none;
+    }
+
+    .report-view {
+      padding: 14px;
+      display: grid;
+      gap: 14px;
+      align-content: start;
+    }
+
+    .report-controls {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 10px;
+      align-items: end;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #f7faf7;
+    }
+
+    .report-controls label {
+      display: grid;
+      gap: 6px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .report-controls input {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 10px 11px;
+      background: #fff;
+      color: var(--ink);
+    }
+
+    .report-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(140px, 1fr));
+      gap: 10px;
+    }
+
+    .report-line,
+    .client-work-row {
+      display: grid;
+      grid-template-columns: 120px 1fr auto;
+      gap: 10px;
+      align-items: center;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .client-work-row button {
+      justify-self: end;
+    }
+
+    .client-detail {
+      display: grid;
+      gap: 12px;
     }
 
     .day-todo {
@@ -973,9 +1041,15 @@
       .main,
       .sidebar { padding: 16px; }
       .app {
-        display: block;
+        display: flex;
+        flex-direction: column;
+      }
+      .main {
+        order: 1;
+        padding-bottom: 86px;
       }
       .sidebar {
+        order: 2;
         gap: 12px;
       }
       .topbar { align-items: stretch; flex-direction: column; }
@@ -992,6 +1066,15 @@
       .view-switch {
         display: grid;
         grid-template-columns: repeat(3, minmax(0, 1fr));
+        position: fixed;
+        left: 12px;
+        right: 12px;
+        bottom: 12px;
+        z-index: 20;
+        box-shadow: 0 12px 34px rgba(0, 0, 0, 0.22);
+      }
+      .view-btn {
+        min-height: 48px;
       }
       .search,
       .tools .secondary { width: 100%; max-width: none; }
@@ -1039,7 +1122,23 @@
       .boss-panel,
       .month-debt-grid,
       .todo-layout,
-      .todo-create { grid-template-columns: 1fr; }
+      .todo-create,
+      .report-controls,
+      .report-grid,
+      .report-line,
+      .client-work-row { grid-template-columns: 1fr; }
+      .client-list {
+        display: flex;
+        overflow-x: auto;
+        gap: 8px;
+        padding-bottom: 4px;
+      }
+      .client-card {
+        min-width: 190px;
+      }
+      .client-work-row button {
+        justify-self: stretch;
+      }
       .result { grid-template-columns: 1fr; gap: 5px; }
     }
   </style>
@@ -1153,7 +1252,7 @@
           <div class="view-switch" aria-label="Pogled">
             <button class="view-btn active" id="calendarViewBtn" type="button">Koledar</button>
             <button class="view-btn" id="todosViewBtn" type="button">Opravila</button>
-            <button class="view-btn" id="photosViewBtn" type="button">Fotografije</button>
+            <button class="view-btn" id="reportViewBtn" type="button">Obra&#269;un</button>
           </div>
           <input class="search" id="clientSearch" placeholder="I&#353;&#269;i stranko, material ali opis">
           <button class="secondary" id="todayBtn" type="button">Danes</button>
@@ -1211,12 +1310,28 @@
         </div>
       </section>
 
-      <section class="panel photos-panel photos-view view-hidden">
-        <div class="todo-head">
-          <strong id="photosPanelTitle">Fotografije opravil</strong>
-          <button class="secondary" id="backToTodos" type="button">Nazaj na opravila</button>
+      <section class="panel report-view report-screen view-hidden">
+        <div class="report-controls">
+          <label>Od
+            <input id="reportFrom" type="date">
+          </label>
+          <label>Do
+            <input id="reportTo" type="date">
+          </label>
+          <label>Stranka
+            <input id="reportClient" list="clientList" placeholder="Vse stranke">
+          </label>
+          <button class="secondary" id="clearReportClient" type="button">Vse stranke</button>
+          <button class="primary" id="exportReportExcel" type="button">Izvoz Excel</button>
         </div>
-        <div id="photoGallery" class="photo-gallery"></div>
+        <div class="report-grid" id="reportSummary"></div>
+        <div class="client-detail">
+          <div class="todo-head">
+            <strong id="clientDetailTitle">Vsa dela in opravila</strong>
+            <span class="todo-meta" id="clientDetailRange"></span>
+          </div>
+          <div id="clientDetailList"></div>
+        </div>
       </section>
 
       <section class="panel calendar-shell calendar-view">
@@ -1261,6 +1376,12 @@
           </label>
           <label>Kilometri
             <input id="entryKm" type="number" min="0" step="0.1">
+          </label>
+          <label>Ra&#269;un
+            <select id="entryInvoiceSent">
+              <option value="false">Ra&#269;un ni poslan</option>
+              <option value="true">Ra&#269;un poslan</option>
+            </select>
           </label>
         </div>
 
@@ -1385,7 +1506,8 @@
       debts: [],
       clients: [],
       selectedClient: "",
-      selectedPhotoTodoId: "",
+      expandedTodoPhotos: "",
+      reportClient: "",
       user: null,
       token: localStorage.getItem(tokenKey) || ""
     };
@@ -1408,6 +1530,7 @@
     async function boot() {
       $("quickDate").value = dateKey(new Date());
       $("pageTodoDate").value = "";
+      setDefaultReportRange();
       updateQuickErrandMode();
       if (location.protocol === "file:") {
         $("serverWarning").classList.remove("hidden");
@@ -1673,14 +1796,14 @@
       document.querySelectorAll(".todos-view").forEach((element) => {
         element.classList.toggle("view-hidden", view !== "todos");
       });
-      document.querySelectorAll(".photos-view").forEach((element) => {
-        element.classList.toggle("view-hidden", view !== "photos");
+      document.querySelectorAll(".report-screen").forEach((element) => {
+        element.classList.toggle("view-hidden", view !== "report");
       });
       $("calendarViewBtn").classList.toggle("active", view === "calendar");
       $("todosViewBtn").classList.toggle("active", view === "todos");
-      $("photosViewBtn").classList.toggle("active", view === "photos");
+      $("reportViewBtn").classList.toggle("active", view === "report");
       if (view === "todos") renderTodos();
-      if (view === "photos") renderPhotos();
+      if (view === "report") renderReport();
     }
 
     async function addTodo(todo, clearInputs = []) {
@@ -1720,7 +1843,7 @@
         renderStats();
         renderSearch();
         renderTodos();
-        renderPhotos();
+        renderReport();
       }
     }
 
@@ -1920,6 +2043,7 @@
             <button class="secondary show-photos" type="button">Fotografije</button>
             <label class="secondary add-photo">Dodaj foto<input class="hidden-file todo-photo-input" type="file" accept="image/*" multiple></label>
           </div>
+          ${state.expandedTodoPhotos === todo.id ? renderTodoPhotoHtml(todo) : ""}
           <button class="secondary delete-todo" type="button">Izbrisi</button>
           <button class="drag-handle" type="button" title="Povleci za vrstni red">::</button>
         `;
@@ -1933,8 +2057,8 @@
           saveTodoToServer({ ...todo, date: event.target.value }).catch((error) => alert(error.message));
         });
         item.querySelector(".show-photos").addEventListener("click", () => {
-          state.selectedPhotoTodoId = todo.id;
-          setView("photos");
+          state.expandedTodoPhotos = state.expandedTodoPhotos === todo.id ? "" : todo.id;
+          renderTodoItems();
         });
         item.querySelector(".todo-photo-input").addEventListener("change", async (event) => {
           try {
@@ -1946,8 +2070,7 @@
             }
             if (photos.length === 0) return;
             await saveTodoToServer({ ...todo, photos: [...(todo.photos || []), ...photos] });
-            state.selectedPhotoTodoId = todo.id;
-            setView("photos");
+            state.expandedTodoPhotos = todo.id;
           } catch (error) {
             alert(error.message);
           } finally {
@@ -1955,6 +2078,16 @@
           }
         });
         item.querySelector(".delete-todo").addEventListener("dragstart", (event) => event.preventDefault());
+        item.querySelectorAll(".remove-photo").forEach((button) => {
+          button.addEventListener("click", async () => {
+            if (!confirm("Izbrisem to fotografijo?")) return;
+            await saveTodoToServer({
+              ...todo,
+              photos: (todo.photos || []).filter((photo) => photo.id !== button.dataset.photoId)
+            });
+            state.expandedTodoPhotos = todo.id;
+          });
+        });
         item.addEventListener("dragstart", (event) => {
           if (todo.date || todo.done) {
             event.preventDefault();
@@ -1976,19 +2109,11 @@
       });
     }
 
-    function renderPhotos() {
-      const gallery = $("photoGallery");
-      if (!gallery) return;
-      const todosWithPhotos = state.todos.filter((todo) => (todo.photos || []).length > 0);
-      const selected = state.todos.find((todo) => todo.id === state.selectedPhotoTodoId) || todosWithPhotos[0];
-      $("photosPanelTitle").textContent = selected ? `Fotografije: ${selected.title}` : "Fotografije opravil";
-
-      if (!selected || !(selected.photos || []).length) {
-        gallery.innerHTML = `<p class="todo-meta">Ni dodanih fotografij. Fotografijo dodas pri opravilu.</p>`;
-        return;
+    function renderTodoPhotoHtml(todo) {
+      if (!(todo.photos || []).length) {
+        return `<div class="todo-photos-inline"><p class="todo-meta">Pri tem opravilu se ni fotografij.</p></div>`;
       }
-
-      gallery.innerHTML = selected.photos.map((photo) => `
+      return `<div class="todo-photos-inline">${todo.photos.map((photo) => `
         <article class="photo-card">
           <img src="${photo.data}" alt="${escapeHtml(photo.name || "Fotografija")}">
           <div>
@@ -1997,7 +2122,162 @@
             <button class="danger remove-photo" type="button" data-photo-id="${escapeHtml(photo.id)}">Izbrisi</button>
           </div>
         </article>
-      `).join("");
+      `).join("")}</div>`;
+    }
+
+    function setDefaultReportRange() {
+      const now = state.current || new Date();
+      $("reportFrom").value = dateKey(new Date(now.getFullYear(), now.getMonth(), 1));
+      $("reportTo").value = dateKey(new Date(now.getFullYear(), now.getMonth() + 1, 0));
+    }
+
+    function inDateRange(date, from, to) {
+      if (!date) return false;
+      if (from && date < from) return false;
+      if (to && date > to) return false;
+      return true;
+    }
+
+    function reportEntries() {
+      const from = $("reportFrom").value;
+      const to = $("reportTo").value;
+      const client = normalizeClientName($("reportClient").value || state.reportClient || "");
+      return state.entries
+        .filter((entry) => inDateRange(entry.date, from, to))
+        .filter((entry) => !client || normalizeText(entry.client) === normalizeText(client))
+        .sort((a, b) => `${a.date} ${a.start}`.localeCompare(`${b.date} ${b.start}`));
+    }
+
+    function reportTodos() {
+      const from = $("reportFrom").value;
+      const to = $("reportTo").value;
+      const client = normalizeClientName($("reportClient").value || state.reportClient || "");
+      return state.todos
+        .filter((todo) => !todo.date || inDateRange(todo.date, from, to))
+        .filter((todo) => !client || normalizeText(todo.client) === normalizeText(client))
+        .sort(todoSort);
+    }
+
+    function reportMonthKeys(from, to) {
+      const keys = new Set();
+      if (!from || !to) return keys;
+      const cursor = parseDate(from);
+      const end = parseDate(to);
+      cursor.setDate(1);
+      while (cursor <= end) {
+        keys.add(`${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, "0")}`);
+        cursor.setMonth(cursor.getMonth() + 1);
+      }
+      return keys;
+    }
+
+    function reportTotals(entries) {
+      const from = $("reportFrom").value;
+      const to = $("reportTo").value;
+      const counted = entries.filter((entry) => entry.status !== "vacation");
+      const ibroEntries = counted.filter((entry) => (entry.syncUser || entry.createdBy) === "ibro");
+      const workdayEntries = ibroEntries.filter((entry) => !["errand", "vacation"].includes(entry.status));
+      const ibroWorkdays = new Set(workdayEntries.map((entry) => entry.date)).size;
+      const commuteKm = ibroWorkdays * 28;
+      const enteredKm = ibroEntries.reduce((sum, entry) => sum + Number(entry.km || 0), 0);
+      const kmTotal = enteredKm + commuteKm;
+      const ibroHours = uniqueHours(ibroEntries);
+      const monthKeys = reportMonthKeys(from, to);
+      const ibroDebt = state.debts
+        .filter((debt) => monthKeys.has(debt.month) && debt.person === "ibro")
+        .reduce((sum, debt) => sum + Number(debt.amount || 0), 0);
+      const bojanDebt = state.debts
+        .filter((debt) => monthKeys.has(debt.month) && debt.person === "bojan")
+        .reduce((sum, debt) => sum + Number(debt.amount || 0), 0);
+      const hoursPay = ibroHours * 15;
+      const kmPay = kmTotal * 0.22;
+      return {
+        ibroHours,
+        ibroWorkdays,
+        enteredKm,
+        commuteKm,
+        kmTotal,
+        hoursPay,
+        kmPay,
+        ibroDebt,
+        bojanDebt,
+        payout: hoursPay + kmPay + bojanDebt - ibroDebt
+      };
+    }
+
+    function renderReport() {
+      const entries = reportEntries();
+      const todos = reportTodos();
+      const totals = reportTotals(entries);
+      const client = normalizeClientName($("reportClient").value || state.reportClient || "");
+      $("clientDetailTitle").textContent = client ? `Stranka: ${client}` : "Vsa dela in opravila";
+      $("clientDetailRange").textContent = `${formatDate($("reportFrom").value)} - ${formatDate($("reportTo").value)}`;
+      $("reportSummary").innerHTML = [
+        ["Ibro ure", `${totals.ibroHours.toLocaleString("sl-SI", { maximumFractionDigits: 1 })} h x 15 EUR = ${money(totals.hoursPay)} EUR`],
+        ["Delovni dnevi", `${totals.ibroWorkdays} x 28 km = ${totals.commuteKm.toLocaleString("sl-SI")} km`],
+        ["Kilometrina", `${totals.kmTotal.toLocaleString("sl-SI", { maximumFractionDigits: 1 })} km x 0,22 EUR = ${money(totals.kmPay)} EUR`],
+        ["Skupaj za izplacilo", `${money(totals.payout)} EUR`]
+      ].map(([label, value]) => `<div class="stat"><strong>${escapeHtml(value)}</strong><span>${escapeHtml(label)}</span></div>`).join("");
+
+      const detail = $("clientDetailList");
+      const entryRows = entries.map((entry) => `
+        <div class="client-work-row">
+          <strong>${formatDate(entry.date)}</strong>
+          <span>${escapeHtml(entry.client || statusLabels[entry.status])}<br><small>${entry.status === "vacation" ? "Dopust" : `${entry.start} - ${entry.end}, ${entry.status === "vacation" ? "0.00" : duration(entry).toFixed(2)} h`} | ${escapeHtml(entry.work || entry.material || "")} | racun: ${entry.invoiceSent ? "poslan" : "ni poslan"}</small></span>
+          <button class="secondary open-report-entry" type="button" data-entry-id="${escapeHtml(entry.id)}">Odpri</button>
+        </div>
+      `);
+      const todoRows = todos.map((todo) => `
+        <div class="client-work-row">
+          <strong>${todo.date ? formatDate(todo.date) : "Brez datuma"}</strong>
+          <span>Opravilo: ${escapeHtml(todo.title)}<br><small>${escapeHtml(todo.client || "")} | ${todo.done ? "opravljeno" : todo.status === "in_progress" ? "v teku" : "caka"} | ${(todo.photos || []).length} foto</small></span>
+          <button class="secondary open-report-todo" type="button" data-todo-id="${escapeHtml(todo.id)}">Opravilo</button>
+        </div>
+      `);
+      detail.innerHTML = [...entryRows, ...todoRows].join("") || `<p class="todo-meta">Za ta izbor ni vnosov ali opravil.</p>`;
+    }
+
+    function openClientReport(client) {
+      state.reportClient = client;
+      $("reportClient").value = client;
+      $("clientSearch").value = client;
+      setView("report");
+      renderReport();
+    }
+
+    function exportReportExcel() {
+      const entries = reportEntries();
+      const todos = reportTodos();
+      const totals = reportTotals(entries);
+      const rows = [
+        ["INDUS URE obracun", "", "", ""],
+        ["Obdobje", $("reportFrom").value, $("reportTo").value, ""],
+        ["Stranka", $("reportClient").value || "Vse stranke", "", ""],
+        [],
+        ["Postavka", "Kolicina", "Cena", "Skupaj"],
+        ["Ibro ure", totals.ibroHours.toFixed(2), "15 EUR", totals.hoursPay.toFixed(2)],
+        ["Vpisani km", totals.enteredKm.toFixed(1), "", ""],
+        ["Pot dom-sluzba", `${totals.ibroWorkdays} dni x 28 km`, "", totals.commuteKm.toFixed(1)],
+        ["Kilometrina skupaj", totals.kmTotal.toFixed(1), "0.22 EUR", totals.kmPay.toFixed(2)],
+        ["Bojan dolg", "", "", totals.bojanDebt.toFixed(2)],
+        ["Ibro dolg", "", "", `-${totals.ibroDebt.toFixed(2)}`],
+        ["SKUPAJ", "", "", totals.payout.toFixed(2)],
+        [],
+        ["Datum", "Stranka", "Opis", "Ure", "Km", "Racun poslan", "Dodal"]
+      ];
+      entries.forEach((entry) => rows.push([
+        entry.date,
+        entry.client,
+        entry.work || entry.material || statusLabels[entry.status],
+        entry.status === "vacation" ? "0.00" : duration(entry).toFixed(2),
+        entry.km || 0,
+        entry.invoiceSent ? "DA" : "NE",
+        entry.createdByName || ""
+      ]));
+      rows.push([], ["Opravila"], ["Datum", "Stranka", "Opravilo", "Status", "Foto"]);
+      todos.forEach((todo) => rows.push([todo.date || "", todo.client || "", todo.title, todo.done ? "opravljeno" : todo.status, (todo.photos || []).length]));
+      const html = `<html><head><meta charset="utf-8"></head><body><table>${rows.map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`).join("")}</table></body></html>`;
+      downloadText(html, `indus-obracun-${$("reportFrom").value}-${$("reportTo").value}.xls`, "application/vnd.ms-excel;charset=utf-8");
     }
 
     async function reorderUndatedTodos(sourceId, targetId) {
@@ -2069,7 +2349,7 @@
           $("quickClient").value = client.name;
           $("pageTodoClient").value = client.name;
           state.selectedClient = client.name;
-          setView("todos");
+          openClientReport(client.name);
         });
         panel.appendChild(item);
       });
@@ -2173,6 +2453,7 @@
       $("entryClient").value = entry.client || "";
       $("entryPeople").value = entry.people || "";
       $("entryKm").value = entry.km || "";
+      $("entryInvoiceSent").value = entry.invoiceSent ? "true" : "false";
       $("entryWork").value = entry.work || "";
       $("entryMaterial").value = entry.material || "";
       $("entryNotes").value = entry.notes || "";
@@ -2235,7 +2516,8 @@
         syncUser: ($("entryId").value ? (state.entries.find((item) => item.id === $("entryId").value)?.syncUser || "") : "") || state.user?.id || "",
         km: status === "vacation" ? 0 : Number($("entryKm").value || 0),
         materialCost: 0,
-        notes: $("entryNotes").value.trim()
+        notes: $("entryNotes").value.trim(),
+        invoiceSent: $("entryInvoiceSent").value === "true"
       };
 
       if (!validateEntry(entry)) return;
@@ -2266,7 +2548,7 @@
     }
 
     function exportCsv() {
-      const header = ["Datum", "Od", "Do", "Stranka", "Sodelavci", "Status", "Ure", "Km", "Delo", "Material", "Opombe", "Dodal", "Spremenil"];
+      const header = ["Datum", "Od", "Do", "Stranka", "Sodelavci", "Status", "Ure", "Km", "Racun poslan", "Delo", "Material", "Opombe", "Dodal", "Spremenil"];
       const rows = state.entries
         .slice()
         .sort((a, b) => `${a.date} ${a.start}`.localeCompare(`${b.date} ${b.start}`))
@@ -2279,6 +2561,7 @@
           statusLabels[entry.status],
           entry.status === "vacation" ? "0.00" : duration(entry).toFixed(2),
           entry.km || 0,
+          entry.invoiceSent ? "DA" : "NE",
           entry.work || "",
           entry.material || "",
           entry.notes || "",
@@ -2331,6 +2614,7 @@
     }
 
     function formatDate(value) {
+      if (!value) return "-";
       return parseDate(value).toLocaleDateString("sl-SI");
     }
 
@@ -2536,8 +2820,19 @@
 
     $("calendarViewBtn").addEventListener("click", () => setView("calendar"));
     $("todosViewBtn").addEventListener("click", () => setView("todos"));
-    $("photosViewBtn").addEventListener("click", () => setView("photos"));
-    $("backToTodos").addEventListener("click", () => setView("todos"));
+    $("reportViewBtn").addEventListener("click", () => setView("report"));
+    $("reportFrom").addEventListener("change", renderReport);
+    $("reportTo").addEventListener("change", renderReport);
+    $("reportClient").addEventListener("input", () => {
+      state.reportClient = $("reportClient").value;
+      renderReport();
+    });
+    $("clearReportClient").addEventListener("click", () => {
+      state.reportClient = "";
+      $("reportClient").value = "";
+      renderReport();
+    });
+    $("exportReportExcel").addEventListener("click", exportReportExcel);
 
     $("clearClientFilter").addEventListener("click", () => {
       state.selectedClient = "";
@@ -2563,18 +2858,21 @@
       }
     });
 
-    $("photoGallery").addEventListener("click", async (event) => {
-      const button = event.target.closest(".remove-photo");
-      if (!button) return;
-      const todo = state.todos.find((item) => item.id === state.selectedPhotoTodoId) || state.todos.find((item) => (item.photos || []).some((photo) => photo.id === button.dataset.photoId));
-      if (!todo) return;
-      if (!confirm("Izbrisem to fotografijo?")) return;
-      await saveTodoToServer({
-        ...todo,
-        photos: (todo.photos || []).filter((photo) => photo.id !== button.dataset.photoId)
-      });
-      state.selectedPhotoTodoId = todo.id;
-      renderPhotos();
+    $("clientDetailList").addEventListener("click", (event) => {
+      const entryButton = event.target.closest(".open-report-entry");
+      if (entryButton) {
+        const entry = state.entries.find((item) => item.id === entryButton.dataset.entryId);
+        if (entry) openDialog(entry);
+        return;
+      }
+      const todoButton = event.target.closest(".open-report-todo");
+      if (todoButton) {
+        const todo = state.todos.find((item) => item.id === todoButton.dataset.todoId);
+        if (!todo) return;
+        state.selectedClient = todo.client || "";
+        state.expandedTodoPhotos = todo.id;
+        setView("todos");
+      }
     });
 
     $("refreshBtn").addEventListener("click", loadAll);

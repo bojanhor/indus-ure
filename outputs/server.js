@@ -206,6 +206,10 @@ function normalizeDb(db = {}) {
       next.googleUpdatedAt = "";
       changed = true;
     }
+    if (typeof next.invoiceSent !== "boolean") {
+      next.invoiceSent = false;
+      changed = true;
+    }
     return next;
   });
 
@@ -470,7 +474,8 @@ function cleanEntry(input) {
     syncUser: ["bojan", "ibro"].includes(input.syncUser) ? input.syncUser : "",
     km: Number(input.km || 0),
     materialCost: Number(input.materialCost || 0),
-    notes: String(input.notes || "").trim()
+    notes: String(input.notes || "").trim(),
+    invoiceSent: Boolean(input.invoiceSent)
   };
   if (["errand", "vacation"].includes(entry.status)) entry.client = "";
   if (entry.status === "vacation") {
