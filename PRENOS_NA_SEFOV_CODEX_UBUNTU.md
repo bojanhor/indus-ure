@@ -189,6 +189,8 @@ DATABASE_URL=postgresql://indus_ure:ZAMENJAJ_TO_GESLO@127.0.0.1:5432/indus_ure
 GOOGLE_CLIENT_ID=VSTAVI_GOOGLE_CLIENT_ID
 GOOGLE_CLIENT_SECRET=VSTAVI_GOOGLE_CLIENT_SECRET
 GOOGLE_REDIRECT_URI=https://TVOJA-DOMENA/api/google/callback
+GOOGLE_SHEETS_ID=VSTAVI_ID_GOOGLE_SHEETS_DATOTEKE
+GOOGLE_SHEETS_RANGE=Stranke!A:B
 ```
 
 Ce bo najprej delovalo samo lokalno brez domene:
@@ -196,6 +198,14 @@ Ce bo najprej delovalo samo lokalno brez domene:
 ```env
 GOOGLE_REDIRECT_URI=http://IP_STREZNIKA:8123/api/google/callback
 ```
+
+Za sync strank z Google Sheets mora imeti Google Sheet zavihek `Stranke` in stolpca:
+
+```text
+Naziv stranke | Search
+```
+
+`GOOGLE_SHEETS_ID` je del URL-ja Google Sheeta med `/d/` in `/edit`.
 
 Za Nginx/domeno je bolje uporabiti HTTPS domeno.
 
@@ -458,4 +468,3 @@ Priporocene izboljsave:
 - administracija strank v posebnem zavihku
 - avtomatski off-site backup na zunanji disk ali cloud
 - monitoring, da se vidi, ce app pade
-

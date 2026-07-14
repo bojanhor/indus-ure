@@ -19,6 +19,8 @@ const resetUserPasswords = process.env.RESET_USER_PASSWORDS === "true";
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || "";
 const GOOGLE_REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI || "";
+const GOOGLE_SHEETS_ID = process.env.GOOGLE_SHEETS_ID || "";
+const GOOGLE_SHEETS_RANGE = process.env.GOOGLE_SHEETS_RANGE || "Stranke!A:B";
 let pgPool = null;
 let pgReady = null;
 
@@ -132,6 +134,25 @@ function normalizeDb(db = {}) {
     changed = true;
   }
 
+  if (!Array.isArray(db.billingLocks)) {
+    db.billingLocks = [];
+    changed = true;
+  }
+
+  if (!db.settings || typeof db.settings !== "object") {
+    db.settings = {};
+    changed = true;
+  }
+  if (!db.settings.billing || typeof db.settings.billing !== "object") {
+    db.settings.billing = {};
+    changed = true;
+  }
+  db.settings.billing = {
+    hourlyRate: Number(db.settings.billing?.hourlyRate || 15),
+    kmRate: Number(db.settings.billing?.kmRate || 0.22),
+    commuteKmPerDay: Number(db.settings.billing?.commuteKmPerDay || 28)
+  };
+
   if (!Array.isArray(db.clients)) {
     db.clients = [];
     changed = true;
@@ -210,8 +231,22 @@ function normalizeDb(db = {}) {
       next.invoiceSent = false;
       changed = true;
     }
+    if (typeof next.fromHome !== "boolean") {
+      next.fromHome = false;
+      changed = true;
+    }
     return next;
   });
+
+  db.billingLocks = db.billingLocks.map((lock) => ({
+    id: lock.id || crypto.randomUUID(),
+    from: String(lock.from || ""),
+    to: String(lock.to || ""),
+    note: String(lock.note || ""),
+    createdBy: lock.createdBy || "system",
+    createdByName: lock.createdByName || "",
+    createdAt: lock.createdAt || new Date().toISOString()
+  })).filter((lock) => /^\d{4}-\d{2}-\d{2}$/.test(lock.from) && /^\d{4}-\d{2}-\d{2}$/.test(lock.to));
 
   db.todos = db.todos.map((todo, index) => {
     const next = { ...todo };
@@ -434,6 +469,37 @@ function canManageEntry(user, entry) {
   return (entry.syncUser || entry.createdBy) === user.id;
 }
 
+function entryIsLocked(db, entry) {
+  return (db.billingLocks || []).some((lock) => entry.date >= lock.from && entry.date <= lock.to);
+}
+
+function lockedFieldChanged(oldEntry, newEntry) {
+  return oldEntry.start !== newEntry.start
+    || oldEntry.end !== newEntry.end
+    || Number(oldEntry.km || 0) !== Number(newEntry.km || 0)
+    || Boolean(oldEntry.fromHome) !== Boolean(newEntry.fromHome);
+}
+
+function mergeClientList(existingClients, incomingClients, source) {
+  const map = new Map();
+  const add = (client) => {
+    const name = String(client.name || "").trim();
+    if (!name) return;
+    const key = name.toLowerCase();
+    const previous = map.get(key);
+    map.set(key, {
+      id: previous?.id || client.id || crypto.randomUUID(),
+      name: previous?.name || name,
+      search: [previous?.search || "", String(client.search || name).trim()].filter(Boolean).join(" "),
+      createdBy: previous?.createdBy || client.createdBy || source || "sync",
+      createdAt: previous?.createdAt || client.createdAt || new Date().toISOString()
+    });
+  };
+  (existingClients || []).forEach(add);
+  (incomingClients || []).forEach(add);
+  return [...map.values()].sort((a, b) => a.name.localeCompare(b.name, "sl"));
+}
+
 async function getSessionUser(req) {
   const auth = req.headers.authorization || "";
   const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
@@ -475,7 +541,8 @@ function cleanEntry(input) {
     km: Number(input.km || 0),
     materialCost: Number(input.materialCost || 0),
     notes: String(input.notes || "").trim(),
-    invoiceSent: Boolean(input.invoiceSent)
+    invoiceSent: Boolean(input.invoiceSent),
+    fromHome: Boolean(input.fromHome)
   };
   if (["errand", "vacation"].includes(entry.status)) entry.client = "";
   if (entry.status === "vacation") {
@@ -920,6 +987,38 @@ async function syncGoogleForUser(req, db, user) {
   return { pushed, pulled, calendarName: user.google.calendarName || `INDUS URE - ${user.name}` };
 }
 
+async function syncClientsWithSheets(db, user) {
+  if (!GOOGLE_SHEETS_ID) throw new Error("GOOGLE_SHEETS_ID ni nastavljen na strezniku.");
+  if (!user.google?.tokens) throw new Error("Najprej povezi Google racun.");
+  const { google } = require("googleapis");
+  const auth = googleClient({ headers: { host: "localhost" } }, user.google.tokens);
+  const sheets = google.sheets({ version: "v4", auth });
+  const remote = await sheets.spreadsheets.values.get({
+    spreadsheetId: GOOGLE_SHEETS_ID,
+    range: GOOGLE_SHEETS_RANGE
+  }).catch((error) => {
+    throw new Error(`Google Sheets ni mogoce prebrati (${GOOGLE_SHEETS_RANGE}): ${error.message}`);
+  });
+  const rows = remote.data.values || [];
+  const dataRows = rows.slice(1);
+  const sheetClients = dataRows
+    .map((row) => ({ name: String(row[0] || "").trim(), search: String(row[1] || row[0] || "").trim(), createdBy: "google-sheets" }))
+    .filter((client) => client.name);
+  const merged = mergeClientList(db.clients || [], sheetClients, "google-sheets");
+  db.clients = merged;
+  const values = [
+    ["Naziv stranke", "Search"],
+    ...merged.map((client) => [client.name, client.search || client.name])
+  ];
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: GOOGLE_SHEETS_ID,
+    range: GOOGLE_SHEETS_RANGE,
+    valueInputOption: "RAW",
+    requestBody: { values }
+  });
+  return { imported: sheetClients.length, total: merged.length };
+}
+
 async function deleteGoogleEventForItem(req, db, item) {
   if (!googleReady() || !item?.googleEventId || !item.syncUser) return false;
   const user = db.users[item.syncUser];
@@ -1001,8 +1100,11 @@ async function handleApi(req, res) {
           "email",
           "profile",
           "https://www.googleapis.com/auth/calendar",
-          "https://www.googleapis.com/auth/calendar.events"
-        ]
+          "https://www.googleapis.com/auth/calendar.events",
+          "https://www.googleapis.com/auth/spreadsheets"
+        ],
+        include_granted_scopes: true,
+        prompt: "select_account"
       });
       sendJson(res, 200, { url: authUrl });
       return;
@@ -1022,8 +1124,11 @@ async function handleApi(req, res) {
         state: (req.headers.authorization || "").replace(/^Bearer\s+/i, ""),
         scope: [
           "https://www.googleapis.com/auth/calendar",
-          "https://www.googleapis.com/auth/calendar.events"
-        ]
+          "https://www.googleapis.com/auth/calendar.events",
+          "https://www.googleapis.com/auth/spreadsheets"
+        ],
+        include_granted_scopes: true,
+        prompt: "consent"
       });
       sendJson(res, 200, { url: authUrl });
       return;
@@ -1189,6 +1294,30 @@ async function handleApi(req, res) {
       return;
     }
 
+    if (url.pathname === "/api/settings" && req.method === "GET") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      const db = await readDbAsync();
+      sendJson(res, 200, { settings: db.settings || {}, billingLocks: db.billingLocks || [] });
+      return;
+    }
+
+    if (url.pathname === "/api/settings/billing" && req.method === "PUT") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      const body = await readBody(req);
+      const db = await readDbAsync();
+      db.settings = db.settings || {};
+      db.settings.billing = {
+        hourlyRate: Number(body.hourlyRate || 15),
+        kmRate: Number(body.kmRate || 0.22),
+        commuteKmPerDay: Number(body.commuteKmPerDay || 28)
+      };
+      await writeDbAsync(db);
+      sendJson(res, 200, { settings: db.settings });
+      return;
+    }
+
     if (url.pathname === "/api/debts" && req.method === "GET") {
       const user = await requireUser(req, res);
       if (!user) return;
@@ -1246,6 +1375,46 @@ async function handleApi(req, res) {
       }
       await writeDbAsync(db);
       sendJson(res, 200, { clients: db.clients });
+      return;
+    }
+
+    if (url.pathname === "/api/clients/sync" && req.method === "POST") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      const db = await readDbAsync();
+      const current = db.users[user.id];
+      const result = await syncClientsWithSheets(db, current);
+      await writeDbAsync(db);
+      sendJson(res, 200, { clients: db.clients || [], ...result });
+      return;
+    }
+
+    if (url.pathname === "/api/billing-locks" && req.method === "POST") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      if (user.role !== "boss") {
+        sendJson(res, 403, { error: "Samo Bojan lahko zaklene obracun." });
+        return;
+      }
+      const body = await readBody(req);
+      const from = String(body.from || "");
+      const to = String(body.to || "");
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to) || to < from) {
+        sendJson(res, 400, { error: "Datum zaklepa ni pravilen." });
+        return;
+      }
+      const db = await readDbAsync();
+      db.billingLocks.push({
+        id: crypto.randomUUID(),
+        from,
+        to,
+        note: String(body.note || "Obracunano").trim(),
+        createdBy: user.id,
+        createdByName: user.name,
+        createdAt: new Date().toISOString()
+      });
+      await writeDbAsync(db);
+      sendJson(res, 200, { billingLocks: db.billingLocks });
       return;
     }
 
@@ -1369,6 +1538,10 @@ async function handleApi(req, res) {
         sendJson(res, 403, { error: "Tega vnosa ne mores spreminjati." });
         return;
       }
+      if (user.role !== "boss" && entryIsLocked(db, db.entries[index]) && lockedFieldChanged(db.entries[index], entry)) {
+        sendJson(res, 403, { error: "To obdobje je obracunano. Ure, kilometrina in start od doma so zaklenjeni." });
+        return;
+      }
       db.entries[index] = {
         ...db.entries[index],
         ...entry,
@@ -1391,6 +1564,10 @@ async function handleApi(req, res) {
       const entry = db.entries.find((item) => item.id === id);
       if (!canManageEntry(user, entry)) {
         sendJson(res, 403, { error: "Tega vnosa ne mores izbrisati." });
+        return;
+      }
+      if (user.role !== "boss" && entryIsLocked(db, entry)) {
+        sendJson(res, 403, { error: "To obdobje je obracunano. Vnosa ne mores izbrisati." });
         return;
       }
       await deleteGoogleEventForItem(req, db, entry);

@@ -295,6 +295,9 @@
       justify-content: space-between;
       gap: 14px;
       padding: 14px 16px;
+      position: sticky;
+      top: 0;
+      z-index: 15;
     }
 
     .month-title {
@@ -302,6 +305,7 @@
       align-items: center;
       gap: 10px;
       min-width: 0;
+      flex-wrap: wrap;
     }
 
     .month-title h2 {
@@ -676,6 +680,14 @@
       border: 1px solid var(--line);
       border-radius: 8px;
       background: #f7faf7;
+    }
+
+    .compact-report-controls {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .report-setting {
+      text-align: left;
     }
 
     .report-controls label {
@@ -1220,6 +1232,13 @@
           <label for="quickKm">Km</label>
           <input id="quickKm" type="number" min="0" step="0.1" placeholder="0">
         </div>
+        <div class="control">
+          <label for="quickFromHome">Start</label>
+          <select id="quickFromHome">
+            <option value="false">Obi&#269;ajen</option>
+            <option value="true">Od doma</option>
+          </select>
+        </div>
       </div>
 
       <div class="control">
@@ -1247,6 +1266,8 @@
           <button class="icon-btn" id="prevMonth" type="button" title="Prej&#353;nji mesec">&lsaquo;</button>
           <h2 id="monthTitle"></h2>
           <button class="icon-btn" id="nextMonth" type="button" title="Naslednji mesec">&rsaquo;</button>
+          <button class="secondary" id="todayBtn" type="button">Danes</button>
+          <button class="secondary" id="syncClientsBtn" type="button">Sync stranke</button>
         </div>
         <div class="tools">
           <div class="view-switch" aria-label="Pogled">
@@ -1255,7 +1276,6 @@
             <button class="view-btn" id="reportViewBtn" type="button">Obra&#269;un</button>
           </div>
           <input class="search" id="clientSearch" placeholder="I&#353;&#269;i stranko, material ali opis">
-          <button class="secondary" id="todayBtn" type="button">Danes</button>
           <button class="secondary" id="exportCsv" type="button">Izvoz CSV</button>
           <button class="secondary" id="googleCalendar" type="button">Google sync</button>
           <button class="account-btn" id="accountBtn" type="button" title="Upravljanje ra&#269;una">
@@ -1323,6 +1343,12 @@
           </label>
           <button class="secondary" id="clearReportClient" type="button">Vse stranke</button>
           <button class="primary" id="exportReportExcel" type="button">Izvoz Excel</button>
+          <button class="secondary hidden" id="lockReportRange" type="button">Zakleni kot obra&#269;unano</button>
+        </div>
+        <div class="report-controls compact-report-controls">
+          <button class="secondary report-setting" data-setting="hourlyRate" type="button">Urna postavka: <strong id="hourlyRateLabel">15 EUR</strong></button>
+          <button class="secondary report-setting" data-setting="kmRate" type="button">Kilometrina: <strong id="kmRateLabel">0,22 EUR/km</strong></button>
+          <button class="secondary report-setting" data-setting="commuteKmPerDay" type="button">Dom-slu&#382;ba: <strong id="commuteKmLabel">28 km/dan</strong></button>
         </div>
         <div class="report-grid" id="reportSummary"></div>
         <div class="client-detail">
@@ -1376,6 +1402,12 @@
           </label>
           <label>Kilometri
             <input id="entryKm" type="number" min="0" step="0.1">
+          </label>
+          <label>Start
+            <select id="entryFromHome">
+              <option value="false">Obi&#269;ajen start</option>
+              <option value="true">Start od doma</option>
+            </select>
           </label>
           <label>Ra&#269;un
             <select id="entryInvoiceSent">
@@ -1508,6 +1540,8 @@
       selectedClient: "",
       expandedTodoPhotos: "",
       reportClient: "",
+      settings: { billing: { hourlyRate: 15, kmRate: 0.22, commuteKmPerDay: 28 } },
+      billingLocks: [],
       user: null,
       token: localStorage.getItem(tokenKey) || ""
     };
@@ -1587,13 +1621,57 @@
     }
 
     async function loadAll() {
-      const [entries, todos, debts, clients] = await Promise.all([api("/api/entries"), api("/api/todos"), api("/api/debts"), api("/api/clients")]);
+      const [entries, todos, debts, clients, settings] = await Promise.all([api("/api/entries"), api("/api/todos"), api("/api/debts"), api("/api/clients"), api("/api/settings")]);
       state.entries = entries.entries;
       state.todos = todos.todos;
       state.debts = debts.debts;
       state.clients = clients.clients;
+      state.settings = settings.settings || state.settings;
+      state.billingLocks = settings.billingLocks || [];
       refreshClientList();
       render();
+    }
+
+    async function saveBillingSettings(settings) {
+      const data = await api("/api/settings/billing", { method: "PUT", body: JSON.stringify(settings) });
+      state.settings = data.settings || state.settings;
+      renderReport();
+    }
+
+    async function syncClients() {
+      const data = await api("/api/clients/sync", { method: "POST", body: JSON.stringify({}) });
+      state.clients = data.clients || state.clients;
+      refreshClientList();
+      renderSearch();
+      renderReport();
+      alert(`Sync strank koncan. Iz Sheets prebrano: ${data.imported || 0}, skupaj strank: ${data.total || state.clients.length}.`);
+    }
+
+    async function lockCurrentReportRange() {
+      if (!confirm(`Zaklenem obdobje ${$("reportFrom").value} - ${$("reportTo").value} kot obracunano? Ibro potem ne bo mogel spreminjati ur in kilometrov v tem obdobju.`)) return;
+      const data = await api("/api/billing-locks", {
+        method: "POST",
+        body: JSON.stringify({ from: $("reportFrom").value, to: $("reportTo").value, note: "Obracunano" })
+      });
+      state.billingLocks = data.billingLocks || [];
+      alert("Obdobje je zaklenjeno kot obracunano.");
+    }
+
+    async function editBillingSetting(key) {
+      const billing = state.settings.billing || { hourlyRate: 15, kmRate: 0.22, commuteKmPerDay: 28 };
+      const labels = {
+        hourlyRate: "urna postavka EUR",
+        kmRate: "kilometrina EUR/km",
+        commuteKmPerDay: "kilometri dom-sluzba na dan"
+      };
+      const next = prompt(`Vpisi ${labels[key]}:`, billing[key]);
+      if (next === null) return;
+      const value = Number(String(next).replace(",", "."));
+      if (!Number.isFinite(value) || value < 0) {
+        alert("Vnesi pravilno stevilko.");
+        return;
+      }
+      await saveBillingSettings({ ...billing, [key]: value });
     }
 
     async function saveDebtToServer(debt) {
@@ -1747,7 +1825,8 @@
         syncUser: state.user?.id || "",
         km: status === "vacation" ? 0 : Number($("quickKm").value || 0),
         materialCost: 0,
-        notes: ""
+        notes: "",
+        fromHome: $("quickFromHome").value === "true"
       };
     }
 
@@ -2174,11 +2253,14 @@
     function reportTotals(entries) {
       const from = $("reportFrom").value;
       const to = $("reportTo").value;
+      const billing = state.settings.billing || { hourlyRate: 15, kmRate: 0.22, commuteKmPerDay: 28 };
       const counted = entries.filter((entry) => entry.status !== "vacation");
       const ibroEntries = counted.filter((entry) => (entry.syncUser || entry.createdBy) === "ibro");
       const workdayEntries = ibroEntries.filter((entry) => !["errand", "vacation"].includes(entry.status));
+      const fromHomeDays = new Set(workdayEntries.filter((entry) => entry.fromHome).map((entry) => entry.date));
+      const commuteDays = new Set(workdayEntries.map((entry) => entry.date).filter((date) => !fromHomeDays.has(date)));
       const ibroWorkdays = new Set(workdayEntries.map((entry) => entry.date)).size;
-      const commuteKm = ibroWorkdays * 28;
+      const commuteKm = commuteDays.size * billing.commuteKmPerDay;
       const enteredKm = ibroEntries.reduce((sum, entry) => sum + Number(entry.km || 0), 0);
       const kmTotal = enteredKm + commuteKm;
       const ibroHours = uniqueHours(ibroEntries);
@@ -2189,11 +2271,12 @@
       const bojanDebt = state.debts
         .filter((debt) => monthKeys.has(debt.month) && debt.person === "bojan")
         .reduce((sum, debt) => sum + Number(debt.amount || 0), 0);
-      const hoursPay = ibroHours * 15;
-      const kmPay = kmTotal * 0.22;
+      const hoursPay = ibroHours * billing.hourlyRate;
+      const kmPay = kmTotal * billing.kmRate;
       return {
         ibroHours,
         ibroWorkdays,
+        commuteDays: commuteDays.size,
         enteredKm,
         commuteKm,
         kmTotal,
@@ -2209,13 +2292,18 @@
       const entries = reportEntries();
       const todos = reportTodos();
       const totals = reportTotals(entries);
+      const billing = state.settings.billing || { hourlyRate: 15, kmRate: 0.22, commuteKmPerDay: 28 };
       const client = normalizeClientName($("reportClient").value || state.reportClient || "");
+      $("hourlyRateLabel").textContent = `${money(billing.hourlyRate)} EUR`;
+      $("kmRateLabel").textContent = `${money(billing.kmRate)} EUR/km`;
+      $("commuteKmLabel").textContent = `${billing.commuteKmPerDay.toLocaleString("sl-SI")} km/dan`;
+      $("lockReportRange").classList.toggle("hidden", state.user?.role !== "boss");
       $("clientDetailTitle").textContent = client ? `Stranka: ${client}` : "Vsa dela in opravila";
       $("clientDetailRange").textContent = `${formatDate($("reportFrom").value)} - ${formatDate($("reportTo").value)}`;
       $("reportSummary").innerHTML = [
-        ["Ibro ure", `${totals.ibroHours.toLocaleString("sl-SI", { maximumFractionDigits: 1 })} h x 15 EUR = ${money(totals.hoursPay)} EUR`],
-        ["Delovni dnevi", `${totals.ibroWorkdays} x 28 km = ${totals.commuteKm.toLocaleString("sl-SI")} km`],
-        ["Kilometrina", `${totals.kmTotal.toLocaleString("sl-SI", { maximumFractionDigits: 1 })} km x 0,22 EUR = ${money(totals.kmPay)} EUR`],
+        ["Ibro ure", `${totals.ibroHours.toLocaleString("sl-SI", { maximumFractionDigits: 1 })} h x ${money(billing.hourlyRate)} EUR = ${money(totals.hoursPay)} EUR`],
+        ["Dom-sluzba", `${totals.commuteDays} dni x ${billing.commuteKmPerDay.toLocaleString("sl-SI")} km = ${totals.commuteKm.toLocaleString("sl-SI")} km`],
+        ["Kilometrina", `${totals.kmTotal.toLocaleString("sl-SI", { maximumFractionDigits: 1 })} km x ${money(billing.kmRate)} EUR = ${money(totals.kmPay)} EUR`],
         ["Skupaj za izplacilo", `${money(totals.payout)} EUR`]
       ].map(([label, value]) => `<div class="stat"><strong>${escapeHtml(value)}</strong><span>${escapeHtml(label)}</span></div>`).join("");
 
@@ -2223,7 +2311,7 @@
       const entryRows = entries.map((entry) => `
         <div class="client-work-row">
           <strong>${formatDate(entry.date)}</strong>
-          <span>${escapeHtml(entry.client || statusLabels[entry.status])}<br><small>${entry.status === "vacation" ? "Dopust" : `${entry.start} - ${entry.end}, ${entry.status === "vacation" ? "0.00" : duration(entry).toFixed(2)} h`} | ${escapeHtml(entry.work || entry.material || "")} | racun: ${entry.invoiceSent ? "poslan" : "ni poslan"}</small></span>
+          <span>${escapeHtml(entry.client || statusLabels[entry.status])}<br><small>${entry.status === "vacation" ? "Dopust" : `${entry.start} - ${entry.end}, ${entry.status === "vacation" ? "0.00" : duration(entry).toFixed(2)} h`} | ${entry.fromHome ? "start od doma | " : ""}${escapeHtml(entry.work || entry.material || "")} | racun: ${entry.invoiceSent ? "poslan" : "ni poslan"}</small></span>
           <button class="secondary open-report-entry" type="button" data-entry-id="${escapeHtml(entry.id)}">Odpri</button>
         </div>
       `);
@@ -2249,16 +2337,17 @@
       const entries = reportEntries();
       const todos = reportTodos();
       const totals = reportTotals(entries);
+      const billing = state.settings.billing || { hourlyRate: 15, kmRate: 0.22, commuteKmPerDay: 28 };
       const rows = [
         ["INDUS URE obracun", "", "", ""],
         ["Obdobje", $("reportFrom").value, $("reportTo").value, ""],
         ["Stranka", $("reportClient").value || "Vse stranke", "", ""],
         [],
         ["Postavka", "Kolicina", "Cena", "Skupaj"],
-        ["Ibro ure", totals.ibroHours.toFixed(2), "15 EUR", totals.hoursPay.toFixed(2)],
+        ["Ibro ure", totals.ibroHours.toFixed(2), `${billing.hourlyRate} EUR`, totals.hoursPay.toFixed(2)],
         ["Vpisani km", totals.enteredKm.toFixed(1), "", ""],
-        ["Pot dom-sluzba", `${totals.ibroWorkdays} dni x 28 km`, "", totals.commuteKm.toFixed(1)],
-        ["Kilometrina skupaj", totals.kmTotal.toFixed(1), "0.22 EUR", totals.kmPay.toFixed(2)],
+        ["Pot dom-sluzba", `${totals.commuteDays} dni x ${billing.commuteKmPerDay} km`, "", totals.commuteKm.toFixed(1)],
+        ["Kilometrina skupaj", totals.kmTotal.toFixed(1), `${billing.kmRate} EUR`, totals.kmPay.toFixed(2)],
         ["Bojan dolg", "", "", totals.bojanDebt.toFixed(2)],
         ["Ibro dolg", "", "", `-${totals.ibroDebt.toFixed(2)}`],
         ["SKUPAJ", "", "", totals.payout.toFixed(2)],
@@ -2465,6 +2554,7 @@
       $("entryClient").value = entry.client || "";
       $("entryPeople").value = entry.people || "";
       $("entryKm").value = entry.km || "";
+      $("entryFromHome").value = entry.fromHome ? "true" : "false";
       $("entryInvoiceSent").value = entry.invoiceSent ? "true" : "false";
       $("entryWork").value = entry.work || "";
       $("entryMaterial").value = entry.material || "";
@@ -2529,7 +2619,8 @@
         km: status === "vacation" ? 0 : Number($("entryKm").value || 0),
         materialCost: 0,
         notes: $("entryNotes").value.trim(),
-        invoiceSent: $("entryInvoiceSent").value === "true"
+        invoiceSent: $("entryInvoiceSent").value === "true",
+        fromHome: $("entryFromHome").value === "true"
       };
 
       if (!validateEntry(entry)) return;
@@ -2770,6 +2861,7 @@
       $("quickWork").value = "";
       $("quickMaterial").value = "";
       $("quickKm").value = "";
+      $("quickFromHome").value = "false";
     });
     $("quickStatus").addEventListener("change", updateQuickErrandMode);
     $("quickLunch").addEventListener("click", () => applyErrandPreset("Malica"));
@@ -2845,6 +2937,10 @@
       renderReport();
     });
     $("exportReportExcel").addEventListener("click", exportReportExcel);
+    $("lockReportRange").addEventListener("click", () => lockCurrentReportRange().catch((error) => alert(error.message)));
+    document.querySelectorAll(".report-setting").forEach((button) => {
+      button.addEventListener("click", () => editBillingSetting(button.dataset.setting).catch((error) => alert(error.message)));
+    });
 
     $("clearClientFilter").addEventListener("click", () => {
       state.selectedClient = "";
@@ -2902,6 +2998,7 @@
       $("pageTodoDate").value = dateKey(new Date());
       render();
     });
+    $("syncClientsBtn").addEventListener("click", () => syncClients().catch((error) => alert(error.message)));
     $("clientSearch").addEventListener("input", renderSearch);
     $("exportCsv").addEventListener("click", exportCsv);
     $("googleCalendar").addEventListener("click", () => syncGoogle(true));
