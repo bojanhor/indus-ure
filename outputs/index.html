@@ -111,6 +111,13 @@
       gap: 16px;
     }
 
+    .sidebar .control,
+    .sidebar .row,
+    .sidebar .quick-presets,
+    #saveQuick {
+      display: none;
+    }
+
     .brand {
       display: grid;
       gap: 5px;
@@ -301,7 +308,8 @@
     }
 
     .month-title {
-      display: flex;
+      display: grid;
+      grid-template-columns: 38px 180px 38px auto;
       align-items: center;
       gap: 10px;
       min-width: 0;
@@ -312,6 +320,8 @@
       margin: 0;
       font-size: 24px;
       line-height: 1.1;
+      text-align: center;
+      white-space: nowrap;
     }
 
     .icon-btn {
@@ -727,9 +737,47 @@
       justify-self: end;
     }
 
+    .invoice-flags {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .invoice-flags label {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 12px;
+      color: var(--muted);
+      font-weight: 700;
+    }
+
     .client-detail {
       display: grid;
       gap: 12px;
+    }
+
+    .client-directory {
+      display: grid;
+      gap: 8px;
+    }
+
+    .client-row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 10px;
+      align-items: center;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+    }
+
+    .client-row strong,
+    .client-row span {
+      display: block;
     }
 
     .day-todo {
@@ -1077,7 +1125,7 @@
       }
       .view-switch {
         display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
+        grid-template-columns: repeat(4, minmax(0, 1fr));
         position: fixed;
         left: 12px;
         right: 12px;
@@ -1150,6 +1198,9 @@
       }
       .client-work-row button {
         justify-self: stretch;
+      }
+      .client-row {
+        grid-template-columns: 1fr;
       }
       .result { grid-template-columns: 1fr; gap: 5px; }
     }
@@ -1267,15 +1318,16 @@
           <h2 id="monthTitle"></h2>
           <button class="icon-btn" id="nextMonth" type="button" title="Naslednji mesec">&rsaquo;</button>
           <button class="secondary" id="todayBtn" type="button">Danes</button>
-          <button class="secondary" id="syncClientsBtn" type="button">Sync stranke</button>
         </div>
         <div class="tools">
           <div class="view-switch" aria-label="Pogled">
             <button class="view-btn active" id="calendarViewBtn" type="button">Koledar</button>
             <button class="view-btn" id="todosViewBtn" type="button">Opravila</button>
+            <button class="view-btn" id="clientsViewBtn" type="button">Stranke</button>
             <button class="view-btn" id="reportViewBtn" type="button">Obra&#269;un</button>
           </div>
           <input class="search" id="clientSearch" placeholder="I&#353;&#269;i stranko, material ali opis">
+          <button class="secondary" id="syncClientsBtn" type="button">Sync stranke</button>
           <button class="secondary" id="exportCsv" type="button">Izvoz CSV</button>
           <button class="secondary" id="googleCalendar" type="button">Google sync</button>
           <button class="account-btn" id="accountBtn" type="button" title="Upravljanje ra&#269;una">
@@ -1300,6 +1352,27 @@
       </section>
 
       <section class="panel search-panel" id="searchPanel"></section>
+
+      <section class="panel report-view clients-screen view-hidden">
+        <div class="report-controls">
+          <label>Naziv stranke
+            <input id="newClientName" placeholder="Naziv stranke">
+          </label>
+          <label>Search / vzdevek
+            <input id="newClientSearch" placeholder="Kako jo isces">
+          </label>
+          <label>Dav&#269;na / fiksni ID
+            <input id="newClientTax" placeholder="npr. SI12345678">
+          </label>
+          <button class="primary" id="addClientBtn" type="button">Dodaj stranko</button>
+          <button class="secondary" id="syncClientsFromTabBtn" type="button">Sync stranke</button>
+        </div>
+        <div class="todo-head">
+          <strong>Vse stranke</strong>
+          <span class="todo-meta" id="clientsCount"></span>
+        </div>
+        <div id="clientsList" class="client-directory"></div>
+      </section>
 
       <section class="panel todo-layout todos-view view-hidden">
         <div class="client-list" id="clientTodoList"></div>
@@ -1413,6 +1486,18 @@
             <select id="entryInvoiceSent">
               <option value="false">Ra&#269;un ni poslan</option>
               <option value="true">Ra&#269;un poslan</option>
+            </select>
+          </label>
+          <label>Pora&#269;unano
+            <select id="entryInvoiceSettled">
+              <option value="false">Ni pora&#269;unano</option>
+              <option value="true">Pora&#269;unano</option>
+            </select>
+          </label>
+          <label>Pla&#269;ano
+            <select id="entryInvoicePaid">
+              <option value="false">Ni pla&#269;ano</option>
+              <option value="true">Pla&#269;ano</option>
             </select>
           </label>
         </div>
@@ -1540,6 +1625,7 @@
       selectedClient: "",
       expandedTodoPhotos: "",
       reportClient: "",
+      reportClientId: "",
       settings: { billing: { hourlyRate: 15, kmRate: 0.22, commuteKmPerDay: 28 } },
       billingLocks: [],
       user: null,
@@ -1674,6 +1760,13 @@
       await saveBillingSettings({ ...billing, [key]: value });
     }
 
+    async function updateInvoiceFlag(input) {
+      const entry = state.entries.find((item) => item.id === input.dataset.entryId);
+      if (!entry) return;
+      await saveEntryToServer({ ...entry, [input.dataset.field]: input.checked });
+      renderReport();
+    }
+
     async function saveDebtToServer(debt) {
       const method = debt.id ? "PUT" : "POST";
       const path = debt.id ? `/api/debts/${debt.id}` : "/api/debts";
@@ -1695,6 +1788,7 @@
       state.clients = data.clients;
       refreshClientList();
       renderSearch();
+      renderClients();
     }
 
     async function saveEntryToServer(entry) {
@@ -1811,13 +1905,23 @@
       });
     }
 
+    function findClient(value) {
+      const input = normalizeText(value);
+      if (!input) return null;
+      return allClientRecords().find((client) => [client.clientId, client.id, client.name, client.search, client.taxId]
+        .filter(Boolean)
+        .some((field) => normalizeText(field) === input)) || null;
+    }
+
     function entryFromQuick() {
       const status = $("quickStatus").value;
+      const client = findClient($("quickClient").value);
       return {
         date: $("quickDate").value,
         start: status === "vacation" ? "00:00" : $("quickStart").value,
         end: status === "vacation" ? "23:59" : $("quickEnd").value,
-        client: ["errand", "vacation"].includes(status) ? "" : normalizeClientName($("quickClient").value),
+        client: ["errand", "vacation"].includes(status) ? "" : (client?.name || normalizeClientName($("quickClient").value)),
+        clientId: ["errand", "vacation"].includes(status) ? "" : (client?.clientId || client?.id || ""),
         status,
         work: status === "vacation" ? ($("quickWork").value.trim() || "Dopust") : $("quickWork").value.trim(),
         material: $("quickMaterial").value.trim(),
@@ -1831,9 +1935,11 @@
     }
 
     function todoFromPage() {
+      const client = findClient($("pageTodoClient").value);
       return {
         date: $("pageTodoDate").value,
-        client: normalizeClientName($("pageTodoClient").value),
+        client: client?.name || normalizeClientName($("pageTodoClient").value),
+        clientId: client?.clientId || client?.id || "",
         title: $("pageTodoTitle").value.trim(),
         notes: "",
         status: $("pageTodoStatus").value,
@@ -1878,10 +1984,15 @@
       document.querySelectorAll(".report-screen").forEach((element) => {
         element.classList.toggle("view-hidden", view !== "report");
       });
+      document.querySelectorAll(".clients-screen").forEach((element) => {
+        element.classList.toggle("view-hidden", view !== "clients");
+      });
       $("calendarViewBtn").classList.toggle("active", view === "calendar");
       $("todosViewBtn").classList.toggle("active", view === "todos");
+      $("clientsViewBtn").classList.toggle("active", view === "clients");
       $("reportViewBtn").classList.toggle("active", view === "report");
       if (view === "todos") renderTodos();
+      if (view === "clients") renderClients();
       if (view === "report") renderReport();
     }
 
@@ -1922,6 +2033,7 @@
         renderStats();
         renderSearch();
         renderTodos();
+        renderClients();
         renderReport();
       }
     }
@@ -2080,6 +2192,43 @@
       });
     }
 
+    function renderClients() {
+      const list = $("clientsList");
+      if (!list) return;
+      const records = allClientRecords();
+      $("clientsCount").textContent = `${records.length} strank`;
+      list.innerHTML = records.map((client) => `
+        <div class="client-row">
+          <div>
+            <strong>${escapeHtml(client.name)}</strong>
+            <span class="todo-meta">${escapeHtml([client.search, client.taxId, client.address, client.postal, client.city].filter(Boolean).join(" | "))}</span>
+            <span class="todo-meta">ID: ${escapeHtml(client.clientId || client.id || "-")}</span>
+          </div>
+          <button class="secondary open-client" type="button" data-client-id="${escapeHtml(client.clientId || client.id || "")}" data-client-name="${escapeHtml(client.name)}">Odpri</button>
+        </div>
+      `).join("");
+    }
+
+    async function addClientFromForm() {
+      const name = $("newClientName").value.trim();
+      if (!name) {
+        alert("Vpisi naziv stranke.");
+        return;
+      }
+      const taxId = $("newClientTax").value.trim().replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+      const clientId = taxId ? `tax:${taxId}` : "";
+      await saveClientToServer({
+        clientId,
+        name,
+        search: $("newClientSearch").value.trim() || name,
+        taxId
+      });
+      $("newClientName").value = "";
+      $("newClientSearch").value = "";
+      $("newClientTax").value = "";
+      renderClients();
+    }
+
     function renderTodoItems() {
       const items = $("todoItems");
       const title = $("todoPanelTitle");
@@ -2220,20 +2369,22 @@
     function reportEntries() {
       const from = $("reportFrom").value;
       const to = $("reportTo").value;
-      const client = normalizeClientName($("reportClient").value || state.reportClient || "");
+      const client = findClient(state.reportClientId || $("reportClient").value || state.reportClient || "");
+      const clientName = normalizeClientName($("reportClient").value || state.reportClient || "");
       return state.entries
         .filter((entry) => inDateRange(entry.date, from, to))
-        .filter((entry) => !client || normalizeText(entry.client) === normalizeText(client))
+        .filter((entry) => !clientName || entry.clientId === (client?.clientId || client?.id) || normalizeText(entry.client) === normalizeText(clientName))
         .sort((a, b) => `${a.date} ${a.start}`.localeCompare(`${b.date} ${b.start}`));
     }
 
     function reportTodos() {
       const from = $("reportFrom").value;
       const to = $("reportTo").value;
-      const client = normalizeClientName($("reportClient").value || state.reportClient || "");
+      const client = findClient(state.reportClientId || $("reportClient").value || state.reportClient || "");
+      const clientName = normalizeClientName($("reportClient").value || state.reportClient || "");
       return state.todos
         .filter((todo) => !todo.date || inDateRange(todo.date, from, to))
-        .filter((todo) => !client || normalizeText(todo.client) === normalizeText(client))
+        .filter((todo) => !clientName || todo.clientId === (client?.clientId || client?.id) || normalizeText(todo.client) === normalizeText(clientName))
         .sort(todoSort);
     }
 
@@ -2311,8 +2462,15 @@
       const entryRows = entries.map((entry) => `
         <div class="client-work-row">
           <strong>${formatDate(entry.date)}</strong>
-          <span>${escapeHtml(entry.client || statusLabels[entry.status])}<br><small>${entry.status === "vacation" ? "Dopust" : `${entry.start} - ${entry.end}, ${entry.status === "vacation" ? "0.00" : duration(entry).toFixed(2)} h`} | ${entry.fromHome ? "start od doma | " : ""}${escapeHtml(entry.work || entry.material || "")} | racun: ${entry.invoiceSent ? "poslan" : "ni poslan"}</small></span>
-          <button class="secondary open-report-entry" type="button" data-entry-id="${escapeHtml(entry.id)}">Odpri</button>
+          <span>${escapeHtml(entry.client || statusLabels[entry.status])}<br><small>${entry.status === "vacation" ? "Dopust" : `${entry.start} - ${entry.end}, ${entry.status === "vacation" ? "0.00" : duration(entry).toFixed(2)} h`} | ${entry.fromHome ? "start od doma | " : ""}${escapeHtml(entry.work || entry.material || "")}</small></span>
+          <span class="invoice-flags">
+            ${state.user?.role === "boss" ? `
+              <label><input class="invoice-flag" data-entry-id="${escapeHtml(entry.id)}" data-field="invoiceSent" type="checkbox" ${entry.invoiceSent ? "checked" : ""}> Poslan</label>
+              <label><input class="invoice-flag" data-entry-id="${escapeHtml(entry.id)}" data-field="invoiceSettled" type="checkbox" ${entry.invoiceSettled ? "checked" : ""}> Pora&#269;unano</label>
+              <label><input class="invoice-flag" data-entry-id="${escapeHtml(entry.id)}" data-field="invoicePaid" type="checkbox" ${entry.invoicePaid ? "checked" : ""}> Pla&#269;ano</label>
+            ` : `<small>racun: ${entry.invoiceSent ? "poslan" : "ni poslan"} | ${entry.invoicePaid ? "placano" : "ni placano"}</small>`}
+            <button class="secondary open-report-entry" type="button" data-entry-id="${escapeHtml(entry.id)}">Odpri</button>
+          </span>
         </div>
       `);
       const todoRows = todos.map((todo) => `
@@ -2325,8 +2483,9 @@
       detail.innerHTML = [...entryRows, ...todoRows].join("") || `<p class="todo-meta">Za ta izbor ni vnosov ali opravil.</p>`;
     }
 
-    function openClientReport(client) {
+    function openClientReport(client, clientId = "") {
       state.reportClient = client;
+      state.reportClientId = clientId;
       $("reportClient").value = client;
       $("clientSearch").value = client;
       setView("report");
@@ -2352,7 +2511,7 @@
         ["Ibro dolg", "", "", `-${totals.ibroDebt.toFixed(2)}`],
         ["SKUPAJ", "", "", totals.payout.toFixed(2)],
         [],
-        ["Datum", "Stranka", "Opis", "Ure", "Km", "Racun poslan", "Dodal"]
+        ["Datum", "Stranka", "Opis", "Ure", "Km", "Racun poslan", "Poracunano", "Placano", "Dodal"]
       ];
       entries.forEach((entry) => rows.push([
         entry.date,
@@ -2361,6 +2520,8 @@
         entry.status === "vacation" ? "0.00" : duration(entry).toFixed(2),
         entry.km || 0,
         entry.invoiceSent ? "DA" : "NE",
+        entry.invoiceSettled ? "DA" : "NE",
+        entry.invoicePaid ? "DA" : "NE",
         entry.createdByName || ""
       ]));
       rows.push([], ["Opravila"], ["Datum", "Stranka", "Opravilo", "Status", "Foto"]);
@@ -2408,25 +2569,33 @@
         if (!clean) return;
         const key = normalizeText(clean);
         const existing = map.get(key);
+        const source = typeof search === "object" ? search : { search };
         map.set(key, {
           name: existing?.name || clean,
-          search: [existing?.search || "", search || ""].filter(Boolean).join(" ")
+          search: [existing?.search || "", source.search || ""].filter(Boolean).join(" "),
+          clientId: existing?.clientId || source.clientId || source.id || "",
+          id: existing?.id || source.clientId || source.id || "",
+          taxId: existing?.taxId || source.taxId || "",
+          address: existing?.address || source.address || "",
+          city: existing?.city || source.city || "",
+          postal: existing?.postal || source.postal || ""
         });
       };
-      state.clients.forEach((client) => add(client.name, client.search));
+      state.clients.forEach((client) => add(client.name, client));
       state.entries.forEach((entry) => {
-        if (!["errand", "vacation"].includes(entry.status)) add(entry.client);
+        if (!["errand", "vacation"].includes(entry.status)) add(entry.client, { clientId: entry.clientId });
       });
-      state.todos.forEach((todo) => add(todo.client));
+      state.todos.forEach((todo) => add(todo.client, { clientId: todo.clientId }));
       return [...map.values()].sort((a, b) => a.name.localeCompare(b.name, "sl"));
     }
 
     function normalizeClientName(value) {
       const input = String(value || "").trim();
       if (!input) return "";
-      const exact = state.clients.find((client) => normalizeText(client.name) === normalizeText(input) || normalizeText(client.search) === normalizeText(input));
+      const records = allClientRecords();
+      const exact = records.find((client) => normalizeText(client.name) === normalizeText(input) || normalizeText(client.search) === normalizeText(input) || normalizeText(client.clientId) === normalizeText(input) || normalizeText(client.taxId) === normalizeText(input));
       if (exact) return exact.name;
-      const partial = state.clients.find((client) => clientMatches(client, input));
+      const partial = records.find((client) => clientMatches(client, input));
       return partial ? partial.name : input;
     }
 
@@ -2451,14 +2620,14 @@
         item.innerHTML = `
           <strong>Stranka</strong>
           <span></span>
-          <span>${escapeHtml(client.name)}<br><small>${escapeHtml(client.search || "")}</small></span>
+          <span>${escapeHtml(client.name)}<br><small>${escapeHtml([client.search, client.taxId, client.address].filter(Boolean).join(" | "))}</small></span>
           <span class="todo-chip">baza strank</span>
         `;
         item.addEventListener("click", () => {
           $("quickClient").value = client.name;
           $("pageTodoClient").value = client.name;
           state.selectedClient = client.name;
-          openClientReport(client.name);
+          openClientReport(client.name, client.clientId || client.id || "");
         });
         panel.appendChild(item);
       });
@@ -2556,6 +2725,8 @@
       $("entryKm").value = entry.km || "";
       $("entryFromHome").value = entry.fromHome ? "true" : "false";
       $("entryInvoiceSent").value = entry.invoiceSent ? "true" : "false";
+      $("entryInvoiceSettled").value = entry.invoiceSettled ? "true" : "false";
+      $("entryInvoicePaid").value = entry.invoicePaid ? "true" : "false";
       $("entryWork").value = entry.work || "";
       $("entryMaterial").value = entry.material || "";
       $("entryNotes").value = entry.notes || "";
@@ -2605,12 +2776,14 @@
 
     async function saveDialogEntry() {
       const status = state.selectedStatus;
+      const client = findClient($("entryClient").value);
       const entry = {
         id: $("entryId").value || undefined,
         date: $("entryDate").value,
         start: status === "vacation" ? "00:00" : $("entryStart").value,
         end: status === "vacation" ? "23:59" : $("entryEnd").value,
-        client: ["errand", "vacation"].includes(status) ? "" : normalizeClientName($("entryClient").value),
+        client: ["errand", "vacation"].includes(status) ? "" : (client?.name || normalizeClientName($("entryClient").value)),
+        clientId: ["errand", "vacation"].includes(status) ? "" : (client?.clientId || client?.id || ""),
         status,
         work: status === "vacation" ? ($("entryWork").value.trim() || "Dopust") : $("entryWork").value.trim(),
         material: $("entryMaterial").value.trim(),
@@ -2620,6 +2793,8 @@
         materialCost: 0,
         notes: $("entryNotes").value.trim(),
         invoiceSent: $("entryInvoiceSent").value === "true",
+        invoiceSettled: $("entryInvoiceSettled").value === "true",
+        invoicePaid: $("entryInvoicePaid").value === "true",
         fromHome: $("entryFromHome").value === "true"
       };
 
@@ -2651,7 +2826,7 @@
     }
 
     function exportCsv() {
-      const header = ["Datum", "Od", "Do", "Stranka", "Sodelavci", "Status", "Ure", "Km", "Racun poslan", "Delo", "Material", "Opombe", "Dodal", "Spremenil"];
+      const header = ["Datum", "Od", "Do", "Stranka", "Client ID", "Sodelavci", "Status", "Ure", "Km", "Racun poslan", "Poracunano", "Placano", "Delo", "Material", "Opombe", "Dodal", "Spremenil"];
       const rows = state.entries
         .slice()
         .sort((a, b) => `${a.date} ${a.start}`.localeCompare(`${b.date} ${b.start}`))
@@ -2660,11 +2835,14 @@
           entry.start,
           entry.end,
           entry.client,
+          entry.clientId || "",
           entry.people || "",
           statusLabels[entry.status],
           entry.status === "vacation" ? "0.00" : duration(entry).toFixed(2),
           entry.km || 0,
           entry.invoiceSent ? "DA" : "NE",
+          entry.invoiceSettled ? "DA" : "NE",
+          entry.invoicePaid ? "DA" : "NE",
           entry.work || "",
           entry.material || "",
           entry.notes || "",
@@ -2924,6 +3102,7 @@
 
     $("calendarViewBtn").addEventListener("click", () => setView("calendar"));
     $("todosViewBtn").addEventListener("click", () => setView("todos"));
+    $("clientsViewBtn").addEventListener("click", () => setView("clients"));
     $("reportViewBtn").addEventListener("click", () => setView("report"));
     $("reportFrom").addEventListener("change", renderReport);
     $("reportTo").addEventListener("change", renderReport);
@@ -2937,6 +3116,8 @@
       renderReport();
     });
     $("exportReportExcel").addEventListener("click", exportReportExcel);
+    $("addClientBtn").addEventListener("click", () => addClientFromForm().catch((error) => alert(error.message)));
+    $("syncClientsFromTabBtn").addEventListener("click", () => syncClients().catch((error) => alert(error.message)));
     $("lockReportRange").addEventListener("click", () => lockCurrentReportRange().catch((error) => alert(error.message)));
     document.querySelectorAll(".report-setting").forEach((button) => {
       button.addEventListener("click", () => editBillingSetting(button.dataset.setting).catch((error) => alert(error.message)));
@@ -2967,6 +3148,14 @@
     });
 
     $("clientDetailList").addEventListener("click", (event) => {
+      const invoiceInput = event.target.closest(".invoice-flag");
+      if (invoiceInput) {
+        updateInvoiceFlag(invoiceInput).catch((error) => {
+          invoiceInput.checked = !invoiceInput.checked;
+          alert(error.message);
+        });
+        return;
+      }
       const entryButton = event.target.closest(".open-report-entry");
       if (entryButton) {
         const entry = state.entries.find((item) => item.id === entryButton.dataset.entryId);
@@ -2981,6 +3170,11 @@
         state.expandedTodoPhotos = todo.id;
         setView("todos");
       }
+    });
+    $("clientsList").addEventListener("click", (event) => {
+      const button = event.target.closest(".open-client");
+      if (!button) return;
+      openClientReport(button.dataset.clientName, button.dataset.clientId);
     });
 
     $("refreshBtn").addEventListener("click", loadAll);

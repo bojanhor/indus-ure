@@ -171,14 +171,33 @@ function normalizeDb(db = {}) {
   }
 
   db.clients = db.clients
-    .map((client) => ({
-      id: client.id || crypto.randomUUID(),
-      name: String(client.name || "").trim(),
-      search: String(client.search || client.name || "").trim(),
-      createdBy: client.createdBy || "system",
-      createdAt: client.createdAt || new Date().toISOString()
-    }))
+    .map((client) => {
+      const stableClientId = client.clientId || client.id || crypto.randomUUID();
+      return {
+        id: stableClientId,
+        clientId: stableClientId,
+        name: String(client.name || "").trim(),
+        search: String(client.search || client.name || "").trim(),
+        email: String(client.email || "").trim(),
+        address: String(client.address || "").trim(),
+        city: String(client.city || "").trim(),
+        postal: String(client.postal || "").trim(),
+        country: String(client.country || "").trim(),
+        taxId: String(client.taxId || "").trim(),
+        vatPayer: Boolean(client.vatPayer),
+        createdBy: client.createdBy || "system",
+        createdAt: client.createdAt || new Date().toISOString()
+      };
+    })
     .filter((client) => client.name);
+
+  const clientByText = new Map();
+  for (const client of db.clients) {
+    [client.clientId, client.name, client.search, client.taxId].filter(Boolean).forEach((value) => {
+      clientByText.set(String(value).toLowerCase(), client);
+    });
+  }
+  const resolveClient = (value) => clientByText.get(String(value || "").trim().toLowerCase());
 
   if (!db.calendarToken || String(db.calendarToken).length < 24) {
     db.calendarToken = crypto.randomBytes(24).toString("hex");
@@ -231,9 +250,25 @@ function normalizeDb(db = {}) {
       next.invoiceSent = false;
       changed = true;
     }
+    if (typeof next.invoiceSettled !== "boolean") {
+      next.invoiceSettled = false;
+      changed = true;
+    }
+    if (typeof next.invoicePaid !== "boolean") {
+      next.invoicePaid = false;
+      changed = true;
+    }
     if (typeof next.fromHome !== "boolean") {
       next.fromHome = false;
       changed = true;
+    }
+    if (!next.clientId && next.client) {
+      const client = resolveClient(next.client);
+      if (client) {
+        next.clientId = client.clientId;
+        next.client = client.name;
+        changed = true;
+      }
     }
     return next;
   });
@@ -261,6 +296,14 @@ function normalizeDb(db = {}) {
     if (!next.syncUser) {
       next.syncUser = next.createdBy || "ibro";
       changed = true;
+    }
+    if (!next.clientId && next.client) {
+      const client = resolveClient(next.client);
+      if (client) {
+        next.clientId = client.clientId;
+        next.client = client.name;
+        changed = true;
+      }
     }
     if (typeof next.googleEventId !== "string") {
       next.googleEventId = "";
@@ -311,13 +354,24 @@ function readSeedClients() {
     const clients = JSON.parse(fs.readFileSync(clientsSeedFile, "utf8").replace(/^\uFEFF/, ""));
     if (!Array.isArray(clients)) return [];
     return clients
-      .map((client) => ({
-        id: client.id || crypto.randomUUID(),
-        name: String(client.name || "").trim(),
-        search: String(client.search || client.name || "").trim(),
-        createdBy: "import",
-        createdAt: new Date().toISOString()
-      }))
+      .map((client) => {
+        const stableClientId = client.clientId || client.id || crypto.randomUUID();
+        return {
+          id: stableClientId,
+          clientId: stableClientId,
+          name: String(client.name || "").trim(),
+          search: String(client.search || client.name || "").trim(),
+          email: String(client.email || "").trim(),
+          address: String(client.address || "").trim(),
+          city: String(client.city || "").trim(),
+          postal: String(client.postal || "").trim(),
+          country: String(client.country || "").trim(),
+          taxId: String(client.taxId || "").trim(),
+          vatPayer: Boolean(client.vatPayer),
+          createdBy: "import",
+          createdAt: new Date().toISOString()
+        };
+      })
       .filter((client) => client.name);
   } catch {
     return [];
@@ -485,12 +539,21 @@ function mergeClientList(existingClients, incomingClients, source) {
   const add = (client) => {
     const name = String(client.name || "").trim();
     if (!name) return;
-    const key = name.toLowerCase();
+    const key = String(client.clientId || client.id || client.taxId || name).toLowerCase();
     const previous = map.get(key);
+    const clientId = previous?.clientId || client.clientId || client.id || (client.taxId ? `tax:${client.taxId}` : "");
     map.set(key, {
-      id: previous?.id || client.id || crypto.randomUUID(),
+      id: clientId || previous?.id || client.id || crypto.randomUUID(),
+      clientId: clientId || previous?.clientId || previous?.id || client.id || "",
       name: previous?.name || name,
       search: [previous?.search || "", String(client.search || name).trim()].filter(Boolean).join(" "),
+      taxId: previous?.taxId || client.taxId || "",
+      email: previous?.email || client.email || "",
+      address: previous?.address || client.address || "",
+      city: previous?.city || client.city || "",
+      postal: previous?.postal || client.postal || "",
+      country: previous?.country || client.country || "",
+      vatPayer: Boolean(previous?.vatPayer || client.vatPayer),
       createdBy: previous?.createdBy || client.createdBy || source || "sync",
       createdAt: previous?.createdAt || client.createdAt || new Date().toISOString()
     });
@@ -498,6 +561,16 @@ function mergeClientList(existingClients, incomingClients, source) {
   (existingClients || []).forEach(add);
   (incomingClients || []).forEach(add);
   return [...map.values()].sort((a, b) => a.name.localeCompare(b.name, "sl"));
+}
+
+function attachResolvedClient(db, item) {
+  if (!item.client && !item.clientId) return item;
+  const wanted = String(item.clientId || item.client || "").trim().toLowerCase();
+  const client = (db.clients || []).find((row) => [row.clientId, row.id, row.name, row.search, row.taxId]
+    .filter(Boolean)
+    .some((value) => String(value).trim().toLowerCase() === wanted));
+  if (!client) return item;
+  return { ...item, clientId: client.clientId || client.id, client: client.name };
 }
 
 async function getSessionUser(req) {
@@ -533,6 +606,7 @@ function cleanEntry(input) {
     start: String(input.start || ""),
     end: String(input.end || ""),
     client: String(input.client || "").trim(),
+    clientId: String(input.clientId || "").trim(),
     status: ["billed", "warranty", "unbilled", "errand", "vacation"].includes(input.status) ? input.status : "unbilled",
     work: String(input.work || "").trim(),
     material: String(input.material || "").trim(),
@@ -542,9 +616,14 @@ function cleanEntry(input) {
     materialCost: Number(input.materialCost || 0),
     notes: String(input.notes || "").trim(),
     invoiceSent: Boolean(input.invoiceSent),
+    invoiceSettled: Boolean(input.invoiceSettled),
+    invoicePaid: Boolean(input.invoicePaid),
     fromHome: Boolean(input.fromHome)
   };
-  if (["errand", "vacation"].includes(entry.status)) entry.client = "";
+  if (["errand", "vacation"].includes(entry.status)) {
+    entry.client = "";
+    entry.clientId = "";
+  }
   if (entry.status === "vacation") {
     entry.start = entry.start || "00:00";
     entry.end = entry.end || "23:59";
@@ -568,6 +647,7 @@ function cleanTodo(input) {
     title: String(input.title || "").trim(),
     date: String(input.date || ""),
     client: String(input.client || "").trim(),
+    clientId: String(input.clientId || "").trim(),
     notes: String(input.notes || "").trim(),
     status: ["open", "in_progress"].includes(input.status) ? input.status : "open",
     order: Number.isFinite(Number(input.order)) ? Number(input.order) : 0,
@@ -588,9 +668,19 @@ function cleanTodo(input) {
 }
 
 function cleanClient(input) {
+  const clientId = String(input.clientId || input.id || "").trim() || `internal:${crypto.randomUUID()}`;
   return {
+    id: clientId,
+    clientId,
     name: String(input.name || "").trim(),
-    search: String(input.search || input.name || "").trim()
+    search: String(input.search || input.name || "").trim(),
+    email: String(input.email || "").trim(),
+    address: String(input.address || "").trim(),
+    city: String(input.city || "").trim(),
+    postal: String(input.postal || "").trim(),
+    country: String(input.country || "").trim(),
+    taxId: String(input.taxId || "").trim(),
+    vatPayer: Boolean(input.vatPayer)
   };
 }
 
@@ -1362,9 +1452,12 @@ async function handleApi(req, res) {
         return;
       }
       const db = await readDbAsync();
-      const existing = (db.clients || []).find((item) => item.name.toLowerCase() === client.name.toLowerCase());
+      const existing = (db.clients || []).find((item) => String(item.clientId || item.id || "").toLowerCase() === String(client.clientId || "").toLowerCase() || item.name.toLowerCase() === client.name.toLowerCase());
       if (existing) {
         existing.search = client.search || existing.search || existing.name;
+        existing.taxId = client.taxId || existing.taxId || "";
+        existing.clientId = existing.clientId || client.clientId || existing.id;
+        existing.id = existing.clientId;
       } else {
         db.clients.push({
           id: crypto.randomUUID(),
@@ -1461,7 +1554,7 @@ async function handleApi(req, res) {
     if (url.pathname === "/api/todos" && req.method === "POST") {
       const user = await requireUser(req, res);
       if (!user) return;
-      const todo = cleanTodo(await readBody(req));
+      let todo = cleanTodo(await readBody(req));
       const validation = validateTodo(todo);
       if (validation) {
         sendJson(res, 400, { error: validation });
@@ -1469,6 +1562,7 @@ async function handleApi(req, res) {
       }
       const now = new Date().toISOString();
       const db = await readDbAsync();
+      todo = attachResolvedClient(db, todo);
       const maxOrder = db.todos.reduce((max, item) => Math.max(max, Number(item.order || 0)), 0);
       db.todos.push({
         id: crypto.randomUUID(),
@@ -1492,7 +1586,7 @@ async function handleApi(req, res) {
     if (url.pathname === "/api/entries" && req.method === "POST") {
       const user = await requireUser(req, res);
       if (!user) return;
-      const entry = cleanEntry(await readBody(req));
+      let entry = cleanEntry(await readBody(req));
       const validation = validateEntry(entry);
       if (validation) {
         sendJson(res, 400, { error: validation });
@@ -1500,6 +1594,7 @@ async function handleApi(req, res) {
       }
       const now = new Date().toISOString();
       const db = await readDbAsync();
+      entry = attachResolvedClient(db, entry);
       db.entries.push({
         id: crypto.randomUUID(),
         ...entry,
@@ -1522,13 +1617,14 @@ async function handleApi(req, res) {
       const user = await requireUser(req, res);
       if (!user) return;
       const id = decodeURIComponent(match[1]);
-      const entry = cleanEntry(await readBody(req));
+      let entry = cleanEntry(await readBody(req));
       const validation = validateEntry(entry);
       if (validation) {
         sendJson(res, 400, { error: validation });
         return;
       }
       const db = await readDbAsync();
+      entry = attachResolvedClient(db, entry);
       const index = db.entries.findIndex((item) => item.id === id);
       if (index < 0) {
         sendJson(res, 404, { error: "Vnos ne obstaja." });
@@ -1582,13 +1678,14 @@ async function handleApi(req, res) {
       const user = await requireUser(req, res);
       if (!user) return;
       const id = decodeURIComponent(todoMatch[1]);
-      const todo = cleanTodo(await readBody(req));
+      let todo = cleanTodo(await readBody(req));
       const validation = validateTodo(todo);
       if (validation) {
         sendJson(res, 400, { error: validation });
         return;
       }
       const db = await readDbAsync();
+      todo = attachResolvedClient(db, todo);
       const index = db.todos.findIndex((item) => item.id === id);
       if (index < 0) {
         sendJson(res, 404, { error: "Opravilo ne obstaja." });
