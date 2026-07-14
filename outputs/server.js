@@ -5,7 +5,9 @@ const crypto = require("crypto");
 const os = require("os");
 
 const PORT = Number(process.env.PORT || 8123);
-const HOST = process.env.HOST || "0.0.0.0";
+const HOST = process.env.HOST || "127.0.0.1";
+const NODE_ENV = process.env.NODE_ENV || "development";
+const PUBLIC_BASE_URL = String(process.env.PUBLIC_BASE_URL || "").replace(/\/$/, "");
 const root = __dirname;
 const dataDir = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(root, "data");
 const dbFile = path.join(dataDir, "db.json");
@@ -21,8 +23,30 @@ const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || "";
 const GOOGLE_REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI || "";
 const GOOGLE_SHEETS_ID = process.env.GOOGLE_SHEETS_ID || "";
 const GOOGLE_SHEETS_RANGE = process.env.GOOGLE_SHEETS_RANGE || "Stranke!A:B";
+const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 let pgPool = null;
 let pgReady = null;
+let mutationQueue = Promise.resolve();
+
+const IMAGE_SIGNATURES = {
+  png: (buffer) => buffer.length >= 8 && buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])),
+  jpeg: (buffer) => buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff,
+  webp: (buffer) => buffer.length >= 12 && buffer.subarray(0, 4).toString("ascii") === "RIFF" && buffer.subarray(8, 12).toString("ascii") === "WEBP"
+};
+
+function validImageDataUrl(value, maxEncodedLength) {
+  if (typeof value !== "string" || value.length > maxEncodedLength) return false;
+  const match = value.match(/^data:image\/(png|jpe?g|webp);base64,([A-Za-z0-9+/]+={0,2})$/);
+  if (!match) return false;
+  const type = match[1] === "jpg" ? "jpeg" : match[1];
+  try {
+    const buffer = Buffer.from(match[2], "base64");
+    if (!buffer.length || !IMAGE_SIGNATURES[type]?.(buffer)) return false;
+    return buffer.toString("base64").replace(/=+$/, "") === match[2].replace(/=+$/, "");
+  } catch {
+    return false;
+  }
+}
 
 function hashPassword(password, salt = crypto.randomBytes(16).toString("hex")) {
   const hash = crypto.pbkdf2Sync(String(password), salt, 120000, 32, "sha256").toString("hex");
@@ -67,6 +91,7 @@ const defaultUsers = {
 
 const sessions = new Map();
 const pendingGoogleLogins = new Map();
+const pendingGoogleConnections = new Map();
 
 function allowedGoogleUsers(db) {
   return Object.values(db.users || {}).filter((user) => user.email);
@@ -100,6 +125,10 @@ function normalizeDb(db = {}) {
     }
     if (!db.users[id].google) {
       db.users[id].google = { tokens: null, calendarId: "", calendarName: "", connectedAt: "" };
+      changed = true;
+    }
+    if (db.users[id].avatar && !validImageDataUrl(db.users[id].avatar, 1_500_000)) {
+      db.users[id].avatar = "";
       changed = true;
     }
     if (resetUserPasswords) {
@@ -326,7 +355,7 @@ function normalizeDb(db = {}) {
         createdByName: photo.createdByName || next.createdByName || "",
         createdAt: photo.createdAt || new Date().toISOString()
       }))
-      .filter((photo) => photo.data.startsWith("data:image/"))
+      .filter((photo) => validImageDataUrl(photo.data, 700_000))
       .slice(0, 8);
     return next;
   });
@@ -461,25 +490,37 @@ async function writeDbAsync(db) {
   );
 }
 
+function securityHeaders(extra = {}) {
+  return {
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+    "X-Frame-Options": "DENY",
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+    "Content-Security-Policy": "default-src 'self'; base-uri 'self'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; img-src 'self' data: blob:; object-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'",
+    ...extra
+  };
+}
+
 function sendJson(res, status, data) {
-  res.writeHead(status, {
+  res.writeHead(status, securityHeaders({
     "Content-Type": "application/json; charset=utf-8",
     "Cache-Control": "no-store"
-  });
+  }));
   res.end(JSON.stringify(data));
 }
 
 function absoluteBaseUrl(req) {
+  if (PUBLIC_BASE_URL) return PUBLIC_BASE_URL;
   const proto = req.headers["x-forwarded-proto"] || (req.socket.encrypted ? "https" : "http");
   const host = req.headers["x-forwarded-host"] || req.headers.host;
   return `${proto}://${host}`;
 }
 
 function sendText(res, status, text, type) {
-  res.writeHead(status, {
-    "Content-Type": `${type}; charset=utf-8`,
+  res.writeHead(status, securityHeaders({
+    "Content-Type": type.includes("charset=") ? type : `${type}; charset=utf-8`,
     "Cache-Control": "no-store"
-  });
+  }));
   res.end(text);
 }
 
@@ -521,6 +562,13 @@ function canManageEntry(user, entry) {
   if (!entry) return false;
   if (user.role === "boss") return true;
   return (entry.syncUser || entry.createdBy) === user.id;
+}
+
+function syncUserForRequest(user, requested, fallback = "") {
+  const wanted = ["bojan", "ibro"].includes(requested) ? requested : "";
+  if (user.role === "boss") return wanted || fallback || user.id;
+  if (fallback && fallback !== user.id) return fallback;
+  return user.id;
 }
 
 function entryIsLocked(db, entry) {
@@ -573,13 +621,22 @@ function attachResolvedClient(db, item) {
   return { ...item, clientId: client.clientId || client.id, client: client.name };
 }
 
-async function getSessionUser(req) {
+function sessionTokenFromRequest(req) {
   const auth = req.headers.authorization || "";
-  const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
-  const userId = sessions.get(token);
-  if (!userId) return null;
+  return auth.startsWith("Bearer ") ? auth.slice(7) : "";
+}
+
+async function getSessionUser(req) {
+  const token = sessionTokenFromRequest(req);
+  const session = sessions.get(token);
+  if (!session) return null;
+  if (session.expiresAt <= Date.now()) {
+    sessions.delete(token);
+    return null;
+  }
+  session.expiresAt = Date.now() + SESSION_TTL_MS;
   const db = await readDbAsync();
-  return db.users[userId] || null;
+  return db.users[session.userId] || null;
 }
 
 async function requireUser(req, res) {
@@ -662,7 +719,7 @@ function cleanTodo(input) {
         createdByName: photo.createdByName || "",
         createdAt: photo.createdAt || new Date().toISOString()
       }))
-      .filter((photo) => photo.data.startsWith("data:image/"))
+      .filter((photo) => validImageDataUrl(photo.data, 700_000))
       .slice(0, 8)
   };
 }
@@ -1125,42 +1182,98 @@ async function deleteGoogleEventForItem(req, db, item) {
   }
 }
 
+const STATIC_TYPES = {
+  ".html": "text/html; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".webp": "image/webp",
+  ".ico": "image/x-icon",
+  ".woff": "font/woff",
+  ".woff2": "font/woff2"
+};
+
 function serveStatic(req, res) {
-  const url = new URL(req.url, `http://${req.headers.host}`);
-  const pathname = url.pathname === "/" ? "/index.html" : url.pathname;
-  const filePath = path.normalize(path.join(root, pathname));
-  if (!filePath.startsWith(root)) {
-    res.writeHead(403);
-    res.end("Forbidden");
+  if (!['GET', 'HEAD'].includes(req.method)) {
+    res.writeHead(405, securityHeaders({
+      "Content-Type": "text/plain; charset=utf-8",
+      "Allow": "GET, HEAD"
+    }));
+    res.end(req.method === "HEAD" ? undefined : "Method not allowed");
     return;
   }
-  fs.readFile(filePath, (err, data) => {
-    if (err) {
-      fs.readFile(path.join(root, "index.html"), (indexErr, indexData) => {
-        if (indexErr) {
-          res.writeHead(404);
-          res.end("Not found");
-          return;
-        }
-        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-        res.end(indexData);
-      });
+
+  let pathname;
+  try {
+    const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+    pathname = decodeURIComponent(url.pathname);
+  } catch {
+    sendText(res, 400, "Bad request", "text/plain");
+    return;
+  }
+
+  let filePath;
+  let cacheControl = "no-store";
+  if (pathname === "/" || pathname === "/index.html") {
+    filePath = path.join(root, "index.html");
+  } else if (pathname.startsWith("/assets/")) {
+    const assetsRoot = path.join(root, "assets");
+    filePath = path.resolve(root, `.${pathname}`);
+    if (filePath !== assetsRoot && !filePath.startsWith(`${assetsRoot}${path.sep}`)) {
+      sendText(res, 404, "Not found", "text/plain");
       return;
     }
-    const type = filePath.endsWith(".html")
-      ? "text/html; charset=utf-8"
-      : filePath.endsWith(".js")
-        ? "text/javascript; charset=utf-8"
-        : "text/plain; charset=utf-8";
-    res.writeHead(200, { "Content-Type": type });
-    res.end(data);
+    cacheControl = "public, max-age=86400";
+  } else {
+    sendText(res, 404, "Not found", "text/plain");
+    return;
+  }
+
+  fs.readFile(filePath, (err, data) => {
+    if (err) {
+      sendText(res, 404, "Not found", "text/plain");
+      return;
+    }
+    const type = STATIC_TYPES[path.extname(filePath).toLowerCase()];
+    if (!type) {
+      sendText(res, 404, "Not found", "text/plain");
+      return;
+    }
+    res.writeHead(200, securityHeaders({
+      "Content-Type": type,
+      "Cache-Control": cacheControl,
+      "Content-Length": data.length
+    }));
+    if (req.method === "HEAD") {
+      res.end();
+    } else {
+      res.end(data);
+    }
   });
+}
+
+function cleanupPendingGoogleStates() {
+  const cutoff = Date.now() - 10 * 60 * 1000;
+  for (const [state, startedAt] of pendingGoogleLogins) {
+    if (startedAt < cutoff) pendingGoogleLogins.delete(state);
+  }
+  for (const [state, pending] of pendingGoogleConnections) {
+    if (pending.startedAt < cutoff) pendingGoogleConnections.delete(state);
+  }
 }
 
 async function handleApi(req, res) {
   const url = new URL(req.url, `http://${req.headers.host}`);
 
   try {
+    if (url.pathname === "/api/health" && req.method === "GET") {
+      if (DATABASE_URL) await getPgPool().query("select 1");
+      sendJson(res, 200, { ok: true });
+      return;
+    }
+
     if (url.pathname === "/api/google/status" && req.method === "GET") {
       const user = await requireUser(req, res);
       if (!user) return;
@@ -1175,24 +1288,17 @@ async function handleApi(req, res) {
 
     if (url.pathname === "/api/auth/google-url" && req.method === "GET") {
       if (!googleReady()) {
-        sendJson(res, 400, { error: "Google prijava se ni nastavljena v Render Environment." });
+        sendJson(res, 400, { error: "Google prijava se ni nastavljena na strezniku." });
         return;
       }
+      cleanupPendingGoogleStates();
       const state = `login:${crypto.randomBytes(24).toString("hex")}`;
       pendingGoogleLogins.set(state, Date.now());
       const auth = googleClient(req);
       const authUrl = auth.generateAuthUrl({
-        access_type: "offline",
-        prompt: "consent",
+        access_type: "online",
         state,
-        scope: [
-          "openid",
-          "email",
-          "profile",
-          "https://www.googleapis.com/auth/calendar",
-          "https://www.googleapis.com/auth/calendar.events",
-          "https://www.googleapis.com/auth/spreadsheets"
-        ],
+        scope: ["openid", "email", "profile"],
         include_granted_scopes: true,
         prompt: "select_account"
       });
@@ -1204,17 +1310,18 @@ async function handleApi(req, res) {
       const user = await requireUser(req, res);
       if (!user) return;
       if (!googleReady()) {
-        sendJson(res, 400, { error: "Google OAuth se ni nastavljen v Render Environment." });
+        sendJson(res, 400, { error: "Google OAuth se ni nastavljen na strezniku." });
         return;
       }
+      cleanupPendingGoogleStates();
+      const state = `connect:${crypto.randomBytes(24).toString("hex")}`;
+      pendingGoogleConnections.set(state, { userId: user.id, startedAt: Date.now() });
       const auth = googleClient(req);
       const authUrl = auth.generateAuthUrl({
         access_type: "offline",
-        prompt: "consent",
-        state: (req.headers.authorization || "").replace(/^Bearer\s+/i, ""),
+        state,
         scope: [
           "https://www.googleapis.com/auth/calendar",
-          "https://www.googleapis.com/auth/calendar.events",
           "https://www.googleapis.com/auth/spreadsheets"
         ],
         include_granted_scopes: true,
@@ -1231,6 +1338,15 @@ async function handleApi(req, res) {
       }
       const token = url.searchParams.get("state") || "";
       const code = url.searchParams.get("code") || "";
+      const oauthError = url.searchParams.get("error") || "";
+      if (oauthError) {
+        sendText(res, 400, "Google prijava oziroma povezava je bila preklicana.", "text/plain");
+        return;
+      }
+      if (!code) {
+        sendText(res, 400, "Google ni vrnil avtorizacijske kode.", "text/plain");
+        return;
+      }
       if (token.startsWith("login:")) {
         const startedAt = pendingGoogleLogins.get(token);
         pendingGoogleLogins.delete(token);
@@ -1251,17 +1367,8 @@ async function handleApi(req, res) {
           sendText(res, 403, "Ta Google racun nima dostopa do INDUS URE. Dovoljena sta samo Ibro in Bojan.", "text/plain");
           return;
         }
-        user.google = user.google || {};
-        user.google.tokens = {
-          ...(user.google.tokens || {}),
-          ...result.tokens
-        };
-        user.google.connectedAt = new Date().toISOString();
-        user.google.calendarId = user.google.calendarId || "";
-        user.google.calendarName = user.google.calendarName || "";
         const sessionToken = crypto.randomBytes(24).toString("hex");
-        sessions.set(sessionToken, user.id);
-        await writeDbAsync(db);
+        sessions.set(sessionToken, { userId: user.id, expiresAt: Date.now() + SESSION_TTL_MS });
         const html = `<!doctype html>
 <html lang="sl">
 <head>
@@ -1280,17 +1387,25 @@ async function handleApi(req, res) {
         sendText(res, 200, html, "text/html; charset=utf-8");
         return;
       }
-      const userId = sessions.get(token);
-      if (!userId) {
+      const pending = pendingGoogleConnections.get(token);
+      pendingGoogleConnections.delete(token);
+      if (!pending || Date.now() - pending.startedAt > 10 * 60 * 1000) {
         sendText(res, 401, "Prijava je potekla. Zapri to okno, prijavi se v INDUS URE in poskusi znova.", "text/plain");
         return;
       }
       const auth = googleClient(req);
       const result = await auth.getToken(code);
       const db = await readDbAsync();
-      const user = db.users[userId];
+      const user = db.users[pending.userId];
+      if (!user) {
+        sendText(res, 401, "Uporabnik ne obstaja vec.", "text/plain");
+        return;
+      }
       user.google = user.google || {};
-      user.google.tokens = result.tokens;
+      user.google.tokens = {
+        ...(user.google.tokens || {}),
+        ...result.tokens
+      };
       user.google.connectedAt = new Date().toISOString();
       user.google.calendarId = user.google.calendarId || "";
       user.google.calendarName = user.google.calendarName || "";
@@ -1325,6 +1440,12 @@ async function handleApi(req, res) {
       return;
     }
 
+    if (url.pathname === "/api/logout" && req.method === "POST") {
+      sessions.delete(sessionTokenFromRequest(req));
+      sendJson(res, 200, { ok: true });
+      return;
+    }
+
     if (url.pathname === "/api/me") {
       const user = await requireUser(req, res);
       if (!user) return;
@@ -1338,18 +1459,18 @@ async function handleApi(req, res) {
       const body = await readBody(req);
       const db = await readDbAsync();
       const current = db.users[user.id];
-      const name = String(body.name || "").trim();
+      const name = String(body.name || "").trim().slice(0, 120);
       const avatar = String(body.avatar || "");
       if (name.length < 2) {
         sendJson(res, 400, { error: "Ime mora imeti vsaj 2 znaka." });
         return;
       }
-      if (avatar && !avatar.startsWith("data:image/")) {
+      if (avatar && !validImageDataUrl(avatar, 1_500_000)) {
         sendJson(res, 400, { error: "Slika mora biti slikovna datoteka." });
         return;
       }
       current.name = name;
-      current.avatar = avatar.slice(0, 1_500_000);
+      current.avatar = avatar;
       await writeDbAsync(db);
       sendJson(res, 200, { user: publicUser(current) });
       return;
@@ -1568,7 +1689,7 @@ async function handleApi(req, res) {
         id: crypto.randomUUID(),
         ...todo,
         photos: stampTodoPhotos(todo, user),
-        syncUser: todo.syncUser || user.id,
+        syncUser: syncUserForRequest(user, todo.syncUser),
         order: todo.order || maxOrder + 1,
         createdBy: user.id,
         createdByName: user.name,
@@ -1598,7 +1719,7 @@ async function handleApi(req, res) {
       db.entries.push({
         id: crypto.randomUUID(),
         ...entry,
-        syncUser: entry.syncUser || user.id,
+        syncUser: syncUserForRequest(user, entry.syncUser),
         createdBy: user.id,
         createdByName: user.name,
         createdAt: now,
@@ -1641,7 +1762,7 @@ async function handleApi(req, res) {
       db.entries[index] = {
         ...db.entries[index],
         ...entry,
-        syncUser: entry.syncUser || db.entries[index].syncUser || user.id,
+        syncUser: syncUserForRequest(user, entry.syncUser, db.entries[index].syncUser),
         updatedBy: user.id,
         updatedByName: user.name,
         updatedAt: new Date().toISOString(),
@@ -1695,7 +1816,7 @@ async function handleApi(req, res) {
         ...db.todos[index],
         ...todo,
         photos: stampTodoPhotos(todo, user),
-        syncUser: todo.syncUser || db.todos[index].syncUser || user.id,
+        syncUser: syncUserForRequest(user, todo.syncUser, db.todos[index].syncUser),
         updatedBy: user.id,
         updatedByName: user.name,
         updatedAt: new Date().toISOString(),
@@ -1721,7 +1842,9 @@ async function handleApi(req, res) {
 
     sendJson(res, 404, { error: "API pot ne obstaja." });
   } catch (error) {
-    sendJson(res, 500, { error: error.message || "Napaka na strezniku." });
+    console.error("API napaka:", error);
+    const message = NODE_ENV === "production" ? "Napaka na strezniku." : (error.message || "Napaka na strezniku.");
+    sendJson(res, 500, { error: message });
   }
 }
 
@@ -1735,7 +1858,9 @@ async function handleCalendarFeed(req, res) {
     }
     sendText(res, 200, buildCalendarIcs(db), "text/calendar");
   } catch (error) {
-    sendText(res, 500, error.message || "Napaka na strezniku.", "text/plain");
+    console.error("Napaka koledarskega feeda:", error);
+    const message = NODE_ENV === "production" ? "Napaka na strezniku." : (error.message || "Napaka na strezniku.");
+    sendText(res, 500, message, "text/plain");
   }
 }
 
@@ -1746,7 +1871,24 @@ function networkUrls() {
     .map((item) => `http://${item.address}:${PORT}`);
 }
 
+function handleUnexpectedRequestError(error, res) {
+  console.error("Nepricakovana napaka zahtevka:", error);
+  if (!res.headersSent) {
+    sendJson(res, 500, { error: "Napaka na strezniku." });
+  } else {
+    res.destroy();
+  }
+}
+
+function runSerializedMutation(req, res) {
+  const execution = mutationQueue.then(() => handleApi(req, res));
+  mutationQueue = execution.catch((error) => handleUnexpectedRequestError(error, res));
+}
+
 async function start() {
+  if (NODE_ENV === "production" && !DATABASE_URL) {
+    throw new Error("V produkciji mora biti nastavljen DATABASE_URL.");
+  }
   if (DATABASE_URL) {
     await ensurePostgresDb();
     console.log("Shranjevanje: Postgres baza prek DATABASE_URL");
@@ -1755,17 +1897,25 @@ async function start() {
     console.log(`Shranjevanje: lokalna datoteka ${dbFile}`);
   }
 
-  http.createServer((req, res) => {
+  const server = http.createServer((req, res) => {
     if (req.url.startsWith("/api/")) {
-      handleApi(req, res);
+      if (req.method !== "GET" || req.url.startsWith("/api/google/callback")) {
+        runSerializedMutation(req, res);
+      } else {
+        handleApi(req, res).catch((error) => handleUnexpectedRequestError(error, res));
+      }
       return;
     }
     if (req.url.startsWith("/calendar.ics")) {
-      handleCalendarFeed(req, res);
+      handleCalendarFeed(req, res).catch((error) => handleUnexpectedRequestError(error, res));
       return;
     }
     serveStatic(req, res);
-  }).listen(PORT, HOST, () => {
+  });
+  server.requestTimeout = 60_000;
+  server.headersTimeout = 65_000;
+  server.keepAliveTimeout = 5_000;
+  server.listen(PORT, HOST, () => {
     console.log(`INDUS URE lokalno: http://127.0.0.1:${PORT}`);
     for (const url of networkUrls()) console.log(`Na istem omrezju: ${url}`);
     console.log("Uporabnika: bojan in ibro");

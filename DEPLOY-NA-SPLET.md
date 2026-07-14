@@ -1,5 +1,9 @@
 # INDUS URE - deploy na splet
 
+> Ta dokument opisuje staro Render postavitev in je ohranjen samo kot zgodovina.
+> Za trenutni Ubuntu/PostgreSQL/Nginx deployment uporabi
+> [DEPLOY-UBUNTU.md](DEPLOY-UBUNTU.md).
+
 Najlazja pot za to aplikacijo je:
 
 1. GitHub za kodo.

@@ -5,7 +5,9 @@
   "description": "INDUS URE - skupni delovni koledar za Bojana in Ibra.",
   "main": "outputs/server.js",
   "scripts": {
-    "start": "node outputs/server.js"
+    "start": "node outputs/server.js",
+    "test": "node --check outputs/server.js",
+    "import:json": "node scripts/import-json-to-postgres.js"
   },
   "dependencies": {
     "googleapis": "^144.0.0",

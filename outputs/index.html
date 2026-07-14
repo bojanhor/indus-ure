@@ -1683,8 +1683,12 @@
     function updateAvatar(id, user) {
       const avatar = $(id);
       if (!avatar || !user) return;
+      avatar.replaceChildren();
       if (user.avatar) {
-        avatar.innerHTML = `<img src="${user.avatar}" alt="">`;
+        const image = document.createElement("img");
+        image.src = user.avatar;
+        image.alt = "";
+        avatar.appendChild(image);
       } else {
         avatar.textContent = (user.name || user.id || "?").slice(0, 1).toUpperCase();
       }
@@ -2343,7 +2347,7 @@
       }
       return `<div class="todo-photos-inline">${todo.photos.map((photo) => `
         <article class="photo-card">
-          <img src="${photo.data}" alt="${escapeHtml(photo.name || "Fotografija")}">
+          <img src="${escapeHtml(photo.data)}" alt="${escapeHtml(photo.name || "Fotografija")}">
           <div>
             <strong>${escapeHtml(photo.name || "Fotografija")}</strong>
             <span class="todo-meta">dodal: ${escapeHtml(photo.createdByName || "-")}</span>
@@ -2864,10 +2868,11 @@
       try {
         const status = await api("/api/google/status");
         if (!status.configured) {
-          alert("Google OAuth se ni nastavljen. Najprej moramo v Render dodati GOOGLE_CLIENT_ID in GOOGLE_CLIENT_SECRET.");
+          if (showSuccess) alert("Google OAuth se ni nastavljen na strezniku.");
           return;
         }
         if (!status.connected) {
+          if (!showSuccess) return;
           const data = await api("/api/google/auth-url");
           window.open(data.url, "_blank", "noopener");
           alert("Odpre se Google prijava. Ko potrdis dostop, se vrni sem in klikni Google sync.");
@@ -3013,7 +3018,12 @@
       }
     });
 
-    $("logoutBtn").addEventListener("click", () => {
+    $("logoutBtn").addEventListener("click", async () => {
+      try {
+        await api("/api/logout", { method: "POST", body: JSON.stringify({}) });
+      } catch {
+        // Lokalno odjavo izvedemo tudi, ce je seja ze potekla.
+      }
       localStorage.removeItem(tokenKey);
       location.reload();
     });

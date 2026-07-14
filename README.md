@@ -2,47 +2,46 @@
 
 Skupna spletna aplikacija za Bojana in Ibra za ure, stranke, material, kilometrino in statuse obracuna.
 
+## Funkcije
+
+Aplikacija vsebuje skupni koledar delovnih ur, opravila s fotografijami, stranke,
+kilometrino, material, dolgove, obracun, ICS feed ter Google Calendar/Sheets sync.
+
+Google prijava je dovoljena samo naslovoma `bojan@indus.si` in
+`ibrahim.etemaj04@gmail.com`.
+
 ## Lokalni zagon
 
-Najlazje:
-
-```bat
-ZAGON.bat
+```bash
+npm install
+npm start
 ```
 
-Nato odpri:
+Nato odpri `http://127.0.0.1:8123`.
 
-```text
-http://127.0.0.1:8123
-```
+Brez `DATABASE_URL` aplikacija uporablja lokalno razvojno JSON datoteko.
+Produkcijski zagon brez PostgreSQL namenoma ni dovoljen.
 
-Uporabnika sta `bojan` in `ibro`.
+## Ubuntu produkcija
 
-Gesla se nastavijo v Render Environment:
+Produkcija uporablja Node.js za API, lokalni PostgreSQL za podatke, Nginx kot
+omejen reverse proxy ter systemd za aplikacijo in dnevne backupe.
 
-- `INITIAL_BOJAN_PASSWORD`
-- `INITIAL_IBRO_PASSWORD`
-
-## Objavo na splet
-
-Najlazje je GitHub + Render.
-
-1. Ustvari GitHub repository, npr. `indus-ure`.
-2. Nalozi celotno mapo projekta.
-3. V Render izberi `New` -> `Blueprint`.
-4. Povezi GitHub repository.
-5. Render bo uporabil `render.yaml`.
-
-Po objavi dobis javni HTTPS naslov.
-
-Opomba: trenutna Render nastavitev uporablja free plan brez diska, da ne zahteva kartice. Za trajno shranjevanje podatkov je kasneje potreben persistent disk ali zunanja baza.
+Celotna navodila so v [DEPLOY-UBUNTU.md](DEPLOY-UBUNTU.md).
 
 ## Podatki
 
-Lokalni podatki so v:
+Razvojni podatki brez `DATABASE_URL` so v:
 
 ```text
 outputs/data/db.json
 ```
 
-Ta datoteka je v `.gitignore`, da se zasebni vnosi in gesla ne objavijo na GitHub.
+V produkciji so podatki v PostgreSQL tabeli `app_state`. `db.json`, dumpi,
+gesla in Google OAuth tokeni ne sodijo v Git.
+
+## Preverjanje
+
+```bash
+npm test
+```
