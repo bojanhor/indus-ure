@@ -2,7 +2,7 @@
 Description=Run INDUS URE PostgreSQL backup every day
 
 [Timer]
-OnCalendar=*-*-* 02:15:00
+OnCalendar=*-*-* 02:15:00 Europe/Ljubljana
 RandomizedDelaySec=15m
 Persistent=true
 Unit=indus-ure-backup.service
