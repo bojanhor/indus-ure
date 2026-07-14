@@ -1865,10 +1865,16 @@ async function handleCalendarFeed(req, res) {
 }
 
 function networkUrls() {
-  return Object.values(os.networkInterfaces())
-    .flat()
-    .filter((item) => item && item.family === "IPv4" && !item.internal)
-    .map((item) => `http://${item.address}:${PORT}`);
+  if (["127.0.0.1", "::1", "localhost"].includes(HOST)) return [];
+  try {
+    return Object.values(os.networkInterfaces())
+      .flat()
+      .filter((item) => item && item.family === "IPv4" && !item.internal)
+      .map((item) => `http://${item.address}:${PORT}`);
+  } catch (error) {
+    console.warn(`Omreznih URL-jev ni bilo mogoce prebrati: ${error.message || error}`);
+    return [];
+  }
 }
 
 function handleUnexpectedRequestError(error, res) {
