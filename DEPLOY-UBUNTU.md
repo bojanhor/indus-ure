@@ -3,10 +3,10 @@
 Produkcijska pot je:
 
 ```text
-javni HTTPS edge -> 192.168.50.242:8081 (Nginx) -> 127.0.0.1:8123 (Node) -> 127.0.0.1:5432 (PostgreSQL)
+internet -> router TCP 80/443 -> 192.168.50.242 (Nginx) -> 127.0.0.1:8123 (Node) -> 127.0.0.1:5432 (PostgreSQL)
 ```
 
-Obstojeca testna stran na `8080` in javni forwarding `1900 -> 8080` ostaneta nespremenjena. Node port `8123` in PostgreSQL `5432` se ne odpirata v UFW.
+Obstojeca testna stran na `8080` in javni forwarding `1900 -> 8080` ostaneta nespremenjena. Nginx deli isti javni port 443 med poddomene po `server_name`. Node port `8123` in PostgreSQL `5432` se ne odpirata v UFW.
 
 ## 1. Koda in sistemski uporabnik
 
@@ -16,7 +16,7 @@ Po potrjenem commitu na GitHubu:
 sudo useradd --system --home /var/lib/indus-ure --create-home --shell /usr/sbin/nologin indus-ure
 sudo install -d -o root -g root -m 0755 /opt/indus-ure/releases
 cd /tmp
-git clone https://github.com/ibrahimetemaj04-art/indus-ure.git indus-ure-release
+git clone https://github.com/bojanhor/indus-ure.git indus-ure-release
 cd indus-ure-release
 npm ci --omit=dev
 sudo mv /tmp/indus-ure-release /opt/indus-ure/releases/PRVI_COMMIT
@@ -82,18 +82,34 @@ Logi:
 journalctl -u indus-ure.service -n 100 --no-pager
 ```
 
-## 6. Nginx na notranjem portu 8081
+## 6. Nginx in HTTPS
+
+Za prvo izdajo certifikata najprej namesti bootstrap konfiguracijo, nato koncno HTTPS konfiguracijo:
 
 ```bash
+sudo apt install -y certbot python3-certbot-nginx
+sudo install -o root -g root -m 0644 deploy/nginx-indus-ure-bootstrap.conf /etc/nginx/conf.d/indus-ure.conf
+sudo nginx -t
+sudo systemctl reload nginx
+sudo ufw allow 80/tcp comment 'Nginx HTTP HTTPS redirect'
+sudo ufw allow 443/tcp comment 'Nginx HTTPS'
+sudo ufw allow from 192.168.50.0/24 to any port 8081 proto tcp comment 'INDUS URE LAN'
+sudo certbot certonly --nginx --non-interactive --agree-tos --no-eff-email --email bojan@indus.si -d ure.indus.si
 sudo install -o root -g root -m 0644 deploy/nginx-indus-ure.conf /etc/nginx/conf.d/indus-ure.conf
 sudo nginx -t
 sudo systemctl reload nginx
-curl --fail -H 'Host: ure.indus.si' http://127.0.0.1:8081/api/health
+curl --fail https://ure.indus.si/api/health
+sudo certbot renew --dry-run --no-random-sleep-on-renew
 ```
 
-UFW dovoli `8081/tcp` samo iz LAN-a, VPN omrezja in/ali tocnega IP-ja javnega edge reverse proxyja. Ne uporabi `ufw allow 8081` za ves internet.
+Router posreduje samo standardna spletna porta na Nginx:
 
-Da bo `https://ure.indus.si` deloval brez porta, mora sistem, ki trenutno prejema javna vrata 80/443, terminirati TLS in proxyjati na `192.168.50.242:8081`. Na njem dodaj tudi HSTS. Pred tem moramo vedeti, kateri racunalnik/program trenutno drzi 80/443.
+```text
+TCP 80  -> 192.168.50.242:80
+TCP 443 -> 192.168.50.242:443
+```
+
+Port `8081` ostane dostopen samo iz LAN-a oziroma pozneje tudi iz tocno dolocenega VPN omrezja. Certbotov systemd timer samodejno obnavlja certifikat, port 80 pa vse druge zahteve preusmeri na HTTPS.
 
 ## 7. Dnevni backup
 
