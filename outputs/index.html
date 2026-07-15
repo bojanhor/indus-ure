@@ -262,11 +262,10 @@
 
     .month-title {
       display: grid;
-      grid-template-columns: 38px 180px 38px auto;
+      grid-template-columns: 42px 180px 42px 42px;
       align-items: center;
-      gap: 10px;
+      gap: 12px;
       min-width: 0;
-      flex-wrap: wrap;
     }
 
     .month-title h2 {
@@ -278,13 +277,57 @@
     }
 
     .icon-btn {
-      width: 38px;
-      height: 38px;
+      width: 42px;
+      height: 42px;
       border-radius: 8px;
       background: #edf2ee;
       color: var(--ink);
       font-size: 21px;
       line-height: 1;
+    }
+
+    .today-calendar-btn {
+      width: 42px;
+      height: 42px;
+      display: grid;
+      place-items: center;
+      padding: 0;
+      border-radius: 8px;
+      background: #edf2ee;
+      color: var(--ink);
+    }
+
+    .today-calendar-icon {
+      width: 25px;
+      height: 25px;
+      position: relative;
+      display: grid;
+      place-items: end center;
+      padding-bottom: 2px;
+      border: 2px solid currentColor;
+      border-radius: 4px;
+    }
+
+    .today-calendar-icon::before {
+      content: "";
+      position: absolute;
+      top: 5px;
+      left: 0;
+      right: 0;
+      border-top: 2px solid currentColor;
+    }
+
+    .today-calendar-day {
+      font-size: 11px;
+      font-weight: 900;
+      line-height: 1;
+    }
+
+    .topbar-view-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
     }
 
     .tools {
@@ -330,6 +373,18 @@
       background: #edf2ee;
       color: var(--ink);
       font-weight: 700;
+    }
+
+    .settings-menu-button {
+      width: 42px;
+      height: 42px;
+      justify-content: center;
+      padding: 0;
+    }
+
+    .settings-icon {
+      width: 21px;
+      height: 21px;
     }
 
     .tools-menu {
@@ -1435,7 +1490,7 @@
         display: grid;
         grid-template-columns: auto minmax(0, 1fr);
       }
-      .topbar > .view-switch {
+      .topbar-view-row {
         grid-column: 1 / -1;
         grid-row: 1;
         justify-self: start;
@@ -1522,8 +1577,11 @@
       .topbar {
         align-items: stretch;
         grid-template-columns: minmax(0, 1fr);
+        position: static;
+        top: auto;
+        z-index: auto;
       }
-      .topbar > .view-switch,
+      .topbar-view-row,
       .month-title,
       .tools {
         grid-column: 1;
@@ -1531,30 +1589,31 @@
         justify-self: stretch;
       }
       .month-title {
-        grid-template-columns: 38px minmax(0, 1fr) 38px;
-      }
-      .month-title #todayBtn {
-        grid-column: 1 / -1;
-        width: 100%;
+        grid-template-columns: 44px minmax(0, 1fr) 44px 44px;
+        gap: 8px;
       }
       .tools {
         justify-content: stretch;
         display: grid;
         grid-template-columns: 1fr 1fr;
       }
-      .search,
-      .account-btn,
-      .tools-menu {
+      .search {
         grid-column: 1 / -1;
       }
+      .topbar-view-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 44px;
+        gap: 8px;
+      }
       .tools-menu > summary {
-        width: 100%;
+        width: 44px;
+        height: 48px;
         justify-content: center;
       }
       .tools-menu-panel {
-        left: 0;
+        left: auto;
         right: 0;
-        width: auto;
+        width: min(320px, calc(100vw - 48px));
       }
       .view-switch {
         display: flex;
@@ -1685,25 +1744,19 @@
 
     <main class="main">
       <section class="topbar">
-        <div class="view-switch" aria-label="Pogled">
-          <button class="view-btn active" id="calendarViewBtn" type="button">Koledar</button>
-          <button class="view-btn" id="todosViewBtn" type="button">Opravila</button>
-          <button class="view-btn admin-only" id="clientsViewBtn" type="button">Stranke</button>
-          <button class="view-btn admin-only" id="reportViewBtn" type="button">Obra&#269;un</button>
-        </div>
-        <div class="month-title">
-          <button class="icon-btn" id="prevMonth" type="button" title="Prej&#353;nji mesec">&lsaquo;</button>
-          <h2 id="monthTitle"></h2>
-          <button class="icon-btn" id="nextMonth" type="button" title="Naslednji mesec">&rsaquo;</button>
-          <button class="secondary" id="todayBtn" type="button">Danes</button>
-        </div>
-        <div class="tools">
-          <input class="search" id="clientSearch" placeholder="I&#353;&#269;i stranko, opravilo ali opis">
+        <div class="topbar-view-row">
+          <div class="view-switch" aria-label="Pogled">
+            <button class="view-btn active" id="calendarViewBtn" type="button">Koledar</button>
+            <button class="view-btn" id="todosViewBtn" type="button">Opravila</button>
+            <button class="view-btn admin-only" id="clientsViewBtn" type="button">Stranke</button>
+            <button class="view-btn admin-only" id="reportViewBtn" type="button">Obra&#269;un</button>
+          </div>
           <details class="tools-menu" id="toolsMenu">
-            <summary class="account-btn" title="Nastavitve in orodja">
-              <span class="avatar" id="topAvatar">?</span>
-              <span>Nastavitve</span>
-              <span class="tools-chevron" aria-hidden="true">&#9662;</span>
+            <summary class="account-btn settings-menu-button" title="Nastavitve in orodja" aria-label="Nastavitve in orodja">
+              <svg class="settings-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+                <path d="M4 6h16M4 12h16M4 18h16"></path>
+                <circle cx="9" cy="6" r="2"></circle><circle cx="15" cy="12" r="2"></circle><circle cx="8" cy="18" r="2"></circle>
+              </svg>
             </summary>
             <div class="tools-menu-panel" role="group" aria-label="Nastavitve in orodja">
               <span class="tools-menu-label">Uporabnik</span>
@@ -1718,6 +1771,17 @@
               <button class="menu-action logout-action" id="logoutBtn" type="button">Odjava</button>
             </div>
           </details>
+        </div>
+        <div class="month-title calendar-view">
+          <button class="icon-btn" id="prevMonth" type="button" title="Prej&#353;nji mesec">&lsaquo;</button>
+          <h2 id="monthTitle"></h2>
+          <button class="icon-btn" id="nextMonth" type="button" title="Naslednji mesec">&rsaquo;</button>
+          <button class="today-calendar-btn" id="todayBtn" type="button" title="Danes" aria-label="Danes">
+            <span class="today-calendar-icon" aria-hidden="true"><span class="today-calendar-day" id="todayDayNumber"></span></span>
+          </button>
+        </div>
+        <div class="tools">
+          <input class="search" id="clientSearch" placeholder="I&#353;&#269;i stranko, opravilo ali opis">
         </div>
       </section>
 
@@ -2694,6 +2758,9 @@
       calendar.innerHTML = "";
       const entries = contextEntries();
       const todos = contextTodos();
+      const todayDate = new Date();
+      $("todayDayNumber").textContent = todayDate.getDate();
+      $("todayBtn").setAttribute("aria-label", `Danes, ${todayDate.toLocaleDateString("sl-SI")}`);
 
       const year = state.current.getFullYear();
       const month = state.current.getMonth();

@@ -313,6 +313,7 @@ test("mobilni preklopnik je na vrhu in ne prekriva konca strani", () => {
   assert.match(html, /\.main \{\s*order: 1;\s*padding-bottom: 16px;/);
   assert.match(html, /\.sidebar \{\s*order: 2;\s*gap: 12px;\s*padding-bottom: 16px;/);
   assert.match(html, /\.view-switch \{\s*display: flex;\s*width: 100%;\s*position: static;/);
+  assert.match(html, /\.topbar \{\s*align-items: stretch;\s*grid-template-columns: minmax\(0, 1fr\);\s*position: static;\s*top: auto;\s*z-index: auto;/);
   assert.doesNotMatch(html, /\.main \{\s*order: 1;\s*padding-bottom: 86px;/);
 });
 
@@ -346,9 +347,17 @@ test("glavni preklop pogleda je na vrhu in na telefonu ne prekriva vsebine", () 
   assert.ok(topbar);
   assert.equal((html.match(/class="view-switch"/g) || []).length, 1);
   const switchIndex = topbar.indexOf('class="view-switch"');
-  const monthIndex = topbar.indexOf('class="month-title"');
+  const settingsIndex = topbar.indexOf('class="tools-menu"');
+  const monthIndex = topbar.indexOf('class="month-title calendar-view"');
   const toolsIndex = topbar.indexOf('class="tools"');
-  assert.ok(switchIndex >= 0 && switchIndex < monthIndex && monthIndex < toolsIndex);
+  assert.ok(switchIndex >= 0 && switchIndex < settingsIndex && settingsIndex < monthIndex && monthIndex < toolsIndex);
+  assert.match(topbar, /<summary class="account-btn settings-menu-button"[^>]*aria-label="Nastavitve in orodja">[\s\S]*?<svg class="settings-icon"/);
+  assert.doesNotMatch(topbar, /<span>Nastavitve<\/span>/);
+  assert.match(topbar, /<div class="month-title calendar-view">[\s\S]*?class="today-calendar-btn" id="todayBtn"[\s\S]*?id="todayDayNumber"/);
+  assert.match(html, /\$\("todayDayNumber"\)\.textContent = todayDate\.getDate\(\)/);
+  assert.match(html, /document\.querySelectorAll\("\.calendar-view"\)[\s\S]*?view !== "calendar"/);
+  assert.match(html, /\.month-title \{\s*grid-template-columns: 44px minmax\(0, 1fr\) 44px 44px;\s*gap: 8px;/);
+  assert.match(html, /\.topbar-view-row \{\s*display: grid;\s*grid-template-columns: minmax\(0, 1fr\) 44px;/);
   assert.match(html, /\.view-switch \{\s*display: flex;\s*width: 100%;\s*position: static;/);
   assert.doesNotMatch(html, /\.view-switch\s*\{[^}]*position:\s*fixed/);
   assert.doesNotMatch(html, /padding-bottom:\s*calc\(104px/);
