@@ -1035,6 +1035,23 @@
       justify-self: end;
     }
 
+    .report-entry-state {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .report-state-chip {
+      padding: 4px 7px;
+      border-radius: 6px;
+      background: #edf2ee;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
     .invoice-flags {
       display: flex;
       align-items: center;
@@ -1353,6 +1370,63 @@
       gap: 10px;
       flex-wrap: wrap;
       padding-top: 2px;
+    }
+
+    #todoDialog { width: min(820px, calc(100vw - 26px)); }
+
+    .todo-form-assignees {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 7px;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #f7faf7;
+    }
+
+    .todo-form-assignees label,
+    .todo-form-done {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--ink);
+      font-weight: 700;
+    }
+
+    .todo-form-assignees input,
+    .todo-form-done input {
+      width: 18px;
+      height: 18px;
+      margin: 0;
+      padding: 0;
+      accent-color: var(--accent);
+    }
+
+    .todo-form-attachments {
+      display: grid;
+      gap: 8px;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #f7faf7;
+    }
+
+    .todo-form-photo-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 7px 0;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .todo-form-photo-row:last-child { border-bottom: 0; }
+
+    .todo-form-billing {
+      padding: 10px;
+      border: 1px solid #91c991;
+      border-radius: 8px;
+      background: #f1fbf1;
     }
 
     .status-switch {
@@ -1846,6 +1920,7 @@
             <strong id="clientDetailTitle">Vsa dela in opravila</strong>
             <div class="client-detail-head-tools">
               <span class="todo-meta" id="clientDetailRange"></span>
+              <button class="primary" id="newReportTodo" type="button">Novo opravilo</button>
               <label class="report-todo-filter">Prikaz opravil
                 <select id="reportTodoCompletionFilter">
                   <option value="completed" selected>Zaklju&#269;ena</option>
@@ -1883,7 +1958,7 @@
   <dialog id="entryDialog">
     <form method="dialog" id="entryForm">
       <div class="modal-head">
-        <h3 id="dialogTitle">Vnos dela</h3>
+        <h3 id="dialogTitle">Dogodek</h3>
         <button class="icon-btn" id="closeDialog" type="button" title="Zapri">&times;</button>
       </div>
       <div class="modal-body">
@@ -1966,6 +2041,68 @@
             <button type="button" class="secondary" id="duplicateEntry">Podvoji</button>
             <button type="submit" class="primary">Shrani</button>
           </div>
+        </div>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="todoDialog">
+    <form method="dialog" id="todoForm">
+      <div class="modal-head">
+        <h3 id="todoFormTitle">Opravilo</h3>
+        <button class="icon-btn" id="closeTodoDialog" type="button" title="Zapri">&times;</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="todoFormId">
+        <div class="modal-grid">
+          <label>Datum
+            <input id="todoFormDate" type="date">
+          </label>
+          <label>Stranka
+            <input id="todoFormClient" list="clientList" placeholder="Alias ali naziv stranke">
+          </label>
+          <label>Status
+            <select id="todoFormStatus" class="todo-status todo-status-color"></select>
+          </label>
+          <label id="todoFormEditAssigneeField">Dodeljeno
+            <select id="todoFormAssignee"></select>
+          </label>
+        </div>
+        <div id="todoFormCreateAssigneeField">
+          <label>Dodeljeno delavcem</label>
+          <div class="todo-form-assignees" id="todoFormAssignees"></div>
+        </div>
+        <label>Opravilo
+          <textarea id="todoFormTask" placeholder="Kaj je treba narediti" required></textarea>
+        </label>
+        <label>Opombe
+          <textarea id="todoFormNotes" placeholder="Dodatne informacije"></textarea>
+        </label>
+        <label class="todo-form-done">
+          <input id="todoFormDone" type="checkbox">
+          Opravljeno
+        </label>
+        <div class="todo-form-billing admin-entry-field" id="todoFormBilling">
+          <div class="modal-grid">
+            <label>Urna postavka (EUR/h)
+              <input id="todoFormHourlyRate" type="number" min="0" max="10000" step="0.01">
+            </label>
+            <label>Kilometrina (km)
+              <input id="todoFormBillingKm" type="number" min="0" max="1000000" step="0.1">
+            </label>
+          </div>
+        </div>
+        <div class="todo-form-attachments">
+          <strong>Priloge</strong>
+          <div id="todoFormPhotoList"></div>
+          <label class="secondary add-photo">Dodaj prilogo
+            <input class="hidden-file" id="todoFormPhotoInput" type="file" accept="image/*" multiple>
+          </label>
+        </div>
+        <div class="audit-box hidden" id="todoFormAudit"></div>
+        <div class="actions">
+          <button type="button" class="danger" id="deleteTodoFromDialog">Izbri&#353;i opravilo</button>
+          <button type="submit" class="primary" id="saveTodoDialog">Shrani</button>
         </div>
       </div>
     </form>
@@ -2112,6 +2249,7 @@
       todoClientSuggestionIndex: -1,
       selectedClient: "",
       expandedTodoPhotos: "",
+      todoDialogPhotos: [],
       reportClient: "",
       reportClientId: "",
       settings: { billing: { hourlyRate: 15, kmRate: 0.22, commuteKmPerDay: 28 } },
@@ -2313,6 +2451,7 @@
       state.reportClient = "";
       state.reportClientId = "";
       if ($("entryDialog").open) $("entryDialog").close();
+      if ($("todoDialog").open) $("todoDialog").close();
       if ($("debtDialog").open) $("debtDialog").close();
       if (!isAdminView() && ["clients", "report"].includes(state.view)) state.view = "calendar";
       applyWorkContextUi();
@@ -2498,13 +2637,6 @@
         throw new Error("Vnesi pravilno urno postavko in kilometrino.");
       }
       await saveTodoToServer({ ...todo, billingHourlyRate: hourlyRate, billingKm });
-    }
-
-    async function updateInvoiceFlag(input) {
-      const entry = state.entries.find((item) => item.id === input.dataset.entryId);
-      if (!entry) return;
-      await saveEntryToServer({ ...entry, [input.dataset.field]: input.checked });
-      renderReport();
     }
 
     async function saveDebtToServer(debt) {
@@ -3238,6 +3370,119 @@
       `).join("")}</div>`;
     }
 
+    function renderTodoFormAssignees(selectedIds = []) {
+      const selected = new Set(selectedIds);
+      $("todoFormAssignees").innerHTML = state.users.map((user) => `
+        <label>
+          <input type="checkbox" value="${escapeHtml(user.id)}" ${selected.has(user.id) ? "checked" : ""}>
+          ${escapeHtml(user.name || user.id)}
+        </label>
+      `).join("");
+    }
+
+    function selectedTodoFormAssignees() {
+      return [...$("todoFormAssignees").querySelectorAll('input[type="checkbox"]:checked')]
+        .map((input) => input.value);
+    }
+
+    function renderTodoFormPhotos() {
+      const list = $("todoFormPhotoList");
+      list.innerHTML = state.todoDialogPhotos.map((photo) => `
+        <div class="todo-form-photo-row">
+          <span>${escapeHtml(photo.name || "Priloga")}</span>
+          <button class="danger remove-todo-form-photo" type="button" data-photo-id="${escapeHtml(photo.id)}">Odstrani</button>
+        </div>
+      `).join("");
+    }
+
+    function renderTodoFormAudit(todo) {
+      const audit = $("todoFormAudit");
+      if (!todo.id) {
+        audit.classList.add("hidden");
+        audit.textContent = "";
+        return;
+      }
+      const history = (todo.history || [])
+        .slice(-5)
+        .map((item) => `${escapeHtml(item.action)}: ${escapeHtml(item.byName || item.by)} (${formatDateTime(item.at)})`)
+        .join("<br>");
+      audit.classList.remove("hidden");
+      audit.innerHTML = `
+        Dodal: <strong>${escapeHtml(todo.createdByName || "-")}</strong> (${formatDateTime(todo.createdAt)})<br>
+        Zadnja sprememba: <strong>${escapeHtml(todo.updatedByName || todo.createdByName || "-")}</strong> (${formatDateTime(todo.updatedAt || todo.createdAt)})
+        ${history ? `<br><br>${history}` : ""}
+      `;
+    }
+
+    function updateTodoFormStatus() {
+      updateTodoStatusControl($("todoFormStatus"));
+      const showBilling = isAdminView() && $("todoFormStatus").value === "execution";
+      $("todoFormBilling").classList.toggle("hidden", !showBilling);
+    }
+
+    function openTodoDialog(todo = {}) {
+      const editing = Boolean(todo.id);
+      const client = findClient(todo.clientId || todo.client);
+      $("todoFormTitle").textContent = editing ? "Uredi opravilo" : "Novo opravilo";
+      $("todoFormId").value = todo.id || "";
+      $("todoFormDate").value = todo.date || "";
+      $("todoFormClient").value = client?.search || todo.client || $("reportClient").value || "";
+      $("todoFormTask").value = todo.title || "";
+      $("todoFormNotes").value = todo.notes || "";
+      $("todoFormDone").checked = Boolean(todo.done);
+      $("todoFormStatus").innerHTML = todoStatusOptions(todo.status || "open");
+      updateTodoFormStatus();
+      $("todoFormEditAssigneeField").classList.toggle("hidden", !editing);
+      $("todoFormCreateAssigneeField").classList.toggle("hidden", editing);
+      $("todoFormAssignee").innerHTML = todoAssigneeOptions(todo.syncUser || activeWorkerId());
+      renderTodoFormAssignees(editing ? [] : [activeWorkerId()]);
+      state.todoDialogPhotos = (todo.photos || []).map((photo) => ({ ...photo }));
+      renderTodoFormPhotos();
+      $("todoFormHourlyRate").value = editing ? todoHourlyRate(todo) : workerDefaultHourlyRate(activeWorkerId());
+      $("todoFormBillingKm").value = Number(todo.billingKm || 0);
+      $("deleteTodoFromDialog").classList.toggle("hidden", !editing);
+      renderTodoFormAudit(todo);
+      $("todoFormPhotoInput").value = "";
+      $("todoDialog").showModal();
+      requestAnimationFrame(() => $("todoFormTask").focus());
+    }
+
+    async function saveTodoFromDialog() {
+      const id = $("todoFormId").value;
+      const existing = id ? state.todos.find((todo) => todo.id === id) : null;
+      const client = findTodoClient($("todoFormClient").value);
+      const assigneeIds = existing ? [] : selectedTodoFormAssignees();
+      const hourlyRate = parseBillingNumber($("todoFormHourlyRate").value, 10_000);
+      const billingKm = parseBillingNumber($("todoFormBillingKm").value, 1_000_000);
+      const todo = {
+        ...(existing || {}),
+        id: id || undefined,
+        date: $("todoFormDate").value,
+        client: client?.name || normalizeClientName($("todoFormClient").value),
+        clientId: client?.clientId || client?.id || "",
+        title: $("todoFormTask").value.trim(),
+        notes: $("todoFormNotes").value.trim(),
+        status: $("todoFormStatus").value,
+        order: existing?.order || nextTodoOrder(),
+        assigneeIds,
+        syncUser: existing ? $("todoFormAssignee").value : (assigneeIds[0] || activeWorkerId()),
+        done: $("todoFormDone").checked,
+        billingHourlyRate: hourlyRate,
+        billingKm,
+        photos: state.todoDialogPhotos
+      };
+      if (!validateTodo(todo)) return;
+      await saveTodoToServer(todo);
+      $("todoDialog").close();
+    }
+
+    async function deleteTodoFromDialog() {
+      const id = $("todoFormId").value;
+      if (!id || !confirm("Izbrisem to opravilo?")) return;
+      await deleteTodoFromServer(id);
+      $("todoDialog").close();
+    }
+
     function setDefaultReportRange() {
       const now = state.current || new Date();
       $("reportFrom").value = dateKey(new Date(now.getFullYear(), now.getMonth(), 1));
@@ -3381,13 +3626,11 @@
         <div class="client-work-row">
           <strong>${formatDate(entry.date)}</strong>
           <span>${escapeHtml(entry.client || statusLabels[entry.status])}<br><small>${entry.status === "vacation" ? "Dopust" : `${entry.start} - ${entry.end}, ${entry.status === "vacation" ? "0.00" : duration(entry).toFixed(2)} h`} | ${entry.fromHome ? "start od doma | " : ""}${escapeHtml(entry.work || entry.material || "")}</small></span>
-          <span class="invoice-flags">
-            ${state.user?.role === "boss" ? `
-              <label><input class="invoice-flag" data-entry-id="${escapeHtml(entry.id)}" data-field="invoiceSent" type="checkbox" ${entry.invoiceSent ? "checked" : ""}> Poslan</label>
-              <label><input class="invoice-flag" data-entry-id="${escapeHtml(entry.id)}" data-field="invoiceSettled" type="checkbox" ${entry.invoiceSettled ? "checked" : ""}> Pora&#269;unano</label>
-              <label><input class="invoice-flag" data-entry-id="${escapeHtml(entry.id)}" data-field="invoicePaid" type="checkbox" ${entry.invoicePaid ? "checked" : ""}> Pla&#269;ano</label>
-            ` : `<small>racun: ${entry.invoiceSent ? "poslan" : "ni poslan"} | ${entry.invoicePaid ? "placano" : "ni placano"}</small>`}
-            <button class="secondary open-report-entry" type="button" data-entry-id="${escapeHtml(entry.id)}">Odpri</button>
+          <span class="report-entry-state">
+            <span class="report-state-chip">Ra&#269;un: ${entry.invoiceSent ? "poslan" : "ni poslan"}</span>
+            <span class="report-state-chip">${entry.invoiceSettled ? "pora&#269;unano" : "ni pora&#269;unano"}</span>
+            <span class="report-state-chip">${entry.invoicePaid ? "pla&#269;ano" : "ni pla&#269;ano"}</span>
+            <button class="secondary open-report-entry" type="button" data-entry-id="${escapeHtml(entry.id)}">Uredi dogodek</button>
           </span>
         </div>
       ` }));
@@ -3397,7 +3640,7 @@
         <div class="client-work-row">
           <strong>${todo.date ? formatDate(todo.date) : "Brez datuma"}</strong>
           <span>Opravilo: ${escapeHtml(todo.title)}<br><small>${escapeHtml(todo.client || "")} | ${todo.done ? "opravljeno" : todoStatus(todo.status).label} | ${(todo.photos || []).length} foto</small></span>
-          <button class="secondary open-report-todo" type="button" data-todo-id="${escapeHtml(todo.id)}">Opravilo</button>
+          <button class="secondary open-report-todo" type="button" data-todo-id="${escapeHtml(todo.id)}">Uredi opravilo</button>
         </div>
       ` }));
       const detailRows = [...entryRows, ...todoRows];
@@ -3802,7 +4045,7 @@
         alert("Za zakljucek opravila najprej izberi njegov delavski pogled.");
         return;
       }
-      $("dialogTitle").textContent = existing ? "Uredi vnos" : "Zakljuci opravilo v koledar";
+      $("dialogTitle").textContent = existing ? "Uredi dogodek" : "Nov dogodek iz opravila";
       $("entryId").value = entry.id || "";
       $("entryTodoId").value = entry.todoId || entry.sourceTodoId || "";
       $("entryDate").value = entry.date || dateKey(new Date());
@@ -4255,6 +4498,34 @@
     $("reportTo").addEventListener("change", renderReport);
     $("reportTodoCompletionFilter").addEventListener("change", renderReport);
     $("reportClientGrouping").addEventListener("change", renderReport);
+    $("newReportTodo").addEventListener("click", () => openTodoDialog());
+    $("closeTodoDialog").addEventListener("click", () => $("todoDialog").close());
+    $("todoFormStatus").addEventListener("change", updateTodoFormStatus);
+    $("todoForm").addEventListener("submit", (event) => {
+      event.preventDefault();
+      saveTodoFromDialog().catch((error) => alert(error.message));
+    });
+    $("deleteTodoFromDialog").addEventListener("click", () => deleteTodoFromDialog().catch((error) => alert(error.message)));
+    $("todoFormPhotoInput").addEventListener("change", async (event) => {
+      try {
+        const remaining = Math.max(0, 8 - state.todoDialogPhotos.length);
+        const files = [...event.target.files].slice(0, remaining);
+        for (const file of files) {
+          state.todoDialogPhotos.push(await resizeImageAsDataUrl(file));
+        }
+        renderTodoFormPhotos();
+      } catch (error) {
+        alert(error.message);
+      } finally {
+        event.target.value = "";
+      }
+    });
+    $("todoFormPhotoList").addEventListener("click", (event) => {
+      const button = event.target.closest(".remove-todo-form-photo");
+      if (!button) return;
+      state.todoDialogPhotos = state.todoDialogPhotos.filter((photo) => photo.id !== button.dataset.photoId);
+      renderTodoFormPhotos();
+    });
     $("reportClient").addEventListener("input", () => {
       state.reportClient = $("reportClient").value;
       renderReport();
@@ -4297,14 +4568,6 @@
     });
 
     $("clientDetailList").addEventListener("click", (event) => {
-      const invoiceInput = event.target.closest(".invoice-flag");
-      if (invoiceInput) {
-        updateInvoiceFlag(invoiceInput).catch((error) => {
-          invoiceInput.checked = !invoiceInput.checked;
-          alert(error.message);
-        });
-        return;
-      }
       const entryButton = event.target.closest(".open-report-entry");
       if (entryButton) {
         const entry = state.entries.find((item) => item.id === entryButton.dataset.entryId);
@@ -4315,9 +4578,7 @@
       if (todoButton) {
         const todo = state.todos.find((item) => item.id === todoButton.dataset.todoId);
         if (!todo) return;
-        state.selectedClient = todo.client || "";
-        state.expandedTodoPhotos = todo.id;
-        setView("todos");
+        openTodoDialog(todo);
       }
     });
     $("clientsList").addEventListener("click", (event) => {

@@ -210,6 +210,34 @@ test("sefovski seznam omogoca grupiranje po strankah", () => {
   assert.match(html, /class="client-work-group-title"/);
   assert.match(html, /reportClientGrouping"\)\.addEventListener\("change", renderReport\)/);
 });
+test("sefovski seznam je prikaz, urejanje pa poteka v namenskih formah", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  assert.match(html, /<dialog id="entryDialog">/);
+  assert.match(html, /existing \? "Uredi dogodek" : "Nov dogodek iz opravila"/);
+  assert.match(html, /<dialog id="todoDialog">/);
+  for (const id of [
+    "todoFormId", "todoFormDate", "todoFormClient", "todoFormStatus", "todoFormAssignee",
+    "todoFormAssignees", "todoFormTask", "todoFormNotes", "todoFormDone", "todoFormHourlyRate",
+    "todoFormBillingKm", "todoFormPhotoInput", "todoFormAudit"
+  ]) {
+    assert.match(html, new RegExp(`id="${id}"`));
+  }
+  assert.match(html, /id="newReportTodo"/);
+  assert.match(html, /function openTodoDialog\(todo = \{\}\)/);
+  assert.match(html, /async function saveTodoFromDialog\(\)/);
+  assert.match(html, /openTodoDialog\(todo\)/);
+  assert.match(html, /class="report-state-chip"/);
+  assert.doesNotMatch(html, /class="invoice-flag"/);
+  assert.doesNotMatch(html, /function updateInvoiceFlag/);
+});
+
+test("nov koledarski dogodek tudi po dodatku form nastane samo iz opravila", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  assert.match(html, /if \(!existing && !entry\.todoId\)/);
+  assert.match(html, /startTodoForDate\(entry\.date\)/);
+  assert.match(html, /sourceTodoId: \$\("entryTodoId"\)\.value/);
+});
+
 test("skupni podatki se osvezujejo samodejno in ne prek rocnega gumba", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
   assert.doesNotMatch(html, /id="refreshBtn"/);
