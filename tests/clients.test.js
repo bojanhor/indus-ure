@@ -249,6 +249,18 @@ test("potekla seja samodejno sprozi varno ponovno Google prijavo", () => {
   assert.doesNotMatch(server, /const sessions = new Map\(\)/);
 });
 
+test("tipka nazaj med prijavo ne odpre stare Google prijave", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+
+  assert.match(html, /const loggedInHistoryStateKey = "indusUreLoggedIn"/);
+  assert.match(html, /function protectLoggedInHistory\(\)/);
+  assert.match(html, /history\.replaceState\(loggedInHistoryState\("base"\)/);
+  assert.match(html, /history\.pushState\(loggedInHistoryState\("active"\)/);
+  assert.match(html, /function showApp\(\) \{\s*protectLoggedInHistory\(\)/);
+  assert.match(html, /window\.addEventListener\("popstate"/);
+  assert.match(html, /event\.state\?\.\[loggedInHistoryStateKey\] !== "base"/);
+});
+
 test("opravilo ima loceno ime in dolg vecvrsticni opis", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
   assert.match(html, /<label class="todo-title-field">Ime opravila/);

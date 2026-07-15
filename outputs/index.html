@@ -1993,6 +1993,7 @@
     const googleEmailKey = "indus-ure-google-email";
     const automaticLoginAttemptKey = "indus-ure-auto-login-at";
     const automaticLoginRetryDelayMs = 60_000;
+    const loggedInHistoryStateKey = "indusUreLoggedIn";
     const workContextKey = "indus-ure-work-context";
     const statusLabels = {
       billed: "Ze obracunano",
@@ -2155,7 +2156,19 @@
       }
     }
 
+    function loggedInHistoryState(value) {
+      const current = history.state && typeof history.state === "object" ? history.state : {};
+      return { ...current, [loggedInHistoryStateKey]: value };
+    }
+
+    function protectLoggedInHistory() {
+      if (history.state?.[loggedInHistoryStateKey] === "active") return;
+      history.replaceState(loggedInHistoryState("base"), "", location.href);
+      history.pushState(loggedInHistoryState("active"), "", location.href);
+    }
+
     function showApp() {
+      protectLoggedInHistory();
       $("loginScreen").classList.add("hidden");
       $("app").classList.remove("hidden");
       $("userName").textContent = state.user.name;
@@ -4192,6 +4205,12 @@
     $("downloadBackup").addEventListener("click", downloadBackup);
     $("todoDialog").addEventListener("close", releaseTodoEditLockForDialog);
     window.addEventListener("pagehide", releaseTodoEditLockOnPageHide);
+
+    window.addEventListener("popstate", (event) => {
+      if (!state.token || !state.user) return;
+      if (event.state?.[loggedInHistoryStateKey] !== "base") return;
+      history.pushState(loggedInHistoryState("active"), "", location.href);
+    });
 
     setInterval(autoRefreshSharedData, 15_000);
     window.addEventListener("focus", autoRefreshSharedData);
