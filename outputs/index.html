@@ -2627,8 +2627,8 @@
               ${todoStatusOptions(todo.status)}
             </select>
             <input class="todo-date" type="date" value="${escapeHtml(todo.date || "")}" aria-label="Fiksni datum">
-            <button class="secondary show-photos" type="button">Fotografije</button>
-            <label class="secondary add-photo">Dodaj foto<input class="hidden-file todo-photo-input" type="file" accept="image/*" multiple></label>
+            <button class="secondary show-photos" type="button">Prikaz prilog</button>
+            <label class="secondary add-photo">Dodaj prilogo<input class="hidden-file todo-photo-input" type="file" accept="image/*" multiple></label>
           </div>
           ${state.expandedTodoPhotos === todo.id ? renderTodoPhotoHtml(todo) : ""}
           <button class="secondary delete-todo" type="button">Izbrisi</button>

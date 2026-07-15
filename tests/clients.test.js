@@ -95,3 +95,11 @@ test("dropdown statusov prikaze koledarske barve za vsako moznost", () => {
   assert.match(html, /\.todo-status option\[value="order"\]/);
   assert.match(html, /class="todo-option-\$\{status\.id\}"/);
 });
+
+test("gumba za slike sta poimenovana kot prilogi", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  assert.match(html, />Prikaz prilog<\/button>/);
+  assert.match(html, />Dodaj prilogo<input/);
+  assert.doesNotMatch(html, />Fotografije<\/button>/);
+  assert.doesNotMatch(html, />Dodaj foto<input/);
+});
