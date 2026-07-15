@@ -113,6 +113,17 @@ test("brisanje opravila je majhna dostopna ikona kosa", () => {
   assert.match(html, /if \(!confirm\("Izbrisem to opravilo\?"\)\) return;/);
 });
 
+test("urejanje opravila uporablja svincnik in klik na podatke kartice", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  const card = html.match(/item\.innerHTML = `([\s\S]*?)`;\s*const openTodoEditor/)?.[1] || "";
+  assert.match(card, /class="todo-edit-icon edit-todo"[^>]*aria-label="Uredi opravilo"/);
+  assert.match(card, /todo-edit-icon edit-todo[\s\S]*?todo-delete-icon delete-todo/);
+  assert.doesNotMatch(card, /<button class="primary edit-todo"[^>]*>Uredi opravilo<\/button>/);
+  assert.doesNotMatch(card, /class="todo-status todo-status-color|class="todo-date"|edit-todo-assignees/);
+  assert.match(html, /const todoSummary = item\.querySelector\("\.todo-summary"\);[\s\S]*?todoSummary\.addEventListener\("click"/);
+  assert.match(html, /if \(event\.target\.closest\("a, summary"\)\) return;/);
+});
+
 test("razvrscanje opravil deluje z rocajem, misjo in dotikom", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
   assert.match(html, /draggable="\$\{reorderable \? "true" : "false"\}"/);
@@ -127,7 +138,7 @@ test("razvrscanje opravil deluje z rocajem, misjo in dotikom", () => {
 
 test("kartica opravila poravna status datum in udelezence v stalne stolpce", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
-  const card = html.match(/item\.innerHTML = `([\s\S]*?)`;\s*item\.querySelectorAll/)?.[1] || "";
+  const card = html.match(/item\.innerHTML = `([\s\S]*?)`;\s*const openTodoEditor/)?.[1] || "";
   assert.match(html, /\.todo-primary-meta \{[\s\S]*?display: grid;[\s\S]*?grid-template-columns: 150px 110px minmax\(180px, 1fr\);/);
   assert.match(card, /todo-status-color[\s\S]*?todo-date-chip[\s\S]*?Udele&#382;enci:/);
   assert.match(card, /todo-date-chip \$\{todo\.date \? "" : "is-empty"\}/);
@@ -143,7 +154,7 @@ test("novo opravilo je mogoce dodeliti sebi in vec drugim delavcem", () => {
   assert.match(html, /<input type="checkbox" value="\$\{escapeHtml\(user\.id\)\}"/);
   assert.match(html, /renderTodoFormAssignees\(editing \? todoAssigneeIds\(todo\) : \[activeWorkerId\(\)\]\)/);
   assert.match(html, /const assigneeIds = selectedTodoFormAssignees\(\)/);
-  assert.match(html, /class="secondary todo-assignee-button edit-todo-assignees"/);
+  assert.match(html, /Udele&#382;enci: \$\{escapeHtml\(todoAssigneeNames\(todo\)\)\}/);
   assert.doesNotMatch(html, /class="todo-assignee-select"/);
   assert.doesNotMatch(html, /Opravilo je dodeljeno:/);
   assert.match(html, /const availableUsers = \(await api\("\/api\/users"\)\)\.users/);
@@ -257,8 +268,8 @@ test("vsi pogledi uporabljajo en sam obrazec opravila", () => {
   assert.match(html, /async function openTodoDialog\(todo = \{\}\)/);
   assert.match(html, /async function saveTodoFromDialog\(\)/);
   assert.match(html, /openTodoDialog\(todo\)/);
-  assert.match(html, /class="primary edit-todo"/);
-  assert.match(html, /item\.querySelectorAll\("\.edit-todo, \.edit-todo-assignees"\)/);
+  assert.match(html, /class="todo-edit-icon edit-todo"/);
+  assert.match(html, /item\.querySelector\("\.edit-todo"\)\.addEventListener\("click", openTodoEditor\)/);
   assert.match(html, /class="report-state-chip"/);
   assert.doesNotMatch(html, /class="invoice-flag"/);
   assert.doesNotMatch(html, /function updateInvoiceFlag/);

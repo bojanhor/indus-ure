@@ -723,6 +723,7 @@
       justify-content: flex-end;
     }
 
+    .todo-edit-icon,
     .todo-delete-icon {
       width: 34px;
       height: 34px;
@@ -730,8 +731,22 @@
       display: grid;
       place-items: center;
       padding: 0;
-      border: 1px solid #e3bcbc;
       border-radius: 8px;
+    }
+
+    .todo-edit-icon {
+      border: 1px solid #b8d5dd;
+      background: #eef8fa;
+      color: #176b82;
+    }
+
+    .todo-edit-icon:hover,
+    .todo-edit-icon:focus-visible {
+      background: #dceff3;
+    }
+
+    .todo-delete-icon {
+      border: 1px solid #e3bcbc;
       background: #fff3f3;
       color: #9f3636;
     }
@@ -741,9 +756,16 @@
       background: #f8dddd;
     }
 
+    .todo-edit-icon svg,
     .todo-delete-icon svg {
       width: 18px;
       height: 18px;
+    }
+
+    .todo-summary {
+      min-width: 0;
+      cursor: pointer;
+      border-radius: 6px;
     }
 
     .todo-tool-field {
@@ -2857,7 +2879,7 @@
         item.draggable = false;
         item.innerHTML = `
           <input type="checkbox" ${todo.done ? "checked" : ""} aria-label="Opravljeno">
-          <div>
+          <div class="todo-summary" role="button" tabindex="0" aria-label="Uredi opravilo: ${escapeHtml(todo.title)}">
             <div class="todo-title">${linkifyText(todo.title)}</div>
             <div class="todo-primary-meta">
               <span class="todo-chip todo-status-color ${todoStatusClass(todo.status)}">${todoStatus(todo.status).label}</span>
@@ -2874,13 +2896,12 @@
             </details>` : ""}
           </div>
           <div class="todo-tools">
-            <button class="primary edit-todo" type="button">Uredi opravilo</button>
-            <select class="todo-status todo-status-color ${todoStatusClass(todo.status)}" aria-label="Status opravila">
-              ${todoStatusOptions(todo.status)}
-            </select>
-            <button class="secondary todo-assignee-button edit-todo-assignees" type="button">Dodeljeno: ${escapeHtml(todoAssigneeNames(todo))}</button>
-            <input class="todo-date" type="date" value="${escapeHtml(todo.date || "")}" aria-label="Fiksni datum">
             ${(todo.photos || []).length ? `<button class="secondary show-photos" type="button">Prikaz prilog</button>` : ""}
+            <button class="todo-edit-icon edit-todo" type="button" title="Uredi opravilo" aria-label="Uredi opravilo">
+              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M4 14.5V17h2.5L15.8 7.7l-2.5-2.5L4 14.5zM12.4 6.1l2.5 2.5M13.3 5.2l1.2-1.2a1.4 1.4 0 012 0l.5.5a1.4 1.4 0 010 2l-1.2 1.2"></path>
+              </svg>
+            </button>
             <button class="todo-delete-icon delete-todo" type="button" title="Izbri&#353;i opravilo" aria-label="Izbri&#353;i opravilo">
               <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <path d="M3 5.5h14M7.5 5.5V3.5h5v2M5.5 5.5l1 11h7l1-11M8.5 8.5v5M11.5 8.5v5"></path>
@@ -2901,22 +2922,23 @@
           ${state.expandedTodoPhotos === todo.id ? renderTodoPhotoHtml(todo) : ""}
           <button class="drag-handle" type="button" draggable="${reorderable ? "true" : "false"}" ${reorderable ? "" : "disabled"} title="Povleci za vrstni red znotraj istega datuma" aria-label="Povleci za vrstni red">::</button>
         `;
-        item.querySelectorAll(".edit-todo, .edit-todo-assignees").forEach((button) => {
-          button.addEventListener("click", (event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            openTodoDialog(todo);
-          });
+        const openTodoEditor = (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          openTodoDialog(todo);
+        };
+        item.querySelector(".edit-todo").addEventListener("click", openTodoEditor);
+        const todoSummary = item.querySelector(".todo-summary");
+        todoSummary.addEventListener("click", (event) => {
+          if (event.target.closest("a, summary")) return;
+          openTodoEditor(event);
+        });
+        todoSummary.addEventListener("keydown", (event) => {
+          if (!["Enter", " "].includes(event.key) || event.target.closest("a, summary")) return;
+          openTodoEditor(event);
         });
         item.querySelector('input[type="checkbox"]').addEventListener("change", (event) => {
           saveTodoToServer({ ...todo, done: event.target.checked }).catch((error) => alert(error.message));
-        });
-        item.querySelector(".todo-status").addEventListener("change", (event) => {
-          updateTodoStatusControl(event.target);
-          saveTodoToServer({ ...todo, status: event.target.value }).catch((error) => alert(error.message));
-        });
-        item.querySelector(".todo-date").addEventListener("change", (event) => {
-          saveTodoToServer({ ...todo, date: event.target.value }).catch((error) => alert(error.message));
         });
         const saveTodoBillingButton = item.querySelector(".save-todo-billing");
         if (saveTodoBillingButton) {
