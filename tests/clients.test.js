@@ -69,9 +69,18 @@ test("nova stranka se zapise v devet stolpcev baze strank", () => {
 
 test("novo opravilo ponuja aliase iz prvega stolpca Google Sheeta", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
-  assert.match(html, /id="pageTodoClient" list="todoClientList"/);
-  assert.match(html, /const todoAliasOptions = todoAliases\.flatMap/);
-  assert.match(html, /\.\.\.words\.map\(\(word\) => \(\{ value: word, label: client\.search \}\)\)/);
+  assert.match(html, /id="pageTodoClient"[^>]+aria-controls="todoClientSuggestions"/);
+  assert.match(html, /id="todoClientSuggestions"[^>]+role="listbox"/);
+  assert.match(html, /function renderTodoClientSuggestions\(\)/);
+  assert.match(html, /normalizeText\(client\.search\)\.includes\(query\)/);
   assert.match(html, /function findTodoClient\(value\)/);
   assert.match(html, /client\?\.search \|\| todo\.client/);
+  assert.match(html, /minmax\(300px, 420px\)/);
+});
+
+test("spletne povezave v naslovu opravila so varno klikljive", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  assert.match(html, /todo-title">\$\{linkifyText\(todo\.title\)\}/);
+  assert.match(html, /function linkifyText\(value\)/);
+  assert.match(html, /target="_blank" rel="noopener noreferrer"/);
 });
