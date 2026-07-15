@@ -10,12 +10,14 @@ const {
   deleteOwnedGoogleEvent,
   isIndusOwnedGoogleEvent,
   pushGoogleItem,
+  googleEventMatchesRequest,
   entryFromGoogleEvent,
   entryToGoogleEvent,
   googleEventChanged,
   localItemChanged,
   normalizeDb,
   parseGoogleEventDescription,
+  reconcileGoogleCalendar,
   remoteGoogleChangeWins,
   todoFromGoogleEvent,
   todoToGoogleEvent
@@ -50,6 +52,50 @@ function baseEntry() {
     googleSyncedLocalAt: "2026-07-15T06:00:00.000Z",
     history: []
   };
+}
+
+function fakeCalendar(initialEvents = []) {
+  const stored = new Map(initialEvents.map((event) => [event.id, structuredClone(event)]));
+  const calls = { list: 0, get: [], patch: [], insert: [], delete: [] };
+  let inserted = 0;
+  const notFound = () => {
+    const error = new Error("not found");
+    error.code = 404;
+    return error;
+  };
+  const api = {
+    events: {
+      list: async () => {
+        calls.list++;
+        return { data: { items: [...stored.values()].map((event) => structuredClone(event)) } };
+      },
+      get: async ({ eventId }) => {
+        calls.get.push(eventId);
+        if (!stored.has(eventId)) throw notFound();
+        return { data: structuredClone(stored.get(eventId)) };
+      },
+      patch: async ({ eventId, requestBody }) => {
+        calls.patch.push({ eventId, requestBody: structuredClone(requestBody) });
+        if (!stored.has(eventId)) throw notFound();
+        const event = { ...stored.get(eventId), ...structuredClone(requestBody), id: eventId, updated: "2026-07-15T10:00:00.000Z" };
+        stored.set(eventId, event);
+        return { data: structuredClone(event) };
+      },
+      insert: async ({ requestBody }) => {
+        const id = "inserted-" + (++inserted);
+        calls.insert.push({ id, requestBody: structuredClone(requestBody) });
+        const event = { ...structuredClone(requestBody), id, updated: "2026-07-15T10:00:00.000Z" };
+        stored.set(id, event);
+        return { data: structuredClone(event) };
+      },
+      delete: async ({ eventId }) => {
+        calls.delete.push(eventId);
+        stored.delete(eventId);
+        return { data: {} };
+      }
+    }
+  };
+  return { api, calls, stored };
 }
 
 test("Google opis ohrani strukturirana polja brez podvajanja", () => {
@@ -222,6 +268,73 @@ test("sinhronizacija nima vec poti za uvoz neoznacenega dogodka", () => {
   assert.doesNotMatch(source, /if \(event\.id && !db\.entries\.some/);
   assert.match(source, /verifyOwnedGoogleEvent/);
   assert.match(source, /calendar\.events\.get/);
+});
+
+test("enosmerni sync prepisuje samo INDUS dogodke in nikoli ne uvaza iz Google", async () => {
+  const local = {
+    id: "todo-local",
+    title: "Naslov iz aplikacije",
+    date: "2026-07-16",
+    client: client.name,
+    clientId: client.clientId,
+    notes: "Opis iz aplikacije",
+    status: "open",
+    done: false,
+    syncUser: "bojan",
+    googleEventId: "owned-event",
+    createdAt: "2026-07-15T06:00:00.000Z",
+    updatedAt: "2026-07-15T08:00:00.000Z",
+    photos: []
+  };
+  const missing = {
+    ...local,
+    id: "todo-missing",
+    title: "Manjkajoci dogodek",
+    googleEventId: "deleted-event"
+  };
+  const remoteEdited = {
+    ...todoToGoogleEvent({ ...local, title: "Naslov spremenjen v Google", notes: "Google opis" }),
+    id: "owned-event",
+    updated: "2026-07-15T09:00:00.000Z"
+  };
+  const staleItem = { ...local, id: "todo-stale", googleEventId: "stale-event" };
+  const stale = {
+    ...todoToGoogleEvent(staleItem),
+    id: "stale-event",
+    updated: "2026-07-15T07:00:00.000Z"
+  };
+  const foreign = {
+    id: "foreign-event",
+    summary: "Zaseben Google dogodek",
+    start: { date: "2026-07-17" },
+    end: { date: "2026-07-18" }
+  };
+  const calendar = fakeCalendar([remoteEdited, stale, foreign]);
+  const syncDb = { entries: [], todos: [local, missing] };
+
+  const first = await reconcileGoogleCalendar(calendar.api, "calendar", syncDb, user);
+  assert.deepEqual(first, { pushed: 2, removed: 1, pulled: 0, conflicts: 0 });
+  assert.equal(local.title, "Naslov iz aplikacije");
+  assert.equal(local.notes, "Opis iz aplikacije");
+  assert.equal(syncDb.todos.length, 2);
+  assert.deepEqual(calendar.calls.delete, ["stale-event"]);
+  assert.equal(calendar.calls.patch.length, 1);
+  assert.equal(calendar.calls.patch[0].eventId, "owned-event");
+  assert.equal(calendar.calls.patch[0].requestBody.summary, "TODO: Naslov iz aplikacije");
+  assert.equal(calendar.calls.insert.length, 1);
+  assert.equal(calendar.stored.has("foreign-event"), true);
+  assert.equal(calendar.stored.get("foreign-event").summary, "Zaseben Google dogodek");
+  assert.equal(googleEventMatchesRequest(calendar.stored.get("owned-event"), todoToGoogleEvent(local)), true);
+
+  const second = await reconcileGoogleCalendar(calendar.api, "calendar", syncDb, user);
+  assert.deepEqual(second, { pushed: 0, removed: 0, pulled: 0, conflicts: 0 });
+  assert.equal(calendar.calls.patch.length, 1);
+
+  const source = fs.readFileSync(path.join(__dirname, "../outputs/server.js"), "utf8");
+  const syncSource = source.match(/async function syncGoogleForUser[\s\S]*?\n}/)?.[0] || "";
+  assert.doesNotMatch(syncSource, /entryFromGoogleEvent|todoFromGoogleEvent|pulled\+\+/);
+  const html = fs.readFileSync(path.join(__dirname, "../outputs/index.html"), "utf8");
+  assert.doesNotMatch(html, /prebrano iz Google/);
 });
 
 test("konflikt zmaga novejsa sprememba, nespremenjen vnos pa se ne posilja", () => {

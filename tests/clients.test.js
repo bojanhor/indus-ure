@@ -330,6 +330,6 @@ test("skupni obrazec opravila uporablja strezniski zaklep", () => {
   assert.match(server, /todoLockMatch && req\.method === "POST"/);
   assert.match(server, /todoEditLockConflict\(id, user, editLockToken\)/);
   assert.match(server, /sendJson\(res, 409, \{ error: `Opravilo trenutno ureja/);
-  assert.match(server, /if \(activeTodoEditLock\(todo\.id\)\) continue/);
+  assert.match(server, /locked: Boolean\(activeTodoEditLock\(item\.id\)\)/);
   assert.match(server, /releaseTodoEditLock\(id, user, editLockToken\)/);
 });

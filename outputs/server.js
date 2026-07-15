@@ -1471,35 +1471,57 @@ function todoFromGoogleEvent(event, user, db = {}, existing = null) {
   };
 }
 
-async function listGoogleEventChanges(calendar, calendarId, syncToken = "") {
+async function listGoogleEvents(calendar, calendarId) {
   const events = [];
   let pageToken = "";
-  let nextSyncToken = "";
-  try {
-    do {
-      const request = { calendarId, maxResults: 2500, showDeleted: true };
-      if (pageToken) request.pageToken = pageToken;
-      if (syncToken) {
-        request.syncToken = syncToken;
-      } else {
-        const timeMin = new Date();
-        timeMin.setDate(timeMin.getDate() - 30);
-        request.timeMin = timeMin.toISOString();
-        request.singleEvents = true;
-        request.orderBy = "startTime";
-      }
-      const response = await calendar.events.list(request);
-      events.push(...(response.data.items || []));
-      pageToken = response.data.nextPageToken || "";
-      nextSyncToken = response.data.nextSyncToken || nextSyncToken;
-    } while (pageToken);
-  } catch (error) {
-    if (syncToken && Number(error.code || error.response?.status) === 410) {
-      return listGoogleEventChanges(calendar, calendarId, "");
-    }
-    throw error;
+  do {
+    const request = { calendarId, maxResults: 2500, showDeleted: false };
+    if (pageToken) request.pageToken = pageToken;
+    const response = await calendar.events.list(request);
+    events.push(...(response.data.items || []));
+    pageToken = response.data.nextPageToken || "";
+  } while (pageToken);
+  return events;
+}
+
+function googleEventTimeMatches(actual = {}, expected = {}) {
+  if (expected.date) return String(actual.date || "") === String(expected.date);
+  if (expected.dateTime) {
+    return String(actual.dateTime || "").slice(0, 19) === String(expected.dateTime).slice(0, 19);
   }
-  return { events, syncToken: nextSyncToken };
+  return !actual.date && !actual.dateTime;
+}
+
+function googleEventMatchesRequest(event, requestBody) {
+  const actualPrivate = googleEventPrivateProperties(event);
+  const expectedPrivate = requestBody.extendedProperties?.private || {};
+  const colorMatches = !Object.hasOwn(requestBody, "colorId")
+    || String(event.colorId || "") === String(requestBody.colorId || "");
+  return String(event.summary || "") === String(requestBody.summary || "")
+    && String(event.description || "") === String(requestBody.description || "")
+    && colorMatches
+    && googleEventTimeMatches(event.start, requestBody.start)
+    && googleEventTimeMatches(event.end, requestBody.end)
+    && Object.entries(expectedPrivate).every(([key, value]) => String(actualPrivate[key] || "") === String(value || ""));
+}
+
+function markGoogleItemSynced(item, event, requestBody, expectedType = "") {
+  item.googleUpdatedAt = event.updated || item.googleUpdatedAt || new Date().toISOString();
+  item.googleSyncedLocalAt = item.updatedAt || item.createdAt || new Date().toISOString();
+  item.googleManagedByIndus = true;
+  if (expectedType === "todo") {
+    item.googleColorId = String(requestBody.colorId || "");
+    item.googleStatusLabel = todoStatusDefinition(item.status).label;
+  }
+}
+
+function resetGoogleItemSync(item) {
+  item.googleEventId = "";
+  item.googleUpdatedAt = "";
+  item.googleSyncedLocalAt = item.updatedAt || "";
+  item.googleManagedByIndus = false;
+  item.googleColorId = "";
+  item.googleStatusLabel = "";
 }
 
 async function verifyOwnedGoogleEvent(calendar, calendarId, item, expectedType = "") {
@@ -1535,13 +1557,7 @@ async function pushGoogleItem(calendar, calendarId, item, requestBody, expectedT
     response = await calendar.events.insert({ calendarId, requestBody, sendUpdates: "none" });
     item.googleEventId = response.data.id || "";
   }
-  item.googleUpdatedAt = response.data.updated || new Date().toISOString();
-  item.googleSyncedLocalAt = item.updatedAt || item.createdAt || new Date().toISOString();
-  item.googleManagedByIndus = true;
-  if (expectedType === "todo") {
-    item.googleColorId = String(requestBody.colorId || "");
-    item.googleStatusLabel = todoStatusDefinition(item.status).label;
-  }
+  markGoogleItemSynced(item, response.data, requestBody, expectedType);
   return true;
 }
 
@@ -1559,6 +1575,82 @@ async function deleteOwnedGoogleEvent(calendar, calendarId, item, expectedType =
   return true;
 }
 
+async function reconcileGoogleCalendar(calendar, calendarId, db, user) {
+  const records = new Map();
+  for (const item of db.entries.filter((entry) => entry.syncUser === user.id)) {
+    records.set("entry:" + item.id, {
+      item,
+      type: "entry",
+      eligible: Boolean(item.date && item.start && item.end),
+      locked: Boolean(activeEntryEditLock(item.id))
+    });
+  }
+  for (const item of db.todos.filter((todo) => todo.syncUser === user.id)) {
+    records.set("todo:" + item.id, {
+      item,
+      type: "todo",
+      eligible: Boolean(item.date && !item.done),
+      locked: Boolean(activeTodoEditLock(item.id))
+    });
+  }
+
+  const remoteGroups = new Map();
+  const remoteEvents = await listGoogleEvents(calendar, calendarId);
+  for (const event of remoteEvents) {
+    if (!event?.id || event.status === "cancelled") continue;
+    const privateProps = googleEventPrivateProperties(event);
+    const type = privateProps.indusType;
+    if (!["entry", "todo"].includes(type)) continue;
+    if (!isIndusOwnedGoogleEvent(event, null, user.id, type)) continue;
+    const key = type + ":" + privateProps.indusId;
+    if (!remoteGroups.has(key)) remoteGroups.set(key, []);
+    remoteGroups.get(key).push(event);
+  }
+
+  let pushed = 0;
+  let removed = 0;
+  for (const [key, events] of remoteGroups) {
+    const record = records.get(key);
+    if (record?.locked) continue;
+    if (!record || !record.eligible) {
+      for (const event of events) {
+        const privateProps = googleEventPrivateProperties(event);
+        const stub = { id: privateProps.indusId, syncUser: user.id, googleEventId: event.id };
+        if (await deleteOwnedGoogleEvent(calendar, calendarId, stub, privateProps.indusType)) removed++;
+      }
+      if (record) resetGoogleItemSync(record.item);
+      continue;
+    }
+
+    const preferred = events.find((event) => event.id === record.item.googleEventId) || events[0];
+    record.remoteEvent = preferred;
+    record.item.googleEventId = preferred.id;
+    for (const duplicate of events.filter((event) => event.id !== preferred.id)) {
+      const stub = { id: record.item.id, syncUser: user.id, googleEventId: duplicate.id };
+      if (await deleteOwnedGoogleEvent(calendar, calendarId, stub, record.type)) removed++;
+    }
+  }
+
+  for (const record of records.values()) {
+    if (record.locked) continue;
+    if (!record.eligible) {
+      if (!record.remoteEvent) resetGoogleItemSync(record.item);
+      continue;
+    }
+    const requestBody = record.type === "entry"
+      ? entryToGoogleEvent(record.item)
+      : todoToGoogleEvent(record.item);
+    if (record.remoteEvent && googleEventMatchesRequest(record.remoteEvent, requestBody)) {
+      markGoogleItemSynced(record.item, record.remoteEvent, requestBody, record.type);
+      continue;
+    }
+    if (!record.remoteEvent) resetGoogleItemSync(record.item);
+    if (await pushGoogleItem(calendar, calendarId, record.item, requestBody, record.type)) pushed++;
+  }
+
+  return { pushed, removed, pulled: 0, conflicts: 0 };
+}
+
 async function syncGoogleForUser(req, db, user) {
   if (!googleReady()) throw new Error("Google OAuth se ni nastavljen.");
   if (!user.google?.tokens || Number(user.google.scopeVersion || 0) !== GOOGLE_CALENDAR_SCOPE_VERSION) {
@@ -1568,135 +1660,11 @@ async function syncGoogleForUser(req, db, user) {
   const auth = googleClient(req, user.google.tokens);
   const calendar = google.calendar({ version: "v3", auth });
   const calendarId = await ensureGoogleCalendar(calendar, user);
-  const remote = await listGoogleEventChanges(calendar, calendarId, user.google.syncToken || "");
-  let pushed = 0;
-  let pulled = 0;
-  let conflicts = 0;
-
-  for (const event of remote.events) {
-    const privateProps = googleEventPrivateProperties(event);
-    const entryIndex = db.entries.findIndex((item) => item.syncUser === user.id && (item.googleEventId === event.id || item.id === privateProps.indusId));
-    const todoIndex = db.todos.findIndex((item) => item.syncUser === user.id && (item.googleEventId === event.id || item.id === privateProps.indusId));
-    const entry = entryIndex >= 0 ? db.entries[entryIndex] : null;
-    const todo = todoIndex >= 0 ? db.todos[todoIndex] : null;
-    const ownedEntry = isIndusOwnedGoogleEvent(event, entry, user.id, "entry");
-    const ownedTodo = isIndusOwnedGoogleEvent(event, todo, user.id, "todo");
-
-    if (event.status === "cancelled") {
-      if (entryIndex >= 0 && ownedEntry) {
-        if (activeEntryEditLock(entry.id)) {
-          conflicts++;
-          continue;
-        }
-        db.entries.splice(entryIndex, 1);
-        pulled++;
-      } else if (todoIndex >= 0 && ownedTodo) {
-        if (activeTodoEditLock(todo.id)) {
-          conflicts++;
-          continue;
-        }
-        db.todos.splice(todoIndex, 1);
-        pulled++;
-      }
-      continue;
-    }
-
-    if (ownedEntry) {
-      if (entry && activeEntryEditLock(entry.id)) {
-        conflicts++;
-        continue;
-      }
-      if (!entry) {
-        const imported = entryFromGoogleEvent(event, user, db);
-        if (imported) {
-          db.entries.push(imported);
-          pulled++;
-        }
-      } else {
-        entry.googleManagedByIndus = true;
-        if (!entry.googleEventId) {
-          entry.googleEventId = event.id || "";
-          entry.googleUpdatedAt = event.updated || "";
-          entry.googleSyncedLocalAt = entry.updatedAt || "";
-        } else if (googleEventChanged(event, entry)) {
-          if (remoteGoogleChangeWins(event, entry)) {
-            const imported = entryFromGoogleEvent(event, user, db, entry);
-            if (imported) {
-              Object.assign(entry, imported);
-              pulled++;
-            }
-          } else {
-            conflicts++;
-          }
-        }
-      }
-      continue;
-    }
-
-    if (ownedTodo) {
-      if (todo && activeTodoEditLock(todo.id)) {
-        conflicts++;
-        continue;
-      }
-      if (!todo) {
-        const imported = todoFromGoogleEvent(event, user, db);
-        if (imported) {
-          db.todos.push(imported);
-          pulled++;
-        }
-      } else {
-        todo.googleManagedByIndus = true;
-        todo.googleColorId = String(event.colorId || "");
-        todo.googleStatusLabel = String(parseGoogleEventDescription(event.description).fields.status || "");
-        if (!todo.googleEventId) {
-          todo.googleEventId = event.id || "";
-          todo.googleUpdatedAt = event.updated || "";
-          todo.googleSyncedLocalAt = todo.updatedAt || "";
-        } else if (googleEventChanged(event, todo)) {
-          if (remoteGoogleChangeWins(event, todo)) {
-            const imported = todoFromGoogleEvent(event, user, db, todo);
-            if (imported) {
-              Object.assign(todo, imported);
-              pulled++;
-            }
-          } else {
-            conflicts++;
-          }
-        }
-      }
-    }
-  }
-
-  for (const entry of db.entries.filter((item) => item.syncUser === user.id && item.date && item.start && item.end)) {
-    if (activeEntryEditLock(entry.id)) continue;
-    if (entry.googleEventId && !localItemChanged(entry)) continue;
-    if (await pushGoogleItem(calendar, calendarId, entry, entryToGoogleEvent(entry), "entry")) pushed++;
-  }
-
-  for (const todo of db.todos.filter((item) => item.syncUser === user.id && item.date)) {
-    if (activeTodoEditLock(todo.id)) continue;
-    if (todo.done) {
-      if (todo.googleEventId && await deleteOwnedGoogleEvent(calendar, calendarId, todo, "todo")) {
-        todo.googleEventId = "";
-        todo.googleUpdatedAt = "";
-        todo.googleSyncedLocalAt = todo.updatedAt || "";
-        todo.googleManagedByIndus = false;
-        todo.googleColorId = "";
-        todo.googleStatusLabel = "";
-        pushed++;
-      }
-      continue;
-    }
-    const requestBody = todoToGoogleEvent(todo);
-    const desiredStatusLabel = todoStatusDefinition(todo.status).label;
-    if (todo.googleEventId && !localItemChanged(todo) && todo.googleColorId === requestBody.colorId && todo.googleStatusLabel === desiredStatusLabel) continue;
-    if (await pushGoogleItem(calendar, calendarId, todo, requestBody, "todo")) pushed++;
-  }
-
+  const result = await reconcileGoogleCalendar(calendar, calendarId, db, user);
   user.google.calendarId = calendarId;
-  user.google.syncToken = remote.syncToken || user.google.syncToken || "";
+  user.google.syncToken = "";
   user.google.lastSyncAt = new Date().toISOString();
-  return { pushed, pulled, conflicts, calendarName: user.google.calendarName || `INDUS URE - ${user.name}` };
+  return { ...result, direction: "app_to_google", calendarName: user.google.calendarName || ("INDUS URE - " + user.name) };
 }
 
 async function syncClientsWithSheets(db, user) {
@@ -1887,6 +1855,7 @@ async function handleApi(req, res) {
       sendJson(res, 200, {
         configured: googleReady(),
         connected: Boolean(user.google?.tokens && Number(user.google.scopeVersion || 0) === GOOGLE_CALENDAR_SCOPE_VERSION),
+        direction: "app_to_google",
         calendarName: user.google?.calendarName || "",
         lastSyncAt: user.google?.lastSyncAt || "",
         syncIntervalMs: GOOGLE_SYNC_INTERVAL_MS
@@ -2775,8 +2744,8 @@ async function syncConnectedGoogleCalendars() {
     try {
       const result = await syncGoogleForUser({ headers: { host: "localhost" } }, db, user);
       changed = true;
-      if (result.pushed || result.pulled || result.conflicts) {
-        console.log(`Google koledar ${user.id}: poslano ${result.pushed}, prebrano ${result.pulled}, konflikti ${result.conflicts}.`);
+      if (result.pushed || result.removed) {
+        console.log("Google koledar " + user.id + ": posodobljeno " + result.pushed + ", odstranjeno " + result.removed + ".");
       }
     } catch (error) {
       console.error(`Google koledarja za ${user.id} ni bilo mogoce sinhronizirati: ${error.message || error}`);
@@ -2868,8 +2837,10 @@ module.exports = {
   activeTodoEditLock,
   deleteOwnedGoogleEvent,
   entryEditLockConflict,
+  googleEventMatchesRequest,
   isIndusOwnedGoogleEvent,
   pushGoogleItem,
+  reconcileGoogleCalendar,
   canManageEntry,
   canManageTodo,
   sourceTodoForNewEntry,

@@ -3850,7 +3850,7 @@
         state.todos = data.todos || state.todos;
         refreshClientList();
         render();
-        if (showSuccess) alert(`Google sync koncan. Poslano: ${data.pushed || 0}, prebrano iz Google: ${data.pulled || 0}, konflikti: ${data.conflicts || 0}.`);
+        if (showSuccess) alert("Google koledar posodobljen. Posodobljeno: " + (data.pushed || 0) + ", odstranjeno: " + (data.removed || 0) + ".");
       } catch (error) {
         if (showSuccess) alert(error.message);
       } finally {
