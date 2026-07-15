@@ -111,13 +111,6 @@
       gap: 16px;
     }
 
-    .sidebar .control,
-    .sidebar .row,
-    .sidebar .quick-presets,
-    #saveQuick {
-      display: none;
-    }
-
     .brand {
       display: grid;
       gap: 5px;
@@ -189,49 +182,10 @@
       background: #fbfcfa;
     }
 
-    .control textarea {
-      min-height: 70px;
-      resize: vertical;
-    }
-
-
     .control select option,
     .control select optgroup {
       color: var(--ink);
       background: #fff;
-    }
-    .control input::placeholder,
-    .control textarea::placeholder { color: rgba(255, 255, 255, 0.45); }
-
-    .row {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 10px;
-    }
-
-    .quick-presets {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 8px;
-    }
-
-    .quick-presets button {
-      min-height: 36px;
-      border-radius: 8px;
-      background: rgba(255, 255, 255, 0.1);
-      color: #fff;
-      border: 1px solid rgba(255, 255, 255, 0.18);
-      font-weight: 800;
-    }
-
-    dialog .quick-presets button {
-      background: #e4eee9;
-      color: #203035;
-      border-color: var(--line);
-    }
-
-    .control.internal input {
-      opacity: 0.62;
     }
 
     .primary,
@@ -1253,27 +1207,6 @@
       line-height: 1;
     }
 
-    .event {
-      width: 100%;
-      text-align: left;
-      border-radius: 7px;
-      padding: 7px 8px;
-      color: #fff;
-      display: grid;
-      gap: 3px;
-      min-height: 46px;
-    }
-
-    .event .time { font-size: 12px; font-weight: 800; opacity: 0.95; }
-    .event .client,
-    .event .summary {
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-    .event .client { font-size: 13px; font-weight: 800; }
-    .event .summary { font-size: 12px; opacity: 0.9; }
-
     .billed { background: var(--green); }
     .warranty { background: var(--red); }
     .unbilled { background: var(--orange); }
@@ -1457,26 +1390,6 @@
       background: #f1fbf1;
     }
 
-    .status-switch {
-      display: grid;
-      grid-template-columns: repeat(5, 1fr);
-      gap: 8px;
-    }
-
-    .status-switch button {
-      min-height: 40px;
-      border-radius: 8px;
-      color: #fff;
-      font-weight: 800;
-      padding: 8px;
-      opacity: 0.72;
-    }
-
-    .status-switch button.active {
-      opacity: 1;
-      outline: 3px solid rgba(31, 42, 46, 0.18);
-    }
-
     .debt-list {
       display: grid;
       gap: 10px;
@@ -1657,7 +1570,6 @@
         grid-template-columns: 1fr;
       }
       .modal-grid,
-      .status-switch,
       .boss-panel,
       .month-debt-grid,
       .todo-layout,
@@ -1729,70 +1641,8 @@
         </select>
       </div>
 
-      <div class="control worker-only">
-        <label for="quickDate">Hitri vnos za datum</label>
-        <input id="quickDate" type="date">
-      </div>
-
-      <div class="row worker-only">
-        <div class="control">
-          <label for="quickStart">Od</label>
-          <input id="quickStart" type="time" value="08:00">
-        </div>
-        <div class="control">
-          <label for="quickEnd">Do</label>
-          <input id="quickEnd" type="time" value="16:00">
-        </div>
-      </div>
-
-      <div class="control worker-only">
-        <label for="quickClient">Stranka</label>
-        <input id="quickClient" list="clientList" placeholder="npr. Novak d.o.o.">
-        <datalist id="clientList"></datalist>
-      </div>
-
-      <div class="control worker-only">
-        <label for="quickStatus">Status</label>
-        <select id="quickStatus">
-          <option value="unbilled">Opravljeno / ni obra&#269;unano</option>
-          <option value="billed">&#381;e obra&#269;unano</option>
-          <option value="warranty">Garancija</option>
-          <option value="errand">Opravki</option>
-          <option value="vacation">Dopust</option>
-        </select>
-      </div>
-
-      <div class="quick-presets worker-only">
-        <button id="quickLunch" type="button">Malica</button>
-        <button id="quickTravel" type="button">Pot</button>
-      </div>
-
-      <div class="control worker-only">
-        <label for="quickWork">Kaj si delal</label>
-        <textarea id="quickWork" placeholder="Kratek opis dela"></textarea>
-      </div>
-
-      <div class="row worker-only">
-        <div class="control">
-          <label for="quickKm">Km</label>
-          <input id="quickKm" type="number" min="0" step="0.1" placeholder="0">
-        </div>
-        <div class="control">
-          <label for="quickFromHome">Start</label>
-          <select id="quickFromHome">
-            <option value="false">Obi&#269;ajen</option>
-            <option value="true">Od doma</option>
-          </select>
-        </div>
-      </div>
-
-      <div class="control worker-only">
-        <label for="quickMaterial">Material</label>
-        <textarea id="quickMaterial" placeholder="npr. kabel 20 m, stikalo, vijaki"></textarea>
-      </div>
-
-      <button class="primary worker-only" id="saveQuick" type="button">Shrani v koledar</button>
-      <button class="primary hidden" id="newTodoFromSidebar" type="button">Nov vnos prek opravila</button>
+      <button class="primary hidden" id="newTodoFromSidebar" type="button">Novo opravilo</button>
+      <datalist id="clientList"></datalist>
 
     </aside>
 
@@ -1811,7 +1661,7 @@
             <button class="view-btn admin-only" id="clientsViewBtn" type="button">Stranke</button>
             <button class="view-btn admin-only" id="reportViewBtn" type="button">Obra&#269;un</button>
           </div>
-          <input class="search" id="clientSearch" placeholder="I&#353;&#269;i stranko, material ali opis">
+          <input class="search" id="clientSearch" placeholder="I&#353;&#269;i stranko, opravilo ali opis">
           <details class="tools-menu" id="toolsMenu">
             <summary class="account-btn" title="Nastavitve in orodja">
               <span class="avatar" id="topAvatar">?</span>
@@ -1997,97 +1847,6 @@
     </main>
   </div>
 
-  <dialog id="entryDialog">
-    <form method="dialog" id="entryForm">
-      <div class="modal-head">
-        <h3 id="dialogTitle">Dogodek</h3>
-        <button class="icon-btn" id="closeDialog" type="button" title="Zapri">&times;</button>
-      </div>
-      <div class="modal-body">
-        <input type="hidden" id="entryId">
-        <input type="hidden" id="entryTodoId">
-        <div class="modal-grid">
-          <label>Datum
-            <input id="entryDate" type="date" required>
-          </label>
-          <label>Stranka
-            <input id="entryClient" list="clientList" required>
-          </label>
-          <label>Sodelavci
-            <input id="entryPeople" placeholder="npr. Bojan, Ibro">
-          </label>
-          <label>Od
-            <input id="entryStart" type="time" required>
-          </label>
-          <label>Do
-            <input id="entryEnd" type="time" required>
-          </label>
-          <label>Kilometri
-            <input id="entryKm" type="number" min="0" step="0.1">
-          </label>
-          <label>Start
-            <select id="entryFromHome">
-              <option value="false">Obi&#269;ajen start</option>
-              <option value="true">Start od doma</option>
-            </select>
-          </label>
-          <label class="admin-entry-field">Ra&#269;un
-            <select id="entryInvoiceSent">
-              <option value="false">Ra&#269;un ni poslan</option>
-              <option value="true">Ra&#269;un poslan</option>
-            </select>
-          </label>
-          <label class="admin-entry-field">Pora&#269;unano
-            <select id="entryInvoiceSettled">
-              <option value="false">Ni pora&#269;unano</option>
-              <option value="true">Pora&#269;unano</option>
-            </select>
-          </label>
-          <label class="admin-entry-field">Pla&#269;ano
-            <select id="entryInvoicePaid">
-              <option value="false">Ni pla&#269;ano</option>
-              <option value="true">Pla&#269;ano</option>
-            </select>
-          </label>
-        </div>
-
-        <label>Status</label>
-        <div class="status-switch">
-          <button type="button" class="billed" data-status="billed">Obra&#269;unano</button>
-          <button type="button" class="warranty" data-status="warranty">Garancija</button>
-          <button type="button" class="unbilled" data-status="unbilled">Ni obra&#269;unano</button>
-          <button type="button" class="errand" data-status="errand">Opravki</button>
-          <button type="button" class="vacation" data-status="vacation">Dopust</button>
-        </div>
-
-        <div class="quick-presets">
-          <button id="entryLunch" type="button">Malica</button>
-          <button id="entryTravel" type="button">Pot</button>
-        </div>
-
-        <label>Kaj si delal
-          <textarea id="entryWork" placeholder="Opis dela"></textarea>
-        </label>
-        <label>Porabljen material
-          <textarea id="entryMaterial" placeholder="Material, koli&#269;ina, opombe"></textarea>
-        </label>
-        <label>Opombe
-          <textarea id="entryNotes" placeholder="Dodatno za &#353;efa ali zase"></textarea>
-        </label>
-
-        <div class="audit-box hidden" id="entryAudit"></div>
-
-        <div class="actions">
-          <button type="button" class="danger" id="deleteEntry">Izbri&#353;i vnos</button>
-          <div>
-            <button type="button" class="secondary" id="duplicateEntry">Podvoji</button>
-            <button type="submit" class="primary">Shrani</button>
-          </div>
-        </div>
-      </div>
-    </form>
-  </dialog>
-
   <dialog id="todoDialog">
     <form method="dialog" id="todoForm">
       <div class="modal-head">
@@ -2232,7 +1991,6 @@
   <script>
     const tokenKey = "indus-ure-token";
     const workContextKey = "indus-ure-work-context";
-    const oldStorageKey = "delovni-koledar-v1";
     const statusLabels = {
       billed: "Ze obracunano",
       warranty: "Garancija",
@@ -2283,7 +2041,6 @@
     const state = {
       current: new Date(),
       view: "calendar",
-      selectedStatus: "unbilled",
       entries: [],
       todos: [],
       debts: [],
@@ -2302,10 +2059,10 @@
       workContext: "",
       googleSyncing: false,
       sharedDataRefreshing: false,
-      entryEditLock: null,
-      entryLockHeartbeat: null,
-      entryLockRenewPromise: null,
-      entryLockPending: false,
+      todoEditLock: null,
+      todoLockHeartbeat: null,
+      todoLockRenewPromise: null,
+      todoLockPending: false,
       token: localStorage.getItem(tokenKey) || ""
     };
 
@@ -2328,10 +2085,8 @@
     }
 
     async function boot() {
-      $("quickDate").value = dateKey(new Date());
       $("pageTodoDate").value = "";
       setDefaultReportRange();
-      updateQuickErrandMode();
       if (location.protocol === "file:") {
         $("serverWarning").classList.remove("hidden");
         return;
@@ -2471,13 +2226,6 @@
       $("newTodoFromSidebar").classList.toggle("hidden", admin);
       document.querySelectorAll(".admin-entry-field").forEach((element) => element.classList.toggle("hidden", !admin));
       $("todoCreatePanel").classList.toggle("hidden", admin);
-      const billedOption = $("quickStatus").querySelector('option[value="billed"]');
-      if (billedOption) billedOption.disabled = !admin;
-      if (!admin && $("quickStatus").value === "billed") {
-        $("quickStatus").value = "unbilled";
-        updateQuickErrandMode();
-      }
-      document.querySelectorAll('[data-status="billed"]').forEach((button) => button.disabled = !admin);
       const canSyncOwnGoogle = admin || activeWorkerId() === state.user?.id;
       $("googleCalendar").classList.toggle("hidden", !canSyncOwnGoogle);
       $("googleCalendar").textContent = admin ? `Google sync (${state.user?.name || "sef"})` : "Google sync";
@@ -2492,7 +2240,6 @@
       state.selectedClient = "";
       state.reportClient = "";
       state.reportClientId = "";
-      if ($("entryDialog").open) $("entryDialog").close();
       if ($("todoDialog").open) $("todoDialog").close();
       if ($("debtDialog").open) $("debtDialog").close();
       if (!isAdminView() && ["clients", "report"].includes(state.view)) state.view = "calendar";
@@ -2706,41 +2453,15 @@
       return data;
     }
 
-    async function saveEntryToServer(entry) {
-      if (entry.id && state.entryEditLock?.entryId === entry.id) {
-        await pauseEntryLockHeartbeat();
-      }
-      const method = entry.id ? "PUT" : "POST";
-      const path = entry.id ? `/api/entries/${entry.id}` : "/api/entries";
-      const editLockToken = entry.id && state.entryEditLock?.entryId === entry.id
-        ? state.entryEditLock.token
-        : "";
-      const payload = editLockToken ? { ...entry, editLockToken } : entry;
-      const data = await api(path, { method, body: JSON.stringify(payload) });
-      state.entries = data.entries;
-      if (data.todos) state.todos = data.todos;
-      refreshClientList();
-      render();
-    }
-
-    async function deleteEntryFromServer(id) {
-      await pauseEntryLockHeartbeat();
-      const editLockToken = state.entryEditLock?.entryId === id
-        ? state.entryEditLock.token
-        : "";
-      const data = await api(`/api/entries/${id}`, {
-        method: "DELETE",
-        body: JSON.stringify({ editLockToken })
-      });
-      state.entries = data.entries;
-      refreshClientList();
-      render();
-    }
-
     async function saveTodoToServer(todo) {
+      if (todo.id && state.todoEditLock?.todoId === todo.id) await pauseTodoLockHeartbeat();
       const method = todo.id ? "PUT" : "POST";
       const path = todo.id ? `/api/todos/${todo.id}` : "/api/todos";
-      const data = await api(path, { method, body: JSON.stringify(todo) });
+      const editLockToken = todo.id && state.todoEditLock?.todoId === todo.id
+        ? state.todoEditLock.token
+        : "";
+      const payload = editLockToken ? { ...todo, editLockToken } : todo;
+      const data = await api(path, { method, body: JSON.stringify(payload) });
       state.todos = data.todos;
       refreshClientList();
       render();
@@ -2748,12 +2469,19 @@
     }
 
     async function deleteTodoFromServer(id) {
+      if (state.todoEditLock?.todoId === id) await pauseTodoLockHeartbeat();
+      const editLockToken = state.todoEditLock?.todoId === id
+        ? state.todoEditLock.token
+        : "";
       const previousTodos = state.todos.slice();
       state.todos = state.todos.filter((todo) => todo.id !== id);
       refreshClientList();
       render();
       try {
-        const data = await api(`/api/todos/${id}`, { method: "DELETE" });
+        const data = await api(`/api/todos/${id}`, {
+          method: "DELETE",
+          body: JSON.stringify({ editLockToken })
+        });
         state.todos = data.todos;
         refreshClientList();
         render();
@@ -2859,27 +2587,6 @@
       if (client?.search) $("pageTodoClient").value = client.search;
     }
 
-    function entryFromQuick() {
-      const status = $("quickStatus").value;
-      const client = findClient($("quickClient").value);
-      return {
-        date: $("quickDate").value,
-        start: status === "vacation" ? "00:00" : $("quickStart").value,
-        end: status === "vacation" ? "23:59" : $("quickEnd").value,
-        client: ["errand", "vacation"].includes(status) ? "" : (client?.name || normalizeClientName($("quickClient").value)),
-        clientId: ["errand", "vacation"].includes(status) ? "" : (client?.clientId || client?.id || ""),
-        status,
-        work: status === "vacation" ? ($("quickWork").value.trim() || "Dopust") : $("quickWork").value.trim(),
-        material: $("quickMaterial").value.trim(),
-        people: "",
-        syncUser: activeWorkerId(),
-        km: status === "vacation" ? 0 : Number($("quickKm").value || 0),
-        materialCost: 0,
-        notes: "",
-        fromHome: $("quickFromHome").value === "true"
-      };
-    }
-
     function todoFromPage() {
       const client = findTodoClient($("pageTodoClient").value);
       return {
@@ -2894,26 +2601,6 @@
         syncUser: activeWorkerId(),
         done: false
       };
-    }
-
-    function validateEntry(entry) {
-      if (!entry.date || !entry.start || !entry.end) {
-        alert("Vpisi datum in uro od-do.");
-        return false;
-      }
-      if (!["errand", "vacation"].includes(entry.status) && !entry.client) {
-        alert("Vpisi stranko.");
-        return false;
-      }
-      if (!["errand", "vacation"].includes(entry.status) && !entry.clientId) {
-        alert("Izbrana stranka nima veljavne davcne stevilke v Google Sheets bazi.");
-        return false;
-      }
-      if (minutes(entry.end) <= minutes(entry.start)) {
-        alert("Ura 'do' mora biti kasneje kot ura 'od'.");
-        return false;
-      }
-      return true;
     }
 
     function validateTodo(todo) {
@@ -3059,22 +2746,6 @@
         }
         day.appendChild(head);
 
-        entries
-          .filter((entry) => entry.date === key)
-          .sort((a, b) => minutes(a.start) - minutes(b.start))
-          .forEach((entry) => {
-            const event = document.createElement("button");
-            event.type = "button";
-            event.className = `event ${entry.status}`;
-            event.innerHTML = `
-              <span class="time">${entry.status === "vacation" ? "cel dan" : `${entry.start} - ${entry.end}`}</span>
-              ${["errand", "vacation"].includes(entry.status) ? "" : `<span class="client">${escapeHtml(entry.client)}</span>`}
-              <span class="summary">${escapeHtml(entry.work || entry.material || statusLabels[entry.status])}</span>
-            `;
-            event.addEventListener("click", () => openEventForm(entry));
-            day.appendChild(event);
-          });
-
         todos
           .filter((todo) => todo.date === key)
           .sort(todoSort)
@@ -3083,7 +2754,7 @@
             item.type = "button";
             item.className = `day-todo todo-status-color ${todoStatusClass(todo.status)} ${todo.done ? "done" : ""}`;
             item.innerHTML = `${escapeHtml(todo.title)}${todo.client ? `<br><small>${escapeHtml(todo.client)}</small>` : ""}<br><small>${todoStatus(todo.status).label}</small>`;
-            item.addEventListener("click", () => openCalendarTodoForm(todo, entries));
+            item.addEventListener("click", () => openTodoDialog(todo));
             day.appendChild(item);
           });
 
@@ -3270,6 +2941,7 @@
             ${todo.notes ? `<div class="todo-description todo-meta">${linkifyText(todo.notes)}</div>` : ""}
           </div>
           <div class="todo-tools">
+            <button class="primary edit-todo" type="button">Uredi opravilo</button>
             <select class="todo-status todo-status-color ${todoStatusClass(todo.status)}" aria-label="Status opravila">
               ${todoStatusOptions(todo.status)}
             </select>
@@ -3295,6 +2967,11 @@
           <button class="secondary delete-todo" type="button">Izbrisi</button>
           <button class="drag-handle" type="button" title="Povleci za vrstni red">::</button>
         `;
+        item.querySelector(".edit-todo").addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          openTodoDialog(todo);
+        });
         item.querySelector('input[type="checkbox"]').addEventListener("change", (event) => {
           saveTodoToServer({ ...todo, done: event.target.checked }).catch((error) => alert(error.message));
         });
@@ -3446,8 +3123,9 @@
       $("todoFormBilling").classList.toggle("hidden", !showBilling);
     }
 
-    function openTodoDialog(todo = {}) {
+    async function openTodoDialog(todo = {}) {
       const editing = Boolean(todo.id);
+      if (editing && !(await acquireTodoEditLockForDialog(todo.id))) return;
       const client = findClient(todo.clientId || todo.client);
       $("todoFormTitle").textContent = editing ? "Uredi opravilo" : "Novo opravilo";
       $("todoFormId").value = todo.id || "";
@@ -3656,7 +3334,6 @@
             <span class="report-state-chip">Ra&#269;un: ${entry.invoiceSent ? "poslan" : "ni poslan"}</span>
             <span class="report-state-chip">${entry.invoiceSettled ? "pora&#269;unano" : "ni pora&#269;unano"}</span>
             <span class="report-state-chip">${entry.invoicePaid ? "pla&#269;ano" : "ni pla&#269;ano"}</span>
-            <button class="secondary open-report-entry" type="button" data-entry-id="${escapeHtml(entry.id)}">Uredi dogodek</button>
           </span>
         </div>
       ` }));
@@ -3817,7 +3494,6 @@
         item.disabled = !client.clientId;
         item.title = client.clientId ? "" : "Stranka nima enolicne davcne stevilke v Google Sheetu.";
         if (client.clientId) item.addEventListener("click", () => {
-          $("quickClient").value = client.name;
           $("pageTodoClient").value = client.search || client.name;
           state.selectedClient = client.name;
           openClientReport(client.name, client.clientId);
@@ -3825,9 +3501,9 @@
         panel.appendChild(item);
       });
 
-      const results = contextEntries()
-        .filter((entry) => normalizeText([entry.client, entry.people, entry.work, entry.material, entry.notes, entry.createdByName].join(" ")).includes(normalizeText(query)))
-        .sort((a, b) => `${b.date} ${b.start}`.localeCompare(`${a.date} ${a.start}`));
+      const results = contextTodos()
+        .filter((todo) => normalizeText([todo.client, todo.title, todo.notes, todo.createdByName].join(" ")).includes(normalizeText(query)))
+        .sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")) || todoSort(a, b));
 
       panel.classList.add("active");
       if (results.length === 0 && clientResults.length === 0) {
@@ -3835,19 +3511,17 @@
         return;
       }
 
-      results.forEach((entry) => {
+      results.forEach((todo) => {
         const item = document.createElement("button");
         item.type = "button";
         item.className = "result";
-        const internal = ["errand", "vacation"].includes(entry.status);
-        const resultTitle = internal ? (entry.work || entry.material || statusLabels[entry.status]) : entry.client;
         item.innerHTML = `
-          <strong>${formatDate(entry.date)}</strong>
-          <span>${entry.status === "vacation" ? "cel dan" : `${entry.start} - ${entry.end}`}</span>
-          <span>${escapeHtml(resultTitle)}<br><small>${escapeHtml(internal ? statusLabels[entry.status] : (entry.work || entry.material || ""))}${entry.people ? ` | ${escapeHtml(entry.people)}` : ""} | dodal: ${escapeHtml(entry.createdByName || "-")}</small></span>
-          <span class="badge ${entry.status}">${statusLabels[entry.status]}</span>
+          <strong>${todo.date ? formatDate(todo.date) : "Brez datuma"}</strong>
+          <span>${escapeHtml(todo.client || "Brez stranke")}</span>
+          <span>${escapeHtml(todo.title)}${todo.notes ? `<br><small>${escapeHtml(todo.notes)}</small>` : ""}</span>
+          <span class="todo-chip todo-status-color ${todoStatusClass(todo.status)}">${todoStatus(todo.status).label}</span>
         `;
-        item.addEventListener("click", () => openEventForm(entry));
+        item.addEventListener("click", () => openTodoDialog(todo));
         panel.appendChild(item);
       });
     }
@@ -3970,235 +3644,94 @@
       `).join("");
     }
 
-    function entryLockUrl(entryId) {
-      return `/api/entries/${encodeURIComponent(entryId)}/lock`;
+    function todoLockUrl(todoId) {
+      return `/api/todos/${encodeURIComponent(todoId)}/lock`;
     }
 
-    function clearEntryEditLockState() {
-      if (state.entryLockHeartbeat) clearInterval(state.entryLockHeartbeat);
-      state.entryLockHeartbeat = null;
-      state.entryEditLock = null;
+    function clearTodoEditLockState() {
+      if (state.todoLockHeartbeat) clearInterval(state.todoLockHeartbeat);
+      state.todoLockHeartbeat = null;
+      state.todoEditLock = null;
     }
 
-    async function pauseEntryLockHeartbeat() {
-      if (state.entryLockHeartbeat) clearInterval(state.entryLockHeartbeat);
-      state.entryLockHeartbeat = null;
-      if (state.entryLockRenewPromise) await state.entryLockRenewPromise;
+    async function pauseTodoLockHeartbeat() {
+      if (state.todoLockHeartbeat) clearInterval(state.todoLockHeartbeat);
+      state.todoLockHeartbeat = null;
+      if (state.todoLockRenewPromise) await state.todoLockRenewPromise;
     }
 
-    function renewEntryEditLock() {
-      const current = state.entryEditLock;
+    function renewTodoEditLock() {
+      const current = state.todoEditLock;
       if (!current) return Promise.resolve();
-      if (state.entryLockRenewPromise) return state.entryLockRenewPromise;
+      if (state.todoLockRenewPromise) return state.todoLockRenewPromise;
       const renewal = (async () => {
         try {
-          const data = await api(entryLockUrl(current.entryId), {
+          const data = await api(todoLockUrl(current.todoId), {
             method: "POST",
             body: JSON.stringify({ lockToken: current.token })
           });
-          if (state.entryEditLock?.entryId === current.entryId && state.entryEditLock?.token === current.token) {
-            state.entryEditLock = { entryId: current.entryId, token: data.lockToken, expiresAt: data.lock?.expiresAt || "" };
+          if (state.todoEditLock?.todoId === current.todoId && state.todoEditLock?.token === current.token) {
+            state.todoEditLock = { todoId: current.todoId, token: data.lockToken, expiresAt: data.lock?.expiresAt || "" };
           }
         } catch (error) {
-          if (state.entryEditLock?.entryId !== current.entryId || state.entryEditLock?.token !== current.token) return;
-          clearEntryEditLockState();
-          if ($("entryDialog").open) $("entryDialog").close();
+          if (state.todoEditLock?.todoId !== current.todoId || state.todoEditLock?.token !== current.token) return;
+          clearTodoEditLockState();
+          if ($("todoDialog").open) $("todoDialog").close();
           alert(error.message);
         }
       })();
-      state.entryLockRenewPromise = renewal;
+      state.todoLockRenewPromise = renewal;
       renewal.finally(() => {
-        if (state.entryLockRenewPromise === renewal) state.entryLockRenewPromise = null;
+        if (state.todoLockRenewPromise === renewal) state.todoLockRenewPromise = null;
       });
       return renewal;
     }
 
-    async function acquireEntryEditLockForDialog(entryId) {
-      if (state.entryLockPending) return false;
-      state.entryLockPending = true;
+    async function acquireTodoEditLockForDialog(todoId) {
+      if (state.todoLockPending) return false;
+      state.todoLockPending = true;
       try {
-        const current = state.entryEditLock?.entryId === entryId ? state.entryEditLock : null;
-        const data = await api(entryLockUrl(entryId), {
+        const current = state.todoEditLock?.todoId === todoId ? state.todoEditLock : null;
+        const data = await api(todoLockUrl(todoId), {
           method: "POST",
           body: JSON.stringify({ lockToken: current?.token || "" })
         });
-        if (state.entryLockHeartbeat) clearInterval(state.entryLockHeartbeat);
-        state.entryEditLock = { entryId, token: data.lockToken, expiresAt: data.lock?.expiresAt || "" };
-        state.entryLockHeartbeat = setInterval(renewEntryEditLock, 20_000);
+        if (state.todoLockHeartbeat) clearInterval(state.todoLockHeartbeat);
+        state.todoEditLock = { todoId, token: data.lockToken, expiresAt: data.lock?.expiresAt || "" };
+        state.todoLockHeartbeat = setInterval(renewTodoEditLock, 20_000);
         return true;
       } catch (error) {
         alert(error.message);
         return false;
       } finally {
-        state.entryLockPending = false;
+        state.todoLockPending = false;
       }
     }
 
-    async function releaseEntryEditLockForDialog() {
-      const openedLock = state.entryEditLock;
-      await pauseEntryLockHeartbeat();
-      const current = state.entryEditLock?.entryId === openedLock?.entryId ? state.entryEditLock : openedLock;
-      clearEntryEditLockState();
+    async function releaseTodoEditLockForDialog() {
+      const openedLock = state.todoEditLock;
+      await pauseTodoLockHeartbeat();
+      const current = state.todoEditLock?.todoId === openedLock?.todoId ? state.todoEditLock : openedLock;
+      clearTodoEditLockState();
       if (!current) return;
       try {
-        await api(entryLockUrl(current.entryId), {
+        await api(todoLockUrl(current.todoId), {
           method: "DELETE",
           body: JSON.stringify({ lockToken: current.token })
         });
       } catch {}
     }
 
-    function releaseEntryEditLockOnPageHide() {
-      const current = state.entryEditLock;
-      clearEntryEditLockState();
+    function releaseTodoEditLockOnPageHide() {
+      const current = state.todoEditLock;
+      clearTodoEditLockState();
       if (!current || !state.token) return;
-      fetch(entryLockUrl(current.entryId), {
+      fetch(todoLockUrl(current.todoId), {
         method: "DELETE",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${state.token}` },
         body: JSON.stringify({ lockToken: current.token }),
         keepalive: true
       }).catch(() => {});
-    }
-
-    function eventDraftFromTodo(todo) {
-      return {
-        date: todo.date,
-        client: todo.client || "",
-        work: todo.title,
-        notes: todo.notes || "",
-        start: "08:00",
-        end: "16:00",
-        todoId: todo.id
-      };
-    }
-
-    function openCalendarTodoForm(todo, entries = contextEntries()) {
-      const linkedEntry = entries.find((entry) => entry.sourceTodoId === todo.id);
-      if (linkedEntry) {
-        openEventForm(linkedEntry);
-        return;
-      }
-      if (todo.done) {
-        openTodoDialog(todo);
-        return;
-      }
-      openEventForm(eventDraftFromTodo(todo));
-    }
-
-    async function openEventForm(entry = {}) {
-      const existing = Boolean(entry.id);
-      if (existing && !(await acquireEntryEditLockForDialog(entry.id))) return;
-      if (!existing && !entry.todoId) {
-        startTodoForDate(entry.date);
-        return;
-      }
-      if (!existing && isAdminView()) {
-        alert("Za zakljucek opravila najprej izberi njegov delavski pogled.");
-        return;
-      }
-      $("dialogTitle").textContent = existing ? "Uredi dogodek" : "Nov dogodek iz opravila";
-      $("entryId").value = entry.id || "";
-      $("entryTodoId").value = entry.todoId || entry.sourceTodoId || "";
-      $("entryDate").value = entry.date || dateKey(new Date());
-      $("entryStart").value = entry.start || "08:00";
-      $("entryEnd").value = entry.end || "16:00";
-      $("entryClient").value = entry.client || "";
-      $("entryPeople").value = entry.people || "";
-      $("entryKm").value = entry.km || "";
-      $("entryFromHome").value = entry.fromHome ? "true" : "false";
-      $("entryInvoiceSent").value = entry.invoiceSent ? "true" : "false";
-      $("entryInvoiceSettled").value = entry.invoiceSettled ? "true" : "false";
-      $("entryInvoicePaid").value = entry.invoicePaid ? "true" : "false";
-      $("entryWork").value = entry.work || "";
-      $("entryMaterial").value = entry.material || "";
-      $("entryNotes").value = entry.notes || "";
-      setDialogStatus(entry.status || "unbilled");
-      updateEntryClientMode();
-      $("deleteEntry").style.display = existing ? "inline-flex" : "none";
-      $("duplicateEntry").style.display = "none";
-      renderAudit(entry);
-      $("entryDialog").showModal();
-    }
-
-    function renderAudit(entry) {
-      const audit = $("entryAudit");
-      if (!entry.id) {
-        audit.classList.add("hidden");
-        audit.textContent = "";
-        return;
-      }
-      audit.classList.remove("hidden");
-      const history = (entry.history || [])
-        .slice(-5)
-        .map((item) => `${item.action}: ${item.byName || item.by} (${formatDateTime(item.at)})`)
-        .join("<br>");
-      audit.innerHTML = `
-        Dodal: <strong>${escapeHtml(entry.createdByName || "-")}</strong> (${formatDateTime(entry.createdAt)})<br>
-        Zadnja sprememba: <strong>${escapeHtml(entry.updatedByName || entry.createdByName || "-")}</strong> (${formatDateTime(entry.updatedAt || entry.createdAt)})<br>
-        ${history ? `<br>${history}` : ""}
-      `;
-    }
-
-    function setDialogStatus(status) {
-      state.selectedStatus = status;
-      document.querySelectorAll(".status-switch button").forEach((button) => {
-        button.classList.toggle("active", button.dataset.status === status);
-      });
-      updateEntryClientMode();
-    }
-
-    function updateEntryClientMode() {
-      const isInternal = ["errand", "vacation"].includes(state.selectedStatus);
-      const input = $("entryClient");
-      input.required = !isInternal;
-      input.disabled = isInternal;
-      if (isInternal) input.value = "";
-      input.parentElement?.classList.toggle("internal", isInternal);
-    }
-
-    async function saveDialogEntry() {
-      const status = state.selectedStatus;
-      const client = findClient($("entryClient").value);
-      const entry = {
-        id: $("entryId").value || undefined,
-        sourceTodoId: $("entryTodoId").value,
-        date: $("entryDate").value,
-        start: status === "vacation" ? "00:00" : $("entryStart").value,
-        end: status === "vacation" ? "23:59" : $("entryEnd").value,
-        client: ["errand", "vacation"].includes(status) ? "" : (client?.name || normalizeClientName($("entryClient").value)),
-        clientId: ["errand", "vacation"].includes(status) ? "" : (client?.clientId || client?.id || ""),
-        status,
-        work: status === "vacation" ? ($("entryWork").value.trim() || "Dopust") : $("entryWork").value.trim(),
-        material: $("entryMaterial").value.trim(),
-        people: $("entryPeople").value.trim(),
-        syncUser: ($("entryId").value ? (state.entries.find((item) => item.id === $("entryId").value)?.syncUser || "") : "") || activeWorkerId(),
-        km: status === "vacation" ? 0 : Number($("entryKm").value || 0),
-        materialCost: 0,
-        notes: $("entryNotes").value.trim(),
-        invoiceSent: $("entryInvoiceSent").value === "true",
-        invoiceSettled: $("entryInvoiceSettled").value === "true",
-        invoicePaid: $("entryInvoicePaid").value === "true",
-        fromHome: $("entryFromHome").value === "true"
-      };
-
-      if (!validateEntry(entry)) return;
-      await saveEntryToServer(entry);
-      // Streznik atomsko zakljuci izvorno opravilo skupaj z novim koledarskim vnosom.
-      state.current = parseDate(entry.date);
-      $("entryDialog").close();
-    }
-
-    async function duplicateDialogEntry() {
-      const original = state.entries.find((entry) => entry.id === $("entryId").value);
-      startTodoForDate(original?.date || dateKey(new Date()));
-    }
-
-    async function deleteDialogEntry() {
-      const id = $("entryId").value;
-      if (!id) return;
-      if (!confirm("Izbrisem ta vnos?")) return;
-      await deleteEntryFromServer(id);
-      $("entryDialog").close();
     }
 
     function exportCsv() {
@@ -4353,49 +3886,12 @@
       return result;
     }
 
-    async function migrateOldLocalEntries() {
-      const old = localStorage.getItem(oldStorageKey);
-      if (!old) return;
-      try {
-        const entries = JSON.parse(old);
-        if (!Array.isArray(entries) || entries.length === 0) return;
-        if (!confirm("Nasel sem stare vnose iz prve verzije. Jih prenesem v skupno bazo?")) return;
-        for (const entry of entries) {
-          const { id, ...rest } = entry;
-          await saveEntryToServer(rest);
-        }
-        localStorage.removeItem(oldStorageKey);
-      } catch {}
-    }
-
     function openAccountDialog() {
       $("accountName").value = state.user.name || "";
       $("accountImage").value = "";
       $("accountUserTitle").textContent = `${state.user.name} (${state.user.id})`;
       updateAvatar("accountAvatar", state.user);
       $("accountDialog").showModal();
-    }
-
-    function updateQuickErrandMode() {
-      const isInternal = ["errand", "vacation"].includes($("quickStatus").value);
-      $("quickClient").disabled = isInternal;
-      if (isInternal) $("quickClient").value = "";
-      $("quickClient").closest(".control")?.classList.toggle("internal", isInternal);
-    }
-
-    function applyErrandPreset(label) {
-      $("quickStatus").value = "errand";
-      $("quickClient").value = "";
-      $("quickWork").value = label;
-      $("quickMaterial").value = "";
-      updateQuickErrandMode();
-    }
-
-    function applyEntryErrandPreset(label) {
-      setDialogStatus("errand");
-      $("entryWork").value = label;
-      $("entryMaterial").value = "";
-      $("entryClient").value = "";
     }
 
     $("loginForm").addEventListener("submit", async (event) => {
@@ -4449,11 +3945,7 @@
         alert(error.message);
       }
     });
-    $("saveQuick").addEventListener("click", () => startTodoForDate($("quickDate").value));
     $("newTodoFromSidebar").addEventListener("click", () => startTodoForDate(dateKey(new Date())));
-    $("quickStatus").addEventListener("change", updateQuickErrandMode);
-    $("quickLunch").addEventListener("click", () => applyErrandPreset("Malica"));
-    $("quickTravel").addEventListener("click", () => applyErrandPreset("Pot"));
 
     document.querySelectorAll(".debt-stat").forEach((button) => {
       button.addEventListener("click", () => openDebtDialog({ person: button.dataset.debtPerson || "ibro" }));
@@ -4619,12 +4111,6 @@
     });
 
     $("clientDetailList").addEventListener("click", (event) => {
-      const entryButton = event.target.closest(".open-report-entry");
-      if (entryButton) {
-        const entry = state.entries.find((item) => item.id === entryButton.dataset.entryId);
-        if (entry) openEventForm(entry);
-        return;
-      }
       const todoButton = event.target.closest(".open-report-todo");
       if (todoButton) {
         const todo = state.todos.find((item) => item.id === todoButton.dataset.todoId);
@@ -4648,7 +4134,6 @@
     });
     $("todayBtn").addEventListener("click", () => {
       state.current = new Date();
-      $("quickDate").value = dateKey(new Date());
       $("pageTodoDate").value = dateKey(new Date());
       render();
     });
@@ -4657,20 +4142,8 @@
     $("exportCsv").addEventListener("click", exportCsv);
     $("googleCalendar").addEventListener("click", () => syncGoogle(true));
     $("downloadBackup").addEventListener("click", downloadBackup);
-    $("entryForm").addEventListener("submit", (event) => {
-      event.preventDefault();
-      saveDialogEntry().catch((error) => alert(error.message));
-    });
-    $("deleteEntry").addEventListener("click", () => deleteDialogEntry().catch((error) => alert(error.message)));
-    $("duplicateEntry").addEventListener("click", () => duplicateDialogEntry().catch((error) => alert(error.message)));
-    $("closeDialog").addEventListener("click", () => $("entryDialog").close());
-    $("entryDialog").addEventListener("close", releaseEntryEditLockForDialog);
-    window.addEventListener("pagehide", releaseEntryEditLockOnPageHide);
-    document.querySelectorAll(".status-switch button").forEach((button) => {
-      button.addEventListener("click", () => setDialogStatus(button.dataset.status));
-    });
-    $("entryLunch").addEventListener("click", () => applyEntryErrandPreset("Malica"));
-    $("entryTravel").addEventListener("click", () => applyEntryErrandPreset("Pot"));
+    $("todoDialog").addEventListener("close", releaseTodoEditLockForDialog);
+    window.addEventListener("pagehide", releaseTodoEditLockOnPageHide);
 
     setInterval(autoRefreshSharedData, 15_000);
     window.addEventListener("focus", autoRefreshSharedData);

@@ -140,17 +140,17 @@ test("sef ima tabelo privzetih postavk in obracun zakljucenih opravil", () => {
   assert.match(server, /user\.role !== "boss"[\s\S]*Samo sef lahko spreminja urne postavke delavcev/);
   assert.match(server, /todo = todoForUserRole\(user, db, previousTodo, \{ \.\.\.todo, syncUser: nextAssignee \}\)/);
 });
-test("nov koledarski vnos je mogoc samo skozi opravilo", () => {
+test("koledar ustvarja in prikazuje samo kanonicna opravila", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
   const server = fs.readFileSync(path.join(__dirname, "..", "outputs", "server.js"), "utf8");
   assert.match(html, /id="newTodoFromSidebar"/);
   assert.match(html, /add\.addEventListener\("click", \(\) => startTodoForDate\(key\)\)/);
-  assert.match(html, /if \(!existing && !entry\.todoId\)/);
-  assert.match(html, /sourceTodoId: \$\("entryTodoId"\)\.value/);
-  assert.match(html, /\$\("duplicateEntry"\)\.style\.display = "none"/);
+  assert.match(html, /item\.addEventListener\("click", \(\) => openTodoDialog\(todo\)\)/);
+  assert.doesNotMatch(html, /<dialog id="entryDialog">/);
+  assert.doesNotMatch(html, /id="saveQuick"|id="quickStart"|id="quickEnd"/);
+  assert.doesNotMatch(html, /openEventForm|openCalendarTodoForm|eventDraftFromTodo/);
   assert.match(server, /const sourceTodo = sourceTodoForNewEntry\(db, user, entry\)/);
   assert.match(server, /Nov koledarski vnos lahko ustvaris samo iz svojega opravila/);
-  assert.match(server, /status: "execution",[\s\S]*done: true/);
 });
 test("nastavitve in tehnicna orodja so zbrana v enem meniju", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
@@ -210,11 +210,10 @@ test("sefovski seznam omogoca grupiranje po strankah", () => {
   assert.match(html, /class="client-work-group-title"/);
   assert.match(html, /reportClientGrouping"\)\.addEventListener\("change", renderReport\)/);
 });
-test("sefovski seznam je prikaz, urejanje pa poteka v namenskih formah", () => {
+test("vsi pogledi uporabljajo en sam obrazec opravila", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
-  assert.match(html, /<dialog id="entryDialog">/);
-  assert.match(html, /existing \? "Uredi dogodek" : "Nov dogodek iz opravila"/);
   assert.match(html, /<dialog id="todoDialog">/);
+  assert.equal((html.match(/<dialog id="todoDialog">/g) || []).length, 1);
   for (const id of [
     "todoFormId", "todoFormDate", "todoFormClient", "todoFormStatus", "todoFormAssignee",
     "todoFormAssignees", "todoFormTask", "todoFormNotes", "todoFormDone", "todoFormHourlyRate",
@@ -223,12 +222,17 @@ test("sefovski seznam je prikaz, urejanje pa poteka v namenskih formah", () => {
     assert.match(html, new RegExp(`id="${id}"`));
   }
   assert.match(html, /id="newReportTodo"/);
-  assert.match(html, /function openTodoDialog\(todo = \{\}\)/);
+  assert.match(html, /async function openTodoDialog\(todo = \{\}\)/);
   assert.match(html, /async function saveTodoFromDialog\(\)/);
   assert.match(html, /openTodoDialog\(todo\)/);
+  assert.match(html, /class="primary edit-todo"/);
+  assert.match(html, /item\.querySelector\("\.edit-todo"\)\.addEventListener/);
   assert.match(html, /class="report-state-chip"/);
   assert.doesNotMatch(html, /class="invoice-flag"/);
   assert.doesNotMatch(html, /function updateInvoiceFlag/);
+  assert.doesNotMatch(html, /entryDialog|entryForm|dialogTitle/);
+  assert.doesNotMatch(html, /entryStart|entryEnd|entryWork|entryMaterial/);
+  assert.doesNotMatch(html, /saveDialogEntry|deleteDialogEntry|duplicateDialogEntry/);
 });
 
 test("opravilo ima loceno ime in dolg vecvrsticni opis", () => {
@@ -245,25 +249,26 @@ test("opravilo ima loceno ime in dolg vecvrsticni opis", () => {
   assert.doesNotMatch(html, /Kaj je treba narediti/);
 });
 
-test("nov koledarski dogodek tudi po dodatku form nastane samo iz opravila", () => {
+test("iskanje odpira isti obrazec opravila kot koledar", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
-  assert.match(html, /if \(!existing && !entry\.todoId\)/);
-  assert.match(html, /startTodoForDate\(entry\.date\)/);
-  assert.match(html, /sourceTodoId: \$\("entryTodoId"\)\.value/);
+  assert.match(html, /const results = contextTodos\(\)/);
+  assert.match(html, /normalizeText\(\[todo\.client, todo\.title, todo\.notes, todo\.createdByName\]/);
+  assert.match(html, /results\.forEach\(\(todo\) =>/);
+  assert.match(html, /item\.addEventListener\("click", \(\) => openTodoDialog\(todo\)\)/);
+  assert.doesNotMatch(html, /const results = contextEntries\(\)/);
 });
 
-test("koledar, iskanje in porocilo odpirajo isti centralni obrazec dogodka", () => {
+test("koledar in porocilo odpirata isto instanco obrazca opravila", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
-  assert.match(html, /async function openEventForm\(entry = \{\}\)/);
-  assert.match(html, /event\.addEventListener\("click", \(\) => openEventForm\(entry\)\)/);
-  assert.match(html, /item\.addEventListener\("click", \(\) => openCalendarTodoForm\(todo, entries\)\)/);
-  assert.match(html, /function eventDraftFromTodo\(todo\)/);
-  assert.match(html, /function openCalendarTodoForm\(todo, entries = contextEntries\(\)\)/);
-  assert.match(html, /entries\.find\(\(entry\) => entry\.sourceTodoId === todo\.id\)/);
-  assert.match(html, /openEventForm\(linkedEntry\)/);
-  assert.match(html, /openEventForm\(eventDraftFromTodo\(todo\)\)/);
-  assert.match(html, /if \(entry\) openEventForm\(entry\)/);
-  assert.doesNotMatch(html, /function openDialog\(/);
+  const directOpeners = html.match(/openTodoDialog\(todo\)/g) || [];
+  assert.ok(directOpeners.length >= 3);
+  assert.match(html, /item\.addEventListener\("click", \(\) => openTodoDialog\(todo\)\)/);
+  assert.match(html, /class="secondary open-report-todo"/);
+  assert.match(html, /const todo = state\.todos\.find/);
+  assert.match(html, /openTodoDialog\(todo\)/);
+  assert.doesNotMatch(html, /class="event /);
+  assert.doesNotMatch(html, /open-report-entry/);
+  assert.doesNotMatch(html, /function openEventForm|function openDialog/);
 });
 
 test("skupni podatki se osvezujejo samodejno in ne prek rocnega gumba", () => {
@@ -278,18 +283,18 @@ test("skupni podatki se osvezujejo samodejno in ne prek rocnega gumba", () => {
   assert.match(html, /await loadAll\(\)/);
 });
 
-test("urejanje koledarskega vnosa uporablja strezniski zaklep", () => {
+test("skupni obrazec opravila uporablja strezniski zaklep", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
   const server = fs.readFileSync(path.join(__dirname, "..", "outputs", "server.js"), "utf8");
-  assert.match(html, /acquireEntryEditLockForDialog/);
-  assert.match(html, /setInterval\(renewEntryEditLock, 20_000\)/);
-  assert.match(html, /await pauseEntryLockHeartbeat\(\)/);
-  assert.match(html, /addEventListener\("close", releaseEntryEditLockForDialog\)/);
+  assert.match(html, /acquireTodoEditLockForDialog/);
+  assert.match(html, /setInterval\(renewTodoEditLock, 20_000\)/);
+  assert.match(html, /await pauseTodoLockHeartbeat\(\)/);
+  assert.match(html, /addEventListener\("close", releaseTodoEditLockForDialog\)/);
   assert.match(html, /editLockToken/);
-  assert.match(server, /const entryLockMatch = url\.pathname\.match/);
-  assert.match(server, /entryLockMatch && req\.method === "POST"/);
-  assert.match(server, /entryEditLockConflict\(id, user, editLockToken\)/);
-  assert.match(server, /sendJson\(res, 409, \{ error: `Vnos trenutno ureja/);
-  assert.match(server, /if \(activeEntryEditLock\(entry\.id\)\) continue/);
-  assert.match(server, /releaseEntryEditLock\(id, user, editLockToken\)/);
+  assert.match(server, /const todoLockMatch = url\.pathname\.match/);
+  assert.match(server, /todoLockMatch && req\.method === "POST"/);
+  assert.match(server, /todoEditLockConflict\(id, user, editLockToken\)/);
+  assert.match(server, /sendJson\(res, 409, \{ error: `Opravilo trenutno ureja/);
+  assert.match(server, /if \(activeTodoEditLock\(todo\.id\)\) continue/);
+  assert.match(server, /releaseTodoEditLock\(id, user, editLockToken\)/);
 });

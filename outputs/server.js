@@ -122,6 +122,8 @@ const pendingGoogleLogins = new Map();
 const pendingGoogleConnections = new Map();
 const ENTRY_EDIT_LOCK_TTL_MS = 90_000;
 const entryEditLocks = new Map();
+const TODO_EDIT_LOCK_TTL_MS = 90_000;
+const todoEditLocks = new Map();
 
 function allowedGoogleUsers(db) {
   return Object.values(db.users || {}).filter((user) => user.email);
@@ -703,6 +705,58 @@ function releaseEntryEditLock(entryId, user, lockToken = "", now = Date.now()) {
   if (!active) return true;
   if (active.userId !== user.id || active.token !== String(lockToken || "")) return false;
   entryEditLocks.delete(String(entryId || ""));
+  return true;
+}
+
+function publicTodoEditLock(lock) {
+  return {
+    todoId: lock.todoId,
+    lockedById: lock.userId,
+    lockedByName: lock.userName,
+    expiresAt: new Date(lock.expiresAt).toISOString()
+  };
+}
+
+function activeTodoEditLock(todoId, now = Date.now()) {
+  const id = String(todoId || "");
+  const lock = todoEditLocks.get(id);
+  if (!lock) return null;
+  if (lock.expiresAt <= now) {
+    todoEditLocks.delete(id);
+    return null;
+  }
+  return lock;
+}
+
+function acquireTodoEditLock(todoId, user, lockToken = "", now = Date.now()) {
+  const id = String(todoId || "");
+  const active = activeTodoEditLock(id, now);
+  if (active && (active.userId !== user.id || active.token !== String(lockToken || ""))) {
+    return { ok: false, lock: publicTodoEditLock(active) };
+  }
+  const lock = {
+    todoId: id,
+    userId: user.id,
+    userName: user.name || user.id,
+    token: active?.token || crypto.randomBytes(18).toString("hex"),
+    expiresAt: now + TODO_EDIT_LOCK_TTL_MS
+  };
+  todoEditLocks.set(id, lock);
+  return { ok: true, token: lock.token, lock: publicTodoEditLock(lock) };
+}
+
+function todoEditLockConflict(todoId, user, lockToken = "", now = Date.now()) {
+  const active = activeTodoEditLock(todoId, now);
+  if (!active) return null;
+  if (active.userId === user.id && active.token === String(lockToken || "")) return null;
+  return publicTodoEditLock(active);
+}
+
+function releaseTodoEditLock(todoId, user, lockToken = "", now = Date.now()) {
+  const active = activeTodoEditLock(todoId, now);
+  if (!active) return true;
+  if (active.userId !== user.id || active.token !== String(lockToken || "")) return false;
+  todoEditLocks.delete(String(todoId || ""));
   return true;
 }
 
@@ -1500,6 +1554,10 @@ async function syncGoogleForUser(req, db, user) {
         db.entries.splice(entryIndex, 1);
         pulled++;
       } else if (todoIndex >= 0 && ownedTodo) {
+        if (activeTodoEditLock(todo.id)) {
+          conflicts++;
+          continue;
+        }
         db.todos.splice(todoIndex, 1);
         pulled++;
       }
@@ -1539,6 +1597,10 @@ async function syncGoogleForUser(req, db, user) {
     }
 
     if (ownedTodo) {
+      if (todo && activeTodoEditLock(todo.id)) {
+        conflicts++;
+        continue;
+      }
       if (!todo) {
         const imported = todoFromGoogleEvent(event, user, db);
         if (imported) {
@@ -1575,6 +1637,7 @@ async function syncGoogleForUser(req, db, user) {
   }
 
   for (const todo of db.todos.filter((item) => item.syncUser === user.id && item.date)) {
+    if (activeTodoEditLock(todo.id)) continue;
     if (todo.done) {
       if (todo.googleEventId && await deleteOwnedGoogleEvent(calendar, calendarId, todo, "todo")) {
         todo.googleEventId = "";
@@ -2473,12 +2536,45 @@ async function handleApi(req, res) {
       return;
     }
 
+    const todoLockMatch = url.pathname.match(/^\/api\/todos\/([^/]+)\/lock$/);
+    if (todoLockMatch && req.method === "POST") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      const id = decodeURIComponent(todoLockMatch[1]);
+      const body = await readBody(req);
+      const db = await readDbAsync();
+      const todo = db.todos.find((item) => item.id === id);
+      if (!canManageTodo(user, todo)) {
+        sendJson(res, 403, { error: "Tega opravila ne mores urejati." });
+        return;
+      }
+      const result = acquireTodoEditLock(id, user, body.lockToken);
+      if (!result.ok) {
+        sendJson(res, 409, { error: `Opravilo trenutno ureja ${result.lock.lockedByName || result.lock.lockedById}.`, lock: result.lock });
+        return;
+      }
+      sendJson(res, 200, { lockToken: result.token, lock: result.lock });
+      return;
+    }
+
+    if (todoLockMatch && req.method === "DELETE") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      const id = decodeURIComponent(todoLockMatch[1]);
+      const body = await readBody(req);
+      releaseTodoEditLock(id, user, body.lockToken);
+      sendJson(res, 200, { ok: true });
+      return;
+    }
+
     const todoMatch = url.pathname.match(/^\/api\/todos\/([^/]+)$/);
     if (todoMatch && req.method === "PUT") {
       const user = await requireUser(req, res);
       if (!user) return;
       const id = decodeURIComponent(todoMatch[1]);
-      let todo = cleanTodo(await readBody(req));
+      const body = await readBody(req);
+      const editLockToken = String(body.editLockToken || "");
+      let todo = cleanTodo(body);
       const validation = validateTodo(todo);
       if (validation) {
         sendJson(res, 400, { error: validation });
@@ -2498,6 +2594,11 @@ async function handleApi(req, res) {
       }
       if (!canManageTodo(user, db.todos[index])) {
         sendJson(res, 403, { error: "Tega opravila ne mores spreminjati." });
+        return;
+      }
+      const editLock = todoEditLockConflict(id, user, editLockToken);
+      if (editLock) {
+        sendJson(res, 409, { error: `Opravilo trenutno ureja ${editLock.lockedByName || editLock.lockedById}.`, lock: editLock });
         return;
       }
       const previousTodo = db.todos[index];
@@ -2539,6 +2640,7 @@ async function handleApi(req, res) {
           : todo.done ? "oznaceno opravljeno" : "spremenjeno opravilo")]
       };
       await writeDbAsync(db);
+      releaseTodoEditLock(id, user, editLockToken);
       sendJson(res, 200, { todos: visibleTodosForUser(db, user) });
       return;
     }
@@ -2547,15 +2649,23 @@ async function handleApi(req, res) {
       const user = await requireUser(req, res);
       if (!user) return;
       const id = decodeURIComponent(todoMatch[1]);
+      const body = await readBody(req);
+      const editLockToken = String(body.editLockToken || "");
       const db = await readDbAsync();
       const todo = db.todos.find((item) => item.id === id);
       if (!canManageTodo(user, todo)) {
         sendJson(res, 403, { error: "Tega opravila ne mores izbrisati." });
         return;
       }
+      const editLock = todoEditLockConflict(id, user, editLockToken);
+      if (editLock) {
+        sendJson(res, 409, { error: `Opravilo trenutno ureja ${editLock.lockedByName || editLock.lockedById}.`, lock: editLock });
+        return;
+      }
       await deleteGoogleEventForItem(req, db, todo);
       db.todos = db.todos.filter((item) => item.id !== id);
       await writeDbAsync(db);
+      releaseTodoEditLock(id, user, editLockToken);
       sendJson(res, 200, { todos: visibleTodosForUser(db, user) });
       return;
     }
@@ -2702,11 +2812,14 @@ if (require.main === module) {
 
 module.exports = {
   ENTRY_EDIT_LOCK_TTL_MS,
+  TODO_EDIT_LOCK_TTL_MS,
   GOOGLE_CALENDAR_SCOPE_VERSION,
   INDUS_GOOGLE_APP_ID,
   TODO_STATUS_DEFINITIONS,
   acquireEntryEditLock,
+  acquireTodoEditLock,
   activeEntryEditLock,
+  activeTodoEditLock,
   deleteOwnedGoogleEvent,
   entryEditLockConflict,
   isIndusOwnedGoogleEvent,
@@ -2723,10 +2836,12 @@ module.exports = {
   normalizeDb,
   parseGoogleEventDescription,
   releaseEntryEditLock,
+  releaseTodoEditLock,
   remoteGoogleChangeWins,
   syncUserForRequest,
   todoAssigneeForUpdate,
   todoAssigneesForRequest,
+  todoEditLockConflict,
   todoForUserRole,
   todoFromGoogleEvent,
   todoToGoogleEvent,

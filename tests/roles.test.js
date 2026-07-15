@@ -3,8 +3,11 @@ const test = require("node:test");
 
 const {
   ENTRY_EDIT_LOCK_TTL_MS,
+  TODO_EDIT_LOCK_TTL_MS,
   acquireEntryEditLock,
+  acquireTodoEditLock,
   activeEntryEditLock,
+  activeTodoEditLock,
   canManageEntry,
   canManageTodo,
   entryEditLockConflict,
@@ -12,9 +15,11 @@ const {
   entryForUserRole,
   defaultHourlyRateForUser,
   releaseEntryEditLock,
+  releaseTodoEditLock,
   syncUserForRequest,
   todoAssigneeForUpdate,
   todoAssigneesForRequest,
+  todoEditLockConflict,
   todoForUserRole,
   visibleDebtsForUser,
   visibleEntriesForUser,
@@ -184,4 +189,33 @@ test("koledarski vnos lahko istocasno ureja samo en uporabnik ali zavihek", () =
   assert.equal(afterExpiry.ok, true);
   assert.equal(afterExpiry.lock.lockedByName, "Ibro");
   assert.equal(releaseEntryEditLock(entryId, ibro, afterExpiry.token, startedAt + 10 + ENTRY_EDIT_LOCK_TTL_MS + 2), true);
+});
+
+test("isto opravilo lahko istocasno ureja samo en uporabnik ali zavihek", () => {
+  const todoId = "todo-lock-test";
+  const bojan = { id: "bojan", name: "Bojan", role: "boss" };
+  const ibro = { id: "ibro", name: "Ibro", role: "worker" };
+  const startedAt = 2_000;
+
+  const first = acquireTodoEditLock(todoId, bojan, "", startedAt);
+  assert.equal(first.ok, true);
+  assert.ok(first.token);
+  assert.equal(activeTodoEditLock(todoId, startedAt + 1)?.userId, "bojan");
+
+  const otherUser = acquireTodoEditLock(todoId, ibro, "", startedAt + 2);
+  assert.equal(otherUser.ok, false);
+  assert.equal(otherUser.lock.lockedByName, "Bojan");
+  assert.equal(acquireTodoEditLock(todoId, bojan, "", startedAt + 3).ok, false);
+  assert.equal(todoEditLockConflict(todoId, bojan, first.token, startedAt + 4), null);
+  assert.equal(todoEditLockConflict(todoId, ibro, "", startedAt + 4)?.lockedById, "bojan");
+  assert.equal(releaseTodoEditLock(todoId, ibro, "", startedAt + 5), false);
+  assert.equal(releaseTodoEditLock(todoId, bojan, first.token, startedAt + 5), true);
+  assert.equal(activeTodoEditLock(todoId, startedAt + 6), null);
+
+  const expiring = acquireTodoEditLock(todoId, bojan, "", startedAt + 10);
+  assert.equal(expiring.ok, true);
+  const afterExpiry = acquireTodoEditLock(todoId, ibro, "", startedAt + 10 + TODO_EDIT_LOCK_TTL_MS + 1);
+  assert.equal(afterExpiry.ok, true);
+  assert.equal(afterExpiry.lock.lockedByName, "Ibro");
+  assert.equal(releaseTodoEditLock(todoId, ibro, afterExpiry.token, startedAt + 10 + TODO_EDIT_LOCK_TTL_MS + 2), true);
 });
