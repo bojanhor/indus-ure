@@ -664,6 +664,17 @@
     .todo-status-return_and_bill { --todo-bg: #ffb878; --todo-fg: #202124; --todo-border: #d8883f; }
     .todo-status-return { --todo-bg: #dbadff; --todo-fg: #202124; --todo-border: #8e5bb7; }
 
+    .todo-status option[value="open"] { background: #e1e1e1; color: #202124; }
+    .todo-status option[value="in_progress"] { background: #5484ed; color: #fff; }
+    .todo-status option[value="execution"] { background: #51b749; color: #fff; }
+    .todo-status option[value="billing"] { background: #7ae7bf; color: #202124; }
+    .todo-status option[value="order"],
+    .todo-status option[value="order_car"],
+    .todo-status option[value="order_warehouse"] { background: #dc2127; color: #fff; }
+    .todo-status option[value="add_to_car"] { background: #ff887c; color: #202124; }
+    .todo-status option[value="return_and_bill"] { background: #ffb878; color: #202124; }
+    .todo-status option[value="return"] { background: #dbadff; color: #202124; }
+
     .day-todo.todo-status-color {
       background: var(--todo-bg);
       color: var(--todo-fg);
@@ -1772,7 +1783,7 @@
     function todoStatusOptions(selected) {
       const current = todoStatus(selected).id;
       return todoStatusDefinitions
-        .map((status) => `<option value="${status.id}" ${status.id === current ? "selected" : ""}>${status.label}</option>`)
+        .map((status) => `<option class="todo-option-${status.id}" value="${status.id}" ${status.id === current ? "selected" : ""}>${status.label}</option>`)
         .join("");
     }
 

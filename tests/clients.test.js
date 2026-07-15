@@ -87,3 +87,11 @@ test("spletne povezave v naslovu opravila so varno klikljive", () => {
   assert.match(html, /function linkifyText\(value\)/);
   assert.match(html, /target="_blank" rel="noopener noreferrer"/);
 });
+
+test("dropdown statusov prikaze koledarske barve za vsako moznost", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  assert.match(html, /\.todo-status option\[value="execution"\] \{ background: #51b749; color: #fff; \}/);
+  assert.match(html, /\.todo-status option\[value="return"\] \{ background: #dbadff; color: #202124; \}/);
+  assert.match(html, /\.todo-status option\[value="order"\]/);
+  assert.match(html, /class="todo-option-\$\{status\.id\}"/);
+});
