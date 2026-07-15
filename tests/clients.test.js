@@ -106,6 +106,7 @@ test("gumba za slike sta poimenovana kot prilogi", () => {
   assert.match(html, />Dodaj prilogo<input/);
   assert.doesNotMatch(html, />Fotografije<\/button>/);
   assert.doesNotMatch(html, />Dodaj foto<input/);
+  assert.doesNotMatch(html, /Pri tem opravilu se ni fotografij/);
 });
 
 test("novo opravilo je mogoce dodeliti sebi in vec drugim delavcem", () => {

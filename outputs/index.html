@@ -3201,9 +3201,7 @@
     }
 
     function renderTodoPhotoHtml(todo) {
-      if (!(todo.photos || []).length) {
-        return `<div class="todo-photos-inline"><p class="todo-meta">Pri tem opravilu se ni fotografij.</p></div>`;
-      }
+      if (!(todo.photos || []).length) return "";
       return `<div class="todo-photos-inline">${todo.photos.map((photo) => `
         <article class="photo-card">
           <img src="${escapeHtml(photo.data)}" alt="${escapeHtml(photo.name || "Fotografija")}">
