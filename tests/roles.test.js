@@ -13,6 +13,7 @@ const {
   defaultHourlyRateForUser,
   releaseEntryEditLock,
   syncUserForRequest,
+  todoAssigneeForUpdate,
   todoAssigneesForRequest,
   todoForUserRole,
   visibleDebtsForUser,
@@ -58,6 +59,13 @@ test("delavec ne more upravljati tujih vnosov ali opravil", () => {
   assert.deepEqual(todoAssigneesForRequest(worker, ["bojan"], users), ["bojan"]);
   assert.deepEqual(todoAssigneesForRequest(worker, [], users), ["ibro"]);
   assert.deepEqual(todoAssigneesForRequest(worker, ["ne-obstaja"], users), ["ibro"]);
+});
+
+test("lastnik opravila ga lahko preda veljavnemu delavcu", () => {
+  const users = { bojan: boss, ibro: worker, marko: { id: "marko", role: "worker" } };
+  assert.equal(todoAssigneeForUpdate(worker, "marko", "ibro", users), "marko");
+  assert.equal(todoAssigneeForUpdate(worker, "ne-obstaja", "ibro", users), "ibro");
+  assert.equal(todoAssigneeForUpdate(boss, "ibro", "bojan", users), "ibro");
 });
 
 test("delavski vnos ne more nastaviti obracuna ali racuna", () => {

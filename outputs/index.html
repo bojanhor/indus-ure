@@ -564,7 +564,7 @@
 
     .todo-layout {
       display: grid;
-      grid-template-columns: 260px 1fr;
+      grid-template-columns: minmax(220px, 240px) minmax(0, 1fr);
       gap: 14px;
       padding: 14px;
     }
@@ -614,7 +614,7 @@
 
     .todo-create {
       display: grid;
-      grid-template-columns: 140px minmax(240px, 1.2fr) 150px minmax(170px, 220px) minmax(220px, 1fr) auto;
+      grid-template-columns: 140px minmax(260px, 1.4fr) 160px minmax(210px, 1fr);
       gap: 10px;
       align-items: end;
       padding: 12px;
@@ -640,6 +640,9 @@
       background: #fff;
       outline: none;
     }
+
+    .todo-title-field { grid-column: 1 / 4; }
+    .todo-add-button { width: 100%; }
 
     .todo-client-field { position: relative; }
 
@@ -785,7 +788,8 @@
     }
 
     .todo-date,
-    .todo-status {
+    .todo-status,
+    .todo-assignee-select {
       min-height: 34px;
       border: 1px solid var(--line);
       border-radius: 8px;
@@ -842,6 +846,20 @@
       flex-wrap: wrap;
       justify-content: flex-end;
     }
+
+    .todo-tool-field {
+      display: grid;
+      gap: 3px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+    }
+
+    .todo-assignee-select {
+      min-width: 150px;
+      max-width: 210px;
+    }
+
     .todo-billing {
       grid-column: 2 / -1;
       display: flex;
@@ -1347,6 +1365,19 @@
       font-size: 14px;
     }
 
+    @media (max-width: 1350px) {
+      .todo-layout { grid-template-columns: 1fr; }
+      .client-list {
+        display: flex;
+        overflow-x: auto;
+        gap: 8px;
+        padding-bottom: 4px;
+      }
+      .client-card { min-width: 190px; }
+      .todo-create { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .todo-title-field { grid-column: 1; }
+    }
+
     @media (max-width: 1100px) {
       .app { grid-template-columns: 1fr; }
       .sidebar { position: static; }
@@ -1477,6 +1508,8 @@
       .report-grid,
       .report-line,
       .client-work-row { grid-template-columns: 1fr; }
+      .todo-title-field { grid-column: auto; }
+      .todo-add-button { width: 100%; }
       .client-list {
         display: flex;
         overflow-x: auto;
@@ -1696,14 +1729,14 @@
         <div class="client-list" id="clientTodoList"></div>
         <div class="todo-panel">
           <div class="todo-create" id="todoCreatePanel">
-            <label>Fiksni datum
+            <label class="todo-date-field">Fiksni datum
               <input id="pageTodoDate" type="date">
             </label>
             <label class="todo-client-field">Stranka
               <input id="pageTodoClient" placeholder="Alias iz baze strank" autocomplete="off" aria-autocomplete="list" aria-controls="todoClientSuggestions" aria-expanded="false">
               <div id="todoClientSuggestions" class="todo-client-suggestions hidden" role="listbox"></div>
             </label>
-            <label>Status
+            <label class="todo-status-field">Status
               <select id="pageTodoStatus" class="todo-status todo-status-color todo-status-open">
                 <option value="open">&#268;aka</option>
                 <option value="in_progress">V teku</option>
@@ -1724,10 +1757,10 @@
                 <div id="pageTodoAssigneeOptions" class="todo-assignee-options" role="group" aria-label="Dodeljeno delavcem"></div>
               </details>
             </div>
-            <label>Opravilo
+            <label class="todo-title-field">Opravilo
               <input id="pageTodoTitle" type="text" placeholder="Kaj je treba narediti">
             </label>
-            <button class="primary" id="savePageTodo" type="button">Dodaj</button>
+            <button class="primary todo-add-button" id="savePageTodo" type="button">Dodaj</button>
           </div>
           <div class="todo-head">
             <strong id="todoPanelTitle">Vsa opravila</strong>
@@ -2702,7 +2735,7 @@
       }
       if (!validateTodo(todo)) return;
       try {
-        const data = await saveTodoToServer(todo);
+        await saveTodoToServer(todo);
         state.selectedClient = todo.client;
         clearInputs.forEach((id) => $(id).value = "");
         $("pageTodoDate").value = "";
@@ -2714,10 +2747,6 @@
         }
         setView("todos");
         $("pageTodoAssigneePicker").open = false;
-        const assigned = data.assignedTo || [];
-        if (assigned.length > 1 || assigned.some((person) => person.id !== state.user?.id)) {
-          alert(`Opravilo je dodeljeno: ${assigned.map((person) => person.name || person.id).join(", ")}.`);
-        }
       } catch (error) {
         alert(error.message);
       }
@@ -2974,6 +3003,16 @@
       alert(data.sheetWrite?.action === "updated" ? "Stranka je posodobljena tudi v Google Sheetu." : "Stranka je dodana tudi v Google Sheet Baza Strank.");
     }
 
+    function todoAssigneeOptions(selectedId) {
+      const users = [...new Map([
+        ...state.users,
+        { id: selectedId, name: userDisplayName(selectedId) }
+      ].filter((user) => user.id).map((user) => [user.id, user])).values()];
+      return users
+        .map((user) => `<option value="${escapeHtml(user.id)}" ${user.id === selectedId ? "selected" : ""}>${escapeHtml(user.name || user.id)}</option>`)
+        .join("");
+    }
+
     function renderTodoItems() {
       const items = $("todoItems");
       const title = $("todoPanelTitle");
@@ -3004,7 +3043,6 @@
               <span class="todo-chip todo-status-color ${todoStatusClass(todo.status)}">${todoStatus(todo.status).label}</span>
               ${(todo.photos || []).length ? `<span class="todo-chip">${(todo.photos || []).length} foto</span>` : ""}
               <span class="todo-chip">dodal: ${escapeHtml(todo.createdByName || "-")}</span>
-              <span class="todo-chip">dodeljeno: ${escapeHtml(userDisplayName(todo.syncUser || todo.createdBy))}</span>
             </div>
             ${todo.notes ? `<div class="todo-meta">${escapeHtml(todo.notes)}</div>` : ""}
           </div>
@@ -3012,6 +3050,9 @@
             <select class="todo-status todo-status-color ${todoStatusClass(todo.status)}" aria-label="Status opravila">
               ${todoStatusOptions(todo.status)}
             </select>
+            <label class="todo-tool-field">Dodeljeno
+              <select class="todo-assignee-select" aria-label="Dodeljeno delavcu">${todoAssigneeOptions(todo.syncUser || todo.createdBy)}</select>
+            </label>
             <input class="todo-date" type="date" value="${escapeHtml(todo.date || "")}" aria-label="Fiksni datum">
             <button class="secondary show-photos" type="button">Prikaz prilog</button>
             <label class="secondary add-photo">Dodaj prilogo<input class="hidden-file todo-photo-input" type="file" accept="image/*" multiple></label>
@@ -3037,6 +3078,18 @@
         item.querySelector(".todo-status").addEventListener("change", (event) => {
           updateTodoStatusControl(event.target);
           saveTodoToServer({ ...todo, status: event.target.value }).catch((error) => alert(error.message));
+        });
+        item.querySelector(".todo-assignee-select").addEventListener("change", async (event) => {
+          const select = event.target;
+          const previousAssignee = todo.syncUser || todo.createdBy;
+          select.disabled = true;
+          try {
+            await saveTodoToServer({ ...todo, syncUser: select.value });
+          } catch (error) {
+            select.value = previousAssignee;
+            select.disabled = false;
+            alert(error.message);
+          }
         });
         item.querySelector(".todo-date").addEventListener("change", (event) => {
           saveTodoToServer({ ...todo, date: event.target.value }).catch((error) => alert(error.message));

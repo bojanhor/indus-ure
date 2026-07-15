@@ -75,7 +75,8 @@ test("novo opravilo ponuja aliase iz prvega stolpca Google Sheeta", () => {
   assert.match(html, /normalizeText\(client\.search\)\.includes\(query\)/);
   assert.match(html, /function findTodoClient\(value\)/);
   assert.match(html, /client\?\.search \|\| todo\.client/);
-  assert.match(html, /minmax\(240px, 1\.2fr\)/);
+  assert.match(html, /grid-template-columns: 140px minmax\(260px, 1\.4fr\) 160px minmax\(210px, 1fr\)/);
+  assert.match(html, /\.todo-title-field \{ grid-column: 1 \/ 4; \}/);
   assert.match(html, /event\.key === "ArrowDown" \|\| event\.key === "ArrowUp"/);
   assert.match(html, /event\.key === "Enter" && state\.todoClientSuggestionIndex >= 0/);
   assert.match(html, /scrollIntoView\(\{ block: "nearest" \}\)/);
@@ -114,7 +115,9 @@ test("novo opravilo je mogoce dodeliti sebi in vec drugim delavcem", () => {
   assert.match(html, /id="pageTodoAssigneeOptions"/);
   assert.match(html, /input\.type = "checkbox"/);
   assert.match(html, /assigneeIds: selectedTodoAssigneeIds\(\)/);
-  assert.match(html, /dodeljeno: \$\{escapeHtml\(userDisplayName/);
+  assert.match(html, /class="todo-assignee-select"/);
+  assert.match(html, /saveTodoToServer\(\{ \.\.\.todo, syncUser: select\.value \}\)/);
+  assert.doesNotMatch(html, /Opravilo je dodeljeno:/);
   assert.match(html, /const availableUsers = \(await api\("\/api\/users"\)\)\.users/);
   assert.doesNotMatch(server, /Seznam uporabnikov je na voljo samo sefu/);
   assert.match(server, /todoAssigneesForRequest\(user, body\.assigneeIds/);
@@ -134,7 +137,7 @@ test("sef ima tabelo privzetih postavk in obracun zakljucenih opravil", () => {
   assert.match(html, /class="todo-billing-hourly"/);
   assert.match(html, /class="todo-billing-km"/);
   assert.match(server, /user\.role !== "boss"[\s\S]*Samo sef lahko spreminja urne postavke delavcev/);
-  assert.match(server, /todo = todoForUserRole\(user, db, db\.todos\[index\], todo\)/);
+  assert.match(server, /todo = todoForUserRole\(user, db, previousTodo, \{ \.\.\.todo, syncUser: nextAssignee \}\)/);
 });
 test("nov koledarski vnos je mogoc samo skozi opravilo", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");

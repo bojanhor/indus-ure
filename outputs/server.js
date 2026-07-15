@@ -771,6 +771,15 @@ function syncUserForRequest(user, requested, fallback = "", users = defaultUsers
   return user.id;
 }
 
+function todoAssigneeForUpdate(user, requested, fallback = "", users = defaultUsers) {
+  const allowed = new Set(Object.keys(users || {}));
+  const wanted = cleanUserId(requested);
+  const previous = cleanUserId(fallback);
+  if (allowed.has(wanted)) return wanted;
+  if (allowed.has(previous)) return previous;
+  return allowed.has(user.id) ? user.id : "";
+}
+
 function todoAssigneesForRequest(user, requested, users = defaultUsers) {
   const allowed = new Set(Object.keys(users || {}));
   const values = Array.isArray(requested) ? requested : [requested];
@@ -2491,16 +2500,43 @@ async function handleApi(req, res) {
         sendJson(res, 403, { error: "Tega opravila ne mores spreminjati." });
         return;
       }
-      todo = todoForUserRole(user, db, db.todos[index], todo);
+      const previousTodo = db.todos[index];
+      const nextAssignee = todoAssigneeForUpdate(user, todo.syncUser, previousTodo.syncUser, db.users);
+      if (nextAssignee !== previousTodo.syncUser && previousTodo.assignmentGroupId) {
+        const duplicateAssignment = db.todos.some((item) => item.id !== previousTodo.id
+          && item.assignmentGroupId === previousTodo.assignmentGroupId
+          && item.syncUser === nextAssignee);
+        if (duplicateAssignment) {
+          sendJson(res, 409, { error: "Ta delavec ze ima to opravilo." });
+          return;
+        }
+      }
+      if (nextAssignee !== previousTodo.syncUser && previousTodo.googleEventId) {
+        const removedFromOldCalendar = await deleteGoogleEventForItem(req, db, previousTodo);
+        if (!removedFromOldCalendar) {
+          sendJson(res, 502, { error: "Dodelitve ni bilo mogoce varno prenesti iz starega koledarja." });
+          return;
+        }
+      }
+      const assignmentChanged = nextAssignee !== previousTodo.syncUser;
+      todo = todoForUserRole(user, db, previousTodo, { ...todo, syncUser: nextAssignee });
       db.todos[index] = {
-        ...db.todos[index],
+        ...previousTodo,
         ...todo,
         photos: stampTodoPhotos(todo, user),
-        syncUser: syncUserForRequest(user, todo.syncUser, db.todos[index].syncUser, db.users),
+        syncUser: nextAssignee,
+        googleEventId: assignmentChanged ? "" : previousTodo.googleEventId,
+        googleUpdatedAt: assignmentChanged ? "" : previousTodo.googleUpdatedAt,
+        googleSyncedLocalAt: assignmentChanged ? "" : previousTodo.googleSyncedLocalAt,
+        googleManagedByIndus: assignmentChanged ? false : previousTodo.googleManagedByIndus,
+        googleColorId: assignmentChanged ? "" : previousTodo.googleColorId,
+        googleStatusLabel: assignmentChanged ? "" : previousTodo.googleStatusLabel,
         updatedBy: user.id,
         updatedByName: user.name,
         updatedAt: new Date().toISOString(),
-        history: [...(db.todos[index].history || []), audit(user, todo.done ? "oznaceno opravljeno" : "spremenjeno opravilo")]
+        history: [...(previousTodo.history || []), audit(user, assignmentChanged
+          ? `dodeljeno uporabniku ${db.users[nextAssignee]?.name || nextAssignee}`
+          : todo.done ? "oznaceno opravljeno" : "spremenjeno opravilo")]
       };
       await writeDbAsync(db);
       sendJson(res, 200, { todos: visibleTodosForUser(db, user) });
@@ -2689,6 +2725,7 @@ module.exports = {
   releaseEntryEditLock,
   remoteGoogleChangeWins,
   syncUserForRequest,
+  todoAssigneeForUpdate,
   todoAssigneesForRequest,
   todoForUserRole,
   todoFromGoogleEvent,
