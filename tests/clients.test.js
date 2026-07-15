@@ -182,3 +182,8 @@ test("razlagalni AI teksti niso prikazani v uporabniskem vmesniku", () => {
   }
   assert.doesNotMatch(html, /workContextHint/);
 });
+test("sefovski pogled ne prikazuje statistik zacetne strani", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  assert.match(html, /<section class="stats calendar-view worker-only">/);
+  assert.match(html, /querySelectorAll\("\.worker-only"\)[\s\S]*toggle\("hidden", admin\)/);
+});
