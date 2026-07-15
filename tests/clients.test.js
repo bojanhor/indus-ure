@@ -190,6 +190,15 @@ test("sefovski pogled ne prikazuje statistik zacetne strani", () => {
   assert.match(html, /<section class="stats calendar-view worker-only">/);
   assert.match(html, /querySelectorAll\("\.worker-only"\)[\s\S]*toggle\("hidden", admin\)/);
 });
+test("sefovski seznam privzeto prikaze zakljucena opravila", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  assert.match(html, /id="reportTodoCompletionFilter"/);
+  assert.match(html, /<option value="completed" selected>Zaklju&#269;ena<\/option>/);
+  assert.match(html, /todo\.done \|\| todo\.status === "execution"/);
+  assert.match(html, /function filterReportTodos\(todos\)/);
+  assert.match(html, /const todos = filterReportTodos\(reportTodos\(\)\)/);
+  assert.match(html, /reportTodoCompletionFilter"\)\.addEventListener\("change", renderReport\)/);
+});
 test("skupni podatki se osvezujejo samodejno in ne prek rocnega gumba", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
   assert.doesNotMatch(html, /id="refreshBtn"/);

@@ -1057,6 +1057,38 @@
       gap: 12px;
     }
 
+    .client-detail .todo-head {
+      align-items: end;
+      flex-wrap: wrap;
+    }
+
+    .client-detail-head-tools {
+      display: flex;
+      align-items: end;
+      justify-content: flex-end;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-left: auto;
+    }
+
+    .report-todo-filter {
+      display: grid;
+      gap: 3px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+    }
+
+    .report-todo-filter select {
+      min-height: 34px;
+      min-width: 150px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 6px 8px;
+      background: #fff;
+      color: var(--ink);
+    }
+
     .client-directory {
       display: grid;
       gap: 8px;
@@ -1794,7 +1826,16 @@
         <div class="client-detail">
           <div class="todo-head">
             <strong id="clientDetailTitle">Vsa dela in opravila</strong>
-            <span class="todo-meta" id="clientDetailRange"></span>
+            <div class="client-detail-head-tools">
+              <span class="todo-meta" id="clientDetailRange"></span>
+              <label class="report-todo-filter">Prikaz opravil
+                <select id="reportTodoCompletionFilter">
+                  <option value="completed" selected>Zaklju&#269;ena</option>
+                  <option value="open">Odprta</option>
+                  <option value="all">Vsa</option>
+                </select>
+              </label>
+            </div>
           </div>
           <div id="clientDetailList"></div>
         </div>
@@ -3210,6 +3251,17 @@
         .sort(todoSort);
     }
 
+    function reportTodoIsCompleted(todo) {
+      return Boolean(todo.done || todo.status === "execution");
+    }
+
+    function filterReportTodos(todos) {
+      const filter = $("reportTodoCompletionFilter").value || "completed";
+      if (filter === "completed") return todos.filter(reportTodoIsCompleted);
+      if (filter === "all") return todos;
+      return todos.filter((todo) => !reportTodoIsCompleted(todo));
+    }
+
     function reportMonthKeys(from, to) {
       const keys = new Set();
       if (!from || !to) return keys;
@@ -3263,7 +3315,7 @@
 
     function renderReport() {
       const entries = reportEntries();
-      const todos = reportTodos();
+      const todos = filterReportTodos(reportTodos());
       const totals = reportTotals(entries);
       const billing = state.settings.billing || { hourlyRate: 15, kmRate: 0.22, commuteKmPerDay: 28 };
       const client = normalizeClientName($("reportClient").value || state.reportClient || "");
@@ -4154,6 +4206,7 @@
     $("reportViewBtn").addEventListener("click", () => setView("report"));
     $("reportFrom").addEventListener("change", renderReport);
     $("reportTo").addEventListener("change", renderReport);
+    $("reportTodoCompletionFilter").addEventListener("change", renderReport);
     $("reportClient").addEventListener("input", () => {
       state.reportClient = $("reportClient").value;
       renderReport();
