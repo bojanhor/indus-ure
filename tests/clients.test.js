@@ -152,7 +152,7 @@ test("nastavitve in tehnicna orodja so zbrana v enem meniju", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
   assert.match(html, /<details class="tools-menu" id="toolsMenu">/);
   assert.match(html, /class="tools-menu-panel"/);
-  for (const id of ["accountBtn", "refreshBtn", "googleCalendar", "syncClientsBtn", "workerBillingBtn", "exportCsv", "downloadBackup", "logoutBtn"]) {
+  for (const id of ["accountBtn", "googleCalendar", "syncClientsBtn", "workerBillingBtn", "exportCsv", "downloadBackup", "logoutBtn"]) {
     assert.equal((html.match(new RegExp(`id="${id}"`, "g")) || []).length, 1, `ID ${id} mora biti samo enkrat`);
   }
   const bossPanel = html.match(/<section class="panel boss-panel[\s\S]*?<\/section>/)?.[0] || "";
@@ -186,4 +186,15 @@ test("sefovski pogled ne prikazuje statistik zacetne strani", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
   assert.match(html, /<section class="stats calendar-view worker-only">/);
   assert.match(html, /querySelectorAll\("\.worker-only"\)[\s\S]*toggle\("hidden", admin\)/);
+});
+test("skupni podatki se osvezujejo samodejno in ne prek rocnega gumba", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  assert.doesNotMatch(html, /id="refreshBtn"/);
+  assert.match(html, /async function autoRefreshSharedData\(\)/);
+  assert.match(html, /setInterval\(autoRefreshSharedData, 15_000\)/);
+  assert.match(html, /window\.addEventListener\("focus", autoRefreshSharedData\)/);
+  assert.match(html, /document\.visibilityState !== "visible"/);
+  assert.match(html, /document\.querySelector\("dialog\[open\]"\)/);
+  assert.match(html, /active\?\.matches\('input, textarea, select/);
+  assert.match(html, /await loadAll\(\)/);
 });

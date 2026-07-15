@@ -1626,7 +1626,6 @@
               <span class="tools-menu-label">Uporabnik</span>
               <button class="menu-action" id="accountBtn" type="button">Ra&#269;un in profil</button>
               <span class="tools-menu-label">Podatki in sinhronizacija</span>
-              <button class="menu-action" id="refreshBtn" type="button">Osve&#382;i skupne podatke</button>
               <button class="menu-action" id="googleCalendar" type="button">Google Calendar sync</button>
               <button class="menu-action admin-only" id="syncClientsBtn" type="button">Sync strank iz Google Sheets</button>
               <span class="tools-menu-label admin-only">Napredno</span>
@@ -2024,6 +2023,7 @@
       workerBilling: [],
       workContext: "",
       googleSyncing: false,
+      sharedDataRefreshing: false,
       token: localStorage.getItem(tokenKey) || ""
     };
 
@@ -2270,6 +2270,21 @@
       state.workerBilling = workerBilling.workers || [];
       refreshClientList();
       render();
+    }
+
+    function uiIsBeingEdited() {
+      const active = document.activeElement;
+      return Boolean(document.querySelector("dialog[open]") || active?.matches('input, textarea, select, [contenteditable="true"]'));
+    }
+
+    async function autoRefreshSharedData() {
+      if (!state.token || !state.user || document.visibilityState !== "visible" || state.sharedDataRefreshing || uiIsBeingEdited()) return;
+      state.sharedDataRefreshing = true;
+      try {
+        await loadAll();
+      } catch {} finally {
+        state.sharedDataRefreshing = false;
+      }
     }
 
     async function saveBillingSettings(settings) {
@@ -4048,7 +4063,6 @@
       openClientReport(button.dataset.clientName, button.dataset.clientId);
     });
 
-    $("refreshBtn").addEventListener("click", loadAll);
     $("prevMonth").addEventListener("click", () => {
       state.current = new Date(state.current.getFullYear(), state.current.getMonth() - 1, 1);
       render();
@@ -4080,6 +4094,12 @@
     });
     $("entryLunch").addEventListener("click", () => applyEntryErrandPreset("Malica"));
     $("entryTravel").addEventListener("click", () => applyEntryErrandPreset("Pot"));
+
+    setInterval(autoRefreshSharedData, 15_000);
+    window.addEventListener("focus", autoRefreshSharedData);
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") autoRefreshSharedData();
+    });
 
     setInterval(() => {
       if (state.token && state.user && document.visibilityState === "visible") syncGoogle(false);
