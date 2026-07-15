@@ -132,10 +132,7 @@
       letter-spacing: 0;
     }
 
-    .brand span,
-    .sidebar label,
-    .hint,
-    .small {
+    .sidebar label {
       color: rgba(248, 250, 246, 0.72);
       font-size: 13px;
     }
@@ -529,11 +526,6 @@
       padding: 12px 14px;
     }
 
-    .boss-panel p {
-      margin: 0;
-      color: var(--muted);
-      font-size: 14px;
-    }
     .worker-billing {
       grid-column: 1 / -1;
       display: grid;
@@ -1529,7 +1521,6 @@
     <aside class="sidebar">
       <div class="brand">
         <h1>INDUS URE</h1>
-        <span>Ure, stranke, material in kilometrina</span>
       </div>
 
       <div class="user-box">
@@ -1548,7 +1539,6 @@
             <option value="worker:ibro">Delavski pogled &#8211; Ibro</option>
           </optgroup>
         </select>
-        <span class="small" id="workContextHint"></span>
       </div>
 
       <div class="control worker-only">
@@ -1570,7 +1560,6 @@
       <div class="control worker-only">
         <label for="quickClient">Stranka</label>
         <input id="quickClient" list="clientList" placeholder="npr. Novak d.o.o.">
-        <span class="small">Pri modrih opravkih se stranka ne shrani.</span>
         <datalist id="clientList"></datalist>
       </div>
 
@@ -1617,7 +1606,6 @@
       <button class="primary worker-only" id="saveQuick" type="button">Shrani v koledar</button>
       <button class="primary hidden" id="newTodoFromSidebar" type="button">Nov vnos prek opravila</button>
 
-      <p class="hint">Podatki se zdaj shranjujejo v skupno datoteko na stre&#382;niku. &#352;ef in delavec gledata iste vnose.</p>
     </aside>
 
     <main class="main">
@@ -1668,11 +1656,9 @@
       </section>
 
       <section class="panel boss-panel hidden calendar-view" id="bossPanel">
-        <p>&#352;efovski pogled: vidi&#353; vse delavce, pripravlja&#353; obra&#269;une in spreminja&#353; skupne nastavitve. Za vnos ur izberi delavski pogled.</p>
         <div class="worker-billing">
           <div class="worker-billing-head">
             <strong>Delavci in privzete urne postavke</strong>
-            <span class="todo-meta">Postavka se zajame, ko opravilo dobi status Zaklju&#269;eno.</span>
           </div>
           <div class="worker-billing-scroll">
             <table>
@@ -1721,7 +1707,6 @@
           </label>
           <button class="primary" id="addClientBtn" type="button">Dodaj stranko</button>
           <button class="secondary" id="syncClientsFromTabBtn" type="button">Sync stranke</button>
-          <span class="todo-meta">Google Sheet Baza Strank je osnovna baza. Dav&#269;na &#353;tevilka je ID v vseh vnosih.</span>
         </div>
         <div class="todo-head">
           <strong>Vse stranke</strong>
@@ -1921,8 +1906,7 @@
         <div class="profile-preview">
           <span class="avatar" id="accountAvatar">?</span>
           <div>
-            <strong id="accountUserTitle"></strong><br>
-            <span class="small">Prijava je vezana na tvoj Google ra&#269;un.</span>
+            <strong id="accountUserTitle"></strong>
           </div>
         </div>
         <label>Prikazano ime
@@ -2201,9 +2185,6 @@
       const admin = isAdminView();
       const worker = activeWorker();
       $("userRole").textContent = admin ? "Sef - administracija" : `${worker?.name || "Delavec"} - delavec`;
-      $("workContextHint").textContent = admin
-        ? "Skupni pregled, obracuni in nastavitve."
-        : `Vnosi se shranjujejo za uporabnika ${worker?.name || "delavec"}.`;
       $("bossPanel").classList.toggle("hidden", !admin);
       document.querySelectorAll(".admin-only").forEach((element) => element.classList.toggle("hidden", !admin));
       document.querySelectorAll(".worker-only").forEach((element) => element.classList.toggle("hidden", admin));
@@ -3700,7 +3681,6 @@
           if (!showSuccess) return;
           const data = await api("/api/google/auth-url");
           window.open(data.url, "_blank", "noopener");
-          alert("Odpre se varna Google povezava za namenski INDUS koledar in bazo strank. Po potrditvi se vrni sem in klikni Google sync.");
           return;
         }
         const data = await api("/api/google/sync", { method: "POST", body: JSON.stringify({}) });

@@ -161,3 +161,20 @@ test("leva barvna legenda je odstranjena", () => {
   assert.doesNotMatch(html, /class="legend"/);
   assert.doesNotMatch(html, /class="legend-item"/);
 });
+test("razlagalni AI teksti niso prikazani v uporabniskem vmesniku", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  for (const copy of [
+    "Ure, stranke, material in kilometrina",
+    "Pri modrih opravkih se stranka ne shrani.",
+    "Podatki se zdaj shranjujejo",
+    "Postavka se zajame",
+    "Google Sheet Baza Strank je osnovna baza.",
+    "Prijava je vezana na tvoj Google",
+    "Skupni pregled, obracuni in nastavitve.",
+    "Vnosi se shranjujejo za uporabnika",
+    "Odpre se varna Google povezava"
+  ]) {
+    assert.doesNotMatch(html, new RegExp(copy.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  }
+  assert.doesNotMatch(html, /workContextHint/);
+});
