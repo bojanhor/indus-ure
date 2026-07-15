@@ -34,6 +34,8 @@ const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || "";
 const GOOGLE_REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI || "";
 const GOOGLE_SHEETS_ID = process.env.GOOGLE_SHEETS_ID || "";
 const GOOGLE_SHEETS_RANGE = process.env.GOOGLE_SHEETS_RANGE || DEFAULT_CLIENT_SHEET_RANGE;
+const GOOGLE_CALENDAR_SCOPE_VERSION = 2;
+const GOOGLE_SYNC_INTERVAL_MS = Math.max(60_000, Number(process.env.GOOGLE_SYNC_INTERVAL_MS || 60_000));
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 let pgPool = null;
 let pgReady = null;
@@ -135,8 +137,22 @@ function normalizeDb(db = {}) {
       changed = true;
     }
     if (!db.users[id].google) {
-      db.users[id].google = { tokens: null, calendarId: "", calendarName: "", connectedAt: "" };
+      db.users[id].google = { tokens: null, calendarId: "", calendarName: "", connectedAt: "", scopeVersion: 0 };
       changed = true;
+    }
+    const googleState = db.users[id].google;
+    if (Number(googleState.scopeVersion || 0) !== GOOGLE_CALENDAR_SCOPE_VERSION) {
+      if (googleState.tokens || googleState.calendarId || googleState.syncToken) {
+        googleState.tokens = null;
+        googleState.calendarId = "";
+        googleState.calendarName = "";
+        googleState.syncToken = "";
+        changed = true;
+      }
+      if (Number(googleState.scopeVersion || 0) !== 0) {
+        googleState.scopeVersion = 0;
+        changed = true;
+      }
     }
     if (db.users[id].avatar && !validImageDataUrl(db.users[id].avatar, 1_500_000)) {
       db.users[id].avatar = "";
@@ -257,6 +273,10 @@ function normalizeDb(db = {}) {
       next.googleUpdatedAt = "";
       changed = true;
     }
+    if (typeof next.googleSyncedLocalAt !== "string") {
+      next.googleSyncedLocalAt = next.updatedAt || next.createdAt || "";
+      changed = true;
+    }
     if (typeof next.invoiceSent !== "boolean") {
       next.invoiceSent = false;
       changed = true;
@@ -322,6 +342,10 @@ function normalizeDb(db = {}) {
     }
     if (typeof next.googleUpdatedAt !== "string") {
       next.googleUpdatedAt = "";
+      changed = true;
+    }
+    if (typeof next.googleSyncedLocalAt !== "string") {
+      next.googleSyncedLocalAt = next.updatedAt || next.createdAt || "";
       changed = true;
     }
     if (!Array.isArray(next.photos)) {
@@ -849,8 +873,35 @@ function googleClient(req, tokens) {
   return client;
 }
 
-function googleEventDescription(lines) {
-  return ["INDUS URE", ...lines.filter(Boolean)].join("\n");
+function googleEventDescription(fields, notes = "") {
+  const lines = ["INDUS URE"];
+  for (const [label, value] of Object.entries(fields)) {
+    lines.push(`${label}: ${value ?? ""}`);
+  }
+  lines.push("Opombe:");
+  if (notes) lines.push(String(notes).trim());
+  return lines.join("\n");
+}
+
+function parseGoogleEventDescription(value) {
+  const lines = String(value || "").replaceAll("\r", "").split("\n");
+  const isIndus = lines[0]?.trim() === "INDUS URE";
+  if (!isIndus) return { isIndus: false, fields: {}, notes: String(value || "").trim() };
+  const fields = {};
+  const notes = [];
+  let readingNotes = false;
+  for (const line of lines.slice(1)) {
+    const match = line.match(/^([^:]+):\s*(.*)$/);
+    if (!readingNotes && match && match[1].trim().toLowerCase() === "opombe") {
+      readingNotes = true;
+      if (match[2]) notes.push(match[2]);
+    } else if (readingNotes) {
+      notes.push(line);
+    } else if (match) {
+      fields[match[1].trim().toLowerCase()] = match[2].trim();
+    }
+  }
+  return { isIndus: true, fields, notes: notes.join("\n").trim() };
 }
 
 function entrySummary(entry) {
@@ -863,13 +914,14 @@ function entrySummary(entry) {
 function entryToGoogleEvent(entry) {
   const event = {
     summary: entrySummary(entry),
-    description: googleEventDescription([
-      entry.work ? `Delo: ${entry.work}` : "",
-      entry.material ? `Material: ${entry.material}` : "",
-      entry.people ? `Sodelavci: ${entry.people}` : "",
-      entry.km ? `Km: ${entry.km}` : "",
-      entry.notes ? `Opombe: ${entry.notes}` : ""
-    ]),
+    description: googleEventDescription({
+      Stranka: entry.client || "",
+      Davcna: entry.clientId || "",
+      Delo: entry.work || "",
+      Material: entry.material || "",
+      Sodelavci: entry.people || "",
+      Km: Number(entry.km || 0)
+    }, entry.notes),
     extendedProperties: { private: { indusId: entry.id, indusType: "entry", indusUser: entry.syncUser || entry.createdBy || "" } }
   };
   if (entry.status === "vacation") {
@@ -887,11 +939,12 @@ function entryToGoogleEvent(entry) {
 function todoToGoogleEvent(todo) {
   return {
     summary: `TODO: ${todo.title}`,
-    description: googleEventDescription([
-      todo.client ? `Stranka: ${todo.client}` : "",
-      todo.status === "in_progress" ? "Status: v teku" : "",
-      todo.notes ? `Opombe: ${todo.notes}` : ""
-    ]),
+    description: googleEventDescription({
+      Vrsta: "opravilo",
+      Stranka: todo.client || "",
+      Davcna: todo.clientId || "",
+      Status: todo.status === "in_progress" ? "v teku" : "odprto"
+    }, todo.notes),
     start: { date: todo.date },
     end: { date: addDaysDashed(todo.date, 1) },
     extendedProperties: { private: { indusId: todo.id, indusType: "todo", indusUser: todo.syncUser || todo.createdBy || "" } }
@@ -908,155 +961,276 @@ function addDaysDashed(date, days) {
   ].join("-");
 }
 
-function googleEventUpdatedLater(event, item) {
-  if (!event.updated) return false;
-  if (!item.googleUpdatedAt) return true;
-  return new Date(event.updated).getTime() > new Date(item.googleUpdatedAt).getTime();
+function googleEventChanged(event, item) {
+  return Boolean(event.updated && event.updated !== item.googleUpdatedAt);
+}
+
+function localItemChanged(item) {
+  return Boolean(item.updatedAt && item.updatedAt !== item.googleSyncedLocalAt);
+}
+
+function remoteGoogleChangeWins(event, item) {
+  if (!localItemChanged(item)) return true;
+  const remoteTime = new Date(event.updated || 0).getTime();
+  const localTime = new Date(item.updatedAt || 0).getTime();
+  return Number.isFinite(remoteTime) && remoteTime >= localTime;
 }
 
 async function ensureGoogleCalendar(calendar, user) {
+  if (Number(user.google?.scopeVersion || 0) !== GOOGLE_CALENDAR_SCOPE_VERSION) {
+    throw new Error("Google dovoljenja je treba ponovno potrditi.");
+  }
   const name = `INDUS URE - ${user.name || user.id}`;
   if (user.google?.calendarId) return user.google.calendarId;
-  const existing = await calendar.calendarList.list({ maxResults: 250 });
-  const found = (existing.data.items || []).find((item) => item.summary === name);
-  if (found) {
-    user.google.calendarId = found.id;
-    user.google.calendarName = found.summary;
-    return found.id;
-  }
   const created = await calendar.calendars.insert({
-    requestBody: { summary: name, timeZone: "Europe/Ljubljana" }
+    requestBody: { summary: name, description: "Namenski koledar aplikacije INDUS URE", timeZone: "Europe/Ljubljana" }
   });
   user.google.calendarId = created.data.id;
   user.google.calendarName = created.data.summary || name;
+  user.google.calendarCreatedByApp = true;
+  user.google.syncToken = "";
   return user.google.calendarId;
 }
 
-function entryFromGoogleEvent(event, user) {
+function resolveGoogleClient(db, parsed, summary, existing = {}) {
+  const clients = db.clients || [];
+  const taxId = normalizeTaxId(parsed.fields.davcna || existing.clientId || "");
+  let client = isUsableTaxId(taxId)
+    ? clients.find((item) => normalizeTaxId(item.clientId || item.taxId) === taxId)
+    : null;
+  const requestedName = String(parsed.fields.stranka || existing.client || "").trim().toLowerCase();
+  if (!client && requestedName) {
+    client = clients.find((item) => [item.name, item.search].some((value) => String(value || "").trim().toLowerCase() === requestedName));
+  }
+  if (!client) {
+    const normalizedSummary = String(summary || "").trim().toLowerCase();
+    client = [...clients]
+      .sort((a, b) => String(b.name || "").length - String(a.name || "").length)
+      .find((item) => [item.name, item.search].filter(Boolean).some((value) => normalizedSummary.startsWith(`${String(value).trim().toLowerCase()} - `)));
+  }
+  return client
+    ? { client: client.name, clientId: client.clientId || client.taxId || "" }
+    : { client: existing.client || parsed.fields.stranka || "", clientId: existing.clientId || "" };
+}
+
+function workFromGoogleSummary(summary, client = "") {
+  const value = String(summary || "Google dogodek").trim();
+  const prefix = `${String(client).trim()} - `;
+  return client && value.toLowerCase().startsWith(prefix.toLowerCase()) ? value.slice(prefix.length).trim() : value;
+}
+
+function entryFromGoogleEvent(event, user, db = {}, existing = null) {
+  const allDay = Boolean(event.start?.date);
   const start = event.start?.dateTime ? new Date(event.start.dateTime) : null;
   const end = event.end?.dateTime ? new Date(event.end.dateTime) : null;
-  if (!start || !end) return null;
-  const date = [
+  if (!allDay && (!start || !end)) return null;
+  const date = allDay ? event.start.date : [
     start.getFullYear(),
     String(start.getMonth() + 1).padStart(2, "0"),
     String(start.getDate()).padStart(2, "0")
   ].join("-");
   const time = (value) => `${String(value.getHours()).padStart(2, "0")}:${String(value.getMinutes()).padStart(2, "0")}`;
+  const parsed = parseGoogleEventDescription(event.description);
+  const clientRef = resolveGoogleClient(db, parsed, event.summary, existing || {});
+  const titleChanged = Boolean(existing && String(event.summary || "") !== entrySummary(existing));
+  const work = titleChanged || !parsed.isIndus
+    ? workFromGoogleSummary(event.summary, clientRef.client)
+    : parsed.fields.delo || existing?.work || workFromGoogleSummary(event.summary, clientRef.client);
+  const now = new Date().toISOString();
+  const hasClient = isUsableTaxId(clientRef.clientId);
   return {
-    id: crypto.randomUUID(),
+    id: existing?.id || crypto.randomUUID(),
     date,
-    start: time(start),
-    end: time(end),
-    client: event.summary || "Google dogodek",
-    status: "unbilled",
-    work: event.summary || "",
-    material: "",
-    people: "",
-    km: 0,
-    materialCost: 0,
-    notes: event.description || "",
+    start: allDay ? existing?.start || "00:00" : time(start),
+    end: allDay ? existing?.end || "23:59" : time(end),
+    client: hasClient ? clientRef.client : "",
+    clientId: hasClient ? clientRef.clientId : "",
+    status: allDay ? "vacation" : existing?.status || (hasClient ? "unbilled" : "errand"),
+    work,
+    material: parsed.isIndus ? parsed.fields.material || "" : existing?.material || "",
+    people: parsed.isIndus ? parsed.fields.sodelavci || "" : existing?.people || "",
+    km: parsed.isIndus ? Number(parsed.fields.km || 0) : Number(existing?.km || 0),
+    materialCost: Number(existing?.materialCost || 0),
+    notes: parsed.notes,
     syncUser: user.id,
-    googleEventId: event.id || "",
+    googleEventId: event.id || existing?.googleEventId || "",
     googleUpdatedAt: event.updated || "",
-    createdBy: user.id,
-    createdByName: user.name,
-    createdAt: new Date().toISOString(),
+    googleSyncedLocalAt: now,
+    createdBy: existing?.createdBy || user.id,
+    createdByName: existing?.createdByName || user.name,
+    createdAt: existing?.createdAt || now,
     updatedBy: user.id,
     updatedByName: user.name,
-    updatedAt: new Date().toISOString(),
-    history: [audit(user, "uvozeno iz Google")]
+    updatedAt: now,
+    history: [...(existing?.history || []), audit(user, existing ? "spremenjeno v Google" : "uvozeno iz Google")]
   };
 }
 
-function todoFromGoogleEvent(event, user) {
+function todoFromGoogleEvent(event, user, db = {}, existing = null) {
   if (!event.start?.date) return null;
+  const parsed = parseGoogleEventDescription(event.description);
+  const clientRef = resolveGoogleClient(db, parsed, event.summary, existing || {});
+  const now = new Date().toISOString();
   return {
-    id: crypto.randomUUID(),
+    id: existing?.id || crypto.randomUUID(),
     title: String(event.summary || "Google opravilo").replace(/^TODO:\s*/i, ""),
     date: event.start.date,
-    client: "",
-    notes: event.description || "",
-    status: "open",
-    order: 0,
+    client: clientRef.client,
+    clientId: clientRef.clientId,
+    notes: parsed.notes,
+    status: parsed.fields.status === "v teku" ? "in_progress" : existing?.status || "open",
+    order: Number(existing?.order || 0),
     done: false,
+    photos: existing?.photos || [],
     syncUser: user.id,
-    googleEventId: event.id || "",
+    googleEventId: event.id || existing?.googleEventId || "",
     googleUpdatedAt: event.updated || "",
-    createdBy: user.id,
-    createdByName: user.name,
-    createdAt: new Date().toISOString(),
+    googleSyncedLocalAt: now,
+    createdBy: existing?.createdBy || user.id,
+    createdByName: existing?.createdByName || user.name,
+    createdAt: existing?.createdAt || now,
     updatedBy: user.id,
     updatedByName: user.name,
-    updatedAt: new Date().toISOString(),
-    history: [audit(user, "uvozeno iz Google")]
+    updatedAt: now,
+    history: [...(existing?.history || []), audit(user, existing ? "spremenjeno v Google" : "uvozeno iz Google")]
   };
+}
+
+async function listGoogleEventChanges(calendar, calendarId, syncToken = "") {
+  const events = [];
+  let pageToken = "";
+  let nextSyncToken = "";
+  try {
+    do {
+      const request = { calendarId, maxResults: 2500, showDeleted: true };
+      if (pageToken) request.pageToken = pageToken;
+      if (syncToken) {
+        request.syncToken = syncToken;
+      } else {
+        const timeMin = new Date();
+        timeMin.setDate(timeMin.getDate() - 30);
+        request.timeMin = timeMin.toISOString();
+        request.singleEvents = true;
+        request.orderBy = "startTime";
+      }
+      const response = await calendar.events.list(request);
+      events.push(...(response.data.items || []));
+      pageToken = response.data.nextPageToken || "";
+      nextSyncToken = response.data.nextSyncToken || nextSyncToken;
+    } while (pageToken);
+  } catch (error) {
+    if (syncToken && Number(error.code || error.response?.status) === 410) {
+      return listGoogleEventChanges(calendar, calendarId, "");
+    }
+    throw error;
+  }
+  return { events, syncToken: nextSyncToken };
+}
+
+async function pushGoogleItem(calendar, calendarId, item, requestBody) {
+  let response;
+  if (item.googleEventId) {
+    try {
+      response = await calendar.events.patch({ calendarId, eventId: item.googleEventId, requestBody, sendUpdates: "none" });
+    } catch (error) {
+      if (Number(error.code || error.response?.status) !== 404) throw error;
+      item.googleEventId = "";
+    }
+  }
+  if (!item.googleEventId) {
+    response = await calendar.events.insert({ calendarId, requestBody, sendUpdates: "none" });
+    item.googleEventId = response.data.id || "";
+  }
+  item.googleUpdatedAt = response.data.updated || new Date().toISOString();
+  item.googleSyncedLocalAt = item.updatedAt || item.createdAt || new Date().toISOString();
 }
 
 async function syncGoogleForUser(req, db, user) {
   if (!googleReady()) throw new Error("Google OAuth se ni nastavljen.");
-  if (!user.google?.tokens) throw new Error("Najprej povezi svoj Google racun.");
+  if (!user.google?.tokens || Number(user.google.scopeVersion || 0) !== GOOGLE_CALENDAR_SCOPE_VERSION) {
+    throw new Error("Najprej potrdi omejen dostop do namenskega INDUS koledarja.");
+  }
   const { google } = require("googleapis");
   const auth = googleClient(req, user.google.tokens);
   const calendar = google.calendar({ version: "v3", auth });
   const calendarId = await ensureGoogleCalendar(calendar, user);
-  const now = new Date().toISOString();
+  const remote = await listGoogleEventChanges(calendar, calendarId, user.google.syncToken || "");
   let pushed = 0;
   let pulled = 0;
+  let conflicts = 0;
 
-  const timeMin = new Date();
-  timeMin.setDate(timeMin.getDate() - 30);
-  const remote = await calendar.events.list({
-    calendarId,
-    timeMin: timeMin.toISOString(),
-    maxResults: 2500,
-    singleEvents: false,
-    showDeleted: true
-  });
-
-  for (const event of remote.data.items || []) {
+  for (const event of remote.events) {
     const privateProps = event.extendedProperties?.private || {};
+    const entryIndex = db.entries.findIndex((item) => item.syncUser === user.id && (item.googleEventId === event.id || item.id === privateProps.indusId));
+    const todoIndex = db.todos.findIndex((item) => item.syncUser === user.id && (item.googleEventId === event.id || item.id === privateProps.indusId));
+
     if (event.status === "cancelled") {
-      const entryIndex = db.entries.findIndex((item) => item.syncUser === user.id && (item.googleEventId === event.id || item.id === privateProps.indusId));
       if (entryIndex >= 0) {
         db.entries.splice(entryIndex, 1);
         pulled++;
-        continue;
-      }
-      const todoIndex = db.todos.findIndex((item) => item.syncUser === user.id && (item.googleEventId === event.id || item.id === privateProps.indusId));
-      if (todoIndex >= 0) {
+      } else if (todoIndex >= 0) {
         db.todos.splice(todoIndex, 1);
         pulled++;
-        continue;
       }
       continue;
     }
-    if (privateProps.indusId && privateProps.indusType === "entry") {
-      const entry = db.entries.find((item) => item.id === privateProps.indusId && item.syncUser === user.id);
-      if (entry && googleEventUpdatedLater(event, entry)) {
-        const imported = entryFromGoogleEvent(event, user);
+
+    if (entryIndex >= 0 || (privateProps.indusType === "entry" && privateProps.indusId)) {
+      const entry = entryIndex >= 0 ? db.entries[entryIndex] : null;
+      if (!entry) {
+        const imported = entryFromGoogleEvent(event, user, db);
         if (imported) {
-          Object.assign(entry, { ...entry, date: imported.date, start: imported.start, end: imported.end, work: imported.work, notes: imported.notes, googleUpdatedAt: event.updated || "", updatedAt: now, updatedBy: user.id, updatedByName: user.name });
+          db.entries.push(imported);
           pulled++;
+        }
+      } else if (!entry.googleEventId) {
+        entry.googleEventId = event.id || "";
+        entry.googleUpdatedAt = event.updated || "";
+        entry.googleSyncedLocalAt = entry.updatedAt || "";
+      } else if (googleEventChanged(event, entry)) {
+        if (remoteGoogleChangeWins(event, entry)) {
+          const imported = entryFromGoogleEvent(event, user, db, entry);
+          if (imported) {
+            Object.assign(entry, imported);
+            pulled++;
+          }
+        } else {
+          conflicts++;
         }
       }
       continue;
     }
-    if (privateProps.indusId && privateProps.indusType === "todo") {
-      const todo = db.todos.find((item) => item.id === privateProps.indusId && item.syncUser === user.id);
-      if (todo && googleEventUpdatedLater(event, todo)) {
-        todo.title = String(event.summary || todo.title).replace(/^TODO:\s*/i, "");
-        todo.date = event.start?.date || todo.date;
-        todo.notes = event.description || todo.notes;
+
+    if (todoIndex >= 0 || (privateProps.indusType === "todo" && privateProps.indusId)) {
+      const todo = todoIndex >= 0 ? db.todos[todoIndex] : null;
+      if (!todo) {
+        const imported = todoFromGoogleEvent(event, user, db);
+        if (imported) {
+          db.todos.push(imported);
+          pulled++;
+        }
+      } else if (!todo.googleEventId) {
+        todo.googleEventId = event.id || "";
         todo.googleUpdatedAt = event.updated || "";
-        todo.updatedAt = now;
-        todo.updatedBy = user.id;
-        todo.updatedByName = user.name;
-        pulled++;
+        todo.googleSyncedLocalAt = todo.updatedAt || "";
+      } else if (googleEventChanged(event, todo)) {
+        if (remoteGoogleChangeWins(event, todo)) {
+          const imported = todoFromGoogleEvent(event, user, db, todo);
+          if (imported) {
+            Object.assign(todo, imported);
+            pulled++;
+          }
+        } else {
+          conflicts++;
+        }
       }
       continue;
     }
+
     if (event.id && !db.entries.some((item) => item.googleEventId === event.id) && !db.todos.some((item) => item.googleEventId === event.id)) {
-      const imported = event.start?.dateTime ? entryFromGoogleEvent(event, user) : todoFromGoogleEvent(event, user);
+      const imported = event.start?.dateTime
+        ? entryFromGoogleEvent(event, user, db)
+        : todoFromGoogleEvent(event, user, db);
       if (imported) {
         if (event.start?.dateTime) db.entries.push(imported);
         else db.todos.push(imported);
@@ -1066,34 +1240,33 @@ async function syncGoogleForUser(req, db, user) {
   }
 
   for (const entry of db.entries.filter((item) => item.syncUser === user.id && item.date && item.start && item.end)) {
-    const requestBody = entryToGoogleEvent(entry);
-    if (entry.googleEventId) {
-      const updated = await calendar.events.patch({ calendarId, eventId: entry.googleEventId, requestBody });
-      entry.googleUpdatedAt = updated.data.updated || now;
-    } else {
-      const created = await calendar.events.insert({ calendarId, requestBody });
-      entry.googleEventId = created.data.id || "";
-      entry.googleUpdatedAt = created.data.updated || now;
-    }
+    if (entry.googleEventId && !localItemChanged(entry)) continue;
+    await pushGoogleItem(calendar, calendarId, entry, entryToGoogleEvent(entry));
     pushed++;
   }
 
-  for (const todo of db.todos.filter((item) => item.syncUser === user.id && item.date && !item.done)) {
-    const requestBody = todoToGoogleEvent(todo);
-    if (todo.googleEventId) {
-      const updated = await calendar.events.patch({ calendarId, eventId: todo.googleEventId, requestBody });
-      todo.googleUpdatedAt = updated.data.updated || now;
-    } else {
-      const created = await calendar.events.insert({ calendarId, requestBody });
-      todo.googleEventId = created.data.id || "";
-      todo.googleUpdatedAt = created.data.updated || now;
+  for (const todo of db.todos.filter((item) => item.syncUser === user.id && item.date)) {
+    if (todo.done) {
+      if (todo.googleEventId) {
+        await calendar.events.delete({ calendarId, eventId: todo.googleEventId, sendUpdates: "none" }).catch((error) => {
+          if (Number(error.code || error.response?.status) !== 404) throw error;
+        });
+        todo.googleEventId = "";
+        todo.googleUpdatedAt = "";
+        todo.googleSyncedLocalAt = todo.updatedAt || "";
+        pushed++;
+      }
+      continue;
     }
+    if (todo.googleEventId && !localItemChanged(todo)) continue;
+    await pushGoogleItem(calendar, calendarId, todo, todoToGoogleEvent(todo));
     pushed++;
   }
 
   user.google.calendarId = calendarId;
-  user.google.lastSyncAt = now;
-  return { pushed, pulled, calendarName: user.google.calendarName || `INDUS URE - ${user.name}` };
+  user.google.syncToken = remote.syncToken || user.google.syncToken || "";
+  user.google.lastSyncAt = new Date().toISOString();
+  return { pushed, pulled, conflicts, calendarName: user.google.calendarName || `INDUS URE - ${user.name}` };
 }
 
 async function syncClientsWithSheets(db, user) {
@@ -1284,9 +1457,10 @@ async function handleApi(req, res) {
       if (!user) return;
       sendJson(res, 200, {
         configured: googleReady(),
-        connected: Boolean(user.google?.tokens),
+        connected: Boolean(user.google?.tokens && Number(user.google.scopeVersion || 0) === GOOGLE_CALENDAR_SCOPE_VERSION),
         calendarName: user.google?.calendarName || "",
-        lastSyncAt: user.google?.lastSyncAt || ""
+        lastSyncAt: user.google?.lastSyncAt || "",
+        syncIntervalMs: GOOGLE_SYNC_INTERVAL_MS
       });
       return;
     }
@@ -1326,10 +1500,10 @@ async function handleApi(req, res) {
         access_type: "offline",
         state,
         scope: [
-          "https://www.googleapis.com/auth/calendar",
+          "https://www.googleapis.com/auth/calendar.app.created",
           "https://www.googleapis.com/auth/spreadsheets"
         ],
-        include_granted_scopes: true,
+        include_granted_scopes: false,
         prompt: "consent"
       });
       sendJson(res, 200, { url: authUrl });
@@ -1407,13 +1581,22 @@ async function handleApi(req, res) {
         return;
       }
       user.google = user.google || {};
-      user.google.tokens = {
-        ...(user.google.tokens || {}),
-        ...result.tokens
-      };
+      const currentScope = Number(user.google.scopeVersion || 0) === GOOGLE_CALENDAR_SCOPE_VERSION;
+      const refreshToken = result.tokens.refresh_token || (currentScope ? user.google.tokens?.refresh_token : "");
+      if (!refreshToken) {
+        sendText(res, 400, "Google ni vrnil trajnega dovoljenja. V Google racunu odstrani dostop INDUS URE in poskusi znova.", "text/plain");
+        return;
+      }
+      user.google.tokens = { ...result.tokens, refresh_token: refreshToken };
       user.google.connectedAt = new Date().toISOString();
-      user.google.calendarId = user.google.calendarId || "";
-      user.google.calendarName = user.google.calendarName || "";
+      user.google.scopeVersion = GOOGLE_CALENDAR_SCOPE_VERSION;
+      if (!currentScope) {
+        user.google.calendarId = "";
+        user.google.calendarName = "";
+        user.google.calendarCreatedByApp = false;
+        user.google.syncToken = "";
+        user.google.lastSyncAt = "";
+      }
       await writeDbAsync(db);
       sendText(res, 200, "Google racun je povezan. Lahko zapres to okno in v INDUS URE kliknes Google sync.", "text/plain");
       return;
@@ -1952,6 +2135,31 @@ function runSerializedMutation(req, res) {
   mutationQueue = execution.catch((error) => handleUnexpectedRequestError(error, res));
 }
 
+async function syncConnectedGoogleCalendars() {
+  if (!googleReady()) return;
+  const db = await readDbAsync();
+  let changed = false;
+  for (const user of Object.values(db.users || {})) {
+    if (!user.google?.tokens || Number(user.google.scopeVersion || 0) !== GOOGLE_CALENDAR_SCOPE_VERSION) continue;
+    try {
+      const result = await syncGoogleForUser({ headers: { host: "localhost" } }, db, user);
+      changed = true;
+      if (result.pushed || result.pulled || result.conflicts) {
+        console.log(`Google koledar ${user.id}: poslano ${result.pushed}, prebrano ${result.pulled}, konflikti ${result.conflicts}.`);
+      }
+    } catch (error) {
+      console.error(`Google koledarja za ${user.id} ni bilo mogoce sinhronizirati: ${error.message || error}`);
+    }
+  }
+  if (changed) await writeDbAsync(db);
+}
+
+function queueBackgroundGoogleSync() {
+  mutationQueue = mutationQueue
+    .then(() => syncConnectedGoogleCalendars())
+    .catch((error) => console.error(`Google sync v ozadju ni uspel: ${error.message || error}`));
+}
+
 async function start() {
   if (NODE_ENV === "production" && !DATABASE_URL) {
     throw new Error("V produkciji mora biti nastavljen DATABASE_URL.");
@@ -2003,6 +2211,10 @@ async function start() {
     for (const url of networkUrls()) console.log(`Na istem omrezju: ${url}`);
     console.log("Uporabnika: bojan in ibro");
   });
+  const googleSyncTimer = setInterval(queueBackgroundGoogleSync, GOOGLE_SYNC_INTERVAL_MS);
+  googleSyncTimer.unref();
+  const initialGoogleSyncTimer = setTimeout(queueBackgroundGoogleSync, 15_000);
+  initialGoogleSyncTimer.unref();
 }
 
 if (require.main === module) {
@@ -2013,10 +2225,20 @@ if (require.main === module) {
 }
 
 module.exports = {
+  GOOGLE_CALENDAR_SCOPE_VERSION,
   canManageEntry,
   canManageTodo,
   entryForUserRole,
+  entryFromGoogleEvent,
+  entryToGoogleEvent,
+  googleEventChanged,
+  localItemChanged,
+  normalizeDb,
+  parseGoogleEventDescription,
+  remoteGoogleChangeWins,
   syncUserForRequest,
+  todoFromGoogleEvent,
+  todoToGoogleEvent,
   visibleDebtsForUser,
   visibleEntriesForUser,
   visibleTodosForUser

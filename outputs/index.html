@@ -1676,6 +1676,7 @@
       user: null,
       users: [],
       workContext: "",
+      googleSyncing: false,
       token: localStorage.getItem(tokenKey) || ""
     };
 
@@ -3054,6 +3055,8 @@
     }
 
     async function syncGoogle(showSuccess = true) {
+      if (state.googleSyncing) return;
+      state.googleSyncing = true;
       try {
         const status = await api("/api/google/status");
         if (!status.configured) {
@@ -3064,7 +3067,7 @@
           if (!showSuccess) return;
           const data = await api("/api/google/auth-url");
           window.open(data.url, "_blank", "noopener");
-          alert("Odpre se Google prijava. Ko potrdis dostop, se vrni sem in klikni Google sync.");
+          alert("Odpre se varna Google povezava za namenski INDUS koledar in bazo strank. Po potrditvi se vrni sem in klikni Google sync.");
           return;
         }
         const data = await api("/api/google/sync", { method: "POST", body: JSON.stringify({}) });
@@ -3072,9 +3075,11 @@
         state.todos = data.todos || state.todos;
         refreshClientList();
         render();
-        if (showSuccess) alert(`Google sync koncan. Poslano: ${data.pushed || 0}, prebrano iz Google: ${data.pulled || 0}.`);
+        if (showSuccess) alert(`Google sync koncan. Poslano: ${data.pushed || 0}, prebrano iz Google: ${data.pulled || 0}, konflikti: ${data.conflicts || 0}.`);
       } catch (error) {
         if (showSuccess) alert(error.message);
+      } finally {
+        state.googleSyncing = false;
       }
     }
 
@@ -3413,6 +3418,10 @@
     });
     $("entryLunch").addEventListener("click", () => applyEntryErrandPreset("Malica"));
     $("entryTravel").addEventListener("click", () => applyEntryErrandPreset("Pot"));
+
+    setInterval(() => {
+      if (state.token && state.user && document.visibilityState === "visible") syncGoogle(false);
+    }, 60_000);
 
     boot();
   </script>

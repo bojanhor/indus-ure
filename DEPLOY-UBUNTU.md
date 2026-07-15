@@ -46,7 +46,7 @@ sudoedit /etc/indus-ure.env
 
 Nastavi dolgo DB geslo ter Google OAuth podatke. `PUBLIC_BASE_URL` in `GOOGLE_REDIRECT_URI` morata biti `https://ure.indus.si` oziroma `https://ure.indus.si/api/google/callback`. Skrivnosti ne posiljaj v chat in jih ne commitaj.
 
-Google Cloud OAuth client mora imeti natanko ta Authorized redirect URI. Prijava zahteva samo profil/e-posto; Calendar in Sheets se nato povezeta loceno z gumbom Google sync.
+Google Cloud OAuth client mora imeti natanko ta Authorized redirect URI. Prijava zahteva samo profil/e-posto; Calendar in Sheets se nato povezeta loceno z gumbom Google sync. Calendar uporablja omejeni obseg `calendar.app.created`: aplikacija ustvari namenski sekundarni koledar `INDUS URE - uporabnik` in nima dostopa do osebnega koledarja. Spremembe se dvosmerno osvezujejo vsako minuto; interval doloca `GOOGLE_SYNC_INTERVAL_MS`.
 
 ### Osnovna baza strank v Google Sheets
 
