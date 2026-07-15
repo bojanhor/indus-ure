@@ -97,7 +97,8 @@ test("dropdown statusov prikaze koledarske barve za vsako moznost", () => {
 
 test("osnovni pogled priloge samo prikazuje, dodajanje pa ostane v obrazcu", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
-  assert.match(html, /\$\{\(todo\.photos \|\| \[\]\)\.length \? `<button class="secondary show-photos"[^>]*>Prikaz prilog<\/button>` : ""\}/);
+  assert.match(html, /<details class="todo-description-details todo-attachments-details">[\s\S]*?<summary>Priloge <span class="todo-details-count">/);
+  assert.doesNotMatch(html, /class="secondary show-photos"/);
   assert.match(html, /id="todoFormPhotoInput"[^>]*type="file"/);
   assert.doesNotMatch(html, /class="hidden-file todo-photo-input"/);
   assert.doesNotMatch(html, />Fotografije<\/button>/);
@@ -121,7 +122,7 @@ test("urejanje opravila uporablja svincnik in klik na podatke kartice", () => {
   assert.doesNotMatch(card, /<button class="primary edit-todo"[^>]*>Uredi opravilo<\/button>/);
   assert.doesNotMatch(card, /class="todo-status todo-status-color|class="todo-date"|edit-todo-assignees/);
   assert.match(html, /const todoSummary = item\.querySelector\("\.todo-summary"\);[\s\S]*?todoSummary\.addEventListener\("click"/);
-  assert.match(html, /if \(event\.target\.closest\("a, summary"\)\) return;/);
+  assert.match(html, /if \(event\.target\.closest\("a, summary, button, \.todo-attachments-details"\)\) return;/);
 });
 
 test("razvrscanje opravil deluje z rocajem, misjo in dotikom", () => {
@@ -321,6 +322,9 @@ test("opravilo ima loceno ime in dolg vecvrsticni opis", () => {
   assert.match(html, /<div class="todo-description todo-meta">\$\{linkifyText\(todo\.notes\)\}<\/div>/);
   assert.doesNotMatch(html, /<details class="todo-description-details" open>/);
   assert.match(html, /white-space: pre-wrap/);
+  assert.match(html, /\.todo-description-details summary \{[\s\S]*?min-height: 42px;[\s\S]*?padding: 9px 12px;/);
+  assert.match(html, /\.todo-description-details \{[\s\S]*?border: 1px solid var\(--line\);[\s\S]*?background: #f6f9f6;/);
+  assert.match(html, /\.todo-description-details\[open\] summary::after \{ content: "\\2212"; \}/);
   assert.doesNotMatch(html, /pageTodoTitle|pageTodoNotes/);
   assert.doesNotMatch(html, /Kaj je treba narediti/);
 });

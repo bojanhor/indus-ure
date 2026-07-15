@@ -589,23 +589,56 @@
       line-height: 1.45;
     }
 
-    .todo-description { margin-top: 7px; }
+    .todo-description { margin: 0; }
 
     .todo-description-details {
-      margin-top: 7px;
+      margin-top: 8px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #f6f9f6;
     }
 
     .todo-description-details summary {
-      width: fit-content;
-      color: var(--accent);
+      width: 100%;
+      min-height: 42px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 9px 12px;
+      color: var(--ink);
       cursor: pointer;
-      font-size: 12px;
+      font-size: 13px;
       font-weight: 800;
+      list-style: none;
       user-select: none;
     }
 
+    .todo-description-details summary::-webkit-details-marker { display: none; }
+
+    .todo-description-details summary::after {
+      content: "+";
+      margin-left: auto;
+      color: var(--accent);
+      font-size: 18px;
+      line-height: 1;
+    }
+
     .todo-description-details[open] summary {
-      margin-bottom: 6px;
+      border-bottom: 1px solid var(--line);
+      background: #edf3ef;
+    }
+
+    .todo-description-details[open] summary::after { content: "\2212"; }
+
+    .todo-description-details .todo-description,
+    .todo-attachments-details .todo-photos-inline {
+      padding: 12px;
+    }
+
+    .todo-details-count {
+      color: var(--muted);
+      font-size: 12px;
     }
 
     .report-todo-description {
@@ -2018,7 +2051,6 @@
       debts: [],
       clients: [],
       selectedClient: "",
-      expandedTodoPhotos: "",
       todoDialogPhotos: [],
       reportClient: "",
       reportClientId: "",
@@ -2894,9 +2926,12 @@
               <summary>Opis</summary>
               <div class="todo-description todo-meta">${linkifyText(todo.notes)}</div>
             </details>` : ""}
+            ${(todo.photos || []).length ? `<details class="todo-description-details todo-attachments-details">
+              <summary>Priloge <span class="todo-details-count">${(todo.photos || []).length}</span></summary>
+              ${renderTodoPhotoHtml(todo)}
+            </details>` : ""}
           </div>
           <div class="todo-tools">
-            ${(todo.photos || []).length ? `<button class="secondary show-photos" type="button">Prikaz prilog</button>` : ""}
             <button class="todo-edit-icon edit-todo" type="button" title="Uredi opravilo" aria-label="Uredi opravilo">
               <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <path d="M4 14.5V17h2.5L15.8 7.7l-2.5-2.5L4 14.5zM12.4 6.1l2.5 2.5M13.3 5.2l1.2-1.2a1.4 1.4 0 012 0l.5.5a1.4 1.4 0 010 2l-1.2 1.2"></path>
@@ -2919,7 +2954,6 @@
               <button class="primary save-todo-billing" type="button">Shrani obracun</button>
             </div>
           ` : ""}
-          ${state.expandedTodoPhotos === todo.id ? renderTodoPhotoHtml(todo) : ""}
           <button class="drag-handle" type="button" draggable="${reorderable ? "true" : "false"}" ${reorderable ? "" : "disabled"} title="Povleci za vrstni red znotraj istega datuma" aria-label="Povleci za vrstni red">::</button>
         `;
         const openTodoEditor = (event) => {
@@ -2930,11 +2964,11 @@
         item.querySelector(".edit-todo").addEventListener("click", openTodoEditor);
         const todoSummary = item.querySelector(".todo-summary");
         todoSummary.addEventListener("click", (event) => {
-          if (event.target.closest("a, summary")) return;
+          if (event.target.closest("a, summary, button, .todo-attachments-details")) return;
           openTodoEditor(event);
         });
         todoSummary.addEventListener("keydown", (event) => {
-          if (!["Enter", " "].includes(event.key) || event.target.closest("a, summary")) return;
+          if (!["Enter", " "].includes(event.key) || event.target.closest("a, summary, button, .todo-attachments-details")) return;
           openTodoEditor(event);
         });
         item.querySelector('input[type="checkbox"]').addEventListener("change", (event) => {
@@ -2950,13 +2984,6 @@
               saveTodoBillingButton.disabled = false;
               alert(error.message);
             }
-          });
-        }
-        const showPhotosButton = item.querySelector(".show-photos");
-        if (showPhotosButton) {
-          showPhotosButton.addEventListener("click", () => {
-            state.expandedTodoPhotos = state.expandedTodoPhotos === todo.id ? "" : todo.id;
-            renderTodoItems();
           });
         }
         const dragHandle = item.querySelector(".drag-handle");
@@ -2982,7 +3009,6 @@
               ...todo,
               photos: (todo.photos || []).filter((photo) => photo.id !== button.dataset.photoId)
             });
-            state.expandedTodoPhotos = todo.id;
           });
         });
         item.addEventListener("dragover", (event) => {
