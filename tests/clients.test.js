@@ -144,3 +144,15 @@ test("nov koledarski vnos je mogoc samo skozi opravilo", () => {
   assert.match(server, /Nov koledarski vnos lahko ustvaris samo iz svojega opravila/);
   assert.match(server, /status: "execution",[\s\S]*done: true/);
 });
+test("nastavitve in tehnicna orodja so zbrana v enem meniju", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  assert.match(html, /<details class="tools-menu" id="toolsMenu">/);
+  assert.match(html, /class="tools-menu-panel"/);
+  for (const id of ["accountBtn", "refreshBtn", "googleCalendar", "syncClientsBtn", "exportCsv", "downloadBackup", "logoutBtn"]) {
+    assert.equal((html.match(new RegExp(`id="${id}"`, "g")) || []).length, 1, `ID ${id} mora biti samo enkrat`);
+  }
+  const bossPanel = html.match(/<section class="panel boss-panel[\s\S]*?<\/section>/)?.[0] || "";
+  assert.doesNotMatch(bossPanel, /downloadBackup/);
+  assert.match(html, /id="downloadBackup"[^>]*class="[^"]*admin-only|class="[^"]*admin-only[^"]*" id="downloadBackup"/);
+  assert.match(html, /querySelectorAll\("button"\)[\s\S]*closeToolsMenu/);
+});

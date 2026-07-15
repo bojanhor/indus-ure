@@ -395,6 +395,82 @@
       font-weight: 700;
     }
 
+    .tools-menu {
+      position: relative;
+    }
+
+    .tools-menu > summary {
+      list-style: none;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .tools-menu > summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .tools-menu[open] > summary {
+      background: #dce9e2;
+      outline: 2px solid rgba(43, 122, 77, 0.2);
+    }
+
+    .tools-chevron {
+      margin-left: 2px;
+      color: var(--muted);
+      transition: transform 0.15s ease;
+    }
+
+    .tools-menu[open] .tools-chevron {
+      transform: rotate(180deg);
+    }
+
+    .tools-menu-panel {
+      position: absolute;
+      top: calc(100% + 8px);
+      right: 0;
+      z-index: 100;
+      width: min(320px, calc(100vw - 32px));
+      max-height: min(70vh, 620px);
+      overflow-y: auto;
+      display: grid;
+      gap: 5px;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fff;
+      box-shadow: 0 18px 45px rgba(20, 35, 28, 0.22);
+    }
+
+    .tools-menu-label {
+      padding: 7px 8px 3px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 900;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .menu-action {
+      width: 100%;
+      min-height: 40px;
+      padding: 9px 10px;
+      border-radius: 7px;
+      text-align: left;
+      background: #f3f7f4;
+      color: var(--ink);
+      font-weight: 700;
+    }
+
+    .menu-action:hover,
+    .menu-action:focus-visible {
+      background: #e4eee9;
+    }
+
+    .menu-action.logout-action {
+      margin-top: 5px;
+      color: #8b2828;
+      background: #fff0f0;
+    }
     .avatar {
       width: 30px;
       height: 30px;
@@ -1356,8 +1432,18 @@
       }
       .view-switch,
       .search,
-      .account-btn {
+      .account-btn,
+      .tools-menu {
         grid-column: 1 / -1;
+      }
+      .tools-menu > summary {
+        width: 100%;
+        justify-content: center;
+      }
+      .tools-menu-panel {
+        left: 0;
+        right: 0;
+        width: auto;
       }
       .view-switch {
         display: grid;
@@ -1467,7 +1553,6 @@
           <strong id="userName"></strong>
           <span id="userRole"></span>
         </div>
-        <button class="ghost" id="logoutBtn" type="button">Odjava</button>
       </div>
 
       <div class="control view-context hidden" id="workContextControl">
@@ -1547,7 +1632,6 @@
 
       <button class="primary worker-only" id="saveQuick" type="button">Shrani v koledar</button>
       <button class="primary hidden" id="newTodoFromSidebar" type="button">Nov vnos prek opravila</button>
-      <button class="ghost" id="refreshBtn" type="button">Osve&#382;i skupne podatke</button>
 
       <div class="legend">
         <div class="legend-item"><span class="dot billed"></span> &#381;e obra&#269;unano</div>
@@ -1576,13 +1660,25 @@
             <button class="view-btn admin-only" id="reportViewBtn" type="button">Obra&#269;un</button>
           </div>
           <input class="search" id="clientSearch" placeholder="I&#353;&#269;i stranko, material ali opis">
-          <button class="secondary admin-only" id="syncClientsBtn" type="button">Sync stranke</button>
-          <button class="secondary admin-only" id="exportCsv" type="button">Izvoz CSV</button>
-          <button class="secondary" id="googleCalendar" type="button">Google sync</button>
-          <button class="account-btn" id="accountBtn" type="button" title="Upravljanje ra&#269;una">
-            <span class="avatar" id="topAvatar">?</span>
-            <span>Ra&#269;un</span>
-          </button>
+          <details class="tools-menu" id="toolsMenu">
+            <summary class="account-btn" title="Nastavitve in orodja">
+              <span class="avatar" id="topAvatar">?</span>
+              <span>Nastavitve</span>
+              <span class="tools-chevron" aria-hidden="true">&#9662;</span>
+            </summary>
+            <div class="tools-menu-panel" role="group" aria-label="Nastavitve in orodja">
+              <span class="tools-menu-label">Uporabnik</span>
+              <button class="menu-action" id="accountBtn" type="button">Ra&#269;un in profil</button>
+              <span class="tools-menu-label">Podatki in sinhronizacija</span>
+              <button class="menu-action" id="refreshBtn" type="button">Osve&#382;i skupne podatke</button>
+              <button class="menu-action" id="googleCalendar" type="button">Google Calendar sync</button>
+              <button class="menu-action admin-only" id="syncClientsBtn" type="button">Sync strank iz Google Sheets</button>
+              <span class="tools-menu-label admin-only">Napredno</span>
+              <button class="menu-action admin-only" id="exportCsv" type="button">Izvoz CSV</button>
+              <button class="menu-action admin-only" id="downloadBackup" type="button">Prenesi varnostno kopijo</button>
+              <button class="menu-action logout-action" id="logoutBtn" type="button">Odjava</button>
+            </div>
+          </details>
         </div>
       </section>
 
@@ -1597,7 +1693,6 @@
 
       <section class="panel boss-panel hidden calendar-view" id="bossPanel">
         <p>&#352;efovski pogled: vidi&#353; vse delavce, pripravlja&#353; obra&#269;une in spreminja&#353; skupne nastavitve. Za vnos ur izberi delavski pogled.</p>
-        <button class="secondary" id="downloadBackup" type="button">Prenesi varnostno kopijo</button>
         <div class="worker-billing">
           <div class="worker-billing-head">
             <strong>Delavci in privzete urne postavke</strong>
@@ -1974,6 +2069,9 @@
     };
 
     const $ = (id) => document.getElementById(id);
+    function closeToolsMenu() {
+      $("toolsMenu")?.removeAttribute("open");
+    }
 
     async function api(path, options = {}) {
       const headers = {
@@ -3799,6 +3897,16 @@
     });
 
     $("accountBtn").addEventListener("click", openAccountDialog);
+    $("toolsMenu").querySelectorAll("button").forEach((button) => {
+      button.addEventListener("click", closeToolsMenu);
+    });
+    document.addEventListener("click", (event) => {
+      const menu = $("toolsMenu");
+      if (menu?.open && !menu.contains(event.target)) closeToolsMenu();
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") closeToolsMenu();
+    });
     $("workContextSelect").addEventListener("change", (event) => setWorkContext(event.target.value));
     $("closeAccount").addEventListener("click", () => $("accountDialog").close());
     $("saveProfile").addEventListener("click", async () => {
