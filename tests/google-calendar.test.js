@@ -5,6 +5,11 @@ const test = require("node:test");
 
 const {
   GOOGLE_CALENDAR_SCOPE_VERSION,
+  INDUS_GOOGLE_APP_ID,
+  TODO_STATUS_DEFINITIONS,
+  deleteOwnedGoogleEvent,
+  isIndusOwnedGoogleEvent,
+  pushGoogleItem,
   entryFromGoogleEvent,
   entryToGoogleEvent,
   googleEventChanged,
@@ -97,19 +102,115 @@ test("celodnevni INDUS dogodek ostane dopust", () => {
   assert.equal(imported.start, "00:00");
 });
 
-test("rocno ustvarjen celodnevni Google dogodek postane opravilo", () => {
+test("INDUS celodnevni Google dogodek ostane opravilo", () => {
+  const todo = {
+    id: "todo-local-1",
+    title: "Poklici stranko",
+    date: "2026-07-16",
+    client: client.name,
+    clientId: client.clientId,
+    notes: "Po kosilu",
+    status: "open",
+    syncUser: "bojan"
+  };
   const remote = {
+    ...todoToGoogleEvent(todo),
     id: "todo-1",
-    summary: "TODO: Poklici stranko",
-    description: todoToGoogleEvent({ id: "x", title: "Poklici stranko", date: "2026-07-16", client: client.name, clientId: client.clientId, notes: "Po kosilu", status: "open" }).description,
-    start: { date: "2026-07-16" },
-    end: { date: "2026-07-17" },
     updated: "2026-07-15T07:00:00.000Z"
   };
   const imported = todoFromGoogleEvent(remote, user, db);
   assert.equal(imported.title, "Poklici stranko");
   assert.equal(imported.clientId, client.clientId);
   assert.equal(imported.notes, "Po kosilu");
+});
+
+test("statusi opravil uporabljajo dogovorjene Google barve", () => {
+  const expected = {
+    open: ["\u010caka", "8"],
+    in_progress: ["V teku", "9"],
+    execution: ["Izvedba", "10"],
+    billing: ["Obra\u010dun", "2"],
+    order: ["Naro\u010di", "11"],
+    order_car: ["Naro\u010di Avto", "11"],
+    order_warehouse: ["Naro\u010di Sklad.", "11"],
+    add_to_car: ["Dodaj v avto", "4"],
+    return_and_bill: ["Vrne naj/Pora\u010dunaj", "6"],
+    return: ["!!Vrni", "3"]
+  };
+  assert.deepEqual(Object.keys(TODO_STATUS_DEFINITIONS), Object.keys(expected));
+  for (const [status, [label, colorId]] of Object.entries(expected)) {
+    const todo = { id: `todo-${status}`, title: "Preveri", date: "2026-07-16", status, syncUser: "bojan" };
+    const event = todoToGoogleEvent(todo);
+    assert.equal(event.colorId, colorId);
+    assert.equal(event.extendedProperties.private.indusApp, INDUS_GOOGLE_APP_ID);
+    assert.equal(parseGoogleEventDescription(event.description).fields.status, label);
+    assert.equal(todoFromGoogleEvent({ ...event, id: `event-${status}` }, user, db, todo).status, status);
+  }
+});
+
+test("lastnistvo Google dogodka zahteva popolno INDUS oznako in ujemanje", () => {
+  const item = {
+    id: "todo-owned",
+    title: "Preveri",
+    date: "2026-07-16",
+    status: "open",
+    syncUser: "bojan",
+    googleEventId: "event-owned",
+    photos: []
+  };
+  const owned = { ...todoToGoogleEvent(item), id: item.googleEventId };
+  assert.equal(isIndusOwnedGoogleEvent(owned, item, "bojan", "todo"), true);
+
+  const legacy = JSON.parse(JSON.stringify(owned));
+  delete legacy.extendedProperties.private.indusApp;
+  assert.equal(isIndusOwnedGoogleEvent(legacy, item, "bojan", "todo"), true);
+  assert.equal(isIndusOwnedGoogleEvent({ id: item.googleEventId }, item, "bojan", "todo"), false);
+
+  const wrongUser = JSON.parse(JSON.stringify(owned));
+  wrongUser.extendedProperties.private.indusUser = "ibro";
+  assert.equal(isIndusOwnedGoogleEvent(wrongUser, item, "bojan", "todo"), false);
+  const wrongId = JSON.parse(JSON.stringify(owned));
+  wrongId.extendedProperties.private.indusId = "drug-id";
+  assert.equal(isIndusOwnedGoogleEvent(wrongId, item, "bojan", "todo"), false);
+});
+
+test("neoznacenega Google dogodka ni dovoljeno spremeniti ali izbrisati", async () => {
+  const item = {
+    id: "todo-local",
+    title: "Preveri",
+    date: "2026-07-16",
+    status: "open",
+    syncUser: "bojan",
+    googleEventId: "foreign-event",
+    photos: [],
+    updatedAt: "2026-07-15T08:00:00.000Z"
+  };
+  const calls = { get: 0, patch: 0, insert: 0, delete: 0 };
+  const calendar = { events: {
+    get: async () => { calls.get++; return { data: { id: "foreign-event", summary: "Zaseben dogodek" } }; },
+    patch: async () => { calls.patch++; return { data: {} }; },
+    insert: async () => { calls.insert++; return { data: {} }; },
+    delete: async () => { calls.delete++; return { data: {} }; }
+  } };
+  const originalWarn = console.warn;
+  console.warn = () => {};
+  try {
+    assert.equal(await pushGoogleItem(calendar, "calendar", item, todoToGoogleEvent(item), "todo"), false);
+    assert.equal(await deleteOwnedGoogleEvent(calendar, "calendar", item, "todo"), false);
+  } finally {
+    console.warn = originalWarn;
+  }
+  assert.equal(calls.get, 2);
+  assert.equal(calls.patch, 0);
+  assert.equal(calls.insert, 0);
+  assert.equal(calls.delete, 0);
+});
+
+test("sinhronizacija nima vec poti za uvoz neoznacenega dogodka", () => {
+  const source = fs.readFileSync(path.join(__dirname, "../outputs/server.js"), "utf8");
+  assert.doesNotMatch(source, /if \(event\.id && !db\.entries\.some/);
+  assert.match(source, /verifyOwnedGoogleEvent/);
+  assert.match(source, /calendar\.events\.get/);
 });
 
 test("konflikt zmaga novejsa sprememba, nespremenjen vnos pa se ne posilja", () => {

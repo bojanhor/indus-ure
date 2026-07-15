@@ -35,11 +35,26 @@ const GOOGLE_REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI || "";
 const GOOGLE_SHEETS_ID = process.env.GOOGLE_SHEETS_ID || "";
 const GOOGLE_SHEETS_RANGE = process.env.GOOGLE_SHEETS_RANGE || DEFAULT_CLIENT_SHEET_RANGE;
 const GOOGLE_CALENDAR_SCOPE_VERSION = 2;
+const INDUS_GOOGLE_APP_ID = "indus-ure-v1";
 const GOOGLE_SYNC_INTERVAL_MS = Math.max(60_000, Number(process.env.GOOGLE_SYNC_INTERVAL_MS || 60_000));
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 let pgPool = null;
 let pgReady = null;
 let mutationQueue = Promise.resolve();
+
+const TODO_STATUS_DEFINITIONS = Object.freeze({
+  open: { label: "Čaka", googleColorId: "8" },
+  in_progress: { label: "V teku", googleColorId: "9" },
+  execution: { label: "Izvedba", googleColorId: "10" },
+  billing: { label: "Obračun", googleColorId: "2" },
+  order: { label: "Naroči", googleColorId: "11" },
+  order_car: { label: "Naroči Avto", googleColorId: "11" },
+  order_warehouse: { label: "Naroči Sklad.", googleColorId: "11" },
+  add_to_car: { label: "Dodaj v avto", googleColorId: "4" },
+  return_and_bill: { label: "Vrne naj/Poračunaj", googleColorId: "6" },
+  return: { label: "!!Vrni", googleColorId: "3" }
+});
+const TODO_STATUSES = new Set(Object.keys(TODO_STATUS_DEFINITIONS));
 
 const IMAGE_SIGNATURES = {
   png: (buffer) => buffer.length >= 8 && buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])),
@@ -313,6 +328,10 @@ function normalizeDb(db = {}) {
       next.googleSyncedLocalAt = next.updatedAt || next.createdAt || "";
       changed = true;
     }
+    if (typeof next.googleManagedByIndus !== "boolean") {
+      next.googleManagedByIndus = false;
+      changed = true;
+    }
     if (typeof next.invoiceSent !== "boolean") {
       next.invoiceSent = false;
       changed = true;
@@ -352,7 +371,7 @@ function normalizeDb(db = {}) {
 
   db.todos = db.todos.map((todo, index) => {
     const next = { ...todo };
-    if (!["open", "in_progress"].includes(next.status)) {
+    if (!TODO_STATUSES.has(next.status)) {
       next.status = "open";
       changed = true;
     }
@@ -382,6 +401,14 @@ function normalizeDb(db = {}) {
     }
     if (typeof next.googleSyncedLocalAt !== "string") {
       next.googleSyncedLocalAt = next.updatedAt || next.createdAt || "";
+      changed = true;
+    }
+    if (typeof next.googleManagedByIndus !== "boolean") {
+      next.googleManagedByIndus = false;
+      changed = true;
+    }
+    if (typeof next.googleColorId !== "string") {
+      next.googleColorId = "";
       changed = true;
     }
     if (!Array.isArray(next.photos)) {
@@ -736,7 +763,7 @@ function cleanTodo(input) {
     client: String(input.client || "").trim(),
     clientId: String(input.clientId || "").trim(),
     notes: String(input.notes || "").trim(),
-    status: ["open", "in_progress"].includes(input.status) ? input.status : "open",
+    status: TODO_STATUSES.has(input.status) ? input.status : "open",
     order: Number.isFinite(Number(input.order)) ? Number(input.order) : 0,
     syncUser: cleanUserId(input.syncUser),
     done: Boolean(input.done),
@@ -889,7 +916,7 @@ function buildCalendarIcs(db) {
     if (!todo.date || todo.done) continue;
     const description = [
       todo.client ? `Stranka: ${todo.client}` : "",
-      todo.status === "in_progress" ? "Status: v teku" : "",
+      `Status: ${todoStatusDefinition(todo.status).label}`,
       todo.notes ? `Opombe: ${todo.notes}` : "",
       todo.createdByName ? `Dodal: ${todo.createdByName}` : ""
     ].filter(Boolean).join("\n");
@@ -928,6 +955,50 @@ function googleEventDescription(fields, notes = "") {
   lines.push("Opombe:");
   if (notes) lines.push(String(notes).trim());
   return lines.join("\n");
+}
+
+function todoStatusDefinition(status) {
+  return TODO_STATUS_DEFINITIONS[status] || TODO_STATUS_DEFINITIONS.open;
+}
+
+function todoStatusFromGoogle(value, fallback = "open") {
+  const normalized = String(value || "").trim().toLocaleLowerCase("sl");
+  const match = Object.entries(TODO_STATUS_DEFINITIONS)
+    .find(([, definition]) => definition.label.toLocaleLowerCase("sl") === normalized);
+  if (match) return match[0];
+  if (normalized === "odprto") return "open";
+  return TODO_STATUSES.has(fallback) ? fallback : "open";
+}
+
+function googleEventPrivateProperties(event) {
+  return event?.extendedProperties?.private || {};
+}
+
+function googleItemType(item) {
+  return Array.isArray(item?.photos) ? "todo" : "entry";
+}
+
+function isIndusOwnedGoogleEvent(event, item = null, userId = "", expectedType = "") {
+  const privateProps = googleEventPrivateProperties(event);
+  const type = expectedType || (item ? googleItemType(item) : "");
+  const completeLegacyMarker = Boolean(privateProps.indusId && privateProps.indusType && privateProps.indusUser);
+  if (privateProps.indusApp !== INDUS_GOOGLE_APP_ID && !completeLegacyMarker) return false;
+  if (!privateProps.indusId || !privateProps.indusType || !privateProps.indusUser) return false;
+  if (item && privateProps.indusId !== item.id) return false;
+  if (type && privateProps.indusType !== type) return false;
+  if (userId && privateProps.indusUser !== userId) return false;
+  if (item?.syncUser && privateProps.indusUser !== item.syncUser) return false;
+  if (item?.googleEventId && event?.id && item.googleEventId !== event.id) return false;
+  return true;
+}
+
+function indusGooglePrivateProperties(item, type) {
+  return {
+    indusApp: INDUS_GOOGLE_APP_ID,
+    indusId: item.id,
+    indusType: type,
+    indusUser: item.syncUser || item.createdBy || ""
+  };
 }
 
 function parseGoogleEventDescription(value) {
@@ -969,7 +1040,7 @@ function entryToGoogleEvent(entry) {
       Sodelavci: entry.people || "",
       Km: Number(entry.km || 0)
     }, entry.notes),
-    extendedProperties: { private: { indusId: entry.id, indusType: "entry", indusUser: entry.syncUser || entry.createdBy || "" } }
+    extendedProperties: { private: indusGooglePrivateProperties(entry, "entry") }
   };
   if (entry.status === "vacation") {
     event.start = { date: entry.date };
@@ -984,17 +1055,19 @@ function entryToGoogleEvent(entry) {
 }
 
 function todoToGoogleEvent(todo) {
+  const status = todoStatusDefinition(todo.status);
   return {
     summary: `TODO: ${todo.title}`,
     description: googleEventDescription({
       Vrsta: "opravilo",
       Stranka: todo.client || "",
       Davcna: todo.clientId || "",
-      Status: todo.status === "in_progress" ? "v teku" : "odprto"
+      Status: status.label
     }, todo.notes),
     start: { date: todo.date },
     end: { date: addDaysDashed(todo.date, 1) },
-    extendedProperties: { private: { indusId: todo.id, indusType: "todo", indusUser: todo.syncUser || todo.createdBy || "" } }
+    colorId: status.googleColorId,
+    extendedProperties: { private: indusGooglePrivateProperties(todo, "todo") }
   };
 }
 
@@ -1103,6 +1176,7 @@ function entryFromGoogleEvent(event, user, db = {}, existing = null) {
     googleEventId: event.id || existing?.googleEventId || "",
     googleUpdatedAt: event.updated || "",
     googleSyncedLocalAt: now,
+    googleManagedByIndus: true,
     createdBy: existing?.createdBy || user.id,
     createdByName: existing?.createdByName || user.name,
     createdAt: existing?.createdAt || now,
@@ -1125,7 +1199,7 @@ function todoFromGoogleEvent(event, user, db = {}, existing = null) {
     client: clientRef.client,
     clientId: clientRef.clientId,
     notes: parsed.notes,
-    status: parsed.fields.status === "v teku" ? "in_progress" : existing?.status || "open",
+    status: todoStatusFromGoogle(parsed.fields.status, existing?.status || "open"),
     order: Number(existing?.order || 0),
     done: false,
     photos: existing?.photos || [],
@@ -1133,6 +1207,8 @@ function todoFromGoogleEvent(event, user, db = {}, existing = null) {
     googleEventId: event.id || existing?.googleEventId || "",
     googleUpdatedAt: event.updated || "",
     googleSyncedLocalAt: now,
+    googleManagedByIndus: true,
+    googleColorId: String(event.colorId || ""),
     createdBy: existing?.createdBy || user.id,
     createdByName: existing?.createdByName || user.name,
     createdAt: existing?.createdAt || now,
@@ -1174,22 +1250,58 @@ async function listGoogleEventChanges(calendar, calendarId, syncToken = "") {
   return { events, syncToken: nextSyncToken };
 }
 
-async function pushGoogleItem(calendar, calendarId, item, requestBody) {
+async function verifyOwnedGoogleEvent(calendar, calendarId, item, expectedType = "") {
+  try {
+    const response = await calendar.events.get({ calendarId, eventId: item.googleEventId });
+    return {
+      event: response.data,
+      missing: false,
+      owned: isIndusOwnedGoogleEvent(response.data, item, item.syncUser, expectedType)
+    };
+  } catch (error) {
+    if (Number(error.code || error.response?.status) === 404) {
+      return { event: null, missing: true, owned: false };
+    }
+    throw error;
+  }
+}
+
+async function pushGoogleItem(calendar, calendarId, item, requestBody, expectedType = "") {
   let response;
   if (item.googleEventId) {
-    try {
-      response = await calendar.events.patch({ calendarId, eventId: item.googleEventId, requestBody, sendUpdates: "none" });
-    } catch (error) {
-      if (Number(error.code || error.response?.status) !== 404) throw error;
+    const verification = await verifyOwnedGoogleEvent(calendar, calendarId, item, expectedType);
+    if (verification.missing) {
       item.googleEventId = "";
+    } else if (!verification.owned) {
+      console.warn(`Google dogodek ${item.googleEventId} ni dokazljivo ustvarjen v INDUS URE; sprememba je preskocena.`);
+      return false;
     }
   }
-  if (!item.googleEventId) {
+  if (item.googleEventId) {
+    response = await calendar.events.patch({ calendarId, eventId: item.googleEventId, requestBody, sendUpdates: "none" });
+  } else {
     response = await calendar.events.insert({ calendarId, requestBody, sendUpdates: "none" });
     item.googleEventId = response.data.id || "";
   }
   item.googleUpdatedAt = response.data.updated || new Date().toISOString();
   item.googleSyncedLocalAt = item.updatedAt || item.createdAt || new Date().toISOString();
+  item.googleManagedByIndus = true;
+  if (expectedType === "todo") item.googleColorId = String(requestBody.colorId || "");
+  return true;
+}
+
+async function deleteOwnedGoogleEvent(calendar, calendarId, item, expectedType = "") {
+  if (!item?.googleEventId) return false;
+  const verification = await verifyOwnedGoogleEvent(calendar, calendarId, item, expectedType);
+  if (verification.missing) return true;
+  if (!verification.owned) {
+    console.warn(`Google dogodek ${item.googleEventId} ni dokazljivo ustvarjen v INDUS URE; brisanje je preskoceno.`);
+    return false;
+  }
+  await calendar.events.delete({ calendarId, eventId: item.googleEventId, sendUpdates: "none" }).catch((error) => {
+    if (Number(error.code || error.response?.status) !== 404) throw error;
+  });
+  return true;
 }
 
 async function syncGoogleForUser(req, db, user) {
@@ -1207,107 +1319,102 @@ async function syncGoogleForUser(req, db, user) {
   let conflicts = 0;
 
   for (const event of remote.events) {
-    const privateProps = event.extendedProperties?.private || {};
+    const privateProps = googleEventPrivateProperties(event);
     const entryIndex = db.entries.findIndex((item) => item.syncUser === user.id && (item.googleEventId === event.id || item.id === privateProps.indusId));
     const todoIndex = db.todos.findIndex((item) => item.syncUser === user.id && (item.googleEventId === event.id || item.id === privateProps.indusId));
+    const entry = entryIndex >= 0 ? db.entries[entryIndex] : null;
+    const todo = todoIndex >= 0 ? db.todos[todoIndex] : null;
+    const ownedEntry = isIndusOwnedGoogleEvent(event, entry, user.id, "entry");
+    const ownedTodo = isIndusOwnedGoogleEvent(event, todo, user.id, "todo");
 
     if (event.status === "cancelled") {
-      if (entryIndex >= 0) {
+      if (entryIndex >= 0 && ownedEntry) {
         db.entries.splice(entryIndex, 1);
         pulled++;
-      } else if (todoIndex >= 0) {
+      } else if (todoIndex >= 0 && ownedTodo) {
         db.todos.splice(todoIndex, 1);
         pulled++;
       }
       continue;
     }
 
-    if (entryIndex >= 0 || (privateProps.indusType === "entry" && privateProps.indusId)) {
-      const entry = entryIndex >= 0 ? db.entries[entryIndex] : null;
+    if (ownedEntry) {
       if (!entry) {
         const imported = entryFromGoogleEvent(event, user, db);
         if (imported) {
           db.entries.push(imported);
           pulled++;
         }
-      } else if (!entry.googleEventId) {
-        entry.googleEventId = event.id || "";
-        entry.googleUpdatedAt = event.updated || "";
-        entry.googleSyncedLocalAt = entry.updatedAt || "";
-      } else if (googleEventChanged(event, entry)) {
-        if (remoteGoogleChangeWins(event, entry)) {
-          const imported = entryFromGoogleEvent(event, user, db, entry);
-          if (imported) {
-            Object.assign(entry, imported);
-            pulled++;
+      } else {
+        entry.googleManagedByIndus = true;
+        if (!entry.googleEventId) {
+          entry.googleEventId = event.id || "";
+          entry.googleUpdatedAt = event.updated || "";
+          entry.googleSyncedLocalAt = entry.updatedAt || "";
+        } else if (googleEventChanged(event, entry)) {
+          if (remoteGoogleChangeWins(event, entry)) {
+            const imported = entryFromGoogleEvent(event, user, db, entry);
+            if (imported) {
+              Object.assign(entry, imported);
+              pulled++;
+            }
+          } else {
+            conflicts++;
           }
-        } else {
-          conflicts++;
         }
       }
       continue;
     }
 
-    if (todoIndex >= 0 || (privateProps.indusType === "todo" && privateProps.indusId)) {
-      const todo = todoIndex >= 0 ? db.todos[todoIndex] : null;
+    if (ownedTodo) {
       if (!todo) {
         const imported = todoFromGoogleEvent(event, user, db);
         if (imported) {
           db.todos.push(imported);
           pulled++;
         }
-      } else if (!todo.googleEventId) {
-        todo.googleEventId = event.id || "";
-        todo.googleUpdatedAt = event.updated || "";
-        todo.googleSyncedLocalAt = todo.updatedAt || "";
-      } else if (googleEventChanged(event, todo)) {
-        if (remoteGoogleChangeWins(event, todo)) {
-          const imported = todoFromGoogleEvent(event, user, db, todo);
-          if (imported) {
-            Object.assign(todo, imported);
-            pulled++;
+      } else {
+        todo.googleManagedByIndus = true;
+        todo.googleColorId = String(event.colorId || "");
+        if (!todo.googleEventId) {
+          todo.googleEventId = event.id || "";
+          todo.googleUpdatedAt = event.updated || "";
+          todo.googleSyncedLocalAt = todo.updatedAt || "";
+        } else if (googleEventChanged(event, todo)) {
+          if (remoteGoogleChangeWins(event, todo)) {
+            const imported = todoFromGoogleEvent(event, user, db, todo);
+            if (imported) {
+              Object.assign(todo, imported);
+              pulled++;
+            }
+          } else {
+            conflicts++;
           }
-        } else {
-          conflicts++;
         }
-      }
-      continue;
-    }
-
-    if (event.id && !db.entries.some((item) => item.googleEventId === event.id) && !db.todos.some((item) => item.googleEventId === event.id)) {
-      const imported = event.start?.dateTime
-        ? entryFromGoogleEvent(event, user, db)
-        : todoFromGoogleEvent(event, user, db);
-      if (imported) {
-        if (event.start?.dateTime) db.entries.push(imported);
-        else db.todos.push(imported);
-        pulled++;
       }
     }
   }
 
   for (const entry of db.entries.filter((item) => item.syncUser === user.id && item.date && item.start && item.end)) {
     if (entry.googleEventId && !localItemChanged(entry)) continue;
-    await pushGoogleItem(calendar, calendarId, entry, entryToGoogleEvent(entry));
-    pushed++;
+    if (await pushGoogleItem(calendar, calendarId, entry, entryToGoogleEvent(entry), "entry")) pushed++;
   }
 
   for (const todo of db.todos.filter((item) => item.syncUser === user.id && item.date)) {
     if (todo.done) {
-      if (todo.googleEventId) {
-        await calendar.events.delete({ calendarId, eventId: todo.googleEventId, sendUpdates: "none" }).catch((error) => {
-          if (Number(error.code || error.response?.status) !== 404) throw error;
-        });
+      if (todo.googleEventId && await deleteOwnedGoogleEvent(calendar, calendarId, todo, "todo")) {
         todo.googleEventId = "";
         todo.googleUpdatedAt = "";
         todo.googleSyncedLocalAt = todo.updatedAt || "";
+        todo.googleManagedByIndus = false;
+        todo.googleColorId = "";
         pushed++;
       }
       continue;
     }
-    if (todo.googleEventId && !localItemChanged(todo)) continue;
-    await pushGoogleItem(calendar, calendarId, todo, todoToGoogleEvent(todo));
-    pushed++;
+    const requestBody = todoToGoogleEvent(todo);
+    if (todo.googleEventId && !localItemChanged(todo) && todo.googleColorId === requestBody.colorId) continue;
+    if (await pushGoogleItem(calendar, calendarId, todo, requestBody, "todo")) pushed++;
   }
 
   user.google.calendarId = calendarId;
@@ -1399,8 +1506,7 @@ async function deleteGoogleEventForItem(req, db, item) {
     const { google } = require("googleapis");
     const auth = googleClient(req, user.google.tokens);
     const calendar = google.calendar({ version: "v3", auth });
-    await calendar.events.delete({ calendarId: user.google.calendarId, eventId: item.googleEventId });
-    return true;
+    return deleteOwnedGoogleEvent(calendar, user.google.calendarId, item, googleItemType(item));
   } catch (error) {
     console.warn(`Google dogodka ni bilo mogoce izbrisati: ${error.message || error}`);
     return false;
@@ -2273,6 +2379,11 @@ if (require.main === module) {
 
 module.exports = {
   GOOGLE_CALENDAR_SCOPE_VERSION,
+  INDUS_GOOGLE_APP_ID,
+  TODO_STATUS_DEFINITIONS,
+  deleteOwnedGoogleEvent,
+  isIndusOwnedGoogleEvent,
+  pushGoogleItem,
   canManageEntry,
   canManageTodo,
   entryForUserRole,

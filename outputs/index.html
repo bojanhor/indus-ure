@@ -647,6 +647,36 @@
       padding: 6px 8px;
     }
 
+    .todo-status-color {
+      background: var(--todo-bg) !important;
+      color: var(--todo-fg) !important;
+      border-color: var(--todo-border, var(--todo-bg)) !important;
+    }
+
+    .todo-status-open { --todo-bg: #e1e1e1; --todo-fg: #202124; --todo-border: #9aa0a6; }
+    .todo-status-in_progress { --todo-bg: #5484ed; --todo-fg: #fff; }
+    .todo-status-execution { --todo-bg: #51b749; --todo-fg: #fff; }
+    .todo-status-billing { --todo-bg: #7ae7bf; --todo-fg: #202124; --todo-border: #2e9d78; }
+    .todo-status-order,
+    .todo-status-order_car,
+    .todo-status-order_warehouse { --todo-bg: #dc2127; --todo-fg: #fff; }
+    .todo-status-add_to_car { --todo-bg: #ff887c; --todo-fg: #202124; --todo-border: #d95f54; }
+    .todo-status-return_and_bill { --todo-bg: #ffb878; --todo-fg: #202124; --todo-border: #d8883f; }
+    .todo-status-return { --todo-bg: #dbadff; --todo-fg: #202124; --todo-border: #8e5bb7; }
+
+    .day-todo.todo-status-color {
+      background: var(--todo-bg);
+      color: var(--todo-fg);
+      border-left-color: var(--todo-border, var(--todo-bg));
+    }
+
+    .todo-chip.todo-status-color {
+      background: var(--todo-bg);
+      color: var(--todo-fg);
+      border: 1px solid var(--todo-border, var(--todo-bg));
+      font-weight: 800;
+    }
+
     .todo-tools {
       display: flex;
       gap: 7px;
@@ -1484,9 +1514,17 @@
               <div id="todoClientSuggestions" class="todo-client-suggestions hidden" role="listbox"></div>
             </label>
             <label>Status
-              <select id="pageTodoStatus">
-                <option value="open">Caka</option>
+              <select id="pageTodoStatus" class="todo-status todo-status-color todo-status-open">
+                <option value="open">&#268;aka</option>
                 <option value="in_progress">V teku</option>
+                <option value="execution">Izvedba</option>
+                <option value="billing">Obra&#269;un</option>
+                <option value="order">Naro&#269;i</option>
+                <option value="order_car">Naro&#269;i Avto</option>
+                <option value="order_warehouse">Naro&#269;i Sklad.</option>
+                <option value="add_to_car">Dodaj v avto</option>
+                <option value="return_and_bill">Vrne naj/Pora&#269;unaj</option>
+                <option value="return">!!Vrni</option>
               </select>
             </label>
             <label>Opravilo
@@ -1708,6 +1746,40 @@
       errand: "Opravki",
       vacation: "Dopust"
     };
+
+    const todoStatusDefinitions = [
+      { id: "billing", label: "Obra\u010dun" },
+      { id: "order", label: "Naro\u010di" },
+      { id: "order_car", label: "Naro\u010di Avto" },
+      { id: "order_warehouse", label: "Naro\u010di Sklad." },
+      { id: "add_to_car", label: "Dodaj v avto" },
+      { id: "return_and_bill", label: "Vrne naj/Pora\u010dunaj" },
+      { id: "in_progress", label: "V teku" },
+      { id: "execution", label: "Izvedba" },
+      { id: "open", label: "\u010caka" },
+      { id: "return", label: "!!Vrni" }
+    ];
+    const todoStatusById = Object.fromEntries(todoStatusDefinitions.map((status) => [status.id, status]));
+
+    function todoStatus(status) {
+      return todoStatusById[status] || todoStatusById.open;
+    }
+
+    function todoStatusClass(status) {
+      return `todo-status-${todoStatus(status).id}`;
+    }
+
+    function todoStatusOptions(selected) {
+      const current = todoStatus(selected).id;
+      return todoStatusDefinitions
+        .map((status) => `<option value="${status.id}" ${status.id === current ? "selected" : ""}>${status.label}</option>`)
+        .join("");
+    }
+
+    function updateTodoStatusControl(control) {
+      todoStatusDefinitions.forEach((status) => control.classList.remove(`todo-status-${status.id}`));
+      control.classList.add("todo-status", "todo-status-color", todoStatusClass(control.value));
+    }
 
     const monthNames = [
       "januar", "februar", "marec", "april", "maj", "junij",
@@ -2251,6 +2323,7 @@
         clearInputs.forEach((id) => $(id).value = "");
         $("pageTodoDate").value = "";
         $("pageTodoStatus").value = "open";
+        updateTodoStatusControl($("pageTodoStatus"));
         if (todo.client) {
           const client = findClient(todo.clientId || todo.client);
           $("pageTodoClient").value = client?.search || todo.client;
@@ -2350,8 +2423,8 @@
           .forEach((todo) => {
             const item = document.createElement("button");
             item.type = "button";
-            item.className = `day-todo ${todo.done ? "done" : ""}`;
-            item.innerHTML = `${escapeHtml(todo.title)}${todo.client ? `<br><small>${escapeHtml(todo.client)}</small>` : ""}${todo.status === "in_progress" ? `<br><small>v teku</small>` : ""}`;
+            item.className = `day-todo todo-status-color ${todoStatusClass(todo.status)} ${todo.done ? "done" : ""}`;
+            item.innerHTML = `${escapeHtml(todo.title)}${todo.client ? `<br><small>${escapeHtml(todo.client)}</small>` : ""}<br><small>${todoStatus(todo.status).label}</small>`;
             item.addEventListener("click", () => {
               openDialog({
                 date: todo.date,
@@ -2532,16 +2605,15 @@
             <div class="todo-meta">
               ${todo.date ? `<span class="todo-chip">${formatDate(todo.date)}</span>` : `<span class="todo-chip">brez datuma</span>`}
               ${todo.client ? `<span class="todo-chip">${escapeHtml(todo.client)}</span>` : ""}
-              ${todo.status === "in_progress" ? `<span class="todo-chip">v teku</span>` : ""}
+              <span class="todo-chip todo-status-color ${todoStatusClass(todo.status)}">${todoStatus(todo.status).label}</span>
               ${(todo.photos || []).length ? `<span class="todo-chip">${(todo.photos || []).length} foto</span>` : ""}
               <span class="todo-chip">dodal: ${escapeHtml(todo.createdByName || "-")}</span>
             </div>
             ${todo.notes ? `<div class="todo-meta">${escapeHtml(todo.notes)}</div>` : ""}
           </div>
           <div class="todo-tools">
-            <select class="todo-status" aria-label="Status opravila">
-              <option value="open" ${todo.status === "in_progress" ? "" : "selected"}>Caka</option>
-              <option value="in_progress" ${todo.status === "in_progress" ? "selected" : ""}>V teku</option>
+            <select class="todo-status todo-status-color ${todoStatusClass(todo.status)}" aria-label="Status opravila">
+              ${todoStatusOptions(todo.status)}
             </select>
             <input class="todo-date" type="date" value="${escapeHtml(todo.date || "")}" aria-label="Fiksni datum">
             <button class="secondary show-photos" type="button">Fotografije</button>
@@ -2555,6 +2627,7 @@
           saveTodoToServer({ ...todo, done: event.target.checked }).catch((error) => alert(error.message));
         });
         item.querySelector(".todo-status").addEventListener("change", (event) => {
+          updateTodoStatusControl(event.target);
           saveTodoToServer({ ...todo, status: event.target.value }).catch((error) => alert(error.message));
         });
         item.querySelector(".todo-date").addEventListener("change", (event) => {
@@ -2752,7 +2825,7 @@
       const todoRows = todos.map((todo) => `
         <div class="client-work-row">
           <strong>${todo.date ? formatDate(todo.date) : "Brez datuma"}</strong>
-          <span>Opravilo: ${escapeHtml(todo.title)}<br><small>${escapeHtml(todo.client || "")} | ${todo.done ? "opravljeno" : todo.status === "in_progress" ? "v teku" : "caka"} | ${(todo.photos || []).length} foto</small></span>
+          <span>Opravilo: ${escapeHtml(todo.title)}<br><small>${escapeHtml(todo.client || "")} | ${todo.done ? "opravljeno" : todoStatus(todo.status).label} | ${(todo.photos || []).length} foto</small></span>
           <button class="secondary open-report-todo" type="button" data-todo-id="${escapeHtml(todo.id)}">Opravilo</button>
         </div>
       `);
@@ -2801,7 +2874,7 @@
         entry.createdByName || ""
       ]));
       rows.push([], ["Opravila"], ["Datum", "Stranka", "Opravilo", "Status", "Foto"]);
-      todos.forEach((todo) => rows.push([todo.date || "", todo.client || "", todo.title, todo.done ? "opravljeno" : todo.status, (todo.photos || []).length]));
+      todos.forEach((todo) => rows.push([todo.date || "", todo.client || "", todo.title, todo.done ? "opravljeno" : todoStatus(todo.status).label, (todo.photos || []).length]));
       const html = `<html><head><meta charset="utf-8"></head><body><table>${rows.map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`).join("")}</table></body></html>`;
       downloadText(html, `indus-obracun-${$("reportFrom").value}-${$("reportTo").value}.xls`, "application/vnd.ms-excel;charset=utf-8");
     }
@@ -3481,6 +3554,11 @@
     });
 
     $("pageTodoClient").addEventListener("change", canonicalizeTodoClient);
+    $("pageTodoStatus").innerHTML = todoStatusOptions("open");
+    updateTodoStatusControl($("pageTodoStatus"));
+    $("pageTodoStatus").addEventListener("change", (event) => {
+      updateTodoStatusControl(event.target);
+    });
     $("pageTodoClient").addEventListener("input", renderTodoClientSuggestions);
     $("pageTodoClient").addEventListener("focus", renderTodoClientSuggestions);
     $("pageTodoClient").addEventListener("blur", () => setTimeout(() => {
