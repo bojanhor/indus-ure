@@ -2087,6 +2087,21 @@
         .some((field) => normalizeText(field) === input)) || null;
     }
 
+    function findTodoClient(value) {
+      const exact = findClient(value);
+      if (exact) return exact;
+      const input = normalizeText(value);
+      if (!input) return null;
+      const matches = state.clients.filter((client) => client.clientId && client.search
+        && normalizeText(client.search).includes(input));
+      return matches.length === 1 ? matches[0] : null;
+    }
+
+    function canonicalizeTodoClient() {
+      const client = findTodoClient($("pageTodoClient").value);
+      if (client?.search) $("pageTodoClient").value = client.search;
+    }
+
     function entryFromQuick() {
       const status = $("quickStatus").value;
       const client = findClient($("quickClient").value);
@@ -2109,7 +2124,7 @@
     }
 
     function todoFromPage() {
-      const client = findClient($("pageTodoClient").value);
+      const client = findTodoClient($("pageTodoClient").value);
       return {
         date: $("pageTodoDate").value,
         client: client?.name || normalizeClientName($("pageTodoClient").value),
@@ -2192,7 +2207,8 @@
         $("pageTodoDate").value = "";
         $("pageTodoStatus").value = "open";
         if (todo.client) {
-          $("pageTodoClient").value = todo.client;
+          const client = findClient(todo.clientId || todo.client);
+          $("pageTodoClient").value = client?.search || todo.client;
         }
         setView("todos");
       } catch (error) {
@@ -2843,7 +2859,7 @@
         item.title = client.clientId ? "" : "Stranka nima enolicne davcne stevilke v Google Sheetu.";
         if (client.clientId) item.addEventListener("click", () => {
           $("quickClient").value = client.name;
-          $("pageTodoClient").value = client.name;
+          $("pageTodoClient").value = client.search || client.name;
           state.selectedClient = client.name;
           openClientReport(client.name, client.clientId);
         });
@@ -2890,8 +2906,16 @@
         .filter((client) => client.clientId && client.search)
         .map((client) => [normalizeText(client.search), client])).values()]
         .sort((a, b) => a.search.localeCompare(b.search, "sl"));
-      $("todoClientList").innerHTML = todoAliases
-        .map((client) => `<option value="${escapeHtml(client.search)}" label="${escapeHtml(client.name)}"></option>`)
+      const todoAliasOptions = todoAliases.flatMap((client) => {
+        const words = String(client.search).split(/[^\p{L}\p{N}]+/u)
+          .filter((word) => word.length >= 3 && !normalizeText(client.search).startsWith(normalizeText(word)));
+        return [
+          { value: client.search, label: client.name },
+          ...words.map((word) => ({ value: word, label: client.search }))
+        ];
+      });
+      $("todoClientList").innerHTML = todoAliasOptions
+        .map((option) => `<option value="${escapeHtml(option.value)}" label="${escapeHtml(option.label)}"></option>`)
         .join("");
     }
 
@@ -3344,6 +3368,7 @@
       addTodo(todoFromPage(), ["pageTodoTitle"]);
     });
 
+    $("pageTodoClient").addEventListener("change", canonicalizeTodoClient);
     $("calendarViewBtn").addEventListener("click", () => setView("calendar"));
     $("todosViewBtn").addEventListener("click", () => setView("todos"));
     $("clientsViewBtn").addEventListener("click", () => setView("clients"));

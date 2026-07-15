@@ -70,6 +70,8 @@ test("nova stranka se zapise v devet stolpcev baze strank", () => {
 test("novo opravilo ponuja aliase iz prvega stolpca Google Sheeta", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
   assert.match(html, /id="pageTodoClient" list="todoClientList"/);
-  assert.match(html, /\$\("todoClientList"\)\.innerHTML = todoAliases/);
-  assert.match(html, /value="\$\{escapeHtml\(client\.search\)\}"/);
+  assert.match(html, /const todoAliasOptions = todoAliases\.flatMap/);
+  assert.match(html, /\.\.\.words\.map\(\(word\) => \(\{ value: word, label: client\.search \}\)\)/);
+  assert.match(html, /function findTodoClient\(value\)/);
+  assert.match(html, /client\?\.search \|\| todo\.client/);
 });
