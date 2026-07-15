@@ -125,6 +125,17 @@ test("razvrscanje opravil deluje z rocajem, misjo in dotikom", () => {
   assert.doesNotMatch(html, /reorderUndatedTodos|item\.draggable = !todo\.date/);
 });
 
+test("kartica opravila poravna status datum in udelezence v stalne stolpce", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  const card = html.match(/item\.innerHTML = `([\s\S]*?)`;\s*item\.querySelectorAll/)?.[1] || "";
+  assert.match(html, /\.todo-primary-meta \{[\s\S]*?display: grid;[\s\S]*?grid-template-columns: 150px 110px minmax\(180px, 1fr\);/);
+  assert.match(card, /todo-status-color[\s\S]*?todo-date-chip[\s\S]*?Udele&#382;enci:/);
+  assert.match(card, /todo-date-chip \$\{todo\.date \? "" : "is-empty"\}/);
+  assert.match(html, /\.todo-date-chip\.is-empty \{\s*visibility: hidden;/);
+  assert.doesNotMatch(card, /dodal:/i);
+  assert.match(html, /Dodal: <strong>\$\{escapeHtml\(todo\.createdByName \|\| "-"\)\}/);
+});
+
 test("novo opravilo je mogoce dodeliti sebi in vec drugim delavcem", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
   const server = fs.readFileSync(path.join(__dirname, "..", "outputs", "server.js"), "utf8");

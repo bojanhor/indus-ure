@@ -810,6 +810,33 @@
       font-weight: 700;
     }
 
+    .todo-primary-meta {
+      display: grid;
+      grid-template-columns: 150px 110px minmax(180px, 1fr);
+      gap: 8px;
+      align-items: stretch;
+      margin-top: 5px;
+    }
+
+    .todo-primary-meta > .todo-chip {
+      width: 100%;
+      min-width: 0;
+      justify-content: flex-start;
+      white-space: normal;
+      overflow-wrap: anywhere;
+    }
+
+    .todo-date-chip.is-empty {
+      visibility: hidden;
+    }
+
+    .todo-secondary-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 6px;
+    }
+
     .photos-panel {
       padding: 14px;
       display: grid;
@@ -1510,6 +1537,10 @@
         grid-template-columns: auto 1fr;
         gap: 8px;
         padding: 12px;
+      }
+      .todo-primary-meta {
+        grid-template-columns: minmax(0, 0.9fr) 86px minmax(0, 1.4fr);
+        gap: 5px;
       }
       .todo-tools,
       .todo-item .secondary,
@@ -2828,13 +2859,15 @@
           <input type="checkbox" ${todo.done ? "checked" : ""} aria-label="Opravljeno">
           <div>
             <div class="todo-title">${linkifyText(todo.title)}</div>
-            <div class="todo-meta">
-              ${todo.date ? `<span class="todo-chip">${formatDate(todo.date)}</span>` : `<span class="todo-chip">brez datuma</span>`}
-              ${todo.client ? `<span class="todo-chip">${escapeHtml(todo.client)}</span>` : ""}
+            <div class="todo-primary-meta">
               <span class="todo-chip todo-status-color ${todoStatusClass(todo.status)}">${todoStatus(todo.status).label}</span>
-              ${(todo.photos || []).length ? `<span class="todo-chip">${(todo.photos || []).length} foto</span>` : ""}
-              <span class="todo-chip">dodal: ${escapeHtml(todo.createdByName || "-")}</span>
+              <span class="todo-chip todo-date-chip ${todo.date ? "" : "is-empty"}" ${todo.date ? "" : 'aria-hidden="true"'}>${todo.date ? formatDate(todo.date) : "&nbsp;"}</span>
+              <span class="todo-chip todo-assignees-chip">Udele&#382;enci: ${escapeHtml(todoAssigneeNames(todo))}</span>
             </div>
+            ${todo.client || (todo.photos || []).length ? `<div class="todo-secondary-meta">
+              ${todo.client ? `<span class="todo-chip">${escapeHtml(todo.client)}</span>` : ""}
+              ${(todo.photos || []).length ? `<span class="todo-chip">${(todo.photos || []).length} foto</span>` : ""}
+            </div>` : ""}
             ${todo.notes ? `<details class="todo-description-details">
               <summary>Opis</summary>
               <div class="todo-description todo-meta">${linkifyText(todo.notes)}</div>
