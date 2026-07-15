@@ -527,7 +527,7 @@
 
     .todo-create {
       display: grid;
-      grid-template-columns: 150px minmax(300px, 420px) minmax(140px, 170px) 1fr auto;
+      grid-template-columns: 140px minmax(240px, 1.2fr) 150px minmax(170px, 220px) minmax(220px, 1fr) auto;
       gap: 10px;
       align-items: end;
       padding: 12px;
@@ -555,6 +555,66 @@
     }
 
     .todo-client-field { position: relative; }
+
+    .todo-assignee-field {
+      display: grid;
+      gap: 6px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .todo-assignee-picker { position: relative; }
+
+    .todo-assignee-picker summary {
+      min-height: 38px;
+      display: flex;
+      align-items: center;
+      padding: 9px 30px 9px 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      color: var(--ink);
+      cursor: pointer;
+      list-style: none;
+      position: relative;
+    }
+
+    .todo-assignee-picker summary::-webkit-details-marker { display: none; }
+    .todo-assignee-picker summary::after {
+      content: "\25BE";
+      position: absolute;
+      right: 10px;
+      color: var(--muted);
+    }
+
+    .todo-assignee-options {
+      position: absolute;
+      z-index: 45;
+      top: calc(100% + 4px);
+      left: 0;
+      right: 0;
+      display: grid;
+      gap: 4px;
+      padding: 6px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      box-shadow: var(--shadow);
+    }
+
+    .todo-assignee-options label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px;
+      border-radius: 6px;
+      color: var(--ink);
+      cursor: pointer;
+    }
+
+    .todo-assignee-options label:hover { background: #edf4ef; }
+    .todo-assignee-options input { width: 18px; height: 18px; margin: 0; padding: 0; accent-color: var(--accent); }
 
     .todo-client-suggestions {
       position: absolute;
@@ -1538,6 +1598,13 @@
                 <option value="return">!!Vrni</option>
               </select>
             </label>
+            <div class="todo-assignee-field">
+              <span>Dodeljeno</span>
+              <details id="pageTodoAssigneePicker" class="todo-assignee-picker">
+                <summary id="pageTodoAssigneeSummary">Izberi delavce</summary>
+                <div id="pageTodoAssigneeOptions" class="todo-assignee-options" role="group" aria-label="Dodeljeno delavcem"></div>
+              </details>
+            </div>
             <label>Opravilo
               <input id="pageTodoTitle" type="text" placeholder="Kaj je treba narediti">
             </label>
@@ -1847,9 +1914,10 @@
       try {
         const me = await api("/api/me");
         state.user = me.user;
-        const availableUsers = state.user.role === "boss" ? (await api("/api/users")).users : [state.user];
+        const availableUsers = (await api("/api/users")).users;
         state.users = [...new Map([...availableUsers, state.user].map((user) => [user.id, user])).values()];
         initializeWorkContext();
+        renderTodoAssigneePicker([activeWorkerId()]);
         showApp();
         await loadAll();
         syncGoogle(false);
@@ -1922,6 +1990,40 @@
       return state.users.find((user) => user.id === id) || state.user;
     }
 
+    function userDisplayName(id) {
+      return state.users.find((user) => user.id === id)?.name || id || "-";
+    }
+
+    function selectedTodoAssigneeIds() {
+      return [...$("pageTodoAssigneeOptions").querySelectorAll('input[type="checkbox"]:checked')]
+        .map((input) => input.value);
+    }
+
+    function updateTodoAssigneeSummary() {
+      const names = selectedTodoAssigneeIds().map(userDisplayName);
+      $("pageTodoAssigneeSummary").textContent = names.length ? names.join(", ") : "Izberi delavce";
+    }
+
+    function renderTodoAssigneePicker(selectedIds = []) {
+      const panel = $("pageTodoAssigneeOptions");
+      if (!panel) return;
+      const selected = new Set(selectedIds.length ? selectedIds : [activeWorkerId()]);
+      panel.replaceChildren();
+      state.users.forEach((user) => {
+        const label = document.createElement("label");
+        const input = document.createElement("input");
+        input.type = "checkbox";
+        input.value = user.id;
+        input.checked = selected.has(user.id);
+        input.addEventListener("change", updateTodoAssigneeSummary);
+        const name = document.createElement("span");
+        name.textContent = user.name || user.id;
+        label.append(input, name);
+        panel.appendChild(label);
+      });
+      updateTodoAssigneeSummary();
+    }
+
     function contextEntries() {
       if (isAdminView()) return state.entries;
       const workerId = activeWorkerId();
@@ -1971,6 +2073,7 @@
       if ($("debtDialog").open) $("debtDialog").close();
       if (!isAdminView() && ["clients", "report"].includes(state.view)) state.view = "calendar";
       applyWorkContextUi();
+      if (!isAdminView()) renderTodoAssigneePicker([activeWorkerId()]);
       setView(state.view);
       render();
     }
@@ -2116,6 +2219,7 @@
       state.todos = data.todos;
       refreshClientList();
       render();
+      return data;
     }
 
     async function deleteTodoFromServer(id) {
@@ -2261,6 +2365,7 @@
         notes: "",
         status: $("pageTodoStatus").value,
         order: nextTodoOrder(),
+        assigneeIds: selectedTodoAssigneeIds(),
         syncUser: activeWorkerId(),
         done: false
       };
@@ -2287,6 +2392,10 @@
     }
 
     function validateTodo(todo) {
+      if (!todo.id && (!Array.isArray(todo.assigneeIds) || todo.assigneeIds.length === 0)) {
+        alert("Izberi vsaj enega delavca.");
+        return false;
+      }
       if (!todo.title) {
         alert("Vpisi, kaj je treba narediti.");
         return false;
@@ -2329,7 +2438,7 @@
       }
       if (!validateTodo(todo)) return;
       try {
-        await saveTodoToServer(todo);
+        const data = await saveTodoToServer(todo);
         state.selectedClient = todo.client;
         clearInputs.forEach((id) => $(id).value = "");
         $("pageTodoDate").value = "";
@@ -2340,6 +2449,11 @@
           $("pageTodoClient").value = client?.search || todo.client;
         }
         setView("todos");
+        $("pageTodoAssigneePicker").open = false;
+        const assigned = data.assignedTo || [];
+        if (assigned.length > 1 || assigned.some((person) => person.id !== state.user?.id)) {
+          alert(`Opravilo je dodeljeno: ${assigned.map((person) => person.name || person.id).join(", ")}.`);
+        }
       } catch (error) {
         alert(error.message);
       }
@@ -2619,6 +2733,7 @@
               <span class="todo-chip todo-status-color ${todoStatusClass(todo.status)}">${todoStatus(todo.status).label}</span>
               ${(todo.photos || []).length ? `<span class="todo-chip">${(todo.photos || []).length} foto</span>` : ""}
               <span class="todo-chip">dodal: ${escapeHtml(todo.createdByName || "-")}</span>
+              <span class="todo-chip">dodeljeno: ${escapeHtml(userDisplayName(todo.syncUser || todo.createdBy))}</span>
             </div>
             ${todo.notes ? `<div class="todo-meta">${escapeHtml(todo.notes)}</div>` : ""}
           </div>

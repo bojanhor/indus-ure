@@ -75,7 +75,7 @@ test("novo opravilo ponuja aliase iz prvega stolpca Google Sheeta", () => {
   assert.match(html, /normalizeText\(client\.search\)\.includes\(query\)/);
   assert.match(html, /function findTodoClient\(value\)/);
   assert.match(html, /client\?\.search \|\| todo\.client/);
-  assert.match(html, /minmax\(300px, 420px\)/);
+  assert.match(html, /minmax\(240px, 1\.2fr\)/);
   assert.match(html, /event\.key === "ArrowDown" \|\| event\.key === "ArrowUp"/);
   assert.match(html, /event\.key === "Enter" && state\.todoClientSuggestionIndex >= 0/);
   assert.match(html, /scrollIntoView\(\{ block: "nearest" \}\)/);
@@ -102,4 +102,18 @@ test("gumba za slike sta poimenovana kot prilogi", () => {
   assert.match(html, />Dodaj prilogo<input/);
   assert.doesNotMatch(html, />Fotografije<\/button>/);
   assert.doesNotMatch(html, />Dodaj foto<input/);
+});
+
+test("novo opravilo je mogoce dodeliti sebi in vec drugim delavcem", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  const server = fs.readFileSync(path.join(__dirname, "..", "outputs", "server.js"), "utf8");
+  assert.match(html, /id="pageTodoAssigneePicker"/);
+  assert.match(html, /id="pageTodoAssigneeOptions"/);
+  assert.match(html, /input\.type = "checkbox"/);
+  assert.match(html, /assigneeIds: selectedTodoAssigneeIds\(\)/);
+  assert.match(html, /dodeljeno: \$\{escapeHtml\(userDisplayName/);
+  assert.match(html, /const availableUsers = \(await api\("\/api\/users"\)\)\.users/);
+  assert.doesNotMatch(server, /Seznam uporabnikov je na voljo samo sefu/);
+  assert.match(server, /todoAssigneesForRequest\(user, body\.assigneeIds/);
+  assert.match(server, /assigneeIds\.forEach\(\(assigneeId, index\) =>/);
 });

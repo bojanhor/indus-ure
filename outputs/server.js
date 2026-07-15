@@ -593,6 +593,14 @@ function publicUser(user) {
   };
 }
 
+function publicDirectoryUser(user) {
+  return {
+    id: user.id,
+    name: user.name,
+    role: user.role
+  };
+}
+
 function visibleEntriesForUser(db, user) {
   const entries = db.entries || [];
   if (user.role === "boss") return entries;
@@ -638,6 +646,16 @@ function syncUserForRequest(user, requested, fallback = "", users = defaultUsers
     return user.id;
   }
   return user.id;
+}
+
+function todoAssigneesForRequest(user, requested, users = defaultUsers) {
+  const allowed = new Set(Object.keys(users || {}));
+  const values = Array.isArray(requested) ? requested : [requested];
+  const assignees = [...new Set(values
+    .map(cleanUserId)
+    .filter((id) => allowed.has(id)))];
+  if (assignees.length) return assignees;
+  return allowed.has(user.id) ? [user.id] : [];
 }
 
 function entryForUserRole(user, entry, previous = null) {
@@ -1797,12 +1815,8 @@ async function handleApi(req, res) {
     if (url.pathname === "/api/users" && req.method === "GET") {
       const user = await requireUser(req, res);
       if (!user) return;
-      if (user.role !== "boss") {
-        sendJson(res, 403, { error: "Seznam uporabnikov je na voljo samo sefu." });
-        return;
-      }
       const db = await readDbAsync();
-      const users = Object.values(db.users || {}).map(publicUser);
+      const users = Object.values(db.users || {}).map(publicDirectoryUser);
       sendJson(res, 200, { users });
       return;
     }
@@ -2042,7 +2056,8 @@ async function handleApi(req, res) {
     if (url.pathname === "/api/todos" && req.method === "POST") {
       const user = await requireUser(req, res);
       if (!user) return;
-      let todo = cleanTodo(await readBody(req));
+      const body = await readBody(req);
+      let todo = cleanTodo(body);
       const validation = validateTodo(todo);
       if (validation) {
         sendJson(res, 400, { error: validation });
@@ -2057,22 +2072,31 @@ async function handleApi(req, res) {
         return;
       }
       const maxOrder = db.todos.reduce((max, item) => Math.max(max, Number(item.order || 0)), 0);
-      db.todos.push({
-        id: crypto.randomUUID(),
-        ...todo,
-        photos: stampTodoPhotos(todo, user),
-        syncUser: syncUserForRequest(user, todo.syncUser, "", db.users),
-        order: todo.order || maxOrder + 1,
-        createdBy: user.id,
-        createdByName: user.name,
-        createdAt: now,
-        updatedBy: user.id,
-        updatedByName: user.name,
-        updatedAt: now,
-        history: [audit(user, "dodano opravilo")]
+      const assigneeIds = todoAssigneesForRequest(user, body.assigneeIds || todo.syncUser, db.users);
+      const assignmentGroupId = crypto.randomUUID();
+      assigneeIds.forEach((assigneeId, index) => {
+        const assignee = db.users[assigneeId];
+        db.todos.push({
+          id: crypto.randomUUID(),
+          ...todo,
+          assignmentGroupId,
+          photos: stampTodoPhotos(todo, user),
+          syncUser: assigneeId,
+          order: (todo.order || maxOrder + 1) + index,
+          createdBy: user.id,
+          createdByName: user.name,
+          createdAt: now,
+          updatedBy: user.id,
+          updatedByName: user.name,
+          updatedAt: now,
+          history: [audit(user, `dodano opravilo za ${assignee?.name || assigneeId}`)]
+        });
       });
       await writeDbAsync(db);
-      sendJson(res, 200, { todos: visibleTodosForUser(db, user) });
+      sendJson(res, 200, {
+        todos: visibleTodosForUser(db, user),
+        assignedTo: assigneeIds.map((id) => publicDirectoryUser(db.users[id]))
+      });
       return;
     }
 
@@ -2395,6 +2419,7 @@ module.exports = {
   parseGoogleEventDescription,
   remoteGoogleChangeWins,
   syncUserForRequest,
+  todoAssigneesForRequest,
   todoFromGoogleEvent,
   todoToGoogleEvent,
   visibleDebtsForUser,

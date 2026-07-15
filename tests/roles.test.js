@@ -6,6 +6,7 @@ const {
   canManageTodo,
   entryForUserRole,
   syncUserForRequest,
+  todoAssigneesForRequest,
   visibleDebtsForUser,
   visibleEntriesForUser,
   visibleTodosForUser
@@ -45,6 +46,10 @@ test("delavec ne more upravljati tujih vnosov ali opravil", () => {
   assert.equal(syncUserForRequest(boss, "ibro", "", users), "ibro");
   assert.equal(syncUserForRequest(boss, "marko", "", users), "marko");
   assert.equal(syncUserForRequest(boss, "ne-obstaja", "marko", users), "marko");
+  assert.deepEqual(todoAssigneesForRequest(worker, ["ibro", "marko", "ibro"], users), ["ibro", "marko"]);
+  assert.deepEqual(todoAssigneesForRequest(worker, ["bojan"], users), ["bojan"]);
+  assert.deepEqual(todoAssigneesForRequest(worker, [], users), ["ibro"]);
+  assert.deepEqual(todoAssigneesForRequest(worker, ["ne-obstaja"], users), ["ibro"]);
 });
 
 test("delavski vnos ne more nastaviti obracuna ali racuna", () => {
