@@ -153,6 +153,18 @@
     .user-box strong { display: block; font-size: 14px; }
     .user-box span { display: block; color: rgba(248, 250, 246, 0.7); font-size: 12px; }
 
+    .sidebar .view-context {
+      display: flex;
+      padding: 12px;
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.08);
+    }
+
+    .view-context .small {
+      display: block;
+      line-height: 1.4;
+    }
+
     .control {
       display: flex;
       flex-direction: column;
@@ -1234,12 +1246,20 @@
         <button class="ghost" id="logoutBtn" type="button">Odjava</button>
       </div>
 
-      <div class="control">
+      <div class="control view-context hidden" id="workContextControl">
+        <label for="workContextSelect">Delovni pogled</label>
+        <select id="workContextSelect">
+          <option value="admin">&#352;ef &#8211; obra&#269;uni in upravljanje</option>
+        </select>
+        <span class="small" id="workContextHint"></span>
+      </div>
+
+      <div class="control worker-only">
         <label for="quickDate">Hitri vnos za datum</label>
         <input id="quickDate" type="date">
       </div>
 
-      <div class="row">
+      <div class="row worker-only">
         <div class="control">
           <label for="quickStart">Od</label>
           <input id="quickStart" type="time" value="08:00">
@@ -1250,14 +1270,14 @@
         </div>
       </div>
 
-      <div class="control">
+      <div class="control worker-only">
         <label for="quickClient">Stranka</label>
         <input id="quickClient" list="clientList" placeholder="npr. Novak d.o.o.">
         <span class="small">Pri modrih opravkih se stranka ne shrani.</span>
         <datalist id="clientList"></datalist>
       </div>
 
-      <div class="control">
+      <div class="control worker-only">
         <label for="quickStatus">Status</label>
         <select id="quickStatus">
           <option value="unbilled">Opravljeno / ni obra&#269;unano</option>
@@ -1268,17 +1288,17 @@
         </select>
       </div>
 
-      <div class="quick-presets">
+      <div class="quick-presets worker-only">
         <button id="quickLunch" type="button">Malica</button>
         <button id="quickTravel" type="button">Pot</button>
       </div>
 
-      <div class="control">
+      <div class="control worker-only">
         <label for="quickWork">Kaj si delal</label>
         <textarea id="quickWork" placeholder="Kratek opis dela"></textarea>
       </div>
 
-      <div class="row">
+      <div class="row worker-only">
         <div class="control">
           <label for="quickKm">Km</label>
           <input id="quickKm" type="number" min="0" step="0.1" placeholder="0">
@@ -1292,12 +1312,12 @@
         </div>
       </div>
 
-      <div class="control">
+      <div class="control worker-only">
         <label for="quickMaterial">Material</label>
         <textarea id="quickMaterial" placeholder="npr. kabel 20 m, stikalo, vijaki"></textarea>
       </div>
 
-      <button class="primary" id="saveQuick" type="button">Shrani v koledar</button>
+      <button class="primary worker-only" id="saveQuick" type="button">Shrani v koledar</button>
       <button class="ghost" id="refreshBtn" type="button">Osve&#382;i skupne podatke</button>
 
       <div class="legend">
@@ -1323,12 +1343,12 @@
           <div class="view-switch" aria-label="Pogled">
             <button class="view-btn active" id="calendarViewBtn" type="button">Koledar</button>
             <button class="view-btn" id="todosViewBtn" type="button">Opravila</button>
-            <button class="view-btn" id="clientsViewBtn" type="button">Stranke</button>
-            <button class="view-btn" id="reportViewBtn" type="button">Obra&#269;un</button>
+            <button class="view-btn admin-only" id="clientsViewBtn" type="button">Stranke</button>
+            <button class="view-btn admin-only" id="reportViewBtn" type="button">Obra&#269;un</button>
           </div>
           <input class="search" id="clientSearch" placeholder="I&#353;&#269;i stranko, material ali opis">
-          <button class="secondary" id="syncClientsBtn" type="button">Sync stranke</button>
-          <button class="secondary" id="exportCsv" type="button">Izvoz CSV</button>
+          <button class="secondary admin-only" id="syncClientsBtn" type="button">Sync stranke</button>
+          <button class="secondary admin-only" id="exportCsv" type="button">Izvoz CSV</button>
           <button class="secondary" id="googleCalendar" type="button">Google sync</button>
           <button class="account-btn" id="accountBtn" type="button" title="Upravljanje ra&#269;una">
             <span class="avatar" id="topAvatar">?</span>
@@ -1338,16 +1358,16 @@
       </section>
 
       <section class="stats calendar-view">
-        <div class="stat"><strong id="statHoursIbro">0 h</strong><span>Ibro ure</span></div>
+        <div class="stat"><strong id="statHoursIbro">0 h</strong><span id="statHoursPrimaryLabel">Ibro ure</span></div>
         <div class="stat" id="statHoursBojanBox"><strong id="statHoursBojan">0 h</strong><span>Bojan ure</span></div>
-        <div class="stat"><strong id="statKm">0 km</strong><span>kilometrina</span></div>
-        <button class="stat clickable debt-stat" data-debt-person="ibro" type="button"><strong id="statDebtIbro">0 EUR</strong><span>Ibro dolg</span></button>
-        <button class="stat clickable debt-stat" data-debt-person="bojan" type="button"><strong id="statDebtBojan">0 EUR</strong><span>Bojan dolg</span></button>
+        <div class="stat"><strong id="statKm">0 km</strong><span id="statKmLabel">kilometrina</span></div>
+        <button class="stat clickable debt-stat admin-only" data-debt-person="ibro" type="button"><strong id="statDebtIbro">0 EUR</strong><span>Ibro dolg</span></button>
+        <button class="stat clickable debt-stat admin-only" data-debt-person="bojan" type="button"><strong id="statDebtBojan">0 EUR</strong><span>Bojan dolg</span></button>
         <div class="stat"><strong id="statUnbilled">0</strong><span>neobra&#269;unani vnosi</span></div>
       </section>
 
       <section class="panel boss-panel hidden calendar-view" id="bossPanel">
-        <p>&#352;efovski pogled: vidi&#353; vse vnose, lahko i&#353;&#269;e&#353; po stranki in spremeni&#353; status na obra&#269;unano, garancijo ali drugo.</p>
+        <p>&#352;efovski pogled: vidi&#353; vse delavce, pripravlja&#353; obra&#269;une in spreminja&#353; skupne nastavitve. Za vnos ur izberi delavski pogled.</p>
         <button class="secondary" id="downloadBackup" type="button">Prenesi varnostno kopijo</button>
       </section>
 
@@ -1377,7 +1397,7 @@
       <section class="panel todo-layout todos-view view-hidden">
         <div class="client-list" id="clientTodoList"></div>
         <div class="todo-panel">
-          <div class="todo-create">
+          <div class="todo-create" id="todoCreatePanel">
             <label>Fiksni datum
               <input id="pageTodoDate" type="date">
             </label>
@@ -1482,19 +1502,19 @@
               <option value="true">Start od doma</option>
             </select>
           </label>
-          <label>Ra&#269;un
+          <label class="admin-entry-field">Ra&#269;un
             <select id="entryInvoiceSent">
               <option value="false">Ra&#269;un ni poslan</option>
               <option value="true">Ra&#269;un poslan</option>
             </select>
           </label>
-          <label>Pora&#269;unano
+          <label class="admin-entry-field">Pora&#269;unano
             <select id="entryInvoiceSettled">
               <option value="false">Ni pora&#269;unano</option>
               <option value="true">Pora&#269;unano</option>
             </select>
           </label>
-          <label>Pla&#269;ano
+          <label class="admin-entry-field">Pla&#269;ano
             <select id="entryInvoicePaid">
               <option value="false">Ni pla&#269;ano</option>
               <option value="true">Pla&#269;ano</option>
@@ -1600,6 +1620,7 @@
 
   <script>
     const tokenKey = "indus-ure-token";
+    const workContextKey = "indus-ure-work-context";
     const oldStorageKey = "delovni-koledar-v1";
     const statusLabels = {
       billed: "Ze obracunano",
@@ -1629,6 +1650,8 @@
       settings: { billing: { hourlyRate: 15, kmRate: 0.22, commuteKmPerDay: 28 } },
       billingLocks: [],
       user: null,
+      users: [],
+      workContext: "",
       token: localStorage.getItem(tokenKey) || ""
     };
 
@@ -1660,6 +1683,8 @@
       try {
         const me = await api("/api/me");
         state.user = me.user;
+        state.users = state.user.role === "boss" ? (await api("/api/users")).users : [state.user];
+        initializeWorkContext();
         showApp();
         await loadAll();
         syncGoogle(false);
@@ -1673,9 +1698,98 @@
       $("loginScreen").classList.add("hidden");
       $("app").classList.remove("hidden");
       $("userName").textContent = state.user.name;
-      $("userRole").textContent = state.user.role === "boss" ? "Bojan" : "Ibro";
-      $("bossPanel").classList.toggle("hidden", state.user.role !== "boss");
       updateAvatar("topAvatar", state.user);
+      applyWorkContextUi();
+      setView(state.view);
+      render();
+    }
+
+    function initializeWorkContext() {
+      const select = $("workContextSelect");
+      select.replaceChildren();
+      const contexts = [];
+      if (state.user.role === "boss") {
+        contexts.push({ value: "admin", label: "Sef - obracuni in upravljanje" });
+        state.users.forEach((user) => contexts.push({ value: `worker:${user.id}`, label: `${user.name} - delavec` }));
+      } else {
+        contexts.push({ value: `worker:${state.user.id}`, label: `${state.user.name} - delavec` });
+      }
+      contexts.forEach((context) => {
+        const option = document.createElement("option");
+        option.value = context.value;
+        option.textContent = context.label;
+        select.appendChild(option);
+      });
+      const allowed = new Set(contexts.map((context) => context.value));
+      const stored = localStorage.getItem(workContextKey) || "";
+      state.workContext = state.user.role === "boss" && allowed.has(stored) ? stored : contexts[0].value;
+      select.value = state.workContext;
+      $("workContextControl").classList.toggle("hidden", state.user.role !== "boss");
+    }
+
+    function isAdminView() {
+      return state.user?.role === "boss" && state.workContext === "admin";
+    }
+
+    function activeWorkerId() {
+      if (state.workContext.startsWith("worker:")) return state.workContext.slice(7);
+      return state.user?.id || "";
+    }
+
+    function activeWorker() {
+      const id = activeWorkerId();
+      return state.users.find((user) => user.id === id) || state.user;
+    }
+
+    function contextEntries() {
+      if (isAdminView()) return state.entries;
+      const workerId = activeWorkerId();
+      return state.entries.filter((entry) => (entry.syncUser || entry.createdBy) === workerId);
+    }
+
+    function contextTodos() {
+      if (isAdminView()) return state.todos;
+      const workerId = activeWorkerId();
+      return state.todos.filter((todo) => (todo.syncUser || todo.createdBy) === workerId);
+    }
+
+    function applyWorkContextUi() {
+      const admin = isAdminView();
+      const worker = activeWorker();
+      $("userRole").textContent = admin ? "Sef - administracija" : `${worker?.name || "Delavec"} - delavec`;
+      $("workContextHint").textContent = admin
+        ? "Skupni pregled, obracuni in nastavitve."
+        : `Vnosi se shranjujejo za uporabnika ${worker?.name || "delavec"}.`;
+      $("bossPanel").classList.toggle("hidden", !admin);
+      document.querySelectorAll(".admin-only").forEach((element) => element.classList.toggle("hidden", !admin));
+      document.querySelectorAll(".worker-only").forEach((element) => element.classList.toggle("hidden", admin));
+      document.querySelectorAll(".admin-entry-field").forEach((element) => element.classList.toggle("hidden", !admin));
+      $("todoCreatePanel").classList.toggle("hidden", admin);
+      const billedOption = $("quickStatus").querySelector('option[value="billed"]');
+      if (billedOption) billedOption.disabled = !admin;
+      if (!admin && $("quickStatus").value === "billed") {
+        $("quickStatus").value = "unbilled";
+        updateQuickErrandMode();
+      }
+      document.querySelectorAll('[data-status="billed"]').forEach((button) => button.disabled = !admin);
+      const canSyncOwnGoogle = admin || activeWorkerId() === state.user?.id;
+      $("googleCalendar").classList.toggle("hidden", !canSyncOwnGoogle);
+      $("googleCalendar").textContent = admin ? `Google sync (${state.user?.name || "sef"})` : "Google sync";
+    }
+
+    function setWorkContext(context) {
+      if (state.user?.role !== "boss") return;
+      const allowed = new Set(["admin", ...state.users.map((user) => `worker:${user.id}`)]);
+      if (!allowed.has(context)) return;
+      state.workContext = context;
+      localStorage.setItem(workContextKey, context);
+      state.selectedClient = "";
+      state.reportClient = "";
+      state.reportClientId = "";
+      if ($("entryDialog").open) $("entryDialog").close();
+      if ($("debtDialog").open) $("debtDialog").close();
+      if (!isAdminView() && ["clients", "report"].includes(state.view)) state.view = "calendar";
+      applyWorkContextUi();
       setView(state.view);
       render();
     }
@@ -1930,7 +2044,7 @@
         work: status === "vacation" ? ($("quickWork").value.trim() || "Dopust") : $("quickWork").value.trim(),
         material: $("quickMaterial").value.trim(),
         people: "",
-        syncUser: state.user?.id || "",
+        syncUser: activeWorkerId(),
         km: status === "vacation" ? 0 : Number($("quickKm").value || 0),
         materialCost: 0,
         notes: "",
@@ -1948,7 +2062,7 @@
         notes: "",
         status: $("pageTodoStatus").value,
         order: nextTodoOrder(),
-        syncUser: state.user?.id || "",
+        syncUser: activeWorkerId(),
         done: false
       };
     }
@@ -1978,6 +2092,7 @@
     }
 
     function setView(view) {
+      if (!isAdminView() && ["clients", "report"].includes(view)) view = "calendar";
       state.view = view;
       document.querySelectorAll(".calendar-view").forEach((element) => {
         element.classList.toggle("view-hidden", view !== "calendar");
@@ -2001,6 +2116,10 @@
     }
 
     async function addTodo(todo, clearInputs = []) {
+      if (isAdminView()) {
+        alert("Za nov vnos opravila najprej izberi delavski pogled.");
+        return;
+      }
       if (!validateTodo(todo)) return;
       try {
         await saveTodoToServer(todo);
@@ -2018,7 +2137,7 @@
     }
 
     function nextTodoOrder() {
-      return state.todos.reduce((max, todo) => Math.max(max, Number(todo.order || 0)), 0) + 1;
+      return contextTodos().reduce((max, todo) => Math.max(max, Number(todo.order || 0)), 0) + 1;
     }
 
     function todoSort(a, b) {
@@ -2045,6 +2164,8 @@
     function renderMonth() {
       const calendar = $("calendar");
       calendar.innerHTML = "";
+      const entries = contextEntries();
+      const todos = contextTodos();
 
       const year = state.current.getFullYear();
       const month = state.current.getMonth();
@@ -2063,7 +2184,7 @@
         day.className = "day";
         if (dayDate.getMonth() !== month) day.classList.add("other");
         if (key === today) day.classList.add("today");
-        if (state.entries.some((entry) => entry.date === key && entry.status === "vacation")) {
+        if (entries.some((entry) => entry.date === key && entry.status === "vacation")) {
           day.classList.add("has-vacation");
         }
 
@@ -2071,16 +2192,18 @@
         head.className = "day-head";
         head.innerHTML = `<span class="day-number">${dayDate.getDate()}</span>`;
 
-        const add = document.createElement("button");
-        add.className = "quick-add";
-        add.type = "button";
-        add.textContent = "+";
-        add.title = "Dodaj vnos";
-        add.addEventListener("click", () => openDialog({ date: key }));
-        head.appendChild(add);
+        if (!isAdminView()) {
+          const add = document.createElement("button");
+          add.className = "quick-add";
+          add.type = "button";
+          add.textContent = "+";
+          add.title = `Dodaj vnos za ${activeWorker()?.name || "delavca"}`;
+          add.addEventListener("click", () => openDialog({ date: key }));
+          head.appendChild(add);
+        }
         day.appendChild(head);
 
-        state.entries
+        entries
           .filter((entry) => entry.date === key)
           .sort((a, b) => minutes(a.start) - minutes(b.start))
           .forEach((entry) => {
@@ -2096,7 +2219,7 @@
             day.appendChild(event);
           });
 
-        state.todos
+        todos
           .filter((todo) => todo.date === key)
           .sort(todoSort)
           .forEach((todo) => {
@@ -2125,15 +2248,21 @@
     function renderStats() {
       const year = state.current.getFullYear();
       const month = state.current.getMonth();
-      const monthEntries = state.entries.filter((entry) => {
+      const monthEntries = contextEntries().filter((entry) => {
         const d = parseDate(entry.date);
         return d.getFullYear() === year && d.getMonth() === month;
       });
 
       const monthKey = `${year}-${String(month + 1).padStart(2, "0")}`;
       const hourEntries = monthEntries.filter((entry) => entry.status !== "vacation");
-      const ibroHours = uniqueHours(hourEntries.filter((entry) => (entry.syncUser || entry.createdBy) === "ibro"));
-      const bojanHours = uniqueHours(hourEntries.filter((entry) => (entry.syncUser || entry.createdBy) === "bojan"));
+      const admin = isAdminView();
+      const worker = activeWorker();
+      const primaryHours = admin
+        ? uniqueHours(hourEntries.filter((entry) => (entry.syncUser || entry.createdBy) === "ibro"))
+        : uniqueHours(hourEntries);
+      const bojanHours = admin
+        ? uniqueHours(hourEntries.filter((entry) => (entry.syncUser || entry.createdBy) === "bojan"))
+        : 0;
       const km = hourEntries.reduce((sum, entry) => sum + Number(entry.km || 0), 0);
       const ibroDebt = state.debts
         .filter((debt) => debt.month === monthKey && debt.person === "ibro")
@@ -2143,10 +2272,12 @@
         .reduce((sum, debt) => sum + Number(debt.amount || 0), 0);
       const unbilled = monthEntries.filter((entry) => entry.status === "unbilled").length;
 
-      $("statHoursIbro").textContent = `${ibroHours.toLocaleString("sl-SI", { maximumFractionDigits: 1 })} h`;
+      $("statHoursIbro").textContent = `${primaryHours.toLocaleString("sl-SI", { maximumFractionDigits: 1 })} h`;
+      $("statHoursPrimaryLabel").textContent = admin ? "Ibro ure" : `${worker?.name || "Delavec"} ure`;
       $("statHoursBojan").textContent = `${bojanHours.toLocaleString("sl-SI", { maximumFractionDigits: 1 })} h`;
-      $("statHoursBojanBox").classList.toggle("hidden", state.user?.role !== "boss");
+      $("statHoursBojanBox").classList.toggle("hidden", !admin);
       $("statKm").textContent = `${km.toLocaleString("sl-SI", { maximumFractionDigits: 1 })} km`;
+      $("statKmLabel").textContent = admin ? "kilometrina skupaj" : `${worker?.name || "Delavec"} kilometrina`;
       $("statDebtIbro").textContent = `${money(ibroDebt)} EUR`;
       $("statDebtBojan").textContent = `${money(bojanDebt)} EUR`;
       $("statUnbilled").textContent = unbilled;
@@ -2159,10 +2290,10 @@
 
     function todoClients() {
       const names = new Set();
-      state.entries.forEach((entry) => {
+      contextEntries().forEach((entry) => {
         if (!["errand", "vacation"].includes(entry.status) && entry.client) names.add(entry.client);
       });
-      state.todos.forEach((todo) => {
+      contextTodos().forEach((todo) => {
         if (todo.client) names.add(todo.client);
       });
       return [...names].sort((a, b) => a.localeCompare(b, "sl"));
@@ -2174,7 +2305,7 @@
       const all = document.createElement("button");
       all.type = "button";
       all.className = `client-card ${state.selectedClient ? "" : "active"}`;
-      all.innerHTML = `<strong>Vse stranke</strong><span>${state.todos.filter((todo) => !todo.done).length} odprtih opravil</span>`;
+      all.innerHTML = `<strong>Vse stranke</strong><span>${contextTodos().filter((todo) => !todo.done).length} odprtih opravil</span>`;
       all.addEventListener("click", () => {
         state.selectedClient = "";
         renderTodos();
@@ -2182,7 +2313,7 @@
       list.appendChild(all);
 
       todoClients().forEach((client) => {
-        const clientTodos = state.todos.filter((todo) => todo.client === client);
+        const clientTodos = contextTodos().filter((todo) => todo.client === client);
         const open = clientTodos.filter((todo) => !todo.done).length;
         const card = document.createElement("button");
         card.type = "button";
@@ -2239,7 +2370,7 @@
       title.textContent = state.selectedClient ? `Opravila: ${state.selectedClient}` : "Vsa opravila";
       items.innerHTML = "";
 
-      const todos = state.todos
+      const todos = contextTodos()
         .filter((todo) => !state.selectedClient || todo.client === state.selectedClient)
         .sort(todoSort);
 
@@ -2536,7 +2667,7 @@
 
     async function reorderUndatedTodos(sourceId, targetId) {
       if (!sourceId || !targetId || sourceId === targetId) return;
-      const visible = state.todos
+      const visible = contextTodos()
         .filter((todo) => !todo.done && !todo.date && (!state.selectedClient || todo.client === state.selectedClient))
         .sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
       const from = visible.findIndex((todo) => todo.id === sourceId);
@@ -2586,10 +2717,10 @@
         });
       };
       state.clients.forEach((client) => add(client.name, client));
-      state.entries.forEach((entry) => {
+      contextEntries().forEach((entry) => {
         if (!["errand", "vacation"].includes(entry.status)) add(entry.client, { clientId: entry.clientId });
       });
-      state.todos.forEach((todo) => add(todo.client, { clientId: todo.clientId }));
+      contextTodos().forEach((todo) => add(todo.client, { clientId: todo.clientId }));
       return [...map.values()].sort((a, b) => a.name.localeCompare(b.name, "sl"));
     }
 
@@ -2636,7 +2767,7 @@
         panel.appendChild(item);
       });
 
-      const results = state.entries
+      const results = contextEntries()
         .filter((entry) => normalizeText([entry.client, entry.people, entry.work, entry.material, entry.notes, entry.createdByName].join(" ")).includes(normalizeText(query)))
         .sort((a, b) => `${b.date} ${b.start}`.localeCompare(`${a.date} ${a.start}`));
 
@@ -2717,6 +2848,10 @@
     }
 
     function openDialog(entry = {}) {
+      if (!entry.id && isAdminView()) {
+        alert("Za nov vnos najprej izberi Bojan - delavec ali Ibro - delavec.");
+        return;
+      }
       const existing = Boolean(entry.id);
       $("dialogTitle").textContent = existing ? "Uredi vnos" : "Nov vnos";
       $("entryId").value = entry.id || "";
@@ -2792,7 +2927,7 @@
         work: status === "vacation" ? ($("entryWork").value.trim() || "Dopust") : $("entryWork").value.trim(),
         material: $("entryMaterial").value.trim(),
         people: $("entryPeople").value.trim(),
-        syncUser: ($("entryId").value ? (state.entries.find((item) => item.id === $("entryId").value)?.syncUser || "") : "") || state.user?.id || "",
+        syncUser: ($("entryId").value ? (state.entries.find((item) => item.id === $("entryId").value)?.syncUser || "") : "") || activeWorkerId(),
         km: status === "vacation" ? 0 : Number($("entryKm").value || 0),
         materialCost: 0,
         notes: $("entryNotes").value.trim(),
@@ -3029,6 +3164,7 @@
     });
 
     $("accountBtn").addEventListener("click", openAccountDialog);
+    $("workContextSelect").addEventListener("change", (event) => setWorkContext(event.target.value));
     $("closeAccount").addEventListener("click", () => $("accountDialog").close());
     $("saveProfile").addEventListener("click", async () => {
       try {
@@ -3042,6 +3178,10 @@
       }
     });
     $("saveQuick").addEventListener("click", async () => {
+      if (isAdminView()) {
+        alert("Za nov vnos najprej izberi delavski pogled.");
+        return;
+      }
       const entry = entryFromQuick();
       if (!validateEntry(entry)) return;
       await saveEntryToServer(entry);

@@ -555,7 +555,21 @@ function publicUser(user) {
 }
 
 function visibleEntriesForUser(db, user) {
-  return db.entries || [];
+  const entries = db.entries || [];
+  if (user.role === "boss") return entries;
+  return entries.filter((entry) => (entry.syncUser || entry.createdBy) === user.id);
+}
+
+function visibleTodosForUser(db, user) {
+  const todos = db.todos || [];
+  if (user.role === "boss") return todos;
+  return todos.filter((todo) => (todo.syncUser || todo.createdBy) === user.id);
+}
+
+function visibleDebtsForUser(db, user) {
+  const debts = db.debts || [];
+  if (user.role === "boss") return debts;
+  return debts.filter((debt) => debt.person === user.id);
 }
 
 function canManageEntry(user, entry) {
@@ -564,11 +578,32 @@ function canManageEntry(user, entry) {
   return (entry.syncUser || entry.createdBy) === user.id;
 }
 
+function canManageTodo(user, todo) {
+  if (!todo) return false;
+  if (user.role === "boss") return true;
+  return (todo.syncUser || todo.createdBy) === user.id;
+}
+
 function syncUserForRequest(user, requested, fallback = "") {
   const wanted = ["bojan", "ibro"].includes(requested) ? requested : "";
   if (user.role === "boss") return wanted || fallback || user.id;
-  if (fallback && fallback !== user.id) return fallback;
   return user.id;
+}
+
+function entryForUserRole(user, entry, previous = null) {
+  if (user.role === "boss") return entry;
+  const previousStatus = previous?.status || "";
+  const status = previousStatus === "billed"
+    ? "billed"
+    : entry.status === "billed" ? "unbilled" : entry.status;
+  return {
+    ...entry,
+    syncUser: user.id,
+    status,
+    invoiceSent: Boolean(previous?.invoiceSent),
+    invoiceSettled: Boolean(previous?.invoiceSettled),
+    invoicePaid: Boolean(previous?.invoicePaid)
+  };
 }
 
 function entryIsLocked(db, entry) {
@@ -1421,7 +1456,7 @@ async function handleApi(req, res) {
       const current = db.users[user.id];
       const result = await syncGoogleForUser(req, db, current);
       await writeDbAsync(db);
-      sendJson(res, 200, { ok: true, ...result, entries: visibleEntriesForUser(db, current), todos: db.todos });
+      sendJson(res, 200, { ok: true, ...result, entries: visibleEntriesForUser(db, current), todos: visibleTodosForUser(db, current) });
       return;
     }
 
@@ -1450,6 +1485,19 @@ async function handleApi(req, res) {
       const user = await requireUser(req, res);
       if (!user) return;
       sendJson(res, 200, { user: publicUser(user) });
+      return;
+    }
+
+    if (url.pathname === "/api/users" && req.method === "GET") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      if (user.role !== "boss") {
+        sendJson(res, 403, { error: "Seznam uporabnikov je na voljo samo sefu." });
+        return;
+      }
+      const db = await readDbAsync();
+      const users = Object.values(db.users || {}).map(publicUser);
+      sendJson(res, 200, { users });
       return;
     }
 
@@ -1493,7 +1541,7 @@ async function handleApi(req, res) {
       const user = await requireUser(req, res);
       if (!user) return;
       const db = await readDbAsync();
-      sendJson(res, 200, { todos: db.todos });
+      sendJson(res, 200, { todos: visibleTodosForUser(db, user) });
       return;
     }
 
@@ -1516,6 +1564,10 @@ async function handleApi(req, res) {
     if (url.pathname === "/api/settings/billing" && req.method === "PUT") {
       const user = await requireUser(req, res);
       if (!user) return;
+      if (user.role !== "boss") {
+        sendJson(res, 403, { error: "Samo sef lahko spreminja obracunske nastavitve." });
+        return;
+      }
       const body = await readBody(req);
       const db = await readDbAsync();
       db.settings = db.settings || {};
@@ -1533,13 +1585,17 @@ async function handleApi(req, res) {
       const user = await requireUser(req, res);
       if (!user) return;
       const db = await readDbAsync();
-      sendJson(res, 200, { debts: db.debts || [] });
+      sendJson(res, 200, { debts: visibleDebtsForUser(db, user) });
       return;
     }
 
     if (url.pathname === "/api/debts" && req.method === "POST") {
       const user = await requireUser(req, res);
       if (!user) return;
+      if (user.role !== "boss") {
+        sendJson(res, 403, { error: "Samo sef lahko ureja dolgove." });
+        return;
+      }
       const debt = cleanDebt(await readBody(req));
       const validation = validateDebt(debt);
       if (validation) {
@@ -1566,6 +1622,10 @@ async function handleApi(req, res) {
     if (url.pathname === "/api/clients" && req.method === "POST") {
       const user = await requireUser(req, res);
       if (!user) return;
+      if (user.role !== "boss") {
+        sendJson(res, 403, { error: "Samo sef lahko dodaja ali spreminja stranke." });
+        return;
+      }
       const client = cleanClient(await readBody(req));
       const validation = validateClient(client);
       if (validation) {
@@ -1595,6 +1655,10 @@ async function handleApi(req, res) {
     if (url.pathname === "/api/clients/sync" && req.method === "POST") {
       const user = await requireUser(req, res);
       if (!user) return;
+      if (user.role !== "boss") {
+        sendJson(res, 403, { error: "Samo sef lahko sinhronizira stranke." });
+        return;
+      }
       const db = await readDbAsync();
       const current = db.users[user.id];
       const result = await syncClientsWithSheets(db, current);
@@ -1636,6 +1700,10 @@ async function handleApi(req, res) {
     if (debtMatch && req.method === "PUT") {
       const user = await requireUser(req, res);
       if (!user) return;
+      if (user.role !== "boss") {
+        sendJson(res, 403, { error: "Samo sef lahko ureja dolgove." });
+        return;
+      }
       const id = decodeURIComponent(debtMatch[1]);
       const debt = cleanDebt(await readBody(req));
       const validation = validateDebt(debt);
@@ -1664,6 +1732,10 @@ async function handleApi(req, res) {
     if (debtMatch && req.method === "DELETE") {
       const user = await requireUser(req, res);
       if (!user) return;
+      if (user.role !== "boss") {
+        sendJson(res, 403, { error: "Samo sef lahko ureja dolgove." });
+        return;
+      }
       const id = decodeURIComponent(debtMatch[1]);
       const db = await readDbAsync();
       db.debts = db.debts.filter((item) => item.id !== id);
@@ -1700,7 +1772,7 @@ async function handleApi(req, res) {
         history: [audit(user, "dodano opravilo")]
       });
       await writeDbAsync(db);
-      sendJson(res, 200, { todos: db.todos });
+      sendJson(res, 200, { todos: visibleTodosForUser(db, user) });
       return;
     }
 
@@ -1708,6 +1780,7 @@ async function handleApi(req, res) {
       const user = await requireUser(req, res);
       if (!user) return;
       let entry = cleanEntry(await readBody(req));
+      entry = entryForUserRole(user, entry);
       const validation = validateEntry(entry);
       if (validation) {
         sendJson(res, 400, { error: validation });
@@ -1755,6 +1828,7 @@ async function handleApi(req, res) {
         sendJson(res, 403, { error: "Tega vnosa ne mores spreminjati." });
         return;
       }
+      entry = entryForUserRole(user, entry, db.entries[index]);
       if (user.role !== "boss" && entryIsLocked(db, db.entries[index]) && lockedFieldChanged(db.entries[index], entry)) {
         sendJson(res, 403, { error: "To obdobje je obracunano. Ure, kilometrina in start od doma so zaklenjeni." });
         return;
@@ -1812,6 +1886,10 @@ async function handleApi(req, res) {
         sendJson(res, 404, { error: "Opravilo ne obstaja." });
         return;
       }
+      if (!canManageTodo(user, db.todos[index])) {
+        sendJson(res, 403, { error: "Tega opravila ne mores spreminjati." });
+        return;
+      }
       db.todos[index] = {
         ...db.todos[index],
         ...todo,
@@ -1823,7 +1901,7 @@ async function handleApi(req, res) {
         history: [...(db.todos[index].history || []), audit(user, todo.done ? "oznaceno opravljeno" : "spremenjeno opravilo")]
       };
       await writeDbAsync(db);
-      sendJson(res, 200, { todos: db.todos });
+      sendJson(res, 200, { todos: visibleTodosForUser(db, user) });
       return;
     }
 
@@ -1833,10 +1911,14 @@ async function handleApi(req, res) {
       const id = decodeURIComponent(todoMatch[1]);
       const db = await readDbAsync();
       const todo = db.todos.find((item) => item.id === id);
+      if (!canManageTodo(user, todo)) {
+        sendJson(res, 403, { error: "Tega opravila ne mores izbrisati." });
+        return;
+      }
       await deleteGoogleEventForItem(req, db, todo);
       db.todos = db.todos.filter((item) => item.id !== id);
       await writeDbAsync(db);
-      sendJson(res, 200, { todos: db.todos });
+      sendJson(res, 200, { todos: visibleTodosForUser(db, user) });
       return;
     }
 
@@ -1928,7 +2010,19 @@ async function start() {
   });
 }
 
-start().catch((error) => {
-  console.error(error);
-  process.exit(1);
-});
+if (require.main === module) {
+  start().catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
+}
+
+module.exports = {
+  canManageEntry,
+  canManageTodo,
+  entryForUserRole,
+  syncUserForRequest,
+  visibleDebtsForUser,
+  visibleEntriesForUser,
+  visibleTodosForUser
+};
