@@ -696,6 +696,27 @@
       font-size: 12px;
     }
 
+    .todo-compact-actions {
+      display: flex;
+      align-items: flex-start;
+      gap: 6px;
+      flex-wrap: wrap;
+      margin-top: 7px;
+    }
+
+    .todo-compact-actions .todo-description-details {
+      margin-top: 0;
+    }
+
+    .todo-compact-actions .todo-description-details summary {
+      min-height: 34px;
+      padding: 6px 10px;
+    }
+
+    .todo-compact-actions .todo-description-details[open] {
+      flex: 1 0 100%;
+    }
+
     .report-todo-description {
       display: block;
       margin: 4px 0;
@@ -712,7 +733,7 @@
 
     .todo-item {
       display: grid;
-      grid-template-columns: auto 1fr auto auto;
+      grid-template-columns: auto minmax(0, 1fr);
       gap: 10px;
       align-items: start;
       border: 1px solid var(--line);
@@ -750,6 +771,13 @@
     .drag-handle:disabled {
       cursor: not-allowed;
       opacity: 0.4;
+    }
+
+    .todo-control-stack {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 7px;
     }
 
     .todo-date,
@@ -809,6 +837,7 @@
       align-items: center;
       flex-wrap: wrap;
       justify-content: flex-end;
+      margin-left: auto;
     }
 
     .todo-edit-icon,
@@ -1650,18 +1679,31 @@
       .todo-item {
         grid-template-columns: auto 1fr;
         gap: 8px;
-        padding: 12px;
+        padding: 10px;
       }
       .todo-primary-meta {
         grid-template-columns: minmax(0, 0.9fr) 86px minmax(0, 1.4fr);
         gap: 5px;
       }
-      .todo-tools,
       .todo-item .secondary,
-      .todo-item .add-photo,
-      .drag-handle {
-        grid-column: 2;
+      .todo-item .add-photo {
         justify-content: stretch;
+      }
+      .todo-compact-actions {
+        gap: 4px;
+      }
+      .todo-compact-actions .todo-description-details summary {
+        min-height: 32px;
+        padding: 5px 8px;
+        font-size: 12px;
+      }
+      .todo-tools {
+        gap: 4px;
+      }
+      .todo-edit-icon,
+      .todo-delete-icon {
+        width: 32px;
+        height: 32px;
       }
       .photo-actions {
         grid-column: 2;
@@ -2970,7 +3012,10 @@
         item.dataset.todoId = todo.id;
         item.className = `todo-item ${todo.done ? "done" : ""}`;
         item.innerHTML = `
-          <input type="checkbox" ${todo.done ? "checked" : ""} aria-label="Opravljeno">
+          <div class="todo-control-stack">
+            <input type="checkbox" ${todo.done ? "checked" : ""} aria-label="Opravljeno">
+            <button class="drag-handle" type="button" ${reorderable ? "" : "disabled"} title="Povleci za vrstni red" aria-label="Povleci za vrstni red">::</button>
+          </div>
           <div class="todo-summary" role="button" tabindex="0" aria-label="Uredi opravilo: ${escapeHtml(todo.title)}">
             <div class="todo-title">${linkifyText(todo.title)}</div>
             <div class="todo-primary-meta">
@@ -2982,6 +3027,7 @@
               ${todo.client ? `<span class="todo-chip">${escapeHtml(todo.client)}</span>` : ""}
               ${(todo.photos || []).length ? `<span class="todo-chip">${(todo.photos || []).length} foto</span>` : ""}
             </div>` : ""}
+            <div class="todo-compact-actions">
             ${todo.notes ? `<details class="todo-description-details">
               <summary>Opis</summary>
               <div class="todo-description todo-meta">${linkifyText(todo.notes)}</div>
@@ -2990,7 +3036,6 @@
               <summary>Priloge <span class="todo-details-count">${(todo.photos || []).length}</span></summary>
               ${renderTodoPhotoHtml(todo)}
             </details>` : ""}
-          </div>
           <div class="todo-tools">
             <button class="todo-edit-icon edit-todo" type="button" title="Uredi opravilo" aria-label="Uredi opravilo">
               <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -3003,6 +3048,8 @@
               </svg>
             </button>
           </div>
+            </div>
+          </div>
           ${isAdminView() && todo.status === "execution" ? `
             <div class="todo-billing">
               <label>Urna postavka (EUR/h)
@@ -3014,7 +3061,6 @@
               <button class="primary save-todo-billing" type="button">Shrani obracun</button>
             </div>
           ` : ""}
-          <button class="drag-handle" type="button" ${reorderable ? "" : "disabled"} title="Povleci za vrstni red" aria-label="Povleci za vrstni red">::</button>
         `;
         const openTodoEditor = (event) => {
           event.preventDefault();

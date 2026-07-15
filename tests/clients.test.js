@@ -139,6 +139,17 @@ test("razvrscanje opravil deluje z rocajem, misjo in dotikom", () => {
   assert.doesNotMatch(html, /todoReorderGroup|todoNativeDragSourceId|addEventListener\("dragstart"|draggable="\$\{reorderable/);
 });
 
+test("mobilna kartica zdruzi kontrole v dve kompaktni vrstici", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  const card = html.match(/item\.innerHTML = `([\s\S]*?)`;\s*const openTodoEditor/)?.[1] || "";
+  assert.ok(card);
+  assert.match(card, /todo-control-stack[\s\S]*?type="checkbox"[\s\S]*?class="drag-handle"[\s\S]*?class="todo-summary"/);
+  assert.equal((card.match(/class="drag-handle"/g) || []).length, 1);
+  assert.match(card, /todo-compact-actions[\s\S]*?todo-description-details[\s\S]*?todo-attachments-details[\s\S]*?todo-tools[\s\S]*?edit-todo[\s\S]*?delete-todo/);
+  assert.match(html, /\.todo-compact-actions \{[\s\S]*?display: flex;[\s\S]*?flex-wrap: wrap;/);
+  assert.match(html, /\.todo-edit-icon,\s*\.todo-delete-icon \{\s*width: 32px;\s*height: 32px;/);
+});
+
 test("kartica opravila poravna status datum in udelezence v stalne stolpce", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
   const card = html.match(/item\.innerHTML = `([\s\S]*?)`;\s*const openTodoEditor/)?.[1] || "";
