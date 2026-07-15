@@ -642,6 +642,11 @@
       outline: 2px dashed var(--accent);
     }
 
+    .todo-item.drag-target {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+
     .drag-handle {
       min-width: 34px;
       min-height: 34px;
@@ -650,6 +655,13 @@
       color: var(--muted);
       cursor: grab;
       font-weight: 900;
+      touch-action: none;
+      user-select: none;
+    }
+
+    .drag-handle:disabled {
+      cursor: not-allowed;
+      opacity: 0.4;
     }
 
     .todo-date,
@@ -2579,7 +2591,10 @@
         return a.status === "in_progress" ? -1 : 1;
       }
       if (!a.date && !b.date) return Number(a.order || 0) - Number(b.order || 0);
-      if (a.date && b.date) return String(a.date).localeCompare(String(b.date));
+      if (a.date && b.date) {
+        const dateOrder = String(a.date).localeCompare(String(b.date));
+        return dateOrder || Number(a.order || 0) - Number(b.order || 0);
+      }
       return a.date ? -1 : 1;
     }
 
@@ -2805,9 +2820,10 @@
 
       todos.forEach((todo) => {
         const item = document.createElement("div");
+        const reorderable = !todo.done;
         item.dataset.todoId = todo.id;
         item.className = `todo-item ${todo.done ? "done" : ""}`;
-        item.draggable = !todo.date && !todo.done;
+        item.draggable = false;
         item.innerHTML = `
           <input type="checkbox" ${todo.done ? "checked" : ""} aria-label="Opravljeno">
           <div>
@@ -2850,7 +2866,7 @@
             </div>
           ` : ""}
           ${state.expandedTodoPhotos === todo.id ? renderTodoPhotoHtml(todo) : ""}
-          <button class="drag-handle" type="button" title="Povleci za vrstni red">::</button>
+          <button class="drag-handle" type="button" draggable="${reorderable ? "true" : "false"}" ${reorderable ? "" : "disabled"} title="Povleci za vrstni red znotraj istega datuma" aria-label="Povleci za vrstni red">::</button>
         `;
         item.querySelectorAll(".edit-todo, .edit-todo-assignees").forEach((button) => {
           button.addEventListener("click", (event) => {
@@ -2888,7 +2904,22 @@
             renderTodoItems();
           });
         }
-        item.querySelector(".delete-todo").addEventListener("dragstart", (event) => event.preventDefault());
+        const dragHandle = item.querySelector(".drag-handle");
+        if (reorderable) {
+          dragHandle.addEventListener("dragstart", (event) => {
+            todoNativeDragSourceId = todo.id;
+            item.classList.add("dragging");
+            event.dataTransfer.effectAllowed = "move";
+            event.dataTransfer.setData("text/plain", todo.id);
+          });
+          dragHandle.addEventListener("dragend", clearTodoDragVisuals);
+          dragHandle.addEventListener("pointerdown", (event) => {
+            if (event.pointerType !== "mouse") beginTodoPointerDrag(event, item, todo.id);
+          });
+          dragHandle.addEventListener("pointermove", updateTodoPointerDrag);
+          dragHandle.addEventListener("pointerup", finishTodoPointerDrag);
+          dragHandle.addEventListener("pointercancel", cancelTodoPointerDrag);
+        }
         item.querySelectorAll(".remove-photo").forEach((button) => {
           button.addEventListener("click", async () => {
             if (!confirm("Izbrisem to fotografijo?")) return;
@@ -2899,22 +2930,18 @@
             state.expandedTodoPhotos = todo.id;
           });
         });
-        item.addEventListener("dragstart", (event) => {
-          if (todo.date || todo.done) {
-            event.preventDefault();
-            return;
-          }
-          item.classList.add("dragging");
-          event.dataTransfer.setData("text/plain", todo.id);
-        });
-        item.addEventListener("dragend", () => item.classList.remove("dragging"));
         item.addEventListener("dragover", (event) => {
-          if (todo.date || todo.done) return;
+          if (!todosCanReorderTogether(todoNativeDragSourceId, todo.id)) return;
           event.preventDefault();
+          event.dataTransfer.dropEffect = "move";
+          document.querySelectorAll(".todo-item.drag-target").forEach((row) => row.classList.remove("drag-target"));
+          item.classList.add("drag-target");
         });
         item.addEventListener("drop", (event) => {
           event.preventDefault();
-          reorderUndatedTodos(event.dataTransfer.getData("text/plain"), todo.id);
+          const sourceId = todoNativeDragSourceId || event.dataTransfer.getData("text/plain");
+          clearTodoDragVisuals();
+          reorderTodos(sourceId, todo.id);
         });
         items.appendChild(item);
       });
@@ -3255,10 +3282,69 @@
       downloadText(html, `indus-obracun-${$("reportFrom").value}-${$("reportTo").value}.xls`, "application/vnd.ms-excel;charset=utf-8");
     }
 
-    async function reorderUndatedTodos(sourceId, targetId) {
+    function todoReorderGroup(todo) {
+      return `${todo?.status === "in_progress" ? "priority" : "normal"}|${todo?.date || "undated"}`;
+    }
+
+    function todosCanReorderTogether(sourceId, targetId) {
+      const todos = contextTodos();
+      const source = todos.find((todo) => todo.id === sourceId);
+      const target = todos.find((todo) => todo.id === targetId);
+      return Boolean(source && target && !source.done && !target.done && todoReorderGroup(source) === todoReorderGroup(target));
+    }
+
+    let todoNativeDragSourceId = "";
+    let todoPointerDrag = null;
+
+    function clearTodoDragVisuals() {
+      todoNativeDragSourceId = "";
+      document.querySelectorAll(".todo-item.dragging, .todo-item.drag-target").forEach((item) => {
+        item.classList.remove("dragging", "drag-target");
+      });
+    }
+
+    function beginTodoPointerDrag(event, item, todoId) {
+      event.preventDefault();
+      todoPointerDrag = { pointerId: event.pointerId, sourceId: todoId, targetId: todoId, handle: event.currentTarget };
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+      item.classList.add("dragging");
+    }
+
+    function updateTodoPointerDrag(event) {
+      if (!todoPointerDrag || todoPointerDrag.pointerId !== event.pointerId) return;
+      event.preventDefault();
+      const target = document.elementFromPoint(event.clientX, event.clientY)?.closest(".todo-item");
+      document.querySelectorAll(".todo-item.drag-target").forEach((item) => item.classList.remove("drag-target"));
+      todoPointerDrag.targetId = todoPointerDrag.sourceId;
+      if (target && todosCanReorderTogether(todoPointerDrag.sourceId, target.dataset.todoId)) {
+        todoPointerDrag.targetId = target.dataset.todoId;
+        target.classList.add("drag-target");
+      }
+    }
+
+    function finishTodoPointerDrag(event) {
+      if (!todoPointerDrag || todoPointerDrag.pointerId !== event.pointerId) return;
+      event.preventDefault();
+      const { sourceId, targetId, handle } = todoPointerDrag;
+      if (handle.hasPointerCapture?.(event.pointerId)) handle.releasePointerCapture(event.pointerId);
+      todoPointerDrag = null;
+      clearTodoDragVisuals();
+      reorderTodos(sourceId, targetId);
+    }
+
+    function cancelTodoPointerDrag(event) {
+      if (!todoPointerDrag || todoPointerDrag.pointerId !== event.pointerId) return;
+      todoPointerDrag = null;
+      clearTodoDragVisuals();
+    }
+
+    async function reorderTodos(sourceId, targetId) {
       if (!sourceId || !targetId || sourceId === targetId) return;
+      const source = contextTodos().find((todo) => todo.id === sourceId);
+      if (!source || !todosCanReorderTogether(sourceId, targetId)) return;
+      const group = todoReorderGroup(source);
       const visible = contextTodos()
-        .filter((todo) => !todo.done && !todo.date && (!state.selectedClient || todo.client === state.selectedClient))
+        .filter((todo) => !todo.done && todoReorderGroup(todo) === group && (!state.selectedClient || todo.client === state.selectedClient))
         .sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
       const from = visible.findIndex((todo) => todo.id === sourceId);
       const to = visible.findIndex((todo) => todo.id === targetId);

@@ -113,6 +113,18 @@ test("brisanje opravila je majhna dostopna ikona kosa", () => {
   assert.match(html, /if \(!confirm\("Izbrisem to opravilo\?"\)\) return;/);
 });
 
+test("razvrscanje opravil deluje z rocajem, misjo in dotikom", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  assert.match(html, /draggable="\$\{reorderable \? "true" : "false"\}"/);
+  assert.match(html, /dragHandle\.addEventListener\("dragstart"/);
+  assert.match(html, /dragHandle\.addEventListener\("pointerdown"/);
+  assert.match(html, /document\.elementFromPoint\(event\.clientX, event\.clientY\)/);
+  assert.match(html, /function todosCanReorderTogether\(sourceId, targetId\)/);
+  assert.match(html, /async function reorderTodos\(sourceId, targetId\)/);
+  assert.match(html, /return dateOrder \|\| Number\(a\.order \|\| 0\) - Number\(b\.order \|\| 0\)/);
+  assert.doesNotMatch(html, /reorderUndatedTodos|item\.draggable = !todo\.date/);
+});
+
 test("novo opravilo je mogoce dodeliti sebi in vec drugim delavcem", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
   const server = fs.readFileSync(path.join(__dirname, "..", "outputs", "server.js"), "utf8");
