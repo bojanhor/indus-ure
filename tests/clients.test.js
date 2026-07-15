@@ -261,12 +261,12 @@ test("tipka nazaj med prijavo ne odpre stare Google prijave", () => {
   assert.match(html, /event\.state\?\.\[loggedInHistoryStateKey\] !== "base"/);
 });
 
-test("mobilni spodnji preklopnik ne prekriva konca strani", () => {
+test("mobilni preklopnik je na vrhu in ne prekriva konca strani", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
 
   assert.match(html, /\.main \{\s*order: 1;\s*padding-bottom: 16px;/);
-  assert.match(html, /\.sidebar \{\s*order: 2;\s*gap: 12px;\s*padding-bottom: calc\(104px \+ env\(safe-area-inset-bottom, 0px\)\)/);
-  assert.match(html, /bottom: max\(12px, env\(safe-area-inset-bottom, 0px\)\)/);
+  assert.match(html, /\.sidebar \{\s*order: 2;\s*gap: 12px;\s*padding-bottom: 16px;/);
+  assert.match(html, /\.view-switch \{\s*display: flex;\s*width: 100%;\s*position: static;/);
   assert.doesNotMatch(html, /\.main \{\s*order: 1;\s*padding-bottom: 86px;/);
 });
 
@@ -289,6 +289,20 @@ test("pogled opravil uporablja samo gumb in skupni obrazec ima Preklici", () => 
   assert.match(html, /\$\("cancelTodoDialog"\)\.addEventListener\("click", \(\) => \$\("todoDialog"\)\.close\(\)\)/);
   assert.doesNotMatch(html, /id="todoCreatePanel"|id="savePageTodo"|class="todo-create"/);
   assert.doesNotMatch(html, /todoFromPage|async function addTodo/);
+});
+
+test("glavni preklop pogleda je na vrhu in na telefonu ne prekriva vsebine", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  const topbar = html.match(/<section class="topbar">([\s\S]*?)<\/section>/)?.[1] || "";
+  assert.ok(topbar);
+  assert.equal((html.match(/class="view-switch"/g) || []).length, 1);
+  const switchIndex = topbar.indexOf('class="view-switch"');
+  const monthIndex = topbar.indexOf('class="month-title"');
+  const toolsIndex = topbar.indexOf('class="tools"');
+  assert.ok(switchIndex >= 0 && switchIndex < monthIndex && monthIndex < toolsIndex);
+  assert.match(html, /\.view-switch \{\s*display: flex;\s*width: 100%;\s*position: static;/);
+  assert.doesNotMatch(html, /\.view-switch\s*\{[^}]*position:\s*fixed/);
+  assert.doesNotMatch(html, /padding-bottom:\s*calc\(104px/);
 });
 
 test("iskanje odpira isti obrazec opravila kot koledar", () => {

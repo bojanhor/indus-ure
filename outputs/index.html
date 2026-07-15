@@ -252,7 +252,7 @@
       min-height: 76px;
       display: flex;
       align-items: center;
-      justify-content: space-between;
+      justify-content: flex-start;
       gap: 14px;
       padding: 14px 16px;
       position: sticky;
@@ -293,6 +293,8 @@
       align-items: center;
       flex-wrap: wrap;
       justify-content: flex-end;
+      margin-left: auto;
+      min-width: 0;
     }
 
     .view-switch {
@@ -1312,6 +1314,25 @@
     }
 
     @media (max-width: 1350px) {
+      .topbar {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr);
+      }
+      .topbar > .view-switch {
+        grid-column: 1 / -1;
+        grid-row: 1;
+        justify-self: start;
+      }
+      .month-title {
+        grid-column: 1;
+        grid-row: 2;
+      }
+      .tools {
+        grid-column: 2;
+        grid-row: 2;
+        justify-self: end;
+        margin-left: 0;
+      }
       .todo-layout { grid-template-columns: 1fr; }
       .client-list {
         display: flex;
@@ -1320,6 +1341,19 @@
         padding-bottom: 4px;
       }
       .client-card { min-width: 190px; }
+    }
+
+    @media (max-width: 1250px) {
+      .topbar { grid-template-columns: minmax(0, 1fr); }
+      .month-title,
+      .tools {
+        grid-column: 1;
+        grid-row: auto;
+      }
+      .tools {
+        justify-self: stretch;
+        justify-content: flex-start;
+      }
     }
 
     @media (max-width: 1100px) {
@@ -1366,15 +1400,31 @@
       .sidebar {
         order: 2;
         gap: 12px;
-        padding-bottom: calc(104px + env(safe-area-inset-bottom, 0px));
+        padding-bottom: 16px;
       }
-      .topbar { align-items: stretch; flex-direction: column; }
+      .topbar {
+        align-items: stretch;
+        grid-template-columns: minmax(0, 1fr);
+      }
+      .topbar > .view-switch,
+      .month-title,
+      .tools {
+        grid-column: 1;
+        grid-row: auto;
+        justify-self: stretch;
+      }
+      .month-title {
+        grid-template-columns: 38px minmax(0, 1fr) 38px;
+      }
+      .month-title #todayBtn {
+        grid-column: 1 / -1;
+        width: 100%;
+      }
       .tools {
         justify-content: stretch;
         display: grid;
         grid-template-columns: 1fr 1fr;
       }
-      .view-switch,
       .search,
       .account-btn,
       .tools-menu {
@@ -1390,17 +1440,17 @@
         width: auto;
       }
       .view-switch {
-        display: grid;
-        grid-template-columns: repeat(4, minmax(0, 1fr));
-        position: fixed;
-        left: 12px;
-        right: 12px;
-        bottom: max(12px, env(safe-area-inset-bottom, 0px));
-        z-index: 20;
-        box-shadow: 0 12px 34px rgba(0, 0, 0, 0.22);
+        display: flex;
+        width: 100%;
+        position: static;
+        box-shadow: none;
       }
       .view-btn {
+        flex: 1 1 0;
+        min-width: 0;
         min-height: 48px;
+        padding-left: 6px;
+        padding-right: 6px;
       }
       .search,
       .tools .secondary { width: 100%; max-width: none; }
@@ -1514,6 +1564,12 @@
 
     <main class="main">
       <section class="topbar">
+        <div class="view-switch" aria-label="Pogled">
+          <button class="view-btn active" id="calendarViewBtn" type="button">Koledar</button>
+          <button class="view-btn" id="todosViewBtn" type="button">Opravila</button>
+          <button class="view-btn admin-only" id="clientsViewBtn" type="button">Stranke</button>
+          <button class="view-btn admin-only" id="reportViewBtn" type="button">Obra&#269;un</button>
+        </div>
         <div class="month-title">
           <button class="icon-btn" id="prevMonth" type="button" title="Prej&#353;nji mesec">&lsaquo;</button>
           <h2 id="monthTitle"></h2>
@@ -1521,12 +1577,6 @@
           <button class="secondary" id="todayBtn" type="button">Danes</button>
         </div>
         <div class="tools">
-          <div class="view-switch" aria-label="Pogled">
-            <button class="view-btn active" id="calendarViewBtn" type="button">Koledar</button>
-            <button class="view-btn" id="todosViewBtn" type="button">Opravila</button>
-            <button class="view-btn admin-only" id="clientsViewBtn" type="button">Stranke</button>
-            <button class="view-btn admin-only" id="reportViewBtn" type="button">Obra&#269;un</button>
-          </div>
           <input class="search" id="clientSearch" placeholder="I&#353;&#269;i stranko, opravilo ali opis">
           <details class="tools-menu" id="toolsMenu">
             <summary class="account-btn" title="Nastavitve in orodja">
