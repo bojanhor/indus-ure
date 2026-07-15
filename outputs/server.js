@@ -120,6 +120,8 @@ const defaultUsers = {
 const sessions = new Map();
 const pendingGoogleLogins = new Map();
 const pendingGoogleConnections = new Map();
+const ENTRY_EDIT_LOCK_TTL_MS = 90_000;
+const entryEditLocks = new Map();
 
 function allowedGoogleUsers(db) {
   return Object.values(db.users || {}).filter((user) => user.email);
@@ -650,6 +652,58 @@ function canManageEntry(user, entry) {
   if (!entry) return false;
   if (user.role === "boss") return true;
   return (entry.syncUser || entry.createdBy) === user.id;
+}
+
+function publicEntryEditLock(lock) {
+  return {
+    entryId: lock.entryId,
+    lockedById: lock.userId,
+    lockedByName: lock.userName,
+    expiresAt: new Date(lock.expiresAt).toISOString()
+  };
+}
+
+function activeEntryEditLock(entryId, now = Date.now()) {
+  const id = String(entryId || "");
+  const lock = entryEditLocks.get(id);
+  if (!lock) return null;
+  if (lock.expiresAt <= now) {
+    entryEditLocks.delete(id);
+    return null;
+  }
+  return lock;
+}
+
+function acquireEntryEditLock(entryId, user, lockToken = "", now = Date.now()) {
+  const id = String(entryId || "");
+  const active = activeEntryEditLock(id, now);
+  if (active && (active.userId !== user.id || active.token !== String(lockToken || ""))) {
+    return { ok: false, lock: publicEntryEditLock(active) };
+  }
+  const lock = {
+    entryId: id,
+    userId: user.id,
+    userName: user.name || user.id,
+    token: active?.token || crypto.randomBytes(18).toString("hex"),
+    expiresAt: now + ENTRY_EDIT_LOCK_TTL_MS
+  };
+  entryEditLocks.set(id, lock);
+  return { ok: true, token: lock.token, lock: publicEntryEditLock(lock) };
+}
+
+function entryEditLockConflict(entryId, user, lockToken = "", now = Date.now()) {
+  const active = activeEntryEditLock(entryId, now);
+  if (!active) return null;
+  if (active.userId === user.id && active.token === String(lockToken || "")) return null;
+  return publicEntryEditLock(active);
+}
+
+function releaseEntryEditLock(entryId, user, lockToken = "", now = Date.now()) {
+  const active = activeEntryEditLock(entryId, now);
+  if (!active) return true;
+  if (active.userId !== user.id || active.token !== String(lockToken || "")) return false;
+  entryEditLocks.delete(String(entryId || ""));
+  return true;
 }
 
 function canManageTodo(user, todo) {
@@ -1430,6 +1484,10 @@ async function syncGoogleForUser(req, db, user) {
 
     if (event.status === "cancelled") {
       if (entryIndex >= 0 && ownedEntry) {
+        if (activeEntryEditLock(entry.id)) {
+          conflicts++;
+          continue;
+        }
         db.entries.splice(entryIndex, 1);
         pulled++;
       } else if (todoIndex >= 0 && ownedTodo) {
@@ -1440,6 +1498,10 @@ async function syncGoogleForUser(req, db, user) {
     }
 
     if (ownedEntry) {
+      if (entry && activeEntryEditLock(entry.id)) {
+        conflicts++;
+        continue;
+      }
       if (!entry) {
         const imported = entryFromGoogleEvent(event, user, db);
         if (imported) {
@@ -1498,6 +1560,7 @@ async function syncGoogleForUser(req, db, user) {
   }
 
   for (const entry of db.entries.filter((item) => item.syncUser === user.id && item.date && item.start && item.end)) {
+    if (activeEntryEditLock(entry.id)) continue;
     if (entry.googleEventId && !localItemChanged(entry)) continue;
     if (await pushGoogleItem(calendar, calendarId, entry, entryToGoogleEvent(entry), "entry")) pushed++;
   }
@@ -2286,12 +2349,45 @@ async function handleApi(req, res) {
       return;
     }
 
+    const entryLockMatch = url.pathname.match(/^\/api\/entries\/([^/]+)\/lock$/);
+    if (entryLockMatch && req.method === "POST") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      const id = decodeURIComponent(entryLockMatch[1]);
+      const body = await readBody(req);
+      const db = await readDbAsync();
+      const entry = db.entries.find((item) => item.id === id);
+      if (!canManageEntry(user, entry)) {
+        sendJson(res, 403, { error: "Tega vnosa ne mores urejati." });
+        return;
+      }
+      const result = acquireEntryEditLock(id, user, body.lockToken);
+      if (!result.ok) {
+        sendJson(res, 409, { error: `Vnos trenutno ureja ${result.lock.lockedByName || result.lock.lockedById}.`, lock: result.lock });
+        return;
+      }
+      sendJson(res, 200, { lockToken: result.token, lock: result.lock });
+      return;
+    }
+
+    if (entryLockMatch && req.method === "DELETE") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      const id = decodeURIComponent(entryLockMatch[1]);
+      const body = await readBody(req);
+      releaseEntryEditLock(id, user, body.lockToken);
+      sendJson(res, 200, { ok: true });
+      return;
+    }
+
     const match = url.pathname.match(/^\/api\/entries\/([^/]+)$/);
     if (match && req.method === "PUT") {
       const user = await requireUser(req, res);
       if (!user) return;
       const id = decodeURIComponent(match[1]);
-      let entry = cleanEntry(await readBody(req));
+      const body = await readBody(req);
+      const editLockToken = String(body.editLockToken || "");
+      let entry = cleanEntry(body);
       const validation = validateEntry(entry);
       if (validation) {
         sendJson(res, 400, { error: validation });
@@ -2313,6 +2409,11 @@ async function handleApi(req, res) {
         sendJson(res, 403, { error: "Tega vnosa ne mores spreminjati." });
         return;
       }
+      const editLock = entryEditLockConflict(id, user, editLockToken);
+      if (editLock) {
+        sendJson(res, 409, { error: `Vnos trenutno ureja ${editLock.lockedByName || editLock.lockedById}.`, lock: editLock });
+        return;
+      }
       entry = entryForUserRole(user, entry, db.entries[index]);
       if (user.role !== "boss" && entryIsLocked(db, db.entries[index]) && lockedFieldChanged(db.entries[index], entry)) {
         sendJson(res, 403, { error: "To obdobje je obracunano. Ure, kilometrina in start od doma so zaklenjeni." });
@@ -2329,6 +2430,7 @@ async function handleApi(req, res) {
         history: [...(db.entries[index].history || []), audit(user, "spremenjeno")]
       };
       await writeDbAsync(db);
+      releaseEntryEditLock(id, user, editLockToken);
       sendJson(res, 200, { entries: visibleEntriesForUser(db, user) });
       return;
     }
@@ -2337,10 +2439,17 @@ async function handleApi(req, res) {
       const user = await requireUser(req, res);
       if (!user) return;
       const id = decodeURIComponent(match[1]);
+      const body = await readBody(req);
+      const editLockToken = String(body.editLockToken || "");
       const db = await readDbAsync();
       const entry = db.entries.find((item) => item.id === id);
       if (!canManageEntry(user, entry)) {
         sendJson(res, 403, { error: "Tega vnosa ne mores izbrisati." });
+        return;
+      }
+      const editLock = entryEditLockConflict(id, user, editLockToken);
+      if (editLock) {
+        sendJson(res, 409, { error: `Vnos trenutno ureja ${editLock.lockedByName || editLock.lockedById}.`, lock: editLock });
         return;
       }
       if (user.role !== "boss" && entryIsLocked(db, entry)) {
@@ -2350,6 +2459,7 @@ async function handleApi(req, res) {
       await deleteGoogleEventForItem(req, db, entry);
       db.entries = db.entries.filter((item) => item.id !== id);
       await writeDbAsync(db);
+      releaseEntryEditLock(id, user, editLockToken);
       sendJson(res, 200, { entries: visibleEntriesForUser(db, user) });
       return;
     }
@@ -2555,10 +2665,14 @@ if (require.main === module) {
 }
 
 module.exports = {
+  ENTRY_EDIT_LOCK_TTL_MS,
   GOOGLE_CALENDAR_SCOPE_VERSION,
   INDUS_GOOGLE_APP_ID,
   TODO_STATUS_DEFINITIONS,
+  acquireEntryEditLock,
+  activeEntryEditLock,
   deleteOwnedGoogleEvent,
+  entryEditLockConflict,
   isIndusOwnedGoogleEvent,
   pushGoogleItem,
   canManageEntry,
@@ -2572,6 +2686,7 @@ module.exports = {
   localItemChanged,
   normalizeDb,
   parseGoogleEventDescription,
+  releaseEntryEditLock,
   remoteGoogleChangeWins,
   syncUserForRequest,
   todoAssigneesForRequest,

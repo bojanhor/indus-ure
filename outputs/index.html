@@ -2024,6 +2024,10 @@
       workContext: "",
       googleSyncing: false,
       sharedDataRefreshing: false,
+      entryEditLock: null,
+      entryLockHeartbeat: null,
+      entryLockRenewPromise: null,
+      entryLockPending: false,
       token: localStorage.getItem(tokenKey) || ""
     };
 
@@ -2431,9 +2435,16 @@
     }
 
     async function saveEntryToServer(entry) {
+      if (entry.id && state.entryEditLock?.entryId === entry.id) {
+        await pauseEntryLockHeartbeat();
+      }
       const method = entry.id ? "PUT" : "POST";
       const path = entry.id ? `/api/entries/${entry.id}` : "/api/entries";
-      const data = await api(path, { method, body: JSON.stringify(entry) });
+      const editLockToken = entry.id && state.entryEditLock?.entryId === entry.id
+        ? state.entryEditLock.token
+        : "";
+      const payload = editLockToken ? { ...entry, editLockToken } : entry;
+      const data = await api(path, { method, body: JSON.stringify(payload) });
       state.entries = data.entries;
       if (data.todos) state.todos = data.todos;
       refreshClientList();
@@ -2441,7 +2452,14 @@
     }
 
     async function deleteEntryFromServer(id) {
-      const data = await api(`/api/entries/${id}`, { method: "DELETE" });
+      await pauseEntryLockHeartbeat();
+      const editLockToken = state.entryEditLock?.entryId === id
+        ? state.entryEditLock.token
+        : "";
+      const data = await api(`/api/entries/${id}`, {
+        method: "DELETE",
+        body: JSON.stringify({ editLockToken })
+      });
       state.entries = data.entries;
       refreshClientList();
       render();
@@ -3531,8 +3549,99 @@
       `).join("");
     }
 
-    function openDialog(entry = {}) {
+    function entryLockUrl(entryId) {
+      return `/api/entries/${encodeURIComponent(entryId)}/lock`;
+    }
+
+    function clearEntryEditLockState() {
+      if (state.entryLockHeartbeat) clearInterval(state.entryLockHeartbeat);
+      state.entryLockHeartbeat = null;
+      state.entryEditLock = null;
+    }
+
+    async function pauseEntryLockHeartbeat() {
+      if (state.entryLockHeartbeat) clearInterval(state.entryLockHeartbeat);
+      state.entryLockHeartbeat = null;
+      if (state.entryLockRenewPromise) await state.entryLockRenewPromise;
+    }
+
+    function renewEntryEditLock() {
+      const current = state.entryEditLock;
+      if (!current) return Promise.resolve();
+      if (state.entryLockRenewPromise) return state.entryLockRenewPromise;
+      const renewal = (async () => {
+        try {
+          const data = await api(entryLockUrl(current.entryId), {
+            method: "POST",
+            body: JSON.stringify({ lockToken: current.token })
+          });
+          if (state.entryEditLock?.entryId === current.entryId && state.entryEditLock?.token === current.token) {
+            state.entryEditLock = { entryId: current.entryId, token: data.lockToken, expiresAt: data.lock?.expiresAt || "" };
+          }
+        } catch (error) {
+          if (state.entryEditLock?.entryId !== current.entryId || state.entryEditLock?.token !== current.token) return;
+          clearEntryEditLockState();
+          if ($("entryDialog").open) $("entryDialog").close();
+          alert(error.message);
+        }
+      })();
+      state.entryLockRenewPromise = renewal;
+      renewal.finally(() => {
+        if (state.entryLockRenewPromise === renewal) state.entryLockRenewPromise = null;
+      });
+      return renewal;
+    }
+
+    async function acquireEntryEditLockForDialog(entryId) {
+      if (state.entryLockPending) return false;
+      state.entryLockPending = true;
+      try {
+        const current = state.entryEditLock?.entryId === entryId ? state.entryEditLock : null;
+        const data = await api(entryLockUrl(entryId), {
+          method: "POST",
+          body: JSON.stringify({ lockToken: current?.token || "" })
+        });
+        if (state.entryLockHeartbeat) clearInterval(state.entryLockHeartbeat);
+        state.entryEditLock = { entryId, token: data.lockToken, expiresAt: data.lock?.expiresAt || "" };
+        state.entryLockHeartbeat = setInterval(renewEntryEditLock, 20_000);
+        return true;
+      } catch (error) {
+        alert(error.message);
+        return false;
+      } finally {
+        state.entryLockPending = false;
+      }
+    }
+
+    async function releaseEntryEditLockForDialog() {
+      const openedLock = state.entryEditLock;
+      await pauseEntryLockHeartbeat();
+      const current = state.entryEditLock?.entryId === openedLock?.entryId ? state.entryEditLock : openedLock;
+      clearEntryEditLockState();
+      if (!current) return;
+      try {
+        await api(entryLockUrl(current.entryId), {
+          method: "DELETE",
+          body: JSON.stringify({ lockToken: current.token })
+        });
+      } catch {}
+    }
+
+    function releaseEntryEditLockOnPageHide() {
+      const current = state.entryEditLock;
+      clearEntryEditLockState();
+      if (!current || !state.token) return;
+      fetch(entryLockUrl(current.entryId), {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${state.token}` },
+        body: JSON.stringify({ lockToken: current.token }),
+        keepalive: true
+      }).catch(() => {});
+    }
+
+    async function openDialog(entry = {}) {
       const existing = Boolean(entry.id);
+      if (existing && !(await acquireEntryEditLockForDialog(entry.id))) return;
       if (!existing && !entry.todoId) {
         startTodoForDate(entry.date);
         return;
@@ -4089,6 +4198,8 @@
     $("deleteEntry").addEventListener("click", () => deleteDialogEntry().catch((error) => alert(error.message)));
     $("duplicateEntry").addEventListener("click", () => duplicateDialogEntry().catch((error) => alert(error.message)));
     $("closeDialog").addEventListener("click", () => $("entryDialog").close());
+    $("entryDialog").addEventListener("close", releaseEntryEditLockForDialog);
+    window.addEventListener("pagehide", releaseEntryEditLockOnPageHide);
     document.querySelectorAll(".status-switch button").forEach((button) => {
       button.addEventListener("click", () => setDialogStatus(button.dataset.status));
     });

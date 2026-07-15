@@ -2,11 +2,16 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 
 const {
+  ENTRY_EDIT_LOCK_TTL_MS,
+  acquireEntryEditLock,
+  activeEntryEditLock,
   canManageEntry,
   canManageTodo,
+  entryEditLockConflict,
   sourceTodoForNewEntry,
   entryForUserRole,
   defaultHourlyRateForUser,
+  releaseEntryEditLock,
   syncUserForRequest,
   todoAssigneesForRequest,
   todoForUserRole,
@@ -142,4 +147,33 @@ test("nov koledarski vnos mora izvirati iz lastnega opravila z istim datumom", (
 
   sourceDb.entries.push({ id: "entry", sourceTodoId: "own" });
   assert.equal(sourceTodoForNewEntry(sourceDb, worker, ownEntry), null);
+});
+
+test("koledarski vnos lahko istocasno ureja samo en uporabnik ali zavihek", () => {
+  const entryId = "entry-lock-test";
+  const bojan = { id: "bojan", name: "Bojan", role: "boss" };
+  const ibro = { id: "ibro", name: "Ibro", role: "worker" };
+  const startedAt = 1_000;
+
+  const first = acquireEntryEditLock(entryId, bojan, "", startedAt);
+  assert.equal(first.ok, true);
+  assert.ok(first.token);
+  assert.equal(activeEntryEditLock(entryId, startedAt + 1)?.userId, "bojan");
+
+  const otherUser = acquireEntryEditLock(entryId, ibro, "", startedAt + 2);
+  assert.equal(otherUser.ok, false);
+  assert.equal(otherUser.lock.lockedByName, "Bojan");
+  assert.equal(acquireEntryEditLock(entryId, bojan, "", startedAt + 3).ok, false);
+  assert.equal(entryEditLockConflict(entryId, bojan, first.token, startedAt + 4), null);
+  assert.equal(entryEditLockConflict(entryId, ibro, "", startedAt + 4)?.lockedById, "bojan");
+  assert.equal(releaseEntryEditLock(entryId, ibro, "", startedAt + 5), false);
+  assert.equal(releaseEntryEditLock(entryId, bojan, first.token, startedAt + 5), true);
+  assert.equal(activeEntryEditLock(entryId, startedAt + 6), null);
+
+  const expiring = acquireEntryEditLock(entryId, bojan, "", startedAt + 10);
+  assert.equal(expiring.ok, true);
+  const afterExpiry = acquireEntryEditLock(entryId, ibro, "", startedAt + 10 + ENTRY_EDIT_LOCK_TTL_MS + 1);
+  assert.equal(afterExpiry.ok, true);
+  assert.equal(afterExpiry.lock.lockedByName, "Ibro");
+  assert.equal(releaseEntryEditLock(entryId, ibro, afterExpiry.token, startedAt + 10 + ENTRY_EDIT_LOCK_TTL_MS + 2), true);
 });

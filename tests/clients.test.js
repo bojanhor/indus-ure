@@ -198,3 +198,19 @@ test("skupni podatki se osvezujejo samodejno in ne prek rocnega gumba", () => {
   assert.match(html, /active\?\.matches\('input, textarea, select/);
   assert.match(html, /await loadAll\(\)/);
 });
+
+test("urejanje koledarskega vnosa uporablja strezniski zaklep", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  const server = fs.readFileSync(path.join(__dirname, "..", "outputs", "server.js"), "utf8");
+  assert.match(html, /acquireEntryEditLockForDialog/);
+  assert.match(html, /setInterval\(renewEntryEditLock, 20_000\)/);
+  assert.match(html, /await pauseEntryLockHeartbeat\(\)/);
+  assert.match(html, /addEventListener\("close", releaseEntryEditLockForDialog\)/);
+  assert.match(html, /editLockToken/);
+  assert.match(server, /const entryLockMatch = url\.pathname\.match/);
+  assert.match(server, /entryLockMatch && req\.method === "POST"/);
+  assert.match(server, /entryEditLockConflict\(id, user, editLockToken\)/);
+  assert.match(server, /sendJson\(res, 409, \{ error: `Vnos trenutno ureja/);
+  assert.match(server, /if \(activeEntryEditLock\(entry\.id\)\) continue/);
+  assert.match(server, /releaseEntryEditLock\(id, user, editLockToken\)/);
+});
