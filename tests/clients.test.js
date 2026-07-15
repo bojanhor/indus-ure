@@ -261,6 +261,15 @@ test("tipka nazaj med prijavo ne odpre stare Google prijave", () => {
   assert.match(html, /event\.state\?\.\[loggedInHistoryStateKey\] !== "base"/);
 });
 
+test("mobilni spodnji preklopnik ne prekriva konca strani", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+
+  assert.match(html, /\.main \{\s*order: 1;\s*padding-bottom: 16px;/);
+  assert.match(html, /\.sidebar \{\s*order: 2;\s*gap: 12px;\s*padding-bottom: calc\(104px \+ env\(safe-area-inset-bottom, 0px\)\)/);
+  assert.match(html, /bottom: max\(12px, env\(safe-area-inset-bottom, 0px\)\)/);
+  assert.doesNotMatch(html, /\.main \{\s*order: 1;\s*padding-bottom: 86px;/);
+});
+
 test("opravilo ima loceno ime in dolg vecvrsticni opis", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
   assert.match(html, /<label class="todo-title-field">Ime opravila/);

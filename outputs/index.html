@@ -1488,11 +1488,12 @@
       }
       .main {
         order: 1;
-        padding-bottom: 86px;
+        padding-bottom: 16px;
       }
       .sidebar {
         order: 2;
         gap: 12px;
+        padding-bottom: calc(104px + env(safe-area-inset-bottom, 0px));
       }
       .topbar { align-items: stretch; flex-direction: column; }
       .tools {
@@ -1521,7 +1522,7 @@
         position: fixed;
         left: 12px;
         right: 12px;
-        bottom: 12px;
+        bottom: max(12px, env(safe-area-inset-bottom, 0px));
         z-index: 20;
         box-shadow: 0 12px 34px rgba(0, 0, 0, 0.22);
       }
