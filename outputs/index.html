@@ -1436,7 +1436,8 @@
               <input id="pageTodoDate" type="date">
             </label>
             <label>Stranka
-              <input id="pageTodoClient" list="clientList" placeholder="Stranka ali interno">
+              <input id="pageTodoClient" list="todoClientList" placeholder="Alias iz baze strank">
+              <datalist id="todoClientList"></datalist>
             </label>
             <label>Status
               <select id="pageTodoStatus">
@@ -2885,6 +2886,13 @@
         ...clients.map((client) => `<option value="${escapeHtml(client)}"></option>`),
         ...aliases
       ].join("");
+      const todoAliases = [...new Map(state.clients
+        .filter((client) => client.clientId && client.search)
+        .map((client) => [normalizeText(client.search), client])).values()]
+        .sort((a, b) => a.search.localeCompare(b.search, "sl"));
+      $("todoClientList").innerHTML = todoAliases
+        .map((client) => `<option value="${escapeHtml(client.search)}" label="${escapeHtml(client.name)}"></option>`)
+        .join("");
     }
 
     function currentMonthKey() {

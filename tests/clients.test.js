@@ -1,4 +1,6 @@
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 const test = require("node:test");
 
 const {
@@ -33,6 +35,7 @@ test("Google Sheet A-I se prebere brez spreminjanja njegove strukture", () => {
   assert.equal(result.missingTax, 1);
   assert.equal(result.duplicateTax, 2);
   assert.equal(result.clients[0].clientId, "SI12345678");
+  assert.equal(result.clients[0].search, "Novak");
   assert.equal(result.clients[0].email, "info@novak.si");
   assert.equal(result.clients[1].clientId, "");
 });
@@ -62,4 +65,11 @@ test("nova stranka se zapise v devet stolpcev baze strank", () => {
   assert.equal(sheetAppendRange("'Baza Strank'!A:I"), "'Baza Strank'!A:I");
   assert.equal(findFirstEmptyClientRow([["glava"], ["_ROCNI_"], ["x", "Stranka"], [null, null, null, null, null, null, null, null, "NE"]]), 4);
   assert.equal(findFirstEmptyClientRow([["glava"], ["x", "Stranka"]]), 0);
+});
+
+test("novo opravilo ponuja aliase iz prvega stolpca Google Sheeta", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  assert.match(html, /id="pageTodoClient" list="todoClientList"/);
+  assert.match(html, /\$\("todoClientList"\)\.innerHTML = todoAliases/);
+  assert.match(html, /value="\$\{escapeHtml\(client\.search\)\}"/);
 });
