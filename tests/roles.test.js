@@ -31,6 +31,7 @@ const {
   todoAssigneesForRequest,
   todoEditLockConflict,
   todoForUserRole,
+  validTodoAttachmentDataUrl,
   visibleDebtsForUser,
   visibleEntriesForUser,
   visibleTodosForUser
@@ -283,4 +284,13 @@ test("zaklep skupnega opravila velja za vse dodeljene delavce", () => {
   assert.equal(releaseTodoAssignmentEditLock(groupDb, groupDb.todos[0], ibro, lock.token, startedAt + 3), true);
   assert.equal(activeTodoEditLock("group-ibro", startedAt + 4), null);
   assert.equal(activeTodoEditLock("group-bojan", startedAt + 4), null);
+});
+
+test("priloge sprejmejo pravi PDF in zavrnejo preimenovano datoteko", () => {
+  const pdf = `data:application/pdf;base64,${Buffer.from("%PDF-1.7\n%%EOF").toString("base64")}`;
+  assert.equal(validTodoAttachmentDataUrl(pdf), true);
+  const disguised = `data:application/pdf;base64,${Buffer.from("<html>ni pdf</html>").toString("base64")}`;
+  assert.equal(validTodoAttachmentDataUrl(disguised), false);
+  const html = `data:text/html;base64,${Buffer.from("<script>alert(1)</script>").toString("base64")}`;
+  assert.equal(validTodoAttachmentDataUrl(html), false);
 });

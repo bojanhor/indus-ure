@@ -100,6 +100,12 @@ test("osnovni pogled priloge samo prikazuje, dodajanje pa ostane v obrazcu", () 
   assert.match(html, /<details class="todo-description-details todo-attachments-details">[\s\S]*?<summary>Priloge <span class="todo-details-count">/);
   assert.doesNotMatch(html, /class="secondary show-photos"/);
   assert.match(html, /id="todoFormPhotoInput"[^>]*type="file"/);
+  assert.match(html, /id="todoFormPhotoInput"[^>]*accept="image\/\*,application\/pdf,\.pdf"[^>]*multiple/);
+  assert.match(html, /async function todoAttachmentFromFile\(file\)/);
+  assert.match(html, /file\.size > 1_500_000/);
+  assert.match(html, /todoAttachmentsDataLength\(state\.todoDialogPhotos\) \+ attachment\.data\.length > 4_800_000/);
+  assert.match(html, /class="todo-pdf-preview"[^>]*target="_blank"[^>]*rel="noopener noreferrer"/);
+  assert.match(html, /isPdfAttachment\(photo\) \? "PDF" : "SLIKA"/);
   assert.doesNotMatch(html, /class="hidden-file todo-photo-input"/);
   assert.doesNotMatch(html, />Fotografije<\/button>/);
   assert.doesNotMatch(html, />Dodaj foto<input/);

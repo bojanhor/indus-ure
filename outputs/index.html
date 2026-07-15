@@ -1007,6 +1007,30 @@
       background: #edf2ee;
     }
 
+    .todo-pdf-preview {
+      width: 100%;
+      aspect-ratio: 4 / 3;
+      display: grid;
+      place-items: center;
+      background: #fff1f1;
+      color: #a52e2e;
+      font-size: 22px;
+      font-weight: 900;
+      text-decoration: none;
+    }
+
+    .todo-pdf-preview:hover,
+    .todo-pdf-preview:focus-visible {
+      background: #f8dddd;
+    }
+
+    .todo-form-file-kind {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 800;
+      margin-right: 6px;
+    }
+
     .photo-card div {
       padding: 0 10px;
       display: grid;
@@ -1036,6 +1060,15 @@
 
     .hidden-file {
       display: none;
+    }
+
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+      white-space: nowrap;
     }
 
     .report-view {
@@ -2002,8 +2035,9 @@
         <div class="todo-form-attachments">
           <strong>Priloge</strong>
           <div id="todoFormPhotoList"></div>
-          <label class="secondary add-photo">Dodaj prilogo
-            <input class="hidden-file" id="todoFormPhotoInput" type="file" accept="image/*" multiple>
+          <label class="secondary add-photo">Dodaj slike ali PDF
+            <input class="hidden-file" id="todoFormPhotoInput" type="file" accept="image/*,application/pdf,.pdf" multiple>
+            <span class="sr-only">Izberi slike iz galerije, fotografije ali PDF datoteke</span>
           </label>
         </div>
         <div class="audit-box hidden" id="todoFormAudit"></div>
@@ -3025,7 +3059,7 @@
             </div>
             ${todo.client || (todo.photos || []).length ? `<div class="todo-secondary-meta">
               ${todo.client ? `<span class="todo-chip">${escapeHtml(todo.client)}</span>` : ""}
-              ${(todo.photos || []).length ? `<span class="todo-chip">${(todo.photos || []).length} foto</span>` : ""}
+              ${(todo.photos || []).length ? `<span class="todo-chip">${(todo.photos || []).length} prilog</span>` : ""}
             </div>` : ""}
             <div class="todo-compact-actions">
             ${todo.notes ? `<details class="todo-description-details">
@@ -3103,7 +3137,7 @@
         }
         item.querySelectorAll(".remove-photo").forEach((button) => {
           button.addEventListener("click", async () => {
-            if (!confirm("Izbrisem to fotografijo?")) return;
+            if (!confirm("Izbrisem to prilogo?")) return;
             await saveTodoToServer({
               ...todo,
               photos: (todo.photos || []).filter((photo) => photo.id !== button.dataset.photoId)
@@ -3114,18 +3148,23 @@
       });
     }
 
+    function isPdfAttachment(photo) {
+      return String(photo?.data || "").startsWith("data:application/pdf;base64,");
+    }
+
     function renderTodoPhotoHtml(todo) {
       if (!(todo.photos || []).length) return "";
-      return `<div class="todo-photos-inline">${todo.photos.map((photo) => `
-        <article class="photo-card">
-          <img src="${escapeHtml(photo.data)}" alt="${escapeHtml(photo.name || "Fotografija")}">
+      return `<div class="todo-photos-inline">${todo.photos.map((photo) => {
+        const pdf = isPdfAttachment(photo);
+        return `<article class="photo-card">
+          ${pdf ? `<a class="todo-pdf-preview" href="${escapeHtml(photo.data)}" target="_blank" rel="noopener noreferrer" aria-label="Odpri PDF ${escapeHtml(photo.name || "Priloga")}">PDF</a>` : `<img src="${escapeHtml(photo.data)}" alt="${escapeHtml(photo.name || "Fotografija")}">`}
           <div>
-            <strong>${escapeHtml(photo.name || "Fotografija")}</strong>
+            <strong>${escapeHtml(photo.name || "Priloga")}</strong>
             <span class="todo-meta">dodal: ${escapeHtml(photo.createdByName || "-")}</span>
             <button class="danger remove-photo" type="button" data-photo-id="${escapeHtml(photo.id)}">Izbrisi</button>
           </div>
-        </article>
-      `).join("")}</div>`;
+        </article>`;
+      }).join("")}</div>`;
     }
 
     function renderTodoFormAssignees(selectedIds = []) {
@@ -3147,7 +3186,7 @@
       const list = $("todoFormPhotoList");
       list.innerHTML = state.todoDialogPhotos.map((photo) => `
         <div class="todo-form-photo-row">
-          <span>${escapeHtml(photo.name || "Priloga")}</span>
+          <span><span class="todo-form-file-kind">${isPdfAttachment(photo) ? "PDF" : "SLIKA"}</span>${escapeHtml(photo.name || "Priloga")}</span>
           <button class="danger remove-todo-form-photo" type="button" data-photo-id="${escapeHtml(photo.id)}">Odstrani</button>
         </div>
       `).join("");
@@ -3394,7 +3433,7 @@
         html: `
         <div class="client-work-row">
           <strong>${todo.date ? formatDate(todo.date) : "Brez datuma"}</strong>
-          <span><strong>${escapeHtml(todo.title)}</strong>${todo.notes ? `<span class="report-todo-description">${linkifyText(todo.notes)}</span>` : ""}<small>${escapeHtml(todo.client || "")} | ${todo.done ? "opravljeno" : todoStatus(todo.status).label} | ${(todo.photos || []).length} foto</small></span>
+          <span><strong>${escapeHtml(todo.title)}</strong>${todo.notes ? `<span class="report-todo-description">${linkifyText(todo.notes)}</span>` : ""}<small>${escapeHtml(todo.client || "")} | ${todo.done ? "opravljeno" : todoStatus(todo.status).label} | ${(todo.photos || []).length} prilog</small></span>
           <button class="secondary open-report-todo" type="button" data-todo-id="${escapeHtml(todo.id)}">Uredi opravilo</button>
         </div>
       ` }));
@@ -3898,6 +3937,37 @@
       });
     }
 
+    function readFileAsDataUrl(file, errorMessage) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ""));
+        reader.onerror = () => reject(new Error(errorMessage));
+        reader.readAsDataURL(file);
+      });
+    }
+
+    async function todoAttachmentFromFile(file) {
+      const pdf = file.type === "application/pdf" || /\.pdf$/i.test(file.name);
+      if (pdf) {
+        if (file.size > 1_500_000) throw new Error("PDF je prevelik. Najvecja dovoljena velikost je 1,5 MB.");
+        let data = await readFileAsDataUrl(file, "PDF datoteke ni bilo mogoce prebrati.");
+        data = data.replace(/^data:[^;]*;base64,/, "data:application/pdf;base64,");
+        return {
+          id: window.crypto?.randomUUID ? window.crypto.randomUUID() : `${Date.now()}-${Math.random()}`,
+          name: file.name || "priloga.pdf",
+          data,
+          createdBy: state.user?.id || "",
+          createdByName: state.user?.name || "",
+          createdAt: new Date().toISOString()
+        };
+      }
+      if (file.type.startsWith("image/")) return resizeImageAsDataUrl(file);
+      throw new Error("Izberi sliko ali PDF datoteko.");
+    }
+
+    function todoAttachmentsDataLength(items) {
+      return items.reduce((total, item) => total + String(item.data || "").length, 0);
+    }
     function escapeHtml(value) {
       return String(value || "")
         .replaceAll("&", "&amp;")
@@ -4059,7 +4129,9 @@
         const remaining = Math.max(0, 8 - state.todoDialogPhotos.length);
         const files = [...event.target.files].slice(0, remaining);
         for (const file of files) {
-          state.todoDialogPhotos.push(await resizeImageAsDataUrl(file));
+          const attachment = await todoAttachmentFromFile(file);
+          if (todoAttachmentsDataLength(state.todoDialogPhotos) + attachment.data.length > 4_800_000) throw new Error("Priloge so skupaj prevelike. Odstrani katero od njih.");
+          state.todoDialogPhotos.push(attachment);
         }
         renderTodoFormPhotos();
       } catch (error) {

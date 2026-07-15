@@ -61,6 +61,10 @@ const IMAGE_SIGNATURES = {
   jpeg: (buffer) => buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff,
   webp: (buffer) => buffer.length >= 12 && buffer.subarray(0, 4).toString("ascii") === "RIFF" && buffer.subarray(8, 12).toString("ascii") === "WEBP"
 };
+const MAX_TODO_IMAGE_DATA_LENGTH = 700_000;
+const MAX_TODO_PDF_DATA_LENGTH = 2_100_000;
+const MAX_TODO_ATTACHMENTS_DATA_LENGTH = 5_000_000;
+
 
 function validImageDataUrl(value, maxEncodedLength) {
   if (typeof value !== "string" || value.length > maxEncodedLength) return false;
@@ -74,6 +78,33 @@ function validImageDataUrl(value, maxEncodedLength) {
   } catch {
     return false;
   }
+}
+
+function validPdfDataUrl(value, maxEncodedLength = MAX_TODO_PDF_DATA_LENGTH) {
+  if (typeof value !== "string" || value.length > maxEncodedLength) return false;
+  const match = value.match(/^data:application\/pdf;base64,([A-Za-z0-9+/]+={0,2})$/);
+  if (!match) return false;
+  try {
+    const buffer = Buffer.from(match[1], "base64");
+    if (buffer.length < 5 || buffer.subarray(0, 5).toString("ascii") !== "%PDF-") return false;
+    return buffer.toString("base64").replace(/=+$/, "") === match[1].replace(/=+$/, "");
+  } catch {
+    return false;
+  }
+}
+
+function validTodoAttachmentDataUrl(value) {
+  return validImageDataUrl(value, MAX_TODO_IMAGE_DATA_LENGTH) || validPdfDataUrl(value);
+}
+
+function limitTodoAttachmentsData(items) {
+  let total = 0;
+  return items.filter((item) => {
+    const length = String(item.data || "").length;
+    if (total + length > MAX_TODO_ATTACHMENTS_DATA_LENGTH) return false;
+    total += length;
+    return true;
+  });
 }
 
 function hashPassword(password, salt = crypto.randomBytes(16).toString("hex")) {
@@ -488,17 +519,17 @@ function normalizeDb(db = {}) {
       next.photos = [];
       changed = true;
     }
-    next.photos = next.photos
+    next.photos = limitTodoAttachmentsData(next.photos
       .map((photo) => ({
         id: photo.id || crypto.randomUUID(),
-        name: String(photo.name || "fotografija").slice(0, 120),
+        name: String(photo.name || "priloga").slice(0, 120),
         data: String(photo.data || ""),
         createdBy: photo.createdBy || next.createdBy || "system",
         createdByName: photo.createdByName || next.createdByName || "",
         createdAt: photo.createdAt || new Date().toISOString()
       }))
-      .filter((photo) => validImageDataUrl(photo.data, 700_000))
-      .slice(0, 8);
+      .filter((photo) => validTodoAttachmentDataUrl(photo.data))
+      .slice(0, 8));
     return next;
   });
 
@@ -1062,17 +1093,17 @@ function cleanTodo(input) {
     done: Boolean(input.done),
     billingHourlyRate: nonnegativeNumber(input.billingHourlyRate, null, 10_000),
     billingKm: nonnegativeNumber(input.billingKm, null, 1_000_000),
-    photos: photos
+    photos: limitTodoAttachmentsData(photos
       .map((photo) => ({
         id: photo.id || crypto.randomUUID(),
-        name: String(photo.name || "fotografija").slice(0, 120),
+        name: String(photo.name || "priloga").slice(0, 120),
         data: String(photo.data || ""),
         createdBy: photo.createdBy || "",
         createdByName: photo.createdByName || "",
         createdAt: photo.createdAt || new Date().toISOString()
       }))
-      .filter((photo) => validImageDataUrl(photo.data, 700_000))
-      .slice(0, 8)
+      .filter((photo) => validTodoAttachmentDataUrl(photo.data))
+      .slice(0, 8))
   };
 }
 
@@ -1120,7 +1151,8 @@ function validateTodo(todo) {
   if (!todo.title) return "Manjka opis opravila.";
   if (todo.client && !isUsableTaxId(todo.clientId)) return "Stranka nima veljavne davcne stevilke.";
   if (todo.date && !/^\d{4}-\d{2}-\d{2}$/.test(todo.date)) return "Datum opravila ni pravilen.";
-  if ((todo.photos || []).some((photo) => photo.data.length > 700_000)) return "Ena fotografija je prevelika.";
+  if ((todo.photos || []).some((photo) => !validTodoAttachmentDataUrl(photo.data))) return "Priloga ni veljavna slika ali PDF.";
+  if ((todo.photos || []).reduce((total, photo) => total + photo.data.length, 0) > MAX_TODO_ATTACHMENTS_DATA_LENGTH) return "Priloge so skupaj prevelike.";
   return "";
 }
 
@@ -2988,6 +3020,7 @@ module.exports = {
   sessionTokenHash,
   todoFromGoogleEvent,
   todoToGoogleEvent,
+  validTodoAttachmentDataUrl,
   visibleDebtsForUser,
   visibleEntriesForUser,
   visibleTodosForUser
