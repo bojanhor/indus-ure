@@ -117,7 +117,6 @@ const defaultUsers = {
   }
 };
 
-const sessions = new Map();
 const pendingGoogleLogins = new Map();
 const pendingGoogleConnections = new Map();
 const ENTRY_EDIT_LOCK_TTL_MS = 90_000;
@@ -132,6 +131,34 @@ function allowedGoogleUsers(db) {
 function userByEmail(db, email) {
   const normalized = String(email || "").toLowerCase();
   return allowedGoogleUsers(db).find((user) => String(user.email || "").toLowerCase() === normalized);
+}
+
+function sessionTokenHash(token) {
+  return crypto.createHash("sha256").update(String(token || "")).digest("hex");
+}
+
+function createSession(db, userId, now = Date.now()) {
+  const token = crypto.randomBytes(24).toString("hex");
+  if (!db.sessions || typeof db.sessions !== "object" || Array.isArray(db.sessions)) db.sessions = {};
+  for (const [hash, session] of Object.entries(db.sessions)) {
+    if (!session || Number(session.expiresAt) <= now) {
+      delete db.sessions[hash];
+    }
+  }
+  db.sessions[sessionTokenHash(token)] = { userId, expiresAt: now + SESSION_TTL_MS };
+  return token;
+}
+
+function sessionForToken(db, token, now = Date.now()) {
+  if (!token) return null;
+  const session = db.sessions?.[sessionTokenHash(token)];
+  if (!session || Number(session.expiresAt) <= now) return null;
+  return session;
+}
+
+function revokeSession(db, token) {
+  if (!token || !db.sessions) return false;
+  return delete db.sessions[sessionTokenHash(token)];
 }
 
 function normalizeDb(db = {}) {
@@ -226,6 +253,21 @@ function normalizeDb(db = {}) {
     }
     if (user.avatar && !validImageDataUrl(user.avatar, 1_500_000)) {
       user.avatar = "";
+      changed = true;
+    }
+  }
+
+  if (!db.sessions || typeof db.sessions !== "object" || Array.isArray(db.sessions)) {
+    db.sessions = {};
+    changed = true;
+  }
+  for (const [hash, session] of Object.entries(db.sessions)) {
+    const valid = /^[a-f0-9]{64}$/.test(hash)
+      && session && typeof session === "object"
+      && Boolean(db.users[session.userId])
+      && Number.isFinite(Number(session.expiresAt));
+    if (!valid) {
+      delete db.sessions[hash];
       changed = true;
     }
   }
@@ -480,7 +522,7 @@ function normalizeDb(db = {}) {
 function ensureDb() {
   if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
   if (!fs.existsSync(dbFile)) {
-    fs.writeFileSync(dbFile, JSON.stringify({ users: defaultUsers, entries: [], todos: [], debts: [], clients: [] }, null, 2), "utf8");
+    fs.writeFileSync(dbFile, JSON.stringify({ users: defaultUsers, sessions: {}, entries: [], todos: [], debts: [], clients: [] }, null, 2), "utf8");
     return;
   }
 
@@ -524,7 +566,7 @@ async function ensurePostgresDb() {
     if (existing.rowCount === 0) {
       await pool.query(
         "insert into app_state (id, data) values ($1, $2::jsonb)",
-        ["main", JSON.stringify({ users: defaultUsers, entries: [], todos: [], debts: [], clients: [], calendarToken: crypto.randomBytes(24).toString("hex") })]
+        ["main", JSON.stringify({ users: defaultUsers, sessions: {}, entries: [], todos: [], debts: [], clients: [], calendarToken: crypto.randomBytes(24).toString("hex") })]
       );
       return;
     }
@@ -888,14 +930,9 @@ function sessionTokenFromRequest(req) {
 
 async function getSessionUser(req) {
   const token = sessionTokenFromRequest(req);
-  const session = sessions.get(token);
-  if (!session) return null;
-  if (session.expiresAt <= Date.now()) {
-    sessions.delete(token);
-    return null;
-  }
-  session.expiresAt = Date.now() + SESSION_TTL_MS;
   const db = await readDbAsync();
+  const session = sessionForToken(db, token);
+  if (!session) return null;
   return db.users[session.userId] || null;
 }
 
@@ -1866,13 +1903,18 @@ async function handleApi(req, res) {
       const state = `login:${crypto.randomBytes(24).toString("hex")}`;
       pendingGoogleLogins.set(state, Date.now());
       const auth = googleClient(req);
-      const authUrl = auth.generateAuthUrl({
+      const automatic = url.searchParams.get("automatic") === "1";
+      const requestedLoginHint = String(url.searchParams.get("login_hint") || "").trim().toLowerCase();
+      const loginHint = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(requestedLoginHint) ? requestedLoginHint.slice(0, 254) : "";
+      const authOptions = {
         access_type: "online",
         state,
         scope: ["openid", "email", "profile"],
-        include_granted_scopes: true,
-        prompt: "select_account"
-      });
+        include_granted_scopes: true
+      };
+      if (!automatic) authOptions.prompt = "select_account";
+      if (loginHint) authOptions.login_hint = loginHint;
+      const authUrl = auth.generateAuthUrl(authOptions);
       sendJson(res, 200, { url: authUrl });
       return;
     }
@@ -1938,8 +1980,8 @@ async function handleApi(req, res) {
           sendText(res, 403, "Ta Google racun nima dostopa do INDUS URE. Dovoljena sta samo Ibro in Bojan.", "text/plain");
           return;
         }
-        const sessionToken = crypto.randomBytes(24).toString("hex");
-        sessions.set(sessionToken, { userId: user.id, expiresAt: Date.now() + SESSION_TTL_MS });
+        const sessionToken = createSession(db, user.id);
+        await writeDbAsync(db);
         const html = `<!doctype html>
 <html lang="sl">
 <head>
@@ -1951,6 +1993,8 @@ async function handleApi(req, res) {
   <p>Prijava je uspela. Odpiram INDUS URE...</p>
   <script>
     localStorage.setItem("indus-ure-token", ${JSON.stringify(sessionToken)});
+    localStorage.setItem("indus-ure-google-email", ${JSON.stringify(email)});
+    sessionStorage.removeItem("indus-ure-auto-login-at");
     location.replace("/");
   </script>
 </body>
@@ -2021,7 +2065,8 @@ async function handleApi(req, res) {
     }
 
     if (url.pathname === "/api/logout" && req.method === "POST") {
-      sessions.delete(sessionTokenFromRequest(req));
+      const db = await readDbAsync();
+      if (revokeSession(db, sessionTokenFromRequest(req))) await writeDbAsync(db);
       sendJson(res, 200, { ok: true });
       return;
     }
@@ -2816,6 +2861,7 @@ module.exports = {
   GOOGLE_CALENDAR_SCOPE_VERSION,
   INDUS_GOOGLE_APP_ID,
   TODO_STATUS_DEFINITIONS,
+  SESSION_TTL_MS,
   acquireEntryEditLock,
   acquireTodoEditLock,
   activeEntryEditLock,
@@ -2829,6 +2875,7 @@ module.exports = {
   sourceTodoForNewEntry,
   defaultHourlyRateForUser,
   entryForUserRole,
+  createSession,
   entryFromGoogleEvent,
   entryToGoogleEvent,
   googleEventChanged,
@@ -2841,8 +2888,11 @@ module.exports = {
   syncUserForRequest,
   todoAssigneeForUpdate,
   todoAssigneesForRequest,
+  revokeSession,
   todoEditLockConflict,
   todoForUserRole,
+  sessionForToken,
+  sessionTokenHash,
   todoFromGoogleEvent,
   todoToGoogleEvent,
   visibleDebtsForUser,

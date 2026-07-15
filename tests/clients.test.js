@@ -235,6 +235,20 @@ test("vsi pogledi uporabljajo en sam obrazec opravila", () => {
   assert.doesNotMatch(html, /saveDialogEntry|deleteDialogEntry|duplicateDialogEntry/);
 });
 
+test("potekla seja samodejno sprozi varno ponovno Google prijavo", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  const server = fs.readFileSync(path.join(__dirname, "..", "outputs", "server.js"), "utf8");
+
+  assert.match(html, /function recoverExpiredSession\(\)/);
+  assert.match(html, /response\.status === 401 && hadSession && recoverSession/);
+  assert.match(html, /requestGoogleLoginUrl\(true\)/);
+  assert.match(html, /sessionStorage\.setItem\(automaticLoginAttemptKey/);
+  assert.match(html, /location\.replace\(data\.url\)/);
+  assert.match(server, /db\.sessions\[sessionTokenHash\(token\)\]/);
+  assert.match(server, /await writeDbAsync\(db\);[\s\S]*localStorage\.setItem\("indus-ure-token"/);
+  assert.doesNotMatch(server, /const sessions = new Map\(\)/);
+});
+
 test("opravilo ima loceno ime in dolg vecvrsticni opis", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
   assert.match(html, /<label class="todo-title-field">Ime opravila/);

@@ -1990,6 +1990,9 @@
 
   <script>
     const tokenKey = "indus-ure-token";
+    const googleEmailKey = "indus-ure-google-email";
+    const automaticLoginAttemptKey = "indus-ure-auto-login-at";
+    const automaticLoginRetryDelayMs = 60_000;
     const workContextKey = "indus-ure-work-context";
     const statusLabels = {
       billed: "Ze obracunano",
@@ -2071,16 +2074,60 @@
       $("toolsMenu")?.removeAttribute("open");
     }
 
-    async function api(path, options = {}) {
-      const headers = {
-        "Content-Type": "application/json",
-        ...(options.headers || {})
-      };
-      if (state.token) headers.Authorization = `Bearer ${state.token}`;
-      const response = await fetch(path, { ...options, headers });
+    let sessionRecoveryPromise = null;
+
+    async function requestGoogleLoginUrl(automatic = false) {
+      const params = new URLSearchParams();
+      if (automatic) params.set("automatic", "1");
+      const loginHint = localStorage.getItem(googleEmailKey) || "";
+      if (automatic && loginHint) params.set("login_hint", loginHint);
+      const query = params.toString();
+      const response = await fetch("/api/auth/google-url" + (query ? "?" + query : ""), {
+        headers: { Accept: "application/json" }
+      });
       const text = await response.text();
       const data = text ? JSON.parse(text) : null;
-      if (!response.ok) throw new Error(data?.error || "Napaka pri povezavi.");
+      if (!response.ok || !data?.url) throw new Error(data?.error || "Google prijave ni bilo mogoce zagnati.");
+      return data;
+    }
+
+    function recoverExpiredSession() {
+      if (sessionRecoveryPromise) return sessionRecoveryPromise;
+      sessionRecoveryPromise = (async () => {
+        localStorage.removeItem(tokenKey);
+        state.token = "";
+        const lastAttempt = Number(sessionStorage.getItem(automaticLoginAttemptKey) || 0);
+        if (lastAttempt && Date.now() - lastAttempt < automaticLoginRetryDelayMs) {
+          throw new Error("Samodejna ponovna prijava ni uspela. Prijavi se z Googlom.");
+        }
+        const data = await requestGoogleLoginUrl(true);
+        sessionStorage.setItem(automaticLoginAttemptKey, String(Date.now()));
+        location.replace(data.url);
+        return new Promise(() => {});
+      })();
+      sessionRecoveryPromise.catch(() => {
+        sessionRecoveryPromise = null;
+      });
+      return sessionRecoveryPromise;
+    }
+
+    async function api(path, options = {}) {
+      const { recoverSession = true, ...requestOptions } = options;
+      const headers = {
+        "Content-Type": "application/json",
+        ...(requestOptions.headers || {})
+      };
+      const hadSession = Boolean(state.token);
+      if (hadSession) headers.Authorization = "Bearer " + state.token;
+      const response = await fetch(path, { ...requestOptions, headers });
+      const text = await response.text();
+      const data = text ? JSON.parse(text) : null;
+      if (response.status === 401 && hadSession && recoverSession) await recoverExpiredSession();
+      if (!response.ok) {
+        const error = new Error(data?.error || "Napaka pri povezavi.");
+        error.status = response.status;
+        throw error;
+      }
       return data;
     }
 
@@ -3898,8 +3945,9 @@
       event.preventDefault();
       try {
         $("googleLoginBtn").disabled = true;
-        const data = await api("/api/auth/google-url");
-        location.href = data.url;
+        sessionStorage.removeItem(automaticLoginAttemptKey);
+        const data = await requestGoogleLoginUrl(false);
+        location.replace(data.url);
       } catch (error) {
         $("googleLoginBtn").disabled = false;
         alert(error.message);
@@ -3908,7 +3956,7 @@
 
     $("logoutBtn").addEventListener("click", async () => {
       try {
-        await api("/api/logout", { method: "POST", body: JSON.stringify({}) });
+        await api("/api/logout", { method: "POST", body: JSON.stringify({}), recoverSession: false });
       } catch {
         // Lokalno odjavo izvedemo tudi, ce je seja ze potekla.
       }

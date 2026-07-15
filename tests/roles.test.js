@@ -3,6 +3,7 @@ const test = require("node:test");
 
 const {
   ENTRY_EDIT_LOCK_TTL_MS,
+  SESSION_TTL_MS,
   TODO_EDIT_LOCK_TTL_MS,
   acquireEntryEditLock,
   acquireTodoEditLock,
@@ -10,12 +11,16 @@ const {
   activeTodoEditLock,
   canManageEntry,
   canManageTodo,
+  createSession,
   entryEditLockConflict,
   sourceTodoForNewEntry,
   entryForUserRole,
   defaultHourlyRateForUser,
   releaseEntryEditLock,
   releaseTodoEditLock,
+  revokeSession,
+  sessionForToken,
+  sessionTokenHash,
   syncUserForRequest,
   todoAssigneeForUpdate,
   todoAssigneesForRequest,
@@ -48,6 +53,27 @@ test("sef vidi vse, delavec pa samo svoje podatke", () => {
   assert.deepEqual(visibleEntriesForUser(db, worker).map((item) => item.id), ["e1"]);
   assert.deepEqual(visibleTodosForUser(db, worker).map((item) => item.id), ["t1"]);
   assert.deepEqual(visibleDebtsForUser(db, worker).map((item) => item.id), ["d1"]);
+});
+
+test("seje prezivijo restart in v bazi ne hranijo dejanskega zetona", () => {
+  const now = 10_000;
+  const sessionDb = { sessions: {} };
+  const token = createSession(sessionDb, "bojan", now);
+  const hash = sessionTokenHash(token);
+
+  assert.equal(token.length, 48);
+  assert.equal(hash.length, 64);
+  assert.equal(Object.hasOwn(sessionDb.sessions, token), false);
+  assert.deepEqual(sessionForToken(sessionDb, token, now + 1), {
+    userId: "bojan",
+    expiresAt: now + SESSION_TTL_MS
+  });
+
+  const restoredDb = JSON.parse(JSON.stringify(sessionDb));
+  assert.equal(sessionForToken(restoredDb, token, now + 2)?.userId, "bojan");
+  assert.equal(sessionForToken(restoredDb, token, now + SESSION_TTL_MS), null);
+  assert.equal(revokeSession(restoredDb, token), true);
+  assert.equal(sessionForToken(restoredDb, token, now + 3), null);
 });
 
 test("delavec ne more upravljati tujih vnosov ali opravil", () => {
