@@ -238,6 +238,20 @@ test("nov koledarski dogodek tudi po dodatku form nastane samo iz opravila", () 
   assert.match(html, /sourceTodoId: \$\("entryTodoId"\)\.value/);
 });
 
+test("koledar, iskanje in porocilo odpirajo isti centralni obrazec dogodka", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  assert.match(html, /async function openEventForm\(entry = \{\}\)/);
+  assert.match(html, /event\.addEventListener\("click", \(\) => openEventForm\(entry\)\)/);
+  assert.match(html, /item\.addEventListener\("click", \(\) => openCalendarTodoForm\(todo, entries\)\)/);
+  assert.match(html, /function eventDraftFromTodo\(todo\)/);
+  assert.match(html, /function openCalendarTodoForm\(todo, entries = contextEntries\(\)\)/);
+  assert.match(html, /entries\.find\(\(entry\) => entry\.sourceTodoId === todo\.id\)/);
+  assert.match(html, /openEventForm\(linkedEntry\)/);
+  assert.match(html, /openEventForm\(eventDraftFromTodo\(todo\)\)/);
+  assert.match(html, /if \(entry\) openEventForm\(entry\)/);
+  assert.doesNotMatch(html, /function openDialog\(/);
+});
+
 test("skupni podatki se osvezujejo samodejno in ne prek rocnega gumba", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
   assert.doesNotMatch(html, /id="refreshBtn"/);

@@ -3029,7 +3029,7 @@
               ${["errand", "vacation"].includes(entry.status) ? "" : `<span class="client">${escapeHtml(entry.client)}</span>`}
               <span class="summary">${escapeHtml(entry.work || entry.material || statusLabels[entry.status])}</span>
             `;
-            event.addEventListener("click", () => openDialog(entry));
+            event.addEventListener("click", () => openEventForm(entry));
             day.appendChild(event);
           });
 
@@ -3041,23 +3041,7 @@
             item.type = "button";
             item.className = `day-todo todo-status-color ${todoStatusClass(todo.status)} ${todo.done ? "done" : ""}`;
             item.innerHTML = `${escapeHtml(todo.title)}${todo.client ? `<br><small>${escapeHtml(todo.client)}</small>` : ""}<br><small>${todoStatus(todo.status).label}</small>`;
-            item.addEventListener("click", () => {
-              if (todo.done) {
-                state.selectedClient = todo.client || "";
-                state.expandedTodoPhotos = todo.id;
-                setView("todos");
-                return;
-              }
-              openDialog({
-                date: todo.date,
-                client: todo.client || "",
-                work: todo.title,
-                notes: todo.notes || "",
-                start: "08:00",
-                end: "16:00",
-                todoId: todo.id
-              });
-            });
+            item.addEventListener("click", () => openCalendarTodoForm(todo, entries));
             day.appendChild(item);
           });
 
@@ -3821,7 +3805,7 @@
           <span>${escapeHtml(resultTitle)}<br><small>${escapeHtml(internal ? statusLabels[entry.status] : (entry.work || entry.material || ""))}${entry.people ? ` | ${escapeHtml(entry.people)}` : ""} | dodal: ${escapeHtml(entry.createdByName || "-")}</small></span>
           <span class="badge ${entry.status}">${statusLabels[entry.status]}</span>
         `;
-        item.addEventListener("click", () => openDialog(entry));
+        item.addEventListener("click", () => openEventForm(entry));
         panel.appendChild(item);
       });
     }
@@ -4034,7 +4018,32 @@
       }).catch(() => {});
     }
 
-    async function openDialog(entry = {}) {
+    function eventDraftFromTodo(todo) {
+      return {
+        date: todo.date,
+        client: todo.client || "",
+        work: todo.title,
+        notes: todo.notes || "",
+        start: "08:00",
+        end: "16:00",
+        todoId: todo.id
+      };
+    }
+
+    function openCalendarTodoForm(todo, entries = contextEntries()) {
+      const linkedEntry = entries.find((entry) => entry.sourceTodoId === todo.id);
+      if (linkedEntry) {
+        openEventForm(linkedEntry);
+        return;
+      }
+      if (todo.done) {
+        openTodoDialog(todo);
+        return;
+      }
+      openEventForm(eventDraftFromTodo(todo));
+    }
+
+    async function openEventForm(entry = {}) {
       const existing = Boolean(entry.id);
       if (existing && !(await acquireEntryEditLockForDialog(entry.id))) return;
       if (!existing && !entry.todoId) {
@@ -4571,7 +4580,7 @@
       const entryButton = event.target.closest(".open-report-entry");
       if (entryButton) {
         const entry = state.entries.find((item) => item.id === entryButton.dataset.entryId);
-        if (entry) openDialog(entry);
+        if (entry) openEventForm(entry);
         return;
       }
       const todoButton = event.target.closest(".open-report-todo");
