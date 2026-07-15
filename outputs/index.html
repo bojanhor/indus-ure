@@ -1089,6 +1089,24 @@
       color: var(--ink);
     }
 
+    .client-work-group {
+      display: grid;
+    }
+
+    .client-work-group + .client-work-group {
+      margin-top: 14px;
+    }
+
+    .client-work-group-title {
+      margin: 0;
+      padding: 9px 10px;
+      border-left: 4px solid var(--accent);
+      border-radius: 6px;
+      background: #edf4ef;
+      color: var(--ink);
+      font-size: 14px;
+    }
+
     .client-directory {
       display: grid;
       gap: 8px;
@@ -1833,6 +1851,12 @@
                   <option value="completed" selected>Zaklju&#269;ena</option>
                   <option value="open">Odprta</option>
                   <option value="all">Vsa</option>
+                </select>
+              </label>
+              <label class="report-todo-filter">Grupiranje
+                <select id="reportClientGrouping">
+                  <option value="none" selected>Brez grupiranja</option>
+                  <option value="client">Po strankah</option>
                 </select>
               </label>
             </div>
@@ -3260,6 +3284,26 @@
       return todos.filter((todo) => !reportTodoIsCompleted(todo));
     }
 
+    function renderReportDetailRows(rows) {
+      if ($("reportClientGrouping").value !== "client") {
+        return rows.map((row) => row.html).join("");
+      }
+      const groups = new Map();
+      rows.forEach((row) => {
+        const client = String(row.client || "").trim() || "Brez stranke";
+        if (!groups.has(client)) groups.set(client, []);
+        groups.get(client).push(row.html);
+      });
+      return [...groups.entries()]
+        .sort(([a], [b]) => a.localeCompare(b, "sl"))
+        .map(([client, groupRows]) => `
+          <section class="client-work-group">
+            <h3 class="client-work-group-title">${escapeHtml(client)}</h3>
+            ${groupRows.join("")}
+          </section>
+        `).join("");
+    }
+
     function reportMonthKeys(from, to) {
       const keys = new Set();
       if (!from || !to) return keys;
@@ -3331,7 +3375,9 @@
       ].map(([label, value]) => `<div class="stat"><strong>${escapeHtml(value)}</strong><span>${escapeHtml(label)}</span></div>`).join("");
 
       const detail = $("clientDetailList");
-      const entryRows = entries.map((entry) => `
+      const entryRows = entries.map((entry) => ({
+        client: entry.client,
+        html: `
         <div class="client-work-row">
           <strong>${formatDate(entry.date)}</strong>
           <span>${escapeHtml(entry.client || statusLabels[entry.status])}<br><small>${entry.status === "vacation" ? "Dopust" : `${entry.start} - ${entry.end}, ${entry.status === "vacation" ? "0.00" : duration(entry).toFixed(2)} h`} | ${entry.fromHome ? "start od doma | " : ""}${escapeHtml(entry.work || entry.material || "")}</small></span>
@@ -3344,15 +3390,18 @@
             <button class="secondary open-report-entry" type="button" data-entry-id="${escapeHtml(entry.id)}">Odpri</button>
           </span>
         </div>
-      `);
-      const todoRows = todos.map((todo) => `
+      ` }));
+      const todoRows = todos.map((todo) => ({
+        client: todo.client,
+        html: `
         <div class="client-work-row">
           <strong>${todo.date ? formatDate(todo.date) : "Brez datuma"}</strong>
           <span>Opravilo: ${escapeHtml(todo.title)}<br><small>${escapeHtml(todo.client || "")} | ${todo.done ? "opravljeno" : todoStatus(todo.status).label} | ${(todo.photos || []).length} foto</small></span>
           <button class="secondary open-report-todo" type="button" data-todo-id="${escapeHtml(todo.id)}">Opravilo</button>
         </div>
-      `);
-      detail.innerHTML = [...entryRows, ...todoRows].join("") || `<p class="todo-meta">Za ta izbor ni vnosov ali opravil.</p>`;
+      ` }));
+      const detailRows = [...entryRows, ...todoRows];
+      detail.innerHTML = renderReportDetailRows(detailRows) || `<p class="todo-meta">Za ta izbor ni vnosov ali opravil.</p>`;
     }
 
     function openClientReport(client, clientId = "") {
@@ -4205,6 +4254,7 @@
     $("reportFrom").addEventListener("change", renderReport);
     $("reportTo").addEventListener("change", renderReport);
     $("reportTodoCompletionFilter").addEventListener("change", renderReport);
+    $("reportClientGrouping").addEventListener("change", renderReport);
     $("reportClient").addEventListener("input", () => {
       state.reportClient = $("reportClient").value;
       renderReport();

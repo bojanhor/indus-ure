@@ -200,6 +200,16 @@ test("sefovski seznam privzeto prikaze zakljucena opravila", () => {
   assert.match(html, /const todos = filterReportTodos\(reportTodos\(\)\)/);
   assert.match(html, /reportTodoCompletionFilter"\)\.addEventListener\("change", renderReport\)/);
 });
+test("sefovski seznam omogoca grupiranje po strankah", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  assert.match(html, /id="reportClientGrouping"/);
+  assert.match(html, /<option value="client">Po strankah<\/option>/);
+  assert.match(html, /function renderReportDetailRows\(rows\)/);
+  assert.match(html, /const client = String\(row\.client \|\| ""\)\.trim\(\) \|\| "Brez stranke"/);
+  assert.match(html, /a\.localeCompare\(b, "sl"\)/);
+  assert.match(html, /class="client-work-group-title"/);
+  assert.match(html, /reportClientGrouping"\)\.addEventListener\("change", renderReport\)/);
+});
 test("skupni podatki se osvezujejo samodejno in ne prek rocnega gumba", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
   assert.doesNotMatch(html, /id="refreshBtn"/);
