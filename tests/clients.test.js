@@ -76,7 +76,7 @@ test("novo opravilo ponuja aliase iz prvega stolpca Google Sheeta", () => {
   assert.match(html, /function findTodoClient\(value\)/);
   assert.match(html, /client\?\.search \|\| todo\.client/);
   assert.match(html, /grid-template-columns: 140px minmax\(260px, 1\.4fr\) 160px minmax\(210px, 1fr\)/);
-  assert.match(html, /\.todo-title-field \{ grid-column: 1 \/ 4; \}/);
+  assert.match(html, /\.todo-title-field,\s*\.todo-description-field \{ grid-column: 1 \/ 4; \}/);
   assert.match(html, /event\.key === "ArrowDown" \|\| event\.key === "ArrowUp"/);
   assert.match(html, /event\.key === "Enter" && state\.todoClientSuggestionIndex >= 0/);
   assert.match(html, /scrollIntoView\(\{ block: "nearest" \}\)/);
@@ -229,6 +229,20 @@ test("sefovski seznam je prikaz, urejanje pa poteka v namenskih formah", () => {
   assert.match(html, /class="report-state-chip"/);
   assert.doesNotMatch(html, /class="invoice-flag"/);
   assert.doesNotMatch(html, /function updateInvoiceFlag/);
+});
+
+test("opravilo ima loceno ime in dolg vecvrsticni opis", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  assert.match(html, /<label class="todo-title-field">Ime opravila/);
+  assert.match(html, /id="pageTodoTitle"[^>]+placeholder="Ime opravila"/);
+  assert.match(html, /<label class="todo-description-field">Opis/);
+  assert.match(html, /<textarea id="pageTodoNotes"/);
+  assert.match(html, /notes: \$\("pageTodoNotes"\)\.value\.trim\(\)/);
+  assert.match(html, /<label>Ime opravila\s*<input id="todoFormTask" type="text"/);
+  assert.match(html, /<label>Opis\s*<textarea id="todoFormNotes"/);
+  assert.match(html, /class="todo-description todo-meta">\$\{linkifyText\(todo\.notes\)\}/);
+  assert.match(html, /white-space: pre-wrap/);
+  assert.doesNotMatch(html, /Kaj je treba narediti/);
 });
 
 test("nov koledarski dogodek tudi po dodatku form nastane samo iz opravila", () => {

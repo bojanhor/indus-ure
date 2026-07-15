@@ -631,7 +631,8 @@
       font-weight: 700;
     }
 
-    .todo-create input {
+    .todo-create input,
+    .todo-create textarea {
       width: 100%;
       border: 1px solid var(--line);
       border-radius: 8px;
@@ -639,10 +640,22 @@
       color: var(--ink);
       background: #fff;
       outline: none;
+      font: inherit;
     }
 
-    .todo-title-field { grid-column: 1 / 4; }
-    .todo-add-button { width: 100%; }
+    .todo-create textarea {
+      min-height: 88px;
+      resize: vertical;
+    }
+
+    .todo-title-field,
+    .todo-description-field { grid-column: 1 / 4; }
+    .todo-add-button {
+      grid-column: 4;
+      grid-row: 2 / 4;
+      width: 100%;
+      height: 100%;
+    }
 
     .todo-client-field { position: relative; }
 
@@ -742,10 +755,25 @@
       font-weight: 400;
     }
 
-    .todo-title a {
+    .todo-title a,
+    .todo-description a,
+    .report-todo-description a {
       color: #166534;
       text-decoration: underline;
       overflow-wrap: anywhere;
+    }
+
+    .todo-description,
+    .report-todo-description {
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      line-height: 1.45;
+    }
+
+    .todo-description { margin-top: 7px; }
+    .report-todo-description {
+      display: block;
+      margin: 4px 0;
     }
 
     .todo-head {
@@ -1499,7 +1527,13 @@
       }
       .client-card { min-width: 190px; }
       .todo-create { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      .todo-title-field { grid-column: 1; }
+      .todo-title-field,
+      .todo-description-field,
+      .todo-add-button {
+        grid-column: 1 / -1;
+        grid-row: auto;
+        height: auto;
+      }
     }
 
     @media (max-width: 1100px) {
@@ -1632,7 +1666,12 @@
       .report-grid,
       .report-line,
       .client-work-row { grid-template-columns: 1fr; }
-      .todo-title-field { grid-column: auto; }
+      .todo-title-field,
+      .todo-description-field,
+      .todo-add-button {
+        grid-column: auto;
+        grid-row: auto;
+      }
       .todo-add-button { width: 100%; }
       .client-list {
         display: flex;
@@ -1881,8 +1920,11 @@
                 <div id="pageTodoAssigneeOptions" class="todo-assignee-options" role="group" aria-label="Dodeljeno delavcem"></div>
               </details>
             </div>
-            <label class="todo-title-field">Opravilo
-              <input id="pageTodoTitle" type="text" placeholder="Kaj je treba narediti">
+            <label class="todo-title-field">Ime opravila
+              <input id="pageTodoTitle" type="text" placeholder="Ime opravila">
+            </label>
+            <label class="todo-description-field">Opis
+              <textarea id="pageTodoNotes" placeholder="Dalj&#353;i opis naloge"></textarea>
             </label>
             <button class="primary todo-add-button" id="savePageTodo" type="button">Dodaj</button>
           </div>
@@ -2072,11 +2114,11 @@
           <label>Dodeljeno delavcem</label>
           <div class="todo-form-assignees" id="todoFormAssignees"></div>
         </div>
-        <label>Opravilo
-          <textarea id="todoFormTask" placeholder="Kaj je treba narediti" required></textarea>
+        <label>Ime opravila
+          <input id="todoFormTask" type="text" placeholder="Ime opravila" required>
         </label>
-        <label>Opombe
-          <textarea id="todoFormNotes" placeholder="Dodatne informacije"></textarea>
+        <label>Opis
+          <textarea id="todoFormNotes" placeholder="Dalj&#353;i opis naloge"></textarea>
         </label>
         <label class="todo-form-done">
           <input id="todoFormDone" type="checkbox">
@@ -2845,7 +2887,7 @@
         client: client?.name || normalizeClientName($("pageTodoClient").value),
         clientId: client?.clientId || client?.id || "",
         title: $("pageTodoTitle").value.trim(),
-        notes: "",
+        notes: $("pageTodoNotes").value.trim(),
         status: $("pageTodoStatus").value,
         order: nextTodoOrder(),
         assigneeIds: selectedTodoAssigneeIds(),
@@ -3225,7 +3267,7 @@
               ${(todo.photos || []).length ? `<span class="todo-chip">${(todo.photos || []).length} foto</span>` : ""}
               <span class="todo-chip">dodal: ${escapeHtml(todo.createdByName || "-")}</span>
             </div>
-            ${todo.notes ? `<div class="todo-meta">${escapeHtml(todo.notes)}</div>` : ""}
+            ${todo.notes ? `<div class="todo-description todo-meta">${linkifyText(todo.notes)}</div>` : ""}
           </div>
           <div class="todo-tools">
             <select class="todo-status todo-status-color ${todoStatusClass(todo.status)}" aria-label="Status opravila">
@@ -3623,7 +3665,7 @@
         html: `
         <div class="client-work-row">
           <strong>${todo.date ? formatDate(todo.date) : "Brez datuma"}</strong>
-          <span>Opravilo: ${escapeHtml(todo.title)}<br><small>${escapeHtml(todo.client || "")} | ${todo.done ? "opravljeno" : todoStatus(todo.status).label} | ${(todo.photos || []).length} foto</small></span>
+          <span><strong>${escapeHtml(todo.title)}</strong>${todo.notes ? `<span class="report-todo-description">${linkifyText(todo.notes)}</span>` : ""}<small>${escapeHtml(todo.client || "")} | ${todo.done ? "opravljeno" : todoStatus(todo.status).label} | ${(todo.photos || []).length} foto</small></span>
           <button class="secondary open-report-todo" type="button" data-todo-id="${escapeHtml(todo.id)}">Uredi opravilo</button>
         </div>
       ` }));
@@ -4465,7 +4507,7 @@
     });
 
     $("savePageTodo").addEventListener("click", () => {
-      addTodo(todoFromPage(), ["pageTodoTitle"]);
+      addTodo(todoFromPage(), ["pageTodoTitle", "pageTodoNotes"]);
     });
 
     $("pageTodoClient").addEventListener("change", canonicalizeTodoClient);
