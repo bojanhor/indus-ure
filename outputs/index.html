@@ -1021,6 +1021,7 @@
 
     .todo-form-attachment-preview {
       min-width: 0;
+      flex: 1 1 auto;
       padding: 0;
       border: 0;
       background: transparent;
@@ -1496,6 +1497,39 @@
       border-radius: 4px;
     }
 
+
+    #photoEditorDialog {
+      width: min(1100px, calc(100vw - 20px));
+      max-height: calc(100vh - 20px);
+    }
+
+    .photo-editor-toolbar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      padding: 10px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .photo-editor-canvas-shell {
+      display: grid;
+      place-items: center;
+      min-height: 220px;
+      max-height: calc(100vh - 210px);
+      overflow: auto;
+      padding: 10px;
+      background: #11181c;
+    }
+
+    #photoEditorCanvas {
+      display: block;
+      max-width: 100%;
+      height: auto;
+      background: #fff;
+      cursor: crosshair;
+      touch-action: none;
+    }
     .todo-form-assignees {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
@@ -1543,6 +1577,13 @@
     }
 
     .todo-form-photo-row:last-child { border-bottom: 0; }
+
+    .todo-form-photo-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex: 0 0 auto;
+    }
 
     .todo-form-billing {
       padding: 10px;
@@ -2106,6 +2147,32 @@
     </form>
   </dialog>
 
+  <dialog id="photoEditorDialog">
+    <form method="dialog">
+      <div class="modal-head">
+        <h3 id="photoEditorTitle">Uredi fotografijo</h3>
+        <button class="icon-btn" type="submit" title="Zapri" aria-label="Zapri urejevalnik">&times;</button>
+      </div>
+      <div class="photo-editor-toolbar">
+        <label>Barva
+          <input id="photoEditorColor" type="color" value="#ff2d2d">
+        </label>
+        <label>Debelina
+          <input id="photoEditorSize" type="range" min="2" max="30" value="8">
+        </label>
+        <button class="secondary" id="photoEditorUndo" type="button">Razveljavi</button>
+        <button class="secondary" id="photoEditorClear" type="button">Po&#269;isti</button>
+      </div>
+      <div class="photo-editor-canvas-shell">
+        <canvas id="photoEditorCanvas"></canvas>
+      </div>
+      <div class="actions modal-body">
+        <button class="secondary" type="submit">Prekli&#269;i</button>
+        <button class="primary" id="photoEditorSave" type="button">Shrani sliko</button>
+      </div>
+    </form>
+  </dialog>
+
   <dialog id="workerBillingDialog">
     <form method="dialog">
       <div class="modal-head">
@@ -2248,6 +2315,7 @@
       clients: [],
       selectedClient: "",
       todoDialogPhotos: [],
+      photoEditor: null,
       reportClient: "",
       reportClientId: "",
       settings: { billing: { hourlyRate: 15, kmRate: 0.22, commuteKmPerDay: 28 } },
@@ -3228,6 +3296,88 @@
       if (!dialog.open) dialog.showModal();
 
     }
+    function drawPhotoEditorStroke(context, stroke) {
+      const points = stroke?.points || [];
+      if (!points.length) return;
+      context.save();
+      context.strokeStyle = stroke.color;
+      context.fillStyle = stroke.color;
+      context.lineWidth = stroke.size;
+      context.lineCap = "round";
+      context.lineJoin = "round";
+      if (points.length === 1) {
+        context.beginPath();
+        context.arc(points[0].x, points[0].y, Math.max(1, stroke.size / 2), 0, Math.PI * 2);
+        context.fill();
+        context.restore();
+        return;
+      }
+      context.beginPath();
+      context.moveTo(points[0].x, points[0].y);
+      points.slice(1).forEach((point) => context.lineTo(point.x, point.y));
+      context.stroke();
+      context.restore();
+    }
+
+    function redrawPhotoEditor() {
+      const editor = state.photoEditor;
+      if (!editor?.image) return;
+      const canvas = $("photoEditorCanvas");
+      const context = canvas.getContext("2d");
+      context.clearRect(0, 0, canvas.width, canvas.height);
+      context.drawImage(editor.image, 0, 0, canvas.width, canvas.height);
+      editor.strokes.forEach((stroke) => drawPhotoEditorStroke(context, stroke));
+      if (editor.activeStroke) drawPhotoEditorStroke(context, editor.activeStroke);
+    }
+
+    function photoEditorPoint(event) {
+      const canvas = $("photoEditorCanvas");
+      const rect = canvas.getBoundingClientRect();
+      return {
+        x: (event.clientX - rect.left) * canvas.width / Math.max(1, rect.width),
+        y: (event.clientY - rect.top) * canvas.height / Math.max(1, rect.height)
+      };
+    }
+
+    function openPhotoEditor(photo) {
+      if (!photo || isPdfAttachment(photo)) return;
+      const image = new Image();
+      image.onload = () => {
+        const canvas = $("photoEditorCanvas");
+        canvas.width = Math.max(1, image.naturalWidth);
+        canvas.height = Math.max(1, image.naturalHeight);
+        state.photoEditor = { photoId: photo.id, image, strokes: [], activeStroke: null };
+        $("photoEditorTitle").textContent = `Uredi: ${photo.name || "Fotografija"}`;
+        redrawPhotoEditor();
+        $("photoEditorDialog").showModal();
+      };
+      image.onerror = () => alert("Slike ni bilo mogoce odpreti v urejevalniku.");
+      image.src = photo.data;
+    }
+
+    function finishPhotoEditorStroke() {
+      const editor = state.photoEditor;
+      if (!editor?.activeStroke) return;
+      editor.strokes.push(editor.activeStroke);
+      editor.activeStroke = null;
+    }
+
+    function savePhotoEditor() {
+      const editor = state.photoEditor;
+      if (!editor) return;
+      finishPhotoEditorStroke();
+      redrawPhotoEditor();
+      const data = canvasAsLimitedJpegDataUrl($("photoEditorCanvas"));
+      const nextPhotos = state.todoDialogPhotos.map((photo) => photo.id === editor.photoId ? { ...photo, data } : photo);
+      if (todoAttachmentsDataLength(nextPhotos) > 4_800_000) {
+        alert("Priloge so skupaj prevelike. Odstrani katero od njih.");
+        return;
+      }
+      state.todoDialogPhotos = nextPhotos;
+      renderTodoFormPhotos();
+      $("photoEditorDialog").close();
+    }
+
     function renderTodoPhotoHtml(todo) {
       if (!(todo.photos || []).length) return "";
       return `<div class="todo-photos-inline">${todo.photos.map((photo) => {
@@ -3263,7 +3413,10 @@
       list.innerHTML = state.todoDialogPhotos.map((photo) => `
         <div class="todo-form-photo-row">
           <button class="todo-form-attachment-preview" type="button" data-photo-id="${escapeHtml(photo.id)}"><span class="todo-form-file-kind">${isPdfAttachment(photo) ? "PDF" : "SLIKA"}</span>${escapeHtml(photo.name || "Priloga")}</button>
-          <button class="danger remove-todo-form-photo" type="button" data-photo-id="${escapeHtml(photo.id)}">Odstrani</button>
+          <div class="todo-form-photo-actions">
+            ${isPdfAttachment(photo) ? "" : `<button class="secondary edit-todo-form-photo" type="button" data-photo-id="${escapeHtml(photo.id)}">Uredi</button>`}
+            <button class="danger remove-todo-form-photo" type="button" data-photo-id="${escapeHtml(photo.id)}">Odstrani</button>
+          </div>
         </div>
       `).join("");
     }
@@ -3979,6 +4132,29 @@
       });
     }
 
+    function canvasAsLimitedJpegDataUrl(canvas, maxLength = 680_000) {
+      const targets = [1280, 1024, 800, 640];
+      const qualities = [0.82, 0.72, 0.62, 0.52, 0.42];
+      const maxSide = Math.max(canvas.width, canvas.height);
+      let lastData = "";
+      for (const target of targets) {
+        const scale = Math.min(1, target / maxSide);
+        let output = canvas;
+        if (scale < 1) {
+          output = document.createElement("canvas");
+          output.width = Math.max(1, Math.round(canvas.width * scale));
+          output.height = Math.max(1, Math.round(canvas.height * scale));
+          const context = output.getContext("2d");
+          context.drawImage(canvas, 0, 0, output.width, output.height);
+        }
+        for (const quality of qualities) {
+          lastData = output.toDataURL("image/jpeg", quality);
+          if (lastData.length <= maxLength) return lastData;
+        }
+      }
+      throw new Error("Urejena slika je prevelika.");
+    }
+
     function resizeImageAsDataUrl(file) {
       return new Promise((resolve, reject) => {
         if (!file.type.startsWith("image/")) {
@@ -3999,7 +4175,7 @@
             resolve({
               id: window.crypto?.randomUUID ? window.crypto.randomUUID() : `${Date.now()}-${Math.random()}`,
               name: file.name,
-              data: canvas.toDataURL("image/jpeg", 0.78),
+              data: canvasAsLimitedJpegDataUrl(canvas),
               createdBy: state.user?.id || "",
               createdByName: state.user?.name || "",
               createdAt: new Date().toISOString()
@@ -4217,6 +4393,12 @@
       }
     });
     $("todoFormPhotoList").addEventListener("click", (event) => {
+      const edit = event.target.closest(".edit-todo-form-photo");
+      if (edit) {
+        const photo = state.todoDialogPhotos.find((item) => item.id === edit.dataset.photoId);
+        if (photo) openPhotoEditor(photo);
+        return;
+      }
       const preview = event.target.closest(".todo-form-attachment-preview");
       if (preview) {
         const photo = state.todoDialogPhotos.find((item) => item.id === preview.dataset.photoId);
@@ -4312,6 +4494,64 @@
     $("googleCalendar").addEventListener("click", () => syncGoogle(true));
     $("downloadBackup").addEventListener("click", downloadBackup);
     $("todoDialog").addEventListener("close", releaseTodoEditLockForDialog);
+    $("photoEditorCanvas").addEventListener("pointerdown", (event) => {
+      const editor = state.photoEditor;
+      if (!editor) return;
+      event.preventDefault();
+      const canvas = event.currentTarget;
+      canvas.setPointerCapture(event.pointerId);
+      const rect = canvas.getBoundingClientRect();
+      editor.activeStroke = {
+        pointerId: event.pointerId,
+        color: $("photoEditorColor").value,
+        size: Number($("photoEditorSize").value) * canvas.width / Math.max(1, rect.width),
+        points: [photoEditorPoint(event)]
+      };
+      drawPhotoEditorStroke(canvas.getContext("2d"), editor.activeStroke);
+    });
+    $("photoEditorCanvas").addEventListener("pointermove", (event) => {
+      const stroke = state.photoEditor?.activeStroke;
+      if (!stroke || stroke.pointerId !== event.pointerId) return;
+      event.preventDefault();
+      stroke.points.push(photoEditorPoint(event));
+      drawPhotoEditorStroke(event.currentTarget.getContext("2d"), { ...stroke, points: stroke.points.slice(-2) });
+    });
+    $("photoEditorCanvas").addEventListener("pointerup", (event) => {
+      if (state.photoEditor?.activeStroke?.pointerId !== event.pointerId) return;
+      event.preventDefault();
+      finishPhotoEditorStroke();
+    });
+    $("photoEditorCanvas").addEventListener("pointercancel", (event) => {
+      if (state.photoEditor?.activeStroke?.pointerId === event.pointerId) finishPhotoEditorStroke();
+    });
+    $("photoEditorUndo").addEventListener("click", () => {
+      finishPhotoEditorStroke();
+      state.photoEditor?.strokes.pop();
+      redrawPhotoEditor();
+    });
+    $("photoEditorClear").addEventListener("click", () => {
+      if (!state.photoEditor) return;
+      state.photoEditor.activeStroke = null;
+      state.photoEditor.strokes = [];
+      redrawPhotoEditor();
+    });
+    $("photoEditorSave").addEventListener("click", () => {
+      try {
+        savePhotoEditor();
+      } catch (error) {
+        alert(error.message);
+      }
+    });
+    $("photoEditorDialog").addEventListener("close", () => {
+      state.photoEditor = null;
+      const canvas = $("photoEditorCanvas");
+      canvas.width = 1;
+      canvas.height = 1;
+    });
+    $("photoEditorDialog").addEventListener("click", (event) => {
+      if (event.target === event.currentTarget) event.currentTarget.close();
+    });
+
     $("attachmentPreviewDialog").addEventListener("close", () => {
       $("attachmentPreviewImage").removeAttribute("src");
     });

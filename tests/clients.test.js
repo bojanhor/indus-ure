@@ -118,6 +118,19 @@ test("osnovni pogled priloge samo prikazuje, dodajanje pa ostane v obrazcu", () 
   assert.doesNotMatch(html, /Pri tem opravilu se ni fotografij/);
 });
 
+test("slikovne priloge je mogoce risarsko urediti tudi pri spremembi opravila", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  assert.match(html, /<dialog id="photoEditorDialog">[\s\S]*?id="photoEditorColor"[\s\S]*?id="photoEditorSize"[\s\S]*?id="photoEditorCanvas"/);
+  assert.match(html, /isPdfAttachment\(photo\) \? "" : `<button class="secondary edit-todo-form-photo"/);
+  assert.match(html, /function openPhotoEditor\(photo\)/);
+  assert.match(html, /photoEditorCanvas"\)\.addEventListener\("pointerdown"/);
+  assert.match(html, /photoEditorCanvas"\)\.addEventListener\("pointermove"/);
+  assert.match(html, /#photoEditorCanvas \{[\s\S]*?touch-action: none;/);
+  assert.match(html, /photoEditorUndo"\)\.addEventListener[\s\S]*?strokes\.pop\(\)/);
+  assert.match(html, /function canvasAsLimitedJpegDataUrl\(canvas, maxLength = 680_000\)/);
+  assert.match(html, /state\.todoDialogPhotos = nextPhotos;[\s\S]*?renderTodoFormPhotos\(\)/);
+});
+
 test("brisanje opravila je majhna dostopna ikona kosa", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
   assert.match(html, /class="todo-delete-icon delete-todo"[^>]*aria-label="Izbri&#353;i opravilo"/);
