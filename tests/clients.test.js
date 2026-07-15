@@ -127,14 +127,16 @@ test("urejanje opravila uporablja svincnik in klik na podatke kartice", () => {
 
 test("razvrscanje opravil deluje z rocajem, misjo in dotikom", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
-  assert.match(html, /draggable="\$\{reorderable \? "true" : "false"\}"/);
-  assert.match(html, /dragHandle\.addEventListener\("dragstart"/);
+  const server = fs.readFileSync(path.join(__dirname, "..", "outputs", "server.js"), "utf8");
   assert.match(html, /dragHandle\.addEventListener\("pointerdown"/);
+  assert.match(html, /beginTodoPointerDrag\(event, item, todo\.id\)/);
   assert.match(html, /document\.elementFromPoint\(event\.clientX, event\.clientY\)/);
   assert.match(html, /function todosCanReorderTogether\(sourceId, targetId\)/);
   assert.match(html, /async function reorderTodos\(sourceId, targetId\)/);
-  assert.match(html, /return dateOrder \|\| Number\(a\.order \|\| 0\) - Number\(b\.order \|\| 0\)/);
-  assert.doesNotMatch(html, /reorderUndatedTodos|item\.draggable = !todo\.date/);
+  assert.match(html, /const orderDifference = Number\(a\.order \|\| 0\) - Number\(b\.order \|\| 0\)/);
+  assert.match(html, /const ordered = contextTodos\(\)\.filter\(\(todo\) => !todo\.done\)\.sort\(todoSort\)/);
+  assert.match(server, /order: isOpenedTodo \? todo\.order : existing\.order/);
+  assert.doesNotMatch(html, /todoReorderGroup|todoNativeDragSourceId|addEventListener\("dragstart"|draggable="\$\{reorderable/);
 });
 
 test("kartica opravila poravna status datum in udelezence v stalne stolpce", () => {

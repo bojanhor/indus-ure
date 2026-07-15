@@ -2734,7 +2734,7 @@ async function handleApi(req, res) {
             assignmentGroupId,
             photos: sharedPhotos.map((photo) => ({ ...photo })),
             syncUser: assigneeId,
-            order: existing.order,
+            order: isOpenedTodo ? todo.order : existing.order,
             updatedBy: user.id,
             updatedByName: user.name,
             updatedAt: now,

@@ -2672,15 +2672,9 @@
 
     function todoSort(a, b) {
       if (Number(a.done) !== Number(b.done)) return Number(a.done) - Number(b.done);
-      if ((a.status === "in_progress") !== (b.status === "in_progress")) {
-        return a.status === "in_progress" ? -1 : 1;
-      }
-      if (!a.date && !b.date) return Number(a.order || 0) - Number(b.order || 0);
-      if (a.date && b.date) {
-        const dateOrder = String(a.date).localeCompare(String(b.date));
-        return dateOrder || Number(a.order || 0) - Number(b.order || 0);
-      }
-      return a.date ? -1 : 1;
+      const orderDifference = Number(a.order || 0) - Number(b.order || 0);
+      if (orderDifference) return orderDifference;
+      return String(a.date || "9999-12-31").localeCompare(String(b.date || "9999-12-31"));
     }
 
     function render() {
@@ -2908,7 +2902,6 @@
         const reorderable = !todo.done;
         item.dataset.todoId = todo.id;
         item.className = `todo-item ${todo.done ? "done" : ""}`;
-        item.draggable = false;
         item.innerHTML = `
           <input type="checkbox" ${todo.done ? "checked" : ""} aria-label="Opravljeno">
           <div class="todo-summary" role="button" tabindex="0" aria-label="Uredi opravilo: ${escapeHtml(todo.title)}">
@@ -2954,7 +2947,7 @@
               <button class="primary save-todo-billing" type="button">Shrani obracun</button>
             </div>
           ` : ""}
-          <button class="drag-handle" type="button" draggable="${reorderable ? "true" : "false"}" ${reorderable ? "" : "disabled"} title="Povleci za vrstni red znotraj istega datuma" aria-label="Povleci za vrstni red">::</button>
+          <button class="drag-handle" type="button" ${reorderable ? "" : "disabled"} title="Povleci za vrstni red" aria-label="Povleci za vrstni red">::</button>
         `;
         const openTodoEditor = (event) => {
           event.preventDefault();
@@ -2988,15 +2981,8 @@
         }
         const dragHandle = item.querySelector(".drag-handle");
         if (reorderable) {
-          dragHandle.addEventListener("dragstart", (event) => {
-            todoNativeDragSourceId = todo.id;
-            item.classList.add("dragging");
-            event.dataTransfer.effectAllowed = "move";
-            event.dataTransfer.setData("text/plain", todo.id);
-          });
-          dragHandle.addEventListener("dragend", clearTodoDragVisuals);
           dragHandle.addEventListener("pointerdown", (event) => {
-            if (event.pointerType !== "mouse") beginTodoPointerDrag(event, item, todo.id);
+            beginTodoPointerDrag(event, item, todo.id);
           });
           dragHandle.addEventListener("pointermove", updateTodoPointerDrag);
           dragHandle.addEventListener("pointerup", finishTodoPointerDrag);
@@ -3010,19 +2996,6 @@
               photos: (todo.photos || []).filter((photo) => photo.id !== button.dataset.photoId)
             });
           });
-        });
-        item.addEventListener("dragover", (event) => {
-          if (!todosCanReorderTogether(todoNativeDragSourceId, todo.id)) return;
-          event.preventDefault();
-          event.dataTransfer.dropEffect = "move";
-          document.querySelectorAll(".todo-item.drag-target").forEach((row) => row.classList.remove("drag-target"));
-          item.classList.add("drag-target");
-        });
-        item.addEventListener("drop", (event) => {
-          event.preventDefault();
-          const sourceId = todoNativeDragSourceId || event.dataTransfer.getData("text/plain");
-          clearTodoDragVisuals();
-          reorderTodos(sourceId, todo.id);
         });
         items.appendChild(item);
       });
@@ -3363,22 +3336,16 @@
       downloadText(html, `indus-obracun-${$("reportFrom").value}-${$("reportTo").value}.xls`, "application/vnd.ms-excel;charset=utf-8");
     }
 
-    function todoReorderGroup(todo) {
-      return `${todo?.status === "in_progress" ? "priority" : "normal"}|${todo?.date || "undated"}`;
-    }
-
     function todosCanReorderTogether(sourceId, targetId) {
       const todos = contextTodos();
       const source = todos.find((todo) => todo.id === sourceId);
       const target = todos.find((todo) => todo.id === targetId);
-      return Boolean(source && target && !source.done && !target.done && todoReorderGroup(source) === todoReorderGroup(target));
+      return Boolean(source && target && !source.done && !target.done);
     }
 
-    let todoNativeDragSourceId = "";
     let todoPointerDrag = null;
 
     function clearTodoDragVisuals() {
-      todoNativeDragSourceId = "";
       document.querySelectorAll(".todo-item.dragging, .todo-item.drag-target").forEach((item) => {
         item.classList.remove("dragging", "drag-target");
       });
@@ -3423,18 +3390,17 @@
       if (!sourceId || !targetId || sourceId === targetId) return;
       const source = contextTodos().find((todo) => todo.id === sourceId);
       if (!source || !todosCanReorderTogether(sourceId, targetId)) return;
-      const group = todoReorderGroup(source);
-      const visible = contextTodos()
-        .filter((todo) => !todo.done && todoReorderGroup(todo) === group && (!state.selectedClient || todo.client === state.selectedClient))
-        .sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
-      const from = visible.findIndex((todo) => todo.id === sourceId);
-      const to = visible.findIndex((todo) => todo.id === targetId);
+      const ordered = contextTodos().filter((todo) => !todo.done).sort(todoSort);
+      const from = ordered.findIndex((todo) => todo.id === sourceId);
+      const to = ordered.findIndex((todo) => todo.id === targetId);
       if (from < 0 || to < 0) return;
-      const [moved] = visible.splice(from, 1);
-      visible.splice(to, 0, moved);
+      const [moved] = ordered.splice(from, 1);
+      ordered.splice(to, 0, moved);
       try {
-        for (let index = 0; index < visible.length; index++) {
-          await saveTodoToServer({ ...visible[index], order: index + 1 });
+        for (let index = 0; index < ordered.length; index++) {
+          const order = index + 1;
+          if (Number(ordered[index].order || 0) === order) continue;
+          await saveTodoToServer({ ...ordered[index], order });
         }
       } catch (error) {
         alert(error.message);
