@@ -132,3 +132,15 @@ test("sef ima tabelo privzetih postavk in obracun zakljucenih opravil", () => {
   assert.match(server, /user\.role !== "boss"[\s\S]*Samo sef lahko spreminja urne postavke delavcev/);
   assert.match(server, /todo = todoForUserRole\(user, db, db\.todos\[index\], todo\)/);
 });
+test("nov koledarski vnos je mogoc samo skozi opravilo", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  const server = fs.readFileSync(path.join(__dirname, "..", "outputs", "server.js"), "utf8");
+  assert.match(html, /id="newTodoFromSidebar"/);
+  assert.match(html, /add\.addEventListener\("click", \(\) => startTodoForDate\(key\)\)/);
+  assert.match(html, /if \(!existing && !entry\.todoId\)/);
+  assert.match(html, /sourceTodoId: \$\("entryTodoId"\)\.value/);
+  assert.match(html, /\$\("duplicateEntry"\)\.style\.display = "none"/);
+  assert.match(server, /const sourceTodo = sourceTodoForNewEntry\(db, user, entry\)/);
+  assert.match(server, /Nov koledarski vnos lahko ustvaris samo iz svojega opravila/);
+  assert.match(server, /status: "execution",[\s\S]*done: true/);
+});

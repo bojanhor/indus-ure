@@ -365,6 +365,10 @@ function normalizeDb(db = {}) {
         changed = true;
       }
     }
+    if (typeof next.sourceTodoId !== "string") {
+      next.sourceTodoId = "";
+      changed = true;
+    }
     return next;
   });
 
@@ -653,6 +657,14 @@ function canManageTodo(user, todo) {
   if (user.role === "boss") return true;
   return (todo.syncUser || todo.createdBy) === user.id;
 }
+function sourceTodoForNewEntry(db, user, entry) {
+  const sourceTodoId = String(entry.sourceTodoId || "");
+  const todo = (db.todos || []).find((item) => item.id === sourceTodoId);
+  if (!todo || !canManageTodo(user, todo)) return null;
+  if (!todo.date || todo.date !== entry.date) return null;
+  if ((db.entries || []).some((item) => item.sourceTodoId === sourceTodoId)) return null;
+  return todo;
+}
 
 function cleanUserId(value) {
   const id = String(value || "").trim();
@@ -806,7 +818,8 @@ function cleanEntry(input) {
     invoiceSent: Boolean(input.invoiceSent),
     invoiceSettled: Boolean(input.invoiceSettled),
     invoicePaid: Boolean(input.invoicePaid),
-    fromHome: Boolean(input.fromHome)
+    fromHome: Boolean(input.fromHome),
+    sourceTodoId: String(input.sourceTodoId || "").trim().slice(0, 100)
   };
   if (["errand", "vacation"].includes(entry.status)) {
     entry.client = "";
@@ -1251,6 +1264,7 @@ function entryFromGoogleEvent(event, user, db = {}, existing = null) {
     materialCost: Number(existing?.materialCost || 0),
     notes: parsed.notes,
     syncUser: user.id,
+    sourceTodoId: existing?.sourceTodoId || "",
     googleEventId: event.id || existing?.googleEventId || "",
     googleUpdatedAt: event.updated || "",
     googleSyncedLocalAt: now,
@@ -2229,26 +2243,46 @@ async function handleApi(req, res) {
       }
       const now = new Date().toISOString();
       const db = await readDbAsync();
+      const sourceTodo = sourceTodoForNewEntry(db, user, entry);
+      if (!sourceTodo) {
+        sendJson(res, 400, { error: "Nov koledarski vnos lahko ustvaris samo iz svojega opravila z istim datumom." });
+        return;
+      }
       entry = attachResolvedClient(db, entry);
       const resolvedValidation = validateEntry(entry);
       if (resolvedValidation) {
         sendJson(res, 400, { error: resolvedValidation });
         return;
       }
+      entry.syncUser = sourceTodo.syncUser;
       db.entries.push({
         id: crypto.randomUUID(),
         ...entry,
-        syncUser: syncUserForRequest(user, entry.syncUser, "", db.users),
         createdBy: user.id,
         createdByName: user.name,
         createdAt: now,
         updatedBy: user.id,
         updatedByName: user.name,
         updatedAt: now,
-        history: [audit(user, "dodano")]
+        history: [audit(user, "dodano iz opravila")]
+      });
+      const completedTodo = todoForUserRole(user, db, sourceTodo, {
+        ...sourceTodo,
+        status: "execution",
+        done: true
+      });
+      Object.assign(sourceTodo, completedTodo, {
+        billingKm: Number(entry.km || 0),
+        updatedBy: user.id,
+        updatedByName: user.name,
+        updatedAt: now,
+        history: [...(sourceTodo.history || []), audit(user, "zakljuceno z vnosom v koledar")]
       });
       await writeDbAsync(db);
-      sendJson(res, 200, { entries: visibleEntriesForUser(db, user) });
+      sendJson(res, 200, {
+        entries: visibleEntriesForUser(db, user),
+        todos: visibleTodosForUser(db, user)
+      });
       return;
     }
 
@@ -2284,6 +2318,7 @@ async function handleApi(req, res) {
         sendJson(res, 403, { error: "To obdobje je obracunano. Ure, kilometrina in start od doma so zaklenjeni." });
         return;
       }
+      entry.sourceTodoId = db.entries[index].sourceTodoId || "";
       db.entries[index] = {
         ...db.entries[index],
         ...entry,
@@ -2528,6 +2563,7 @@ module.exports = {
   pushGoogleItem,
   canManageEntry,
   canManageTodo,
+  sourceTodoForNewEntry,
   defaultHourlyRateForUser,
   entryForUserRole,
   entryFromGoogleEvent,

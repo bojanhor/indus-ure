@@ -1546,6 +1546,7 @@
       </div>
 
       <button class="primary worker-only" id="saveQuick" type="button">Shrani v koledar</button>
+      <button class="primary hidden" id="newTodoFromSidebar" type="button">Nov vnos prek opravila</button>
       <button class="ghost" id="refreshBtn" type="button">Osve&#382;i skupne podatke</button>
 
       <div class="legend">
@@ -2132,6 +2133,7 @@
       $("bossPanel").classList.toggle("hidden", !admin);
       document.querySelectorAll(".admin-only").forEach((element) => element.classList.toggle("hidden", !admin));
       document.querySelectorAll(".worker-only").forEach((element) => element.classList.toggle("hidden", admin));
+      $("newTodoFromSidebar").classList.toggle("hidden", admin);
       document.querySelectorAll(".admin-entry-field").forEach((element) => element.classList.toggle("hidden", !admin));
       $("todoCreatePanel").classList.toggle("hidden", admin);
       const billedOption = $("quickStatus").querySelector('option[value="billed"]');
@@ -2365,6 +2367,7 @@
       const path = entry.id ? `/api/entries/${entry.id}` : "/api/entries";
       const data = await api(path, { method, body: JSON.stringify(entry) });
       state.entries = data.entries;
+      if (data.todos) state.todos = data.todos;
       refreshClientList();
       render();
     }
@@ -2595,6 +2598,17 @@
       if (view === "report") renderReport();
     }
 
+    function startTodoForDate(date = "") {
+      if (isAdminView()) {
+        alert("Za novo opravilo najprej izberi delavski pogled.");
+        return;
+      }
+      $("pageTodoDate").value = date || dateKey(new Date());
+      renderTodoAssigneePicker([activeWorkerId()]);
+      setView("todos");
+      requestAnimationFrame(() => $("pageTodoTitle").focus());
+    }
+
     async function addTodo(todo, clearInputs = []) {
       if (isAdminView()) {
         alert("Za nov vnos opravila najprej izberi delavski pogled.");
@@ -2685,8 +2699,8 @@
           add.className = "quick-add";
           add.type = "button";
           add.textContent = "+";
-          add.title = `Dodaj vnos za ${activeWorker()?.name || "delavca"}`;
-          add.addEventListener("click", () => openDialog({ date: key }));
+          add.title = `Dodaj opravilo za ${activeWorker()?.name || "delavca"}`;
+          add.addEventListener("click", () => startTodoForDate(key));
           head.appendChild(add);
         }
         day.appendChild(head);
@@ -2716,6 +2730,12 @@
             item.className = `day-todo todo-status-color ${todoStatusClass(todo.status)} ${todo.done ? "done" : ""}`;
             item.innerHTML = `${escapeHtml(todo.title)}${todo.client ? `<br><small>${escapeHtml(todo.client)}</small>` : ""}<br><small>${todoStatus(todo.status).label}</small>`;
             item.addEventListener("click", () => {
+              if (todo.done) {
+                state.selectedClient = todo.client || "";
+                state.expandedTodoPhotos = todo.id;
+                setView("todos");
+                return;
+              }
               openDialog({
                 date: todo.date,
                 client: todo.client || "",
@@ -3444,14 +3464,18 @@
     }
 
     function openDialog(entry = {}) {
-      if (!entry.id && isAdminView()) {
-        alert("Za nov vnos najprej izberi Bojan - delavec ali Ibro - delavec.");
+      const existing = Boolean(entry.id);
+      if (!existing && !entry.todoId) {
+        startTodoForDate(entry.date);
         return;
       }
-      const existing = Boolean(entry.id);
-      $("dialogTitle").textContent = existing ? "Uredi vnos" : "Nov vnos";
+      if (!existing && isAdminView()) {
+        alert("Za zakljucek opravila najprej izberi njegov delavski pogled.");
+        return;
+      }
+      $("dialogTitle").textContent = existing ? "Uredi vnos" : "Zakljuci opravilo v koledar";
       $("entryId").value = entry.id || "";
-      $("entryTodoId").value = entry.todoId || "";
+      $("entryTodoId").value = entry.todoId || entry.sourceTodoId || "";
       $("entryDate").value = entry.date || dateKey(new Date());
       $("entryStart").value = entry.start || "08:00";
       $("entryEnd").value = entry.end || "16:00";
@@ -3468,7 +3492,7 @@
       setDialogStatus(entry.status || "unbilled");
       updateEntryClientMode();
       $("deleteEntry").style.display = existing ? "inline-flex" : "none";
-      $("duplicateEntry").style.display = existing ? "inline-flex" : "none";
+      $("duplicateEntry").style.display = "none";
       renderAudit(entry);
       $("entryDialog").showModal();
     }
@@ -3514,6 +3538,7 @@
       const client = findClient($("entryClient").value);
       const entry = {
         id: $("entryId").value || undefined,
+        sourceTodoId: $("entryTodoId").value,
         date: $("entryDate").value,
         start: status === "vacation" ? "00:00" : $("entryStart").value,
         end: status === "vacation" ? "23:59" : $("entryEnd").value,
@@ -3535,21 +3560,14 @@
 
       if (!validateEntry(entry)) return;
       await saveEntryToServer(entry);
-      const todoId = $("entryTodoId").value;
-      if (todoId) {
-        const todo = state.todos.find((item) => item.id === todoId);
-        if (todo) await saveTodoToServer({ ...todo, done: true });
-      }
+      // Streznik atomsko zakljuci izvorno opravilo skupaj z novim koledarskim vnosom.
       state.current = parseDate(entry.date);
       $("entryDialog").close();
     }
 
     async function duplicateDialogEntry() {
-      const id = $("entryId").value;
-      const original = state.entries.find((entry) => entry.id === id);
-      if (!original) return;
-      const copy = { ...original, id: undefined, status: "unbilled" };
-      await saveEntryToServer(copy);
+      const original = state.entries.find((entry) => entry.id === $("entryId").value);
+      startTodoForDate(original?.date || dateKey(new Date()));
     }
 
     async function deleteDialogEntry() {
@@ -3794,20 +3812,8 @@
         alert(error.message);
       }
     });
-    $("saveQuick").addEventListener("click", async () => {
-      if (isAdminView()) {
-        alert("Za nov vnos najprej izberi delavski pogled.");
-        return;
-      }
-      const entry = entryFromQuick();
-      if (!validateEntry(entry)) return;
-      await saveEntryToServer(entry);
-      state.current = parseDate(entry.date);
-      $("quickWork").value = "";
-      $("quickMaterial").value = "";
-      $("quickKm").value = "";
-      $("quickFromHome").value = "false";
-    });
+    $("saveQuick").addEventListener("click", () => startTodoForDate($("quickDate").value));
+    $("newTodoFromSidebar").addEventListener("click", () => startTodoForDate(dateKey(new Date())));
     $("quickStatus").addEventListener("change", updateQuickErrandMode);
     $("quickLunch").addEventListener("click", () => applyErrandPreset("Malica"));
     $("quickTravel").addEventListener("click", () => applyErrandPreset("Pot"));

@@ -4,6 +4,7 @@ const test = require("node:test");
 const {
   canManageEntry,
   canManageTodo,
+  sourceTodoForNewEntry,
   entryForUserRole,
   defaultHourlyRateForUser,
   syncUserForRequest,
@@ -122,4 +123,23 @@ test("obracunske podatke zakljucenega opravila lahko spremeni samo sef", () => {
   });
   assert.equal(newlyCompleted.billingHourlyRate, 18);
   assert.equal(newlyCompleted.billingKm, 0);
+});
+
+test("nov koledarski vnos mora izvirati iz lastnega opravila z istim datumom", () => {
+  const sourceDb = {
+    todos: [
+      { id: "own", syncUser: "ibro", date: "2026-07-15" },
+      { id: "other", syncUser: "bojan", date: "2026-07-15" }
+    ],
+    entries: []
+  };
+  const ownEntry = { sourceTodoId: "own", date: "2026-07-15" };
+
+  assert.equal(sourceTodoForNewEntry(sourceDb, worker, ownEntry)?.id, "own");
+  assert.equal(sourceTodoForNewEntry(sourceDb, worker, { ...ownEntry, date: "2026-07-16" }), null);
+  assert.equal(sourceTodoForNewEntry(sourceDb, worker, { sourceTodoId: "other", date: "2026-07-15" }), null);
+  assert.equal(sourceTodoForNewEntry(sourceDb, boss, { sourceTodoId: "other", date: "2026-07-15" })?.id, "other");
+
+  sourceDb.entries.push({ id: "entry", sourceTodoId: "own" });
+  assert.equal(sourceTodoForNewEntry(sourceDb, worker, ownEntry), null);
 });
