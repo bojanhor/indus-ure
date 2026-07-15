@@ -1007,6 +1007,30 @@
       background: #edf2ee;
     }
 
+    .todo-image-preview {
+      width: 100%;
+      display: block;
+      padding: 0;
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+      cursor: zoom-in;
+    }
+
+    .todo-image-preview img { pointer-events: none; }
+
+    .todo-form-attachment-preview {
+      min-width: 0;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      color: var(--ink);
+      text-align: left;
+      cursor: pointer;
+      overflow-wrap: anywhere;
+    }
+
+
     .todo-pdf-preview {
       width: 100%;
       aspect-ratio: 4 / 3;
@@ -1451,6 +1475,26 @@
     }
 
     #todoDialog { width: min(820px, calc(100vw - 26px)); }
+
+    #attachmentPreviewDialog {
+      width: min(1100px, calc(100vw - 20px));
+      max-height: calc(100vh - 20px);
+    }
+
+    .attachment-preview-body {
+      display: grid;
+      place-items: center;
+      min-height: 180px;
+      padding: 10px;
+      background: #11181c;
+    }
+
+    .attachment-preview-body img {
+      max-width: 100%;
+      max-height: calc(100vh - 100px);
+      object-fit: contain;
+      border-radius: 4px;
+    }
 
     .todo-form-assignees {
       display: grid;
@@ -2046,6 +2090,18 @@
           <button type="button" class="secondary" id="cancelTodoDialog">Prekli&#269;i</button>
           <button type="submit" class="primary" id="saveTodoDialog">Shrani</button>
         </div>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="attachmentPreviewDialog">
+    <form method="dialog">
+      <div class="modal-head">
+        <h3 id="attachmentPreviewTitle">Priloga</h3>
+        <button class="icon-btn" type="submit" title="Zapri" aria-label="Zapri predogled">&times;</button>
+      </div>
+      <div class="attachment-preview-body">
+        <img id="attachmentPreviewImage" alt="Predogled priloge">
       </div>
     </form>
   </dialog>
@@ -3152,12 +3208,32 @@
       return String(photo?.data || "").startsWith("data:application/pdf;base64,");
     }
 
+    function openAttachmentPreview(photo) {
+      if (isPdfAttachment(photo)) {
+        const link = document.createElement("a");
+        link.href = photo.data;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        return;
+      }
+      const name = photo.name || "Fotografija";
+      $("attachmentPreviewTitle").textContent = name;
+      const image = $("attachmentPreviewImage");
+      image.src = photo.data;
+      image.alt = `Predogled: ${name}`;
+      const dialog = $("attachmentPreviewDialog");
+      if (!dialog.open) dialog.showModal();
+
+    }
     function renderTodoPhotoHtml(todo) {
       if (!(todo.photos || []).length) return "";
       return `<div class="todo-photos-inline">${todo.photos.map((photo) => {
         const pdf = isPdfAttachment(photo);
         return `<article class="photo-card">
-          ${pdf ? `<a class="todo-pdf-preview" href="${escapeHtml(photo.data)}" target="_blank" rel="noopener noreferrer" aria-label="Odpri PDF ${escapeHtml(photo.name || "Priloga")}">PDF</a>` : `<img src="${escapeHtml(photo.data)}" alt="${escapeHtml(photo.name || "Fotografija")}">`}
+          ${pdf ? `<a class="todo-pdf-preview" href="${escapeHtml(photo.data)}" target="_blank" rel="noopener noreferrer" aria-label="Odpri PDF ${escapeHtml(photo.name || "Priloga")}">PDF</a>` : `<button class="todo-image-preview" type="button" data-photo-id="${escapeHtml(photo.id)}" aria-label="Povecaj sliko ${escapeHtml(photo.name || "Fotografija")}"><img src="${escapeHtml(photo.data)}" alt="${escapeHtml(photo.name || "Fotografija")}"></button>`}
           <div>
             <strong>${escapeHtml(photo.name || "Priloga")}</strong>
             <span class="todo-meta">dodal: ${escapeHtml(photo.createdByName || "-")}</span>
@@ -3186,7 +3262,7 @@
       const list = $("todoFormPhotoList");
       list.innerHTML = state.todoDialogPhotos.map((photo) => `
         <div class="todo-form-photo-row">
-          <span><span class="todo-form-file-kind">${isPdfAttachment(photo) ? "PDF" : "SLIKA"}</span>${escapeHtml(photo.name || "Priloga")}</span>
+          <button class="todo-form-attachment-preview" type="button" data-photo-id="${escapeHtml(photo.id)}"><span class="todo-form-file-kind">${isPdfAttachment(photo) ? "PDF" : "SLIKA"}</span>${escapeHtml(photo.name || "Priloga")}</button>
           <button class="danger remove-todo-form-photo" type="button" data-photo-id="${escapeHtml(photo.id)}">Odstrani</button>
         </div>
       `).join("");
@@ -4141,6 +4217,12 @@
       }
     });
     $("todoFormPhotoList").addEventListener("click", (event) => {
+      const preview = event.target.closest(".todo-form-attachment-preview");
+      if (preview) {
+        const photo = state.todoDialogPhotos.find((item) => item.id === preview.dataset.photoId);
+        if (photo) openAttachmentPreview(photo);
+        return;
+      }
       const button = event.target.closest(".remove-todo-form-photo");
       if (!button) return;
       state.todoDialogPhotos = state.todoDialogPhotos.filter((photo) => photo.id !== button.dataset.photoId);
@@ -4169,6 +4251,16 @@
     });
 
     $("todoItems").addEventListener("click", async (event) => {
+      const preview = event.target.closest(".todo-image-preview");
+      if (preview) {
+        event.preventDefault();
+        event.stopPropagation();
+        const item = preview.closest(".todo-item");
+        const todo = state.todos.find((candidate) => candidate.id === item?.dataset.todoId);
+        const photo = todo?.photos?.find((candidate) => candidate.id === preview.dataset.photoId);
+        if (photo) openAttachmentPreview(photo);
+        return;
+      }
       const button = event.target.closest(".delete-todo");
       if (!button) return;
       event.preventDefault();
@@ -4220,6 +4312,13 @@
     $("googleCalendar").addEventListener("click", () => syncGoogle(true));
     $("downloadBackup").addEventListener("click", downloadBackup);
     $("todoDialog").addEventListener("close", releaseTodoEditLockForDialog);
+    $("attachmentPreviewDialog").addEventListener("close", () => {
+      $("attachmentPreviewImage").removeAttribute("src");
+    });
+    $("attachmentPreviewDialog").addEventListener("click", (event) => {
+      if (event.target === event.currentTarget) event.currentTarget.close();
+    });
+
     window.addEventListener("pagehide", releaseTodoEditLockOnPageHide);
 
     window.addEventListener("popstate", (event) => {
