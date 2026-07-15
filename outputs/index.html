@@ -1251,7 +1251,11 @@
       <div class="control view-context hidden" id="workContextControl">
         <label for="workContextSelect">Delovni pogled</label>
         <select id="workContextSelect">
-          <option value="admin">&#352;ef &#8211; obra&#269;uni in upravljanje</option>
+          <option value="admin">&#352;efovski pogled &#8211; obra&#269;uni in upravljanje</option>
+          <optgroup label="Delavski pogledi">
+            <option value="worker:bojan">Delavski pogled &#8211; Bojan</option>
+            <option value="worker:ibro">Delavski pogled &#8211; Ibro</option>
+          </optgroup>
         </select>
         <span class="small" id="workContextHint"></span>
       </div>
@@ -1708,7 +1712,8 @@
       try {
         const me = await api("/api/me");
         state.user = me.user;
-        state.users = state.user.role === "boss" ? (await api("/api/users")).users : [state.user];
+        const availableUsers = state.user.role === "boss" ? (await api("/api/users")).users : [state.user];
+        state.users = [...new Map([...availableUsers, state.user].map((user) => [user.id, user])).values()];
         initializeWorkContext();
         showApp();
         await loadAll();
@@ -1732,19 +1737,35 @@
     function initializeWorkContext() {
       const select = $("workContextSelect");
       select.replaceChildren();
-      const contexts = [];
-      if (state.user.role === "boss") {
-        contexts.push({ value: "admin", label: "Sef - obracuni in upravljanje" });
-        state.users.forEach((user) => contexts.push({ value: `worker:${user.id}`, label: `${user.name} - delavec` }));
-      } else {
-        contexts.push({ value: `worker:${state.user.id}`, label: `${state.user.name} - delavec` });
-      }
-      contexts.forEach((context) => {
+      const directory = [...new Map([...state.users, state.user].map((user) => [user.id, user])).values()]
+        .sort((a, b) => {
+          if (a.id === state.user.id) return -1;
+          if (b.id === state.user.id) return 1;
+          return String(a.name || a.id).localeCompare(String(b.name || b.id), "sl");
+        });
+      state.users = directory;
+      const workerContexts = directory.map((user) => ({
+        value: `worker:${user.id}`,
+        label: `Delavski pogled - ${user.name || user.id}`
+      }));
+      const contexts = state.user.role === "boss"
+        ? [{ value: "admin", label: "Sefovski pogled - obracuni in upravljanje" }, ...workerContexts]
+        : workerContexts.filter((context) => context.value === `worker:${state.user.id}`);
+      const appendOption = (parent, context) => {
         const option = document.createElement("option");
         option.value = context.value;
         option.textContent = context.label;
-        select.appendChild(option);
-      });
+        parent.appendChild(option);
+      };
+      if (state.user.role === "boss") {
+        appendOption(select, contexts[0]);
+        const workerGroup = document.createElement("optgroup");
+        workerGroup.label = "Delavski pogledi";
+        workerContexts.forEach((context) => appendOption(workerGroup, context));
+        select.appendChild(workerGroup);
+      } else {
+        contexts.forEach((context) => appendOption(select, context));
+      }
       const allowed = new Set(contexts.map((context) => context.value));
       const stored = localStorage.getItem(workContextKey) || "";
       state.workContext = state.user.role === "boss" && allowed.has(stored) ? stored : contexts[0].value;

@@ -125,7 +125,8 @@ test("konflikt zmaga novejsa sprememba, nespremenjen vnos pa se ne posilja", () 
 test("staro polno Calendar dovoljenje se pri migraciji zavrze", () => {
   const database = {
     users: {
-      bojan: { id: "bojan", email: "bojan@indus.si", google: { tokens: { refresh_token: "legacy" }, calendarId: "primary", scopeVersion: 1 } }
+      bojan: { id: "bojan", email: "bojan@indus.si", google: { tokens: { refresh_token: "legacy" }, calendarId: "primary", scopeVersion: 1 } },
+      marko: { email: "marko@indus.si", name: "Marko", role: "worker" }
     },
     entries: [], todos: [], debts: [], clients: []
   };
@@ -133,6 +134,9 @@ test("staro polno Calendar dovoljenje se pri migraciji zavrze", () => {
   assert.equal(database.users.bojan.google.tokens, null);
   assert.equal(database.users.bojan.google.calendarId, "");
   assert.equal(database.users.bojan.google.scopeVersion, 0);
+  assert.equal(database.users.marko.id, "marko");
+  assert.equal(database.users.marko.role, "worker");
+  assert.equal(database.users.marko.google.scopeVersion, 0);
   assert.equal(GOOGLE_CALENDAR_SCOPE_VERSION, 2);
 });
 

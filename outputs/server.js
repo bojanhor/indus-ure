@@ -168,9 +168,45 @@ function normalizeDb(db = {}) {
     }
   }
 
-  for (const id of Object.keys(db.users)) {
-    if (!defaultUsers[id]) {
+  for (const [id, user] of Object.entries(db.users)) {
+    if (Object.hasOwn(defaultUsers, id)) continue;
+    if (!user || typeof user !== "object") {
       delete db.users[id];
+      changed = true;
+      continue;
+    }
+    if (user.id !== id) {
+      user.id = id;
+      changed = true;
+    }
+    if (!user.name) {
+      user.name = id;
+      changed = true;
+    }
+    if (!["boss", "worker"].includes(user.role)) {
+      user.role = "worker";
+      changed = true;
+    }
+    if (!user.google) {
+      user.google = { tokens: null, calendarId: "", calendarName: "", connectedAt: "", scopeVersion: 0 };
+      changed = true;
+    }
+    const googleState = user.google;
+    if (Number(googleState.scopeVersion || 0) !== GOOGLE_CALENDAR_SCOPE_VERSION) {
+      if (googleState.tokens || googleState.calendarId || googleState.syncToken) {
+        googleState.tokens = null;
+        googleState.calendarId = "";
+        googleState.calendarName = "";
+        googleState.syncToken = "";
+        changed = true;
+      }
+      if (Number(googleState.scopeVersion || 0) !== 0) {
+        googleState.scopeVersion = 0;
+        changed = true;
+      }
+    }
+    if (user.avatar && !validImageDataUrl(user.avatar, 1_500_000)) {
+      user.avatar = "";
       changed = true;
     }
   }
@@ -560,9 +596,20 @@ function canManageTodo(user, todo) {
   return (todo.syncUser || todo.createdBy) === user.id;
 }
 
-function syncUserForRequest(user, requested, fallback = "") {
-  const wanted = ["bojan", "ibro"].includes(requested) ? requested : "";
-  if (user.role === "boss") return wanted || fallback || user.id;
+function cleanUserId(value) {
+  const id = String(value || "").trim();
+  return /^[a-z0-9][a-z0-9_-]{0,63}$/i.test(id) ? id : "";
+}
+
+function syncUserForRequest(user, requested, fallback = "", users = defaultUsers) {
+  const allowed = new Set(Object.keys(users || {}));
+  const wanted = cleanUserId(requested);
+  const previous = cleanUserId(fallback);
+  if (user.role === "boss") {
+    if (allowed.has(wanted)) return wanted;
+    if (allowed.has(previous)) return previous;
+    return user.id;
+  }
   return user.id;
 }
 
@@ -650,7 +697,7 @@ function cleanEntry(input) {
     work: String(input.work || "").trim(),
     material: String(input.material || "").trim(),
     people: String(input.people || "").trim(),
-    syncUser: ["bojan", "ibro"].includes(input.syncUser) ? input.syncUser : "",
+    syncUser: cleanUserId(input.syncUser),
     km: Number(input.km || 0),
     materialCost: Number(input.materialCost || 0),
     notes: String(input.notes || "").trim(),
@@ -691,7 +738,7 @@ function cleanTodo(input) {
     notes: String(input.notes || "").trim(),
     status: ["open", "in_progress"].includes(input.status) ? input.status : "open",
     order: Number.isFinite(Number(input.order)) ? Number(input.order) : 0,
-    syncUser: ["bojan", "ibro"].includes(input.syncUser) ? input.syncUser : "",
+    syncUser: cleanUserId(input.syncUser),
     done: Boolean(input.done),
     photos: photos
       .map((photo) => ({
@@ -1908,7 +1955,7 @@ async function handleApi(req, res) {
         id: crypto.randomUUID(),
         ...todo,
         photos: stampTodoPhotos(todo, user),
-        syncUser: syncUserForRequest(user, todo.syncUser),
+        syncUser: syncUserForRequest(user, todo.syncUser, "", db.users),
         order: todo.order || maxOrder + 1,
         createdBy: user.id,
         createdByName: user.name,
@@ -1944,7 +1991,7 @@ async function handleApi(req, res) {
       db.entries.push({
         id: crypto.randomUUID(),
         ...entry,
-        syncUser: syncUserForRequest(user, entry.syncUser),
+        syncUser: syncUserForRequest(user, entry.syncUser, "", db.users),
         createdBy: user.id,
         createdByName: user.name,
         createdAt: now,
@@ -1993,7 +2040,7 @@ async function handleApi(req, res) {
       db.entries[index] = {
         ...db.entries[index],
         ...entry,
-        syncUser: syncUserForRequest(user, entry.syncUser, db.entries[index].syncUser),
+        syncUser: syncUserForRequest(user, entry.syncUser, db.entries[index].syncUser, db.users),
         updatedBy: user.id,
         updatedByName: user.name,
         updatedAt: new Date().toISOString(),
@@ -2056,7 +2103,7 @@ async function handleApi(req, res) {
         ...db.todos[index],
         ...todo,
         photos: stampTodoPhotos(todo, user),
-        syncUser: syncUserForRequest(user, todo.syncUser, db.todos[index].syncUser),
+        syncUser: syncUserForRequest(user, todo.syncUser, db.todos[index].syncUser, db.users),
         updatedBy: user.id,
         updatedByName: user.name,
         updatedAt: new Date().toISOString(),

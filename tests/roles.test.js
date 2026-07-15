@@ -40,8 +40,11 @@ test("delavec ne more upravljati tujih vnosov ali opravil", () => {
   assert.equal(canManageEntry(worker, db.entries[1]), false);
   assert.equal(canManageTodo(worker, db.todos[0]), true);
   assert.equal(canManageTodo(worker, db.todos[1]), false);
-  assert.equal(syncUserForRequest(worker, "bojan", "bojan"), "ibro");
-  assert.equal(syncUserForRequest(boss, "ibro"), "ibro");
+  const users = { bojan: boss, ibro: worker, marko: { id: "marko", role: "worker" } };
+  assert.equal(syncUserForRequest(worker, "bojan", "bojan", users), "ibro");
+  assert.equal(syncUserForRequest(boss, "ibro", "", users), "ibro");
+  assert.equal(syncUserForRequest(boss, "marko", "", users), "marko");
+  assert.equal(syncUserForRequest(boss, "ne-obstaja", "marko", users), "marko");
 });
 
 test("delavski vnos ne more nastaviti obracuna ali racuna", () => {
