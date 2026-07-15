@@ -69,17 +69,13 @@ test("nova stranka se zapise v devet stolpcev baze strank", () => {
 
 test("novo opravilo ponuja aliase iz prvega stolpca Google Sheeta", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
-  assert.match(html, /id="pageTodoClient"[^>]+aria-controls="todoClientSuggestions"/);
-  assert.match(html, /id="todoClientSuggestions"[^>]+role="listbox"/);
-  assert.match(html, /function renderTodoClientSuggestions\(\)/);
-  assert.match(html, /normalizeText\(client\.search\)\.includes\(query\)/);
+  assert.match(html, /id="todoFormClient" list="clientList"/);
+  assert.match(html, /<datalist id="clientList"><\/datalist>/);
+  assert.match(html, /client\.search !== client\.name/);
+  assert.match(html, /<option value="\$\{escapeHtml\(client\.search\)\}" label="\$\{escapeHtml\(client\.name\)\}"><\/option>/);
   assert.match(html, /function findTodoClient\(value\)/);
   assert.match(html, /client\?\.search \|\| todo\.client/);
-  assert.match(html, /grid-template-columns: 140px minmax\(260px, 1\.4fr\) 160px minmax\(210px, 1fr\)/);
-  assert.match(html, /\.todo-title-field,\s*\.todo-description-field \{ grid-column: 1 \/ 4; \}/);
-  assert.match(html, /event\.key === "ArrowDown" \|\| event\.key === "ArrowUp"/);
-  assert.match(html, /event\.key === "Enter" && state\.todoClientSuggestionIndex >= 0/);
-  assert.match(html, /scrollIntoView\(\{ block: "nearest" \}\)/);
+  assert.doesNotMatch(html, /pageTodoClient|todoClientSuggestions/);
 });
 
 test("spletne povezave v naslovu opravila so varno klikljive", () => {
@@ -95,7 +91,6 @@ test("dropdown statusov prikaze koledarske barve za vsako moznost", () => {
   assert.match(html, /\.todo-status option\[value="return"\] \{ background: #dbadff; color: #202124; \}/);
   assert.match(html, /\.todo-status option\[value="order"\]/);
   assert.match(html, /class="todo-option-\$\{status\.id\}"/);
-  assert.match(html, /<option value="execution">Zaklju&#269;eno<\/option>/);
   assert.match(html, /id: "execution", label: "Zaklju\\u010deno"/);
   assert.doesNotMatch(html, />Izvedba<\/option>/);
 });
@@ -112,11 +107,8 @@ test("gumba za slike sta poimenovana kot prilogi", () => {
 test("novo opravilo je mogoce dodeliti sebi in vec drugim delavcem", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
   const server = fs.readFileSync(path.join(__dirname, "..", "outputs", "server.js"), "utf8");
-  assert.match(html, /id="pageTodoAssigneePicker"/);
-  assert.match(html, /id="pageTodoAssigneeOptions"/);
-  assert.match(html, /input\.type = "checkbox"/);
-  assert.match(html, /assigneeIds: selectedTodoAssigneeIds\(\)/);
   assert.match(html, /id="todoFormAssignees"/);
+  assert.match(html, /<input type="checkbox" value="\$\{escapeHtml\(user\.id\)\}"/);
   assert.match(html, /renderTodoFormAssignees\(editing \? todoAssigneeIds\(todo\) : \[activeWorkerId\(\)\]\)/);
   assert.match(html, /const assigneeIds = selectedTodoFormAssignees\(\)/);
   assert.match(html, /class="secondary todo-assignee-button edit-todo-assignees"/);
@@ -150,7 +142,8 @@ test("sef ima tabelo privzetih postavk in obracun zakljucenih opravil", () => {
 test("koledar ustvarja in prikazuje samo kanonicna opravila", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
   const server = fs.readFileSync(path.join(__dirname, "..", "outputs", "server.js"), "utf8");
-  assert.match(html, /id="newTodoFromSidebar"/);
+  assert.match(html, /id="newTodoButton"[^>]*>Dodaj opravilo<\/button>/);
+  assert.match(html, /openTodoDialog\(\{ date: date \|\| dateKey\(new Date\(\)\) \}\)/);
   assert.match(html, /add\.addEventListener\("click", \(\) => startTodoForDate\(key\)\)/);
   assert.match(html, /item\.addEventListener\("click", \(\) => openTodoDialog\(todo\)\)/);
   assert.doesNotMatch(html, /<dialog id="entryDialog">/);
@@ -279,16 +272,23 @@ test("mobilni spodnji preklopnik ne prekriva konca strani", () => {
 
 test("opravilo ima loceno ime in dolg vecvrsticni opis", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
-  assert.match(html, /<label class="todo-title-field">Ime opravila/);
-  assert.match(html, /id="pageTodoTitle"[^>]+placeholder="Ime opravila"/);
-  assert.match(html, /<label class="todo-description-field">Opis/);
-  assert.match(html, /<textarea id="pageTodoNotes"/);
-  assert.match(html, /notes: \$\("pageTodoNotes"\)\.value\.trim\(\)/);
   assert.match(html, /<label>Ime opravila\s*<input id="todoFormTask" type="text"/);
   assert.match(html, /<label>Opis\s*<textarea id="todoFormNotes"/);
-  assert.match(html, /class="todo-description todo-meta">\$\{linkifyText\(todo\.notes\)\}/);
+  assert.match(html, /<details class="todo-description-details">\s*<summary>Opis<\/summary>/);
+  assert.match(html, /<div class="todo-description todo-meta">\$\{linkifyText\(todo\.notes\)\}<\/div>/);
+  assert.doesNotMatch(html, /<details class="todo-description-details" open>/);
   assert.match(html, /white-space: pre-wrap/);
+  assert.doesNotMatch(html, /pageTodoTitle|pageTodoNotes/);
   assert.doesNotMatch(html, /Kaj je treba narediti/);
+});
+
+test("pogled opravil uporablja samo gumb in skupni obrazec ima Preklici", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  assert.match(html, /class="todo-actions-bar">\s*<button class="primary" id="newTodoButton"[^>]*>Dodaj opravilo<\/button>/);
+  assert.match(html, /id="cancelTodoDialog">Prekli&#269;i<\/button>/);
+  assert.match(html, /\$\("cancelTodoDialog"\)\.addEventListener\("click", \(\) => \$\("todoDialog"\)\.close\(\)\)/);
+  assert.doesNotMatch(html, /id="todoCreatePanel"|id="savePageTodo"|class="todo-create"/);
+  assert.doesNotMatch(html, /todoFromPage|async function addTodo/);
 });
 
 test("iskanje odpira isti obrazec opravila kot koledar", () => {
