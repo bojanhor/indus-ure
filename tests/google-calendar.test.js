@@ -128,7 +128,7 @@ test("statusi opravil uporabljajo dogovorjene Google barve", () => {
   const expected = {
     open: ["\u010caka", "8"],
     in_progress: ["V teku", "9"],
-    execution: ["Izvedba", "10"],
+    execution: ["Zaklju\u010deno", "10"],
     billing: ["Obra\u010dun", "2"],
     order: ["Naro\u010di", "11"],
     order_car: ["Naro\u010di Avto", "11"],
@@ -146,6 +146,17 @@ test("statusi opravil uporabljajo dogovorjene Google barve", () => {
     assert.equal(parseGoogleEventDescription(event.description).fields.status, label);
     assert.equal(todoFromGoogleEvent({ ...event, id: `event-${status}` }, user, db, todo).status, status);
   }
+});
+
+test("stara oznaka Izvedba se prebere kot Zakljuceno", () => {
+  const todo = { id: "legacy-execution", title: "Preveri", date: "2026-07-16", status: "execution", syncUser: "bojan" };
+  const current = todoToGoogleEvent(todo);
+  const legacy = {
+    ...current,
+    id: "legacy-event",
+    description: current.description.replace("Zaklju\u010deno", "Izvedba")
+  };
+  assert.equal(todoFromGoogleEvent(legacy, user, db, todo).status, "execution");
 });
 
 test("lastnistvo Google dogodka zahteva popolno INDUS oznako in ujemanje", () => {

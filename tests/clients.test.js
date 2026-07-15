@@ -94,6 +94,9 @@ test("dropdown statusov prikaze koledarske barve za vsako moznost", () => {
   assert.match(html, /\.todo-status option\[value="return"\] \{ background: #dbadff; color: #202124; \}/);
   assert.match(html, /\.todo-status option\[value="order"\]/);
   assert.match(html, /class="todo-option-\$\{status\.id\}"/);
+  assert.match(html, /<option value="execution">Zaklju&#269;eno<\/option>/);
+  assert.match(html, /id: "execution", label: "Zaklju\\u010deno"/);
+  assert.doesNotMatch(html, />Izvedba<\/option>/);
 });
 
 test("gumba za slike sta poimenovana kot prilogi", () => {

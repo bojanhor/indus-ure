@@ -45,7 +45,7 @@ let mutationQueue = Promise.resolve();
 const TODO_STATUS_DEFINITIONS = Object.freeze({
   open: { label: "Čaka", googleColorId: "8" },
   in_progress: { label: "V teku", googleColorId: "9" },
-  execution: { label: "Izvedba", googleColorId: "10" },
+  execution: { label: "Zaklju\u010deno", googleColorId: "10" },
   billing: { label: "Obračun", googleColorId: "2" },
   order: { label: "Naroči", googleColorId: "11" },
   order_car: { label: "Naroči Avto", googleColorId: "11" },
@@ -409,6 +409,10 @@ function normalizeDb(db = {}) {
     }
     if (typeof next.googleColorId !== "string") {
       next.googleColorId = "";
+      changed = true;
+    }
+    if (typeof next.googleStatusLabel !== "string") {
+      next.googleStatusLabel = "";
       changed = true;
     }
     if (!Array.isArray(next.photos)) {
@@ -985,6 +989,7 @@ function todoStatusFromGoogle(value, fallback = "open") {
     .find(([, definition]) => definition.label.toLocaleLowerCase("sl") === normalized);
   if (match) return match[0];
   if (normalized === "odprto") return "open";
+  if (normalized === "izvedba") return "execution";
   return TODO_STATUSES.has(fallback) ? fallback : "open";
 }
 
@@ -1227,6 +1232,7 @@ function todoFromGoogleEvent(event, user, db = {}, existing = null) {
     googleSyncedLocalAt: now,
     googleManagedByIndus: true,
     googleColorId: String(event.colorId || ""),
+    googleStatusLabel: String(parsed.fields.status || ""),
     createdBy: existing?.createdBy || user.id,
     createdByName: existing?.createdByName || user.name,
     createdAt: existing?.createdAt || now,
@@ -1304,7 +1310,10 @@ async function pushGoogleItem(calendar, calendarId, item, requestBody, expectedT
   item.googleUpdatedAt = response.data.updated || new Date().toISOString();
   item.googleSyncedLocalAt = item.updatedAt || item.createdAt || new Date().toISOString();
   item.googleManagedByIndus = true;
-  if (expectedType === "todo") item.googleColorId = String(requestBody.colorId || "");
+  if (expectedType === "todo") {
+    item.googleColorId = String(requestBody.colorId || "");
+    item.googleStatusLabel = todoStatusDefinition(item.status).label;
+  }
   return true;
 }
 
@@ -1394,6 +1403,7 @@ async function syncGoogleForUser(req, db, user) {
       } else {
         todo.googleManagedByIndus = true;
         todo.googleColorId = String(event.colorId || "");
+        todo.googleStatusLabel = String(parseGoogleEventDescription(event.description).fields.status || "");
         if (!todo.googleEventId) {
           todo.googleEventId = event.id || "";
           todo.googleUpdatedAt = event.updated || "";
@@ -1426,12 +1436,14 @@ async function syncGoogleForUser(req, db, user) {
         todo.googleSyncedLocalAt = todo.updatedAt || "";
         todo.googleManagedByIndus = false;
         todo.googleColorId = "";
+        todo.googleStatusLabel = "";
         pushed++;
       }
       continue;
     }
     const requestBody = todoToGoogleEvent(todo);
-    if (todo.googleEventId && !localItemChanged(todo) && todo.googleColorId === requestBody.colorId) continue;
+    const desiredStatusLabel = todoStatusDefinition(todo.status).label;
+    if (todo.googleEventId && !localItemChanged(todo) && todo.googleColorId === requestBody.colorId && todo.googleStatusLabel === desiredStatusLabel) continue;
     if (await pushGoogleItem(calendar, calendarId, todo, requestBody, "todo")) pushed++;
   }
 
