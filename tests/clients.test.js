@@ -95,13 +95,22 @@ test("dropdown statusov prikaze koledarske barve za vsako moznost", () => {
   assert.doesNotMatch(html, />Izvedba<\/option>/);
 });
 
-test("gumba za slike sta poimenovana kot prilogi", () => {
+test("osnovni pogled priloge samo prikazuje, dodajanje pa ostane v obrazcu", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
-  assert.match(html, />Prikaz prilog<\/button>/);
-  assert.match(html, />Dodaj prilogo<input/);
+  assert.match(html, /\$\{\(todo\.photos \|\| \[\]\)\.length \? `<button class="secondary show-photos"[^>]*>Prikaz prilog<\/button>` : ""\}/);
+  assert.match(html, /id="todoFormPhotoInput"[^>]*type="file"/);
+  assert.doesNotMatch(html, /class="hidden-file todo-photo-input"/);
   assert.doesNotMatch(html, />Fotografije<\/button>/);
   assert.doesNotMatch(html, />Dodaj foto<input/);
   assert.doesNotMatch(html, /Pri tem opravilu se ni fotografij/);
+});
+
+test("brisanje opravila je majhna dostopna ikona kosa", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  assert.match(html, /class="todo-delete-icon delete-todo"[^>]*aria-label="Izbri&#353;i opravilo"/);
+  assert.match(html, /<svg viewBox="0 0 20 20"[^>]*aria-hidden="true">/);
+  assert.doesNotMatch(html, /class="secondary delete-todo"/);
+  assert.match(html, /if \(!confirm\("Izbrisem to opravilo\?"\)\) return;/);
 });
 
 test("novo opravilo je mogoce dodeliti sebi in vec drugim delavcem", () => {

@@ -624,7 +624,7 @@
 
     .todo-item {
       display: grid;
-      grid-template-columns: auto 1fr auto auto auto;
+      grid-template-columns: auto 1fr auto auto;
       gap: 10px;
       align-items: start;
       border: 1px solid var(--line);
@@ -709,6 +709,29 @@
       align-items: center;
       flex-wrap: wrap;
       justify-content: flex-end;
+    }
+
+    .todo-delete-icon {
+      width: 34px;
+      height: 34px;
+      flex: 0 0 auto;
+      display: grid;
+      place-items: center;
+      padding: 0;
+      border: 1px solid #e3bcbc;
+      border-radius: 8px;
+      background: #fff3f3;
+      color: #9f3636;
+    }
+
+    .todo-delete-icon:hover,
+    .todo-delete-icon:focus-visible {
+      background: #f8dddd;
+    }
+
+    .todo-delete-icon svg {
+      width: 18px;
+      height: 18px;
     }
 
     .todo-tool-field {
@@ -2808,8 +2831,12 @@
             </select>
             <button class="secondary todo-assignee-button edit-todo-assignees" type="button">Dodeljeno: ${escapeHtml(todoAssigneeNames(todo))}</button>
             <input class="todo-date" type="date" value="${escapeHtml(todo.date || "")}" aria-label="Fiksni datum">
-            <button class="secondary show-photos" type="button">Prikaz prilog</button>
-            <label class="secondary add-photo">Dodaj prilogo<input class="hidden-file todo-photo-input" type="file" accept="image/*" multiple></label>
+            ${(todo.photos || []).length ? `<button class="secondary show-photos" type="button">Prikaz prilog</button>` : ""}
+            <button class="todo-delete-icon delete-todo" type="button" title="Izbri&#353;i opravilo" aria-label="Izbri&#353;i opravilo">
+              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M3 5.5h14M7.5 5.5V3.5h5v2M5.5 5.5l1 11h7l1-11M8.5 8.5v5M11.5 8.5v5"></path>
+              </svg>
+            </button>
           </div>
           ${isAdminView() && todo.status === "execution" ? `
             <div class="todo-billing">
@@ -2823,7 +2850,6 @@
             </div>
           ` : ""}
           ${state.expandedTodoPhotos === todo.id ? renderTodoPhotoHtml(todo) : ""}
-          <button class="secondary delete-todo" type="button">Izbrisi</button>
           <button class="drag-handle" type="button" title="Povleci za vrstni red">::</button>
         `;
         item.querySelectorAll(".edit-todo, .edit-todo-assignees").forEach((button) => {
@@ -2855,27 +2881,13 @@
             }
           });
         }
-        item.querySelector(".show-photos").addEventListener("click", () => {
-          state.expandedTodoPhotos = state.expandedTodoPhotos === todo.id ? "" : todo.id;
-          renderTodoItems();
-        });
-        item.querySelector(".todo-photo-input").addEventListener("change", async (event) => {
-          try {
-            const remaining = Math.max(0, 8 - (todo.photos || []).length);
-            const files = [...event.target.files].slice(0, remaining);
-            const photos = [];
-            for (const file of files) {
-              photos.push(await resizeImageAsDataUrl(file));
-            }
-            if (photos.length === 0) return;
-            await saveTodoToServer({ ...todo, photos: [...(todo.photos || []), ...photos] });
-            state.expandedTodoPhotos = todo.id;
-          } catch (error) {
-            alert(error.message);
-          } finally {
-            event.target.value = "";
-          }
-        });
+        const showPhotosButton = item.querySelector(".show-photos");
+        if (showPhotosButton) {
+          showPhotosButton.addEventListener("click", () => {
+            state.expandedTodoPhotos = state.expandedTodoPhotos === todo.id ? "" : todo.id;
+            renderTodoItems();
+          });
+        }
         item.querySelector(".delete-todo").addEventListener("dragstart", (event) => event.preventDefault());
         item.querySelectorAll(".remove-photo").forEach((button) => {
           button.addEventListener("click", async () => {
@@ -3846,13 +3858,14 @@
       const item = button.closest(".todo-item");
       const id = item?.dataset.todoId;
       if (!id) return;
+      if (!confirm("Izbrisem to opravilo?")) return;
       button.disabled = true;
-      button.textContent = "Brisem...";
+      button.setAttribute("aria-busy", "true");
       try {
         await deleteTodoFromServer(id);
       } catch (error) {
         button.disabled = false;
-        button.textContent = "Izbrisi";
+        button.removeAttribute("aria-busy");
         alert(error.message);
       }
     });
