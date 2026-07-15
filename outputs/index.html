@@ -518,16 +518,8 @@
       border-color: var(--accent);
     }
 
-    .boss-panel {
-      display: grid;
-      grid-template-columns: 1fr auto;
-      gap: 12px;
-      align-items: center;
-      padding: 12px 14px;
-    }
 
     .worker-billing {
-      grid-column: 1 / -1;
       display: grid;
       gap: 8px;
       padding-top: 4px;
@@ -1638,6 +1630,7 @@
               <button class="menu-action" id="googleCalendar" type="button">Google Calendar sync</button>
               <button class="menu-action admin-only" id="syncClientsBtn" type="button">Sync strank iz Google Sheets</button>
               <span class="tools-menu-label admin-only">Napredno</span>
+              <button class="menu-action admin-only" id="workerBillingBtn" type="button">Privzete urne postavke</button>
               <button class="menu-action admin-only" id="exportCsv" type="button">Izvoz CSV</button>
               <button class="menu-action admin-only" id="downloadBackup" type="button">Prenesi varnostno kopijo</button>
               <button class="menu-action logout-action" id="logoutBtn" type="button">Odjava</button>
@@ -1655,21 +1648,6 @@
         <div class="stat"><strong id="statUnbilled">0</strong><span>neobra&#269;unani vnosi</span></div>
       </section>
 
-      <section class="panel boss-panel hidden calendar-view" id="bossPanel">
-        <div class="worker-billing">
-          <div class="worker-billing-head">
-            <strong>Delavci in privzete urne postavke</strong>
-          </div>
-          <div class="worker-billing-scroll">
-            <table>
-              <thead>
-                <tr><th>Delavec</th><th>Vloga</th><th>Privzeta urna postavka</th><th></th></tr>
-              </thead>
-              <tbody id="workerBillingRows"></tbody>
-            </table>
-          </div>
-        </div>
-      </section>
 
       <section class="panel search-panel" id="searchPanel"></section>
 
@@ -1890,6 +1868,27 @@
           <div>
             <button type="button" class="secondary" id="duplicateEntry">Podvoji</button>
             <button type="submit" class="primary">Shrani</button>
+          </div>
+        </div>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="workerBillingDialog">
+    <form method="dialog">
+      <div class="modal-head">
+        <h3>Privzete urne postavke</h3>
+        <button class="icon-btn" id="closeWorkerBilling" type="button" title="Zapri">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="worker-billing">
+          <div class="worker-billing-scroll">
+            <table>
+              <thead>
+                <tr><th>Delavec</th><th>Vloga</th><th>Privzeta urna postavka</th><th></th></tr>
+              </thead>
+              <tbody id="workerBillingRows"></tbody>
+            </table>
           </div>
         </div>
       </div>
@@ -2185,7 +2184,6 @@
       const admin = isAdminView();
       const worker = activeWorker();
       $("userRole").textContent = admin ? "Sef - administracija" : `${worker?.name || "Delavec"} - delavec`;
-      $("bossPanel").classList.toggle("hidden", !admin);
       document.querySelectorAll(".admin-only").forEach((element) => element.classList.toggle("hidden", !admin));
       document.querySelectorAll(".worker-only").forEach((element) => element.classList.toggle("hidden", admin));
       $("newTodoFromSidebar").classList.toggle("hidden", admin);
@@ -3856,6 +3854,11 @@
     $("toolsMenu").querySelectorAll("button").forEach((button) => {
       button.addEventListener("click", closeToolsMenu);
     });
+    $("workerBillingBtn").addEventListener("click", () => {
+      renderWorkerBillingTable();
+      $("workerBillingDialog").showModal();
+    });
+    $("closeWorkerBilling").addEventListener("click", () => $("workerBillingDialog").close());
     document.addEventListener("click", (event) => {
       const menu = $("toolsMenu");
       if (menu?.open && !menu.contains(event.target)) closeToolsMenu();

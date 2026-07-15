@@ -124,6 +124,10 @@ test("sef ima tabelo privzetih postavk in obracun zakljucenih opravil", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
   const server = fs.readFileSync(path.join(__dirname, "..", "outputs", "server.js"), "utf8");
   assert.match(html, /id="workerBillingRows"/);
+  const workerBillingDialog = html.match(/<dialog id="workerBillingDialog"[\s\S]*?<\/dialog>/)?.[0] || "";
+  assert.match(workerBillingDialog, /id="workerBillingRows"/);
+  assert.match(html, /id="workerBillingBtn"/);
+  assert.doesNotMatch(html, /id="bossPanel"/);
   assert.match(html, /api\("\/api\/workers\/billing"/);
   assert.match(html, /todo\.status === "execution"/);
   assert.match(html, /class="todo-billing"/);
@@ -148,7 +152,7 @@ test("nastavitve in tehnicna orodja so zbrana v enem meniju", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
   assert.match(html, /<details class="tools-menu" id="toolsMenu">/);
   assert.match(html, /class="tools-menu-panel"/);
-  for (const id of ["accountBtn", "refreshBtn", "googleCalendar", "syncClientsBtn", "exportCsv", "downloadBackup", "logoutBtn"]) {
+  for (const id of ["accountBtn", "refreshBtn", "googleCalendar", "syncClientsBtn", "workerBillingBtn", "exportCsv", "downloadBackup", "logoutBtn"]) {
     assert.equal((html.match(new RegExp(`id="${id}"`, "g")) || []).length, 1, `ID ${id} mora biti samo enkrat`);
   }
   const bossPanel = html.match(/<section class="panel boss-panel[\s\S]*?<\/section>/)?.[0] || "";
