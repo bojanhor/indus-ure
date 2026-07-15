@@ -156,3 +156,8 @@ test("nastavitve in tehnicna orodja so zbrana v enem meniju", () => {
   assert.match(html, /id="downloadBackup"[^>]*class="[^"]*admin-only|class="[^"]*admin-only[^"]*" id="downloadBackup"/);
   assert.match(html, /querySelectorAll\("button"\)[\s\S]*closeToolsMenu/);
 });
+test("leva barvna legenda je odstranjena", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  assert.doesNotMatch(html, /class="legend"/);
+  assert.doesNotMatch(html, /class="legend-item"/);
+});
