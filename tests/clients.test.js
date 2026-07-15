@@ -140,7 +140,7 @@ test("kartica opravila poravna status datum in udelezence v stalne stolpce", () 
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
   const card = html.match(/item\.innerHTML = `([\s\S]*?)`;\s*const openTodoEditor/)?.[1] || "";
   assert.match(html, /\.todo-primary-meta \{[\s\S]*?display: grid;[\s\S]*?grid-template-columns: 150px 110px minmax\(180px, 1fr\);/);
-  assert.match(card, /todo-status-color[\s\S]*?todo-date-chip[\s\S]*?Udele&#382;enci:/);
+  assert.match(card, /todo-status-color[\s\S]*?todo-date-chip[\s\S]*?Za:/);
   assert.match(card, /todo-date-chip \$\{todo\.date \? "" : "is-empty"\}/);
   assert.match(html, /\.todo-date-chip\.is-empty \{\s*visibility: hidden;/);
   assert.doesNotMatch(card, /dodal:/i);
@@ -154,7 +154,7 @@ test("novo opravilo je mogoce dodeliti sebi in vec drugim delavcem", () => {
   assert.match(html, /<input type="checkbox" value="\$\{escapeHtml\(user\.id\)\}"/);
   assert.match(html, /renderTodoFormAssignees\(editing \? todoAssigneeIds\(todo\) : \[activeWorkerId\(\)\]\)/);
   assert.match(html, /const assigneeIds = selectedTodoFormAssignees\(\)/);
-  assert.match(html, /Udele&#382;enci: \$\{escapeHtml\(todoAssigneeNames\(todo\)\)\}/);
+  assert.match(html, /Za: \$\{escapeHtml\(todoAssigneeNames\(todo\)\)\}/);
   assert.doesNotMatch(html, /class="todo-assignee-select"/);
   assert.doesNotMatch(html, /Opravilo je dodeljeno:/);
   assert.match(html, /const availableUsers = \(await api\("\/api\/users"\)\)\.users/);

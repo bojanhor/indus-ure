@@ -2884,7 +2884,7 @@
             <div class="todo-primary-meta">
               <span class="todo-chip todo-status-color ${todoStatusClass(todo.status)}">${todoStatus(todo.status).label}</span>
               <span class="todo-chip todo-date-chip ${todo.date ? "" : "is-empty"}" ${todo.date ? "" : 'aria-hidden="true"'}>${todo.date ? formatDate(todo.date) : "&nbsp;"}</span>
-              <span class="todo-chip todo-assignees-chip">Udele&#382;enci: ${escapeHtml(todoAssigneeNames(todo))}</span>
+              <span class="todo-chip todo-assignees-chip">Za: ${escapeHtml(todoAssigneeNames(todo))}</span>
             </div>
             ${todo.client || (todo.photos || []).length ? `<div class="todo-secondary-meta">
               ${todo.client ? `<span class="todo-chip">${escapeHtml(todo.client)}</span>` : ""}
