@@ -770,8 +770,7 @@
     }
 
     .todo-date,
-    .todo-status,
-    .todo-assignee-select {
+    .todo-status {
       min-height: 34px;
       border: 1px solid var(--line);
       border-radius: 8px;
@@ -837,9 +836,10 @@
       font-weight: 700;
     }
 
-    .todo-assignee-select {
-      min-width: 150px;
-      max-width: 210px;
+    .todo-assignee-button {
+      max-width: 260px;
+      text-align: left;
+      overflow-wrap: anywhere;
     }
 
     .todo-billing {
@@ -1866,11 +1866,8 @@
           <label>Status
             <select id="todoFormStatus" class="todo-status todo-status-color"></select>
           </label>
-          <label id="todoFormEditAssigneeField">Dodeljeno
-            <select id="todoFormAssignee"></select>
-          </label>
         </div>
-        <div id="todoFormCreateAssigneeField">
+        <div id="todoFormAssigneeField">
           <label>Dodeljeno delavcem</label>
           <div class="todo-form-assignees" id="todoFormAssignees"></div>
         </div>
@@ -2234,6 +2231,17 @@
 
     function userDisplayName(id) {
       return state.users.find((user) => user.id === id)?.name || id || "-";
+    }
+
+    function todoAssigneeIds(todo = {}) {
+      const assigned = Array.isArray(todo.assigneeIds) ? todo.assigneeIds : [];
+      const fallback = todo.syncUser || todo.createdBy || "";
+      return [...new Set((assigned.length ? assigned : [fallback]).filter(Boolean))];
+    }
+
+    function todoAssigneeNames(todo) {
+      const names = todoAssigneeIds(todo).map(userDisplayName);
+      return names.length ? names.join(", ") : "Ni dodeljeno";
     }
 
     function selectedTodoAssigneeIds() {
@@ -2665,7 +2673,7 @@
     }
 
     function validateTodo(todo) {
-      if (!todo.id && (!Array.isArray(todo.assigneeIds) || todo.assigneeIds.length === 0)) {
+      if ((!todo.id || Array.isArray(todo.assigneeIds)) && (!Array.isArray(todo.assigneeIds) || todo.assigneeIds.length === 0)) {
         alert("Izberi vsaj enega delavca.");
         return false;
       }
@@ -2958,16 +2966,6 @@
       alert(data.sheetWrite?.action === "updated" ? "Stranka je posodobljena tudi v Google Sheetu." : "Stranka je dodana tudi v Google Sheet Baza Strank.");
     }
 
-    function todoAssigneeOptions(selectedId) {
-      const users = [...new Map([
-        ...state.users,
-        { id: selectedId, name: userDisplayName(selectedId) }
-      ].filter((user) => user.id).map((user) => [user.id, user])).values()];
-      return users
-        .map((user) => `<option value="${escapeHtml(user.id)}" ${user.id === selectedId ? "selected" : ""}>${escapeHtml(user.name || user.id)}</option>`)
-        .join("");
-    }
-
     function renderTodoItems() {
       const items = $("todoItems");
       const title = $("todoPanelTitle");
@@ -3006,9 +3004,7 @@
             <select class="todo-status todo-status-color ${todoStatusClass(todo.status)}" aria-label="Status opravila">
               ${todoStatusOptions(todo.status)}
             </select>
-            <label class="todo-tool-field">Dodeljeno
-              <select class="todo-assignee-select" aria-label="Dodeljeno delavcu">${todoAssigneeOptions(todo.syncUser || todo.createdBy)}</select>
-            </label>
+            <button class="secondary todo-assignee-button edit-todo-assignees" type="button">Dodeljeno: ${escapeHtml(todoAssigneeNames(todo))}</button>
             <input class="todo-date" type="date" value="${escapeHtml(todo.date || "")}" aria-label="Fiksni datum">
             <button class="secondary show-photos" type="button">Prikaz prilog</button>
             <label class="secondary add-photo">Dodaj prilogo<input class="hidden-file todo-photo-input" type="file" accept="image/*" multiple></label>
@@ -3028,10 +3024,12 @@
           <button class="secondary delete-todo" type="button">Izbrisi</button>
           <button class="drag-handle" type="button" title="Povleci za vrstni red">::</button>
         `;
-        item.querySelector(".edit-todo").addEventListener("click", (event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          openTodoDialog(todo);
+        item.querySelectorAll(".edit-todo, .edit-todo-assignees").forEach((button) => {
+          button.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            openTodoDialog(todo);
+          });
         });
         item.querySelector('input[type="checkbox"]').addEventListener("change", (event) => {
           saveTodoToServer({ ...todo, done: event.target.checked }).catch((error) => alert(error.message));
@@ -3039,18 +3037,6 @@
         item.querySelector(".todo-status").addEventListener("change", (event) => {
           updateTodoStatusControl(event.target);
           saveTodoToServer({ ...todo, status: event.target.value }).catch((error) => alert(error.message));
-        });
-        item.querySelector(".todo-assignee-select").addEventListener("change", async (event) => {
-          const select = event.target;
-          const previousAssignee = todo.syncUser || todo.createdBy;
-          select.disabled = true;
-          try {
-            await saveTodoToServer({ ...todo, syncUser: select.value });
-          } catch (error) {
-            select.value = previousAssignee;
-            select.disabled = false;
-            alert(error.message);
-          }
         });
         item.querySelector(".todo-date").addEventListener("change", (event) => {
           saveTodoToServer({ ...todo, date: event.target.value }).catch((error) => alert(error.message));
@@ -3197,10 +3183,7 @@
       $("todoFormDone").checked = Boolean(todo.done);
       $("todoFormStatus").innerHTML = todoStatusOptions(todo.status || "open");
       updateTodoFormStatus();
-      $("todoFormEditAssigneeField").classList.toggle("hidden", !editing);
-      $("todoFormCreateAssigneeField").classList.toggle("hidden", editing);
-      $("todoFormAssignee").innerHTML = todoAssigneeOptions(todo.syncUser || activeWorkerId());
-      renderTodoFormAssignees(editing ? [] : [activeWorkerId()]);
+      renderTodoFormAssignees(editing ? todoAssigneeIds(todo) : [activeWorkerId()]);
       state.todoDialogPhotos = (todo.photos || []).map((photo) => ({ ...photo }));
       renderTodoFormPhotos();
       $("todoFormHourlyRate").value = editing ? todoHourlyRate(todo) : workerDefaultHourlyRate(activeWorkerId());
@@ -3216,7 +3199,7 @@
       const id = $("todoFormId").value;
       const existing = id ? state.todos.find((todo) => todo.id === id) : null;
       const client = findTodoClient($("todoFormClient").value);
-      const assigneeIds = existing ? [] : selectedTodoFormAssignees();
+      const assigneeIds = selectedTodoFormAssignees();
       const hourlyRate = parseBillingNumber($("todoFormHourlyRate").value, 10_000);
       const billingKm = parseBillingNumber($("todoFormBillingKm").value, 1_000_000);
       const todo = {
@@ -3230,7 +3213,7 @@
         status: $("todoFormStatus").value,
         order: existing?.order || nextTodoOrder(),
         assigneeIds,
-        syncUser: existing ? $("todoFormAssignee").value : (assigneeIds[0] || activeWorkerId()),
+        syncUser: existing?.syncUser || assigneeIds[0] || activeWorkerId(),
         done: $("todoFormDone").checked,
         billingHourlyRate: hourlyRate,
         billingKm,

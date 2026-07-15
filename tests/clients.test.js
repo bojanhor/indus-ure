@@ -116,13 +116,19 @@ test("novo opravilo je mogoce dodeliti sebi in vec drugim delavcem", () => {
   assert.match(html, /id="pageTodoAssigneeOptions"/);
   assert.match(html, /input\.type = "checkbox"/);
   assert.match(html, /assigneeIds: selectedTodoAssigneeIds\(\)/);
-  assert.match(html, /class="todo-assignee-select"/);
-  assert.match(html, /saveTodoToServer\(\{ \.\.\.todo, syncUser: select\.value \}\)/);
+  assert.match(html, /id="todoFormAssignees"/);
+  assert.match(html, /renderTodoFormAssignees\(editing \? todoAssigneeIds\(todo\) : \[activeWorkerId\(\)\]\)/);
+  assert.match(html, /const assigneeIds = selectedTodoFormAssignees\(\)/);
+  assert.match(html, /class="secondary todo-assignee-button edit-todo-assignees"/);
+  assert.doesNotMatch(html, /class="todo-assignee-select"/);
   assert.doesNotMatch(html, /Opravilo je dodeljeno:/);
   assert.match(html, /const availableUsers = \(await api\("\/api\/users"\)\)\.users/);
   assert.doesNotMatch(server, /Seznam uporabnikov je na voljo samo sefu/);
   assert.match(server, /todoAssigneesForRequest\(user, body\.assigneeIds/);
   assert.match(server, /assigneeIds\.forEach\(\(assigneeId, index\) =>/);
+  assert.match(server, /const assignmentItems = todoAssignmentItems\(db, previousTodo\)/);
+  assert.match(server, /const updatedGroup = \[\]/);
+  assert.match(server, /db\.todos\.push\(\.\.\.updatedGroup\)/);
 });
 test("sef ima tabelo privzetih postavk in obracun zakljucenih opravil", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
@@ -138,7 +144,8 @@ test("sef ima tabelo privzetih postavk in obracun zakljucenih opravil", () => {
   assert.match(html, /class="todo-billing-hourly"/);
   assert.match(html, /class="todo-billing-km"/);
   assert.match(server, /user\.role !== "boss"[\s\S]*Samo sef lahko spreminja urne postavke delavcev/);
-  assert.match(server, /todo = todoForUserRole\(user, db, previousTodo, \{ \.\.\.todo, syncUser: nextAssignee \}\)/);
+  assert.match(server, /const adjusted = todoForUserRole\(user, db, existing/);
+  assert.match(server, /billingHourlyRate: isOpenedTodo \? todo\.billingHourlyRate : existing\.billingHourlyRate/);
 });
 test("koledar ustvarja in prikazuje samo kanonicna opravila", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
@@ -215,7 +222,7 @@ test("vsi pogledi uporabljajo en sam obrazec opravila", () => {
   assert.match(html, /<dialog id="todoDialog">/);
   assert.equal((html.match(/<dialog id="todoDialog">/g) || []).length, 1);
   for (const id of [
-    "todoFormId", "todoFormDate", "todoFormClient", "todoFormStatus", "todoFormAssignee",
+    "todoFormId", "todoFormDate", "todoFormClient", "todoFormStatus", "todoFormAssigneeField",
     "todoFormAssignees", "todoFormTask", "todoFormNotes", "todoFormDone", "todoFormHourlyRate",
     "todoFormBillingKm", "todoFormPhotoInput", "todoFormAudit"
   ]) {
@@ -226,7 +233,7 @@ test("vsi pogledi uporabljajo en sam obrazec opravila", () => {
   assert.match(html, /async function saveTodoFromDialog\(\)/);
   assert.match(html, /openTodoDialog\(todo\)/);
   assert.match(html, /class="primary edit-todo"/);
-  assert.match(html, /item\.querySelector\("\.edit-todo"\)\.addEventListener/);
+  assert.match(html, /item\.querySelectorAll\("\.edit-todo, \.edit-todo-assignees"\)/);
   assert.match(html, /class="report-state-chip"/);
   assert.doesNotMatch(html, /class="invoice-flag"/);
   assert.doesNotMatch(html, /function updateInvoiceFlag/);
@@ -328,8 +335,8 @@ test("skupni obrazec opravila uporablja strezniski zaklep", () => {
   assert.match(html, /editLockToken/);
   assert.match(server, /const todoLockMatch = url\.pathname\.match/);
   assert.match(server, /todoLockMatch && req\.method === "POST"/);
-  assert.match(server, /todoEditLockConflict\(id, user, editLockToken\)/);
+  assert.match(server, /todoAssignmentEditLockConflict\(db, previousTodo, user, editLockToken\)/);
   assert.match(server, /sendJson\(res, 409, \{ error: `Opravilo trenutno ureja/);
   assert.match(server, /locked: Boolean\(activeTodoEditLock\(item\.id\)\)/);
-  assert.match(server, /releaseTodoEditLock\(id, user, editLockToken\)/);
+  assert.match(server, /releaseTodoAssignmentEditLock\(db, previousTodo, user, editLockToken\)/);
 });

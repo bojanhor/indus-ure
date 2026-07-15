@@ -680,10 +680,29 @@ function visibleEntriesForUser(db, user) {
   return entries.filter((entry) => (entry.syncUser || entry.createdBy) === user.id);
 }
 
+function todoAssignmentItems(db, todo) {
+  if (!todo) return [];
+  const groupId = String(todo.assignmentGroupId || "");
+  if (!groupId) return [todo];
+  const grouped = (db.todos || []).filter((item) => item.assignmentGroupId === groupId);
+  return grouped.length ? grouped : [todo];
+}
+
+function todoAssignmentAssigneeIds(db, todo) {
+  return [...new Set(todoAssignmentItems(db, todo)
+    .map((item) => cleanUserId(item.syncUser || item.createdBy))
+    .filter(Boolean))];
+}
+
 function visibleTodosForUser(db, user) {
   const todos = db.todos || [];
-  if (user.role === "boss") return todos;
-  return todos.filter((todo) => (todo.syncUser || todo.createdBy) === user.id);
+  const visible = user.role === "boss"
+    ? todos
+    : todos.filter((todo) => (todo.syncUser || todo.createdBy) === user.id);
+  return visible.map((todo) => ({
+    ...todo,
+    assigneeIds: todoAssignmentAssigneeIds(db, todo)
+  }));
 }
 
 function visibleDebtsForUser(db, user) {
@@ -800,6 +819,38 @@ function releaseTodoEditLock(todoId, user, lockToken = "", now = Date.now()) {
   if (active.userId !== user.id || active.token !== String(lockToken || "")) return false;
   todoEditLocks.delete(String(todoId || ""));
   return true;
+}
+
+function todoAssignmentEditLockConflict(db, todo, user, lockToken = "", now = Date.now()) {
+  for (const item of todoAssignmentItems(db, todo)) {
+    const conflict = todoEditLockConflict(item.id, user, lockToken, now);
+    if (conflict) return conflict;
+  }
+  return null;
+}
+
+function acquireTodoAssignmentEditLock(db, todo, user, lockToken = "", now = Date.now()) {
+  const items = todoAssignmentItems(db, todo);
+  const conflict = todoAssignmentEditLockConflict(db, todo, user, lockToken, now);
+  if (conflict) return { ok: false, lock: conflict };
+  const existing = items.map((item) => activeTodoEditLock(item.id, now)).find(Boolean);
+  const token = existing?.token || crypto.randomBytes(18).toString("hex");
+  for (const item of items) {
+    todoEditLocks.set(String(item.id), {
+      todoId: String(item.id),
+      userId: user.id,
+      userName: user.name || user.id,
+      token,
+      expiresAt: now + TODO_EDIT_LOCK_TTL_MS
+    });
+  }
+  const lock = activeTodoEditLock(todo.id, now);
+  return { ok: true, token, lock: publicTodoEditLock(lock) };
+}
+
+function releaseTodoAssignmentEditLock(db, todo, user, lockToken = "", now = Date.now()) {
+  return todoAssignmentItems(db, todo)
+    .map((item) => releaseTodoEditLock(item.id, user, lockToken, now)).every(Boolean);
 }
 
 function canManageTodo(user, todo) {
@@ -2562,7 +2613,7 @@ async function handleApi(req, res) {
         sendJson(res, 403, { error: "Tega opravila ne mores urejati." });
         return;
       }
-      const result = acquireTodoEditLock(id, user, body.lockToken);
+      const result = acquireTodoAssignmentEditLock(db, todo, user, body.lockToken);
       if (!result.ok) {
         sendJson(res, 409, { error: `Opravilo trenutno ureja ${result.lock.lockedByName || result.lock.lockedById}.`, lock: result.lock });
         return;
@@ -2576,7 +2627,13 @@ async function handleApi(req, res) {
       if (!user) return;
       const id = decodeURIComponent(todoLockMatch[1]);
       const body = await readBody(req);
-      releaseTodoEditLock(id, user, body.lockToken);
+      const db = await readDbAsync();
+      const todo = db.todos.find((item) => item.id === id);
+      if (todo) {
+        releaseTodoAssignmentEditLock(db, todo, user, body.lockToken);
+      } else {
+        releaseTodoEditLock(id, user, body.lockToken);
+      }
       sendJson(res, 200, { ok: true });
       return;
     }
@@ -2610,51 +2667,111 @@ async function handleApi(req, res) {
         sendJson(res, 403, { error: "Tega opravila ne mores spreminjati." });
         return;
       }
-      const editLock = todoEditLockConflict(id, user, editLockToken);
+      const previousTodo = db.todos[index];
+      const assignmentItems = todoAssignmentItems(db, previousTodo);
+      const editLock = todoAssignmentEditLockConflict(db, previousTodo, user, editLockToken);
       if (editLock) {
         sendJson(res, 409, { error: `Opravilo trenutno ureja ${editLock.lockedByName || editLock.lockedById}.`, lock: editLock });
         return;
       }
-      const previousTodo = db.todos[index];
-      const nextAssignee = todoAssigneeForUpdate(user, todo.syncUser, previousTodo.syncUser, db.users);
-      if (nextAssignee !== previousTodo.syncUser && previousTodo.assignmentGroupId) {
-        const duplicateAssignment = db.todos.some((item) => item.id !== previousTodo.id
-          && item.assignmentGroupId === previousTodo.assignmentGroupId
-          && item.syncUser === nextAssignee);
-        if (duplicateAssignment) {
-          sendJson(res, 409, { error: "Ta delavec ze ima to opravilo." });
+      const currentAssigneeIds = todoAssignmentAssigneeIds(db, previousTodo);
+      let assigneeIds;
+      if (Array.isArray(body.assigneeIds)) {
+        assigneeIds = [...new Set(body.assigneeIds
+          .map(cleanUserId)
+          .filter((assigneeId) => Boolean(db.users?.[assigneeId])))];
+        if (!assigneeIds.length) {
+          sendJson(res, 400, { error: "Izberi vsaj enega delavca." });
+          return;
+        }
+      } else {
+        const nextAssignee = todoAssigneeForUpdate(user, todo.syncUser, previousTodo.syncUser, db.users);
+        assigneeIds = currentAssigneeIds.filter((assigneeId) => assigneeId !== previousTodo.syncUser);
+        if (!assigneeIds.includes(nextAssignee)) assigneeIds.push(nextAssignee);
+      }
+
+      const desiredAssignees = new Set(assigneeIds);
+      const existingByAssignee = new Map();
+      const removedTodos = [];
+      for (const item of assignmentItems) {
+        const assigneeId = cleanUserId(item.syncUser || item.createdBy);
+        if (!desiredAssignees.has(assigneeId) || existingByAssignee.has(assigneeId)) {
+          removedTodos.push(item);
+        } else {
+          existingByAssignee.set(assigneeId, item);
+        }
+      }
+      for (const removedTodo of removedTodos) {
+        if (removedTodo.googleEventId && !(await deleteGoogleEventForItem(req, db, removedTodo))) {
+          sendJson(res, 502, { error: "Dodelitve ni bilo mogoce varno odstraniti iz starega koledarja." });
           return;
         }
       }
-      if (nextAssignee !== previousTodo.syncUser && previousTodo.googleEventId) {
-        const removedFromOldCalendar = await deleteGoogleEventForItem(req, db, previousTodo);
-        if (!removedFromOldCalendar) {
-          sendJson(res, 502, { error: "Dodelitve ni bilo mogoce varno prenesti iz starega koledarja." });
-          return;
+
+      releaseTodoAssignmentEditLock(db, previousTodo, user, editLockToken);
+      const assignmentGroupId = previousTodo.assignmentGroupId || crypto.randomUUID();
+      const now = new Date().toISOString();
+      const maxOrder = db.todos.reduce((max, item) => Math.max(max, Number(item.order || 0)), 0);
+      const sharedPhotos = stampTodoPhotos(todo, user);
+      const assignmentsChanged = [...currentAssigneeIds].sort().join(",") !== [...assigneeIds].sort().join(",");
+      const assigneeNames = assigneeIds.map((assigneeId) => db.users[assigneeId]?.name || assigneeId).join(", ");
+      const updatedGroup = [];
+      let addedOrder = maxOrder + 1;
+
+      for (const assigneeId of assigneeIds) {
+        const existing = existingByAssignee.get(assigneeId);
+        if (existing) {
+          const isOpenedTodo = existing.id === previousTodo.id;
+          const adjusted = todoForUserRole(user, db, existing, {
+            ...todo,
+            syncUser: assigneeId,
+            billingHourlyRate: isOpenedTodo ? todo.billingHourlyRate : existing.billingHourlyRate,
+            billingKm: isOpenedTodo ? todo.billingKm : existing.billingKm
+          });
+          updatedGroup.push({
+            ...existing,
+            ...adjusted,
+            assignmentGroupId,
+            photos: sharedPhotos.map((photo) => ({ ...photo })),
+            syncUser: assigneeId,
+            order: existing.order,
+            updatedBy: user.id,
+            updatedByName: user.name,
+            updatedAt: now,
+            history: [...(existing.history || []), audit(user, assignmentsChanged
+              ? `dodelitev spremenjena: ${assigneeNames}`
+              : todo.done ? "oznaceno opravljeno" : "spremenjeno opravilo")]
+          });
+          continue;
         }
+
+        const assignedTodo = todoForUserRole(user, db, null, {
+          ...todo,
+          syncUser: assigneeId,
+          billingHourlyRate: null,
+          billingKm: null
+        });
+        updatedGroup.push({
+          id: crypto.randomUUID(),
+          ...assignedTodo,
+          assignmentGroupId,
+          photos: sharedPhotos.map((photo) => ({ ...photo })),
+          syncUser: assigneeId,
+          order: addedOrder++,
+          createdBy: previousTodo.createdBy || user.id,
+          createdByName: previousTodo.createdByName || user.name,
+          createdAt: previousTodo.createdAt || now,
+          updatedBy: user.id,
+          updatedByName: user.name,
+          updatedAt: now,
+          history: [...(previousTodo.history || []), audit(user, `dodeljeno uporabniku ${db.users[assigneeId]?.name || assigneeId}`)]
+        });
       }
-      const assignmentChanged = nextAssignee !== previousTodo.syncUser;
-      todo = todoForUserRole(user, db, previousTodo, { ...todo, syncUser: nextAssignee });
-      db.todos[index] = {
-        ...previousTodo,
-        ...todo,
-        photos: stampTodoPhotos(todo, user),
-        syncUser: nextAssignee,
-        googleEventId: assignmentChanged ? "" : previousTodo.googleEventId,
-        googleUpdatedAt: assignmentChanged ? "" : previousTodo.googleUpdatedAt,
-        googleSyncedLocalAt: assignmentChanged ? "" : previousTodo.googleSyncedLocalAt,
-        googleManagedByIndus: assignmentChanged ? false : previousTodo.googleManagedByIndus,
-        googleColorId: assignmentChanged ? "" : previousTodo.googleColorId,
-        googleStatusLabel: assignmentChanged ? "" : previousTodo.googleStatusLabel,
-        updatedBy: user.id,
-        updatedByName: user.name,
-        updatedAt: new Date().toISOString(),
-        history: [...(previousTodo.history || []), audit(user, assignmentChanged
-          ? `dodeljeno uporabniku ${db.users[nextAssignee]?.name || nextAssignee}`
-          : todo.done ? "oznaceno opravljeno" : "spremenjeno opravilo")]
-      };
+
+      const oldGroupIds = new Set(assignmentItems.map((item) => item.id));
+      db.todos = db.todos.filter((item) => !oldGroupIds.has(item.id));
+      db.todos.push(...updatedGroup);
       await writeDbAsync(db);
-      releaseTodoEditLock(id, user, editLockToken);
       sendJson(res, 200, { todos: visibleTodosForUser(db, user) });
       return;
     }
@@ -2671,15 +2788,15 @@ async function handleApi(req, res) {
         sendJson(res, 403, { error: "Tega opravila ne mores izbrisati." });
         return;
       }
-      const editLock = todoEditLockConflict(id, user, editLockToken);
+      const editLock = todoAssignmentEditLockConflict(db, todo, user, editLockToken);
       if (editLock) {
         sendJson(res, 409, { error: `Opravilo trenutno ureja ${editLock.lockedByName || editLock.lockedById}.`, lock: editLock });
         return;
       }
       await deleteGoogleEventForItem(req, db, todo);
+      releaseTodoAssignmentEditLock(db, todo, user, editLockToken);
       db.todos = db.todos.filter((item) => item.id !== id);
       await writeDbAsync(db);
-      releaseTodoEditLock(id, user, editLockToken);
       sendJson(res, 200, { todos: visibleTodosForUser(db, user) });
       return;
     }
@@ -2833,8 +2950,13 @@ module.exports = {
   SESSION_TTL_MS,
   acquireEntryEditLock,
   acquireTodoEditLock,
+  acquireTodoAssignmentEditLock,
   activeEntryEditLock,
   activeTodoEditLock,
+  todoAssignmentAssigneeIds,
+  todoAssignmentEditLockConflict,
+  todoAssignmentItems,
+  releaseTodoAssignmentEditLock,
   deleteOwnedGoogleEvent,
   entryEditLockConflict,
   googleEventMatchesRequest,

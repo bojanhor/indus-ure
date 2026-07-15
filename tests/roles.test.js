@@ -7,6 +7,7 @@ const {
   TODO_EDIT_LOCK_TTL_MS,
   acquireEntryEditLock,
   acquireTodoEditLock,
+  acquireTodoAssignmentEditLock,
   activeEntryEditLock,
   activeTodoEditLock,
   canManageEntry,
@@ -18,6 +19,10 @@ const {
   defaultHourlyRateForUser,
   releaseEntryEditLock,
   releaseTodoEditLock,
+  releaseTodoAssignmentEditLock,
+  todoAssignmentAssigneeIds,
+  todoAssignmentEditLockConflict,
+  todoAssignmentItems,
   revokeSession,
   sessionForToken,
   sessionTokenHash,
@@ -53,6 +58,20 @@ test("sef vidi vse, delavec pa samo svoje podatke", () => {
   assert.deepEqual(visibleEntriesForUser(db, worker).map((item) => item.id), ["e1"]);
   assert.deepEqual(visibleTodosForUser(db, worker).map((item) => item.id), ["t1"]);
   assert.deepEqual(visibleDebtsForUser(db, worker).map((item) => item.id), ["d1"]);
+});
+
+test("vsak delavec vidi vse dodeljene osebe skupnega opravila", () => {
+  const groupedDb = {
+    todos: [
+      { id: "shared-ibro", assignmentGroupId: "shared", syncUser: "ibro" },
+      { id: "shared-bojan", assignmentGroupId: "shared", syncUser: "bojan" }
+    ]
+  };
+  const visible = visibleTodosForUser(groupedDb, worker);
+  assert.equal(visible.length, 1);
+  assert.deepEqual(visible[0].assigneeIds, ["ibro", "bojan"]);
+  assert.deepEqual(todoAssignmentAssigneeIds(groupedDb, visible[0]), ["ibro", "bojan"]);
+  assert.deepEqual(todoAssignmentItems(groupedDb, visible[0]).map((item) => item.id), ["shared-ibro", "shared-bojan"]);
 });
 
 test("seje prezivijo restart in v bazi ne hranijo dejanskega zetona", () => {
@@ -244,4 +263,24 @@ test("isto opravilo lahko istocasno ureja samo en uporabnik ali zavihek", () => 
   assert.equal(afterExpiry.ok, true);
   assert.equal(afterExpiry.lock.lockedByName, "Ibro");
   assert.equal(releaseTodoEditLock(todoId, ibro, afterExpiry.token, startedAt + 10 + TODO_EDIT_LOCK_TTL_MS + 2), true);
+});
+
+test("zaklep skupnega opravila velja za vse dodeljene delavce", () => {
+  const groupDb = {
+    todos: [
+      { id: "group-ibro", assignmentGroupId: "group", syncUser: "ibro" },
+      { id: "group-bojan", assignmentGroupId: "group", syncUser: "bojan" }
+    ]
+  };
+  const bojan = { id: "bojan", name: "Bojan", role: "boss" };
+  const ibro = { id: "ibro", name: "Ibro", role: "worker" };
+  const startedAt = 5_000;
+  const lock = acquireTodoAssignmentEditLock(groupDb, groupDb.todos[0], ibro, "", startedAt);
+  assert.equal(lock.ok, true);
+  assert.equal(activeTodoEditLock("group-ibro", startedAt + 1)?.token, lock.token);
+  assert.equal(activeTodoEditLock("group-bojan", startedAt + 1)?.token, lock.token);
+  assert.equal(todoAssignmentEditLockConflict(groupDb, groupDb.todos[1], bojan, "", startedAt + 2)?.lockedById, "ibro");
+  assert.equal(releaseTodoAssignmentEditLock(groupDb, groupDb.todos[0], ibro, lock.token, startedAt + 3), true);
+  assert.equal(activeTodoEditLock("group-ibro", startedAt + 4), null);
+  assert.equal(activeTodoEditLock("group-bojan", startedAt + 4), null);
 });
