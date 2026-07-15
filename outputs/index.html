@@ -474,6 +474,49 @@
       color: var(--muted);
       font-size: 14px;
     }
+    .worker-billing {
+      grid-column: 1 / -1;
+      display: grid;
+      gap: 8px;
+      padding-top: 4px;
+    }
+
+    .worker-billing-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .worker-billing-scroll {
+      overflow-x: auto;
+    }
+
+    .worker-billing table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 480px;
+    }
+
+    .worker-billing th,
+    .worker-billing td {
+      padding: 9px 10px;
+      text-align: left;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .worker-billing th {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .worker-rate-input {
+      width: 130px;
+      min-height: 36px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 7px 9px;
+    }
 
     .todo-layout {
       display: grid;
@@ -754,6 +797,34 @@
       align-items: center;
       flex-wrap: wrap;
       justify-content: flex-end;
+    }
+    .todo-billing {
+      grid-column: 2 / -1;
+      display: flex;
+      align-items: end;
+      justify-content: flex-end;
+      gap: 8px;
+      flex-wrap: wrap;
+      padding: 9px;
+      border: 1px solid #91c991;
+      border-radius: 8px;
+      background: #f1fbf1;
+    }
+
+    .todo-billing label {
+      display: grid;
+      gap: 4px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .todo-billing input {
+      width: 135px;
+      min-height: 34px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      padding: 6px 8px;
     }
 
     .todo-item.done .todo-title {
@@ -1526,6 +1597,20 @@
       <section class="panel boss-panel hidden calendar-view" id="bossPanel">
         <p>&#352;efovski pogled: vidi&#353; vse delavce, pripravlja&#353; obra&#269;une in spreminja&#353; skupne nastavitve. Za vnos ur izberi delavski pogled.</p>
         <button class="secondary" id="downloadBackup" type="button">Prenesi varnostno kopijo</button>
+        <div class="worker-billing">
+          <div class="worker-billing-head">
+            <strong>Delavci in privzete urne postavke</strong>
+            <span class="todo-meta">Postavka se zajame, ko opravilo dobi status Zaklju&#269;eno.</span>
+          </div>
+          <div class="worker-billing-scroll">
+            <table>
+              <thead>
+                <tr><th>Delavec</th><th>Vloga</th><th>Privzeta urna postavka</th><th></th></tr>
+              </thead>
+              <tbody id="workerBillingRows"></tbody>
+            </table>
+          </div>
+        </div>
       </section>
 
       <section class="panel search-panel" id="searchPanel"></section>
@@ -1881,6 +1966,7 @@
       billingLocks: [],
       user: null,
       users: [],
+      workerBilling: [],
       workContext: "",
       googleSyncing: false,
       token: localStorage.getItem(tokenKey) || ""
@@ -2109,13 +2195,24 @@
     }
 
     async function loadAll() {
-      const [entries, todos, debts, clients, settings] = await Promise.all([api("/api/entries"), api("/api/todos"), api("/api/debts"), api("/api/clients"), api("/api/settings")]);
+      const workerBillingRequest = state.user?.role === "boss"
+        ? api("/api/workers/billing")
+        : Promise.resolve({ workers: [] });
+      const [entries, todos, debts, clients, settings, workerBilling] = await Promise.all([
+        api("/api/entries"),
+        api("/api/todos"),
+        api("/api/debts"),
+        api("/api/clients"),
+        api("/api/settings"),
+        workerBillingRequest
+      ]);
       state.entries = entries.entries;
       state.todos = todos.todos;
       state.debts = debts.debts;
       state.clients = clients.clients;
       state.settings = settings.settings || state.settings;
       state.billingLocks = settings.billingLocks || [];
+      state.workerBilling = workerBilling.workers || [];
       refreshClientList();
       render();
     }
@@ -2162,6 +2259,73 @@
         return;
       }
       await saveBillingSettings({ ...billing, [key]: value });
+    }
+    function workerDefaultHourlyRate(userId) {
+      const worker = state.workerBilling.find((item) => item.id === userId);
+      const fallback = Number(state.settings.billing?.hourlyRate || 15);
+      return Number.isFinite(Number(worker?.hourlyRate)) ? Number(worker.hourlyRate) : fallback;
+    }
+
+    function todoHourlyRate(todo) {
+      if (todo.billingHourlyRate !== null && todo.billingHourlyRate !== undefined && todo.billingHourlyRate !== "") {
+        const value = Number(todo.billingHourlyRate);
+        if (Number.isFinite(value)) return value;
+      }
+      return workerDefaultHourlyRate(todo.syncUser || todo.createdBy);
+    }
+
+    function parseBillingNumber(value, maximum) {
+      const number = Number(String(value).replace(",", "."));
+      return Number.isFinite(number) && number >= 0 && number <= maximum ? number : null;
+    }
+
+    function renderWorkerBillingTable() {
+      const body = $("workerBillingRows");
+      if (!body) return;
+      body.replaceChildren();
+      state.workerBilling
+        .slice()
+        .sort((a, b) => String(a.name || a.id).localeCompare(String(b.name || b.id), "sl"))
+        .forEach((worker) => {
+          const row = document.createElement("tr");
+          row.dataset.userId = worker.id;
+          row.innerHTML = `
+            <td><strong>${escapeHtml(worker.name || worker.id)}</strong></td>
+            <td>${worker.role === "boss" ? "Sef in delavec" : "Delavec"}</td>
+            <td><input class="worker-rate-input" type="number" min="0" max="10000" step="0.01" value="${Number(worker.hourlyRate || 0)}" aria-label="Urna postavka za ${escapeHtml(worker.name || worker.id)}"> EUR/h</td>
+            <td><button class="secondary save-worker-rate" type="button">Shrani</button></td>
+          `;
+          row.querySelector(".save-worker-rate").addEventListener("click", async (event) => {
+            const input = row.querySelector(".worker-rate-input");
+            const hourlyRate = parseBillingNumber(input.value, 10_000);
+            if (hourlyRate === null) {
+              alert("Vnesi pravilno urno postavko.");
+              return;
+            }
+            event.currentTarget.disabled = true;
+            try {
+              const data = await api("/api/workers/billing", {
+                method: "PUT",
+                body: JSON.stringify({ userId: worker.id, hourlyRate })
+              });
+              state.workerBilling = data.workers || state.workerBilling;
+              render();
+            } catch (error) {
+              event.currentTarget.disabled = false;
+              alert(error.message);
+            }
+          });
+          body.appendChild(row);
+        });
+    }
+
+    async function saveTodoBilling(todo, item) {
+      const hourlyRate = parseBillingNumber(item.querySelector(".todo-billing-hourly").value, 10_000);
+      const billingKm = parseBillingNumber(item.querySelector(".todo-billing-km").value, 1_000_000);
+      if (hourlyRate === null || billingKm === null) {
+        throw new Error("Vnesi pravilno urno postavko in kilometrino.");
+      }
+      await saveTodoToServer({ ...todo, billingHourlyRate: hourlyRate, billingKm });
     }
 
     async function updateInvoiceFlag(input) {
@@ -2481,6 +2645,7 @@
         renderTodos();
         renderClients();
         renderReport();
+        renderWorkerBillingTable();
       }
     }
 
@@ -2745,6 +2910,17 @@
             <button class="secondary show-photos" type="button">Prikaz prilog</button>
             <label class="secondary add-photo">Dodaj prilogo<input class="hidden-file todo-photo-input" type="file" accept="image/*" multiple></label>
           </div>
+          ${isAdminView() && todo.status === "execution" ? `
+            <div class="todo-billing">
+              <label>Urna postavka (EUR/h)
+                <input class="todo-billing-hourly" type="number" min="0" max="10000" step="0.01" value="${todoHourlyRate(todo)}">
+              </label>
+              <label>Kilometrina (km)
+                <input class="todo-billing-km" type="number" min="0" max="1000000" step="0.1" value="${Number(todo.billingKm || 0)}">
+              </label>
+              <button class="primary save-todo-billing" type="button">Shrani obracun</button>
+            </div>
+          ` : ""}
           ${state.expandedTodoPhotos === todo.id ? renderTodoPhotoHtml(todo) : ""}
           <button class="secondary delete-todo" type="button">Izbrisi</button>
           <button class="drag-handle" type="button" title="Povleci za vrstni red">::</button>
@@ -2759,6 +2935,18 @@
         item.querySelector(".todo-date").addEventListener("change", (event) => {
           saveTodoToServer({ ...todo, date: event.target.value }).catch((error) => alert(error.message));
         });
+        const saveTodoBillingButton = item.querySelector(".save-todo-billing");
+        if (saveTodoBillingButton) {
+          saveTodoBillingButton.addEventListener("click", async () => {
+            saveTodoBillingButton.disabled = true;
+            try {
+              await saveTodoBilling(todo, item);
+            } catch (error) {
+              saveTodoBillingButton.disabled = false;
+              alert(error.message);
+            }
+          });
+        }
         item.querySelector(".show-photos").addEventListener("click", () => {
           state.expandedTodoPhotos = state.expandedTodoPhotos === todo.id ? "" : todo.id;
           renderTodoItems();

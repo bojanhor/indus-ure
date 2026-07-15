@@ -259,6 +259,15 @@ function normalizeDb(db = {}) {
     kmRate: Number(db.settings.billing?.kmRate || 0.22),
     commuteKmPerDay: Number(db.settings.billing?.commuteKmPerDay || 28)
   };
+  for (const user of Object.values(db.users)) {
+    const currentRate = nonnegativeNumber(user.billing?.hourlyRate, null, 10_000);
+    if (!user.billing || currentRate === null) {
+      user.billing = { ...(user.billing || {}), hourlyRate: currentRate ?? db.settings.billing.hourlyRate };
+      changed = true;
+    } else {
+      user.billing.hourlyRate = currentRate;
+    }
+  }
 
   if (!Array.isArray(db.clients)) {
     db.clients = [];
@@ -413,6 +422,16 @@ function normalizeDb(db = {}) {
     }
     if (typeof next.googleStatusLabel !== "string") {
       next.googleStatusLabel = "";
+      changed = true;
+    }
+    const billingHourlyRate = nonnegativeNumber(next.billingHourlyRate, null, 10_000);
+    if (next.billingHourlyRate !== billingHourlyRate) {
+      next.billingHourlyRate = billingHourlyRate;
+      changed = true;
+    }
+    const billingKm = nonnegativeNumber(next.billingKm, 0, 1_000_000);
+    if (next.billingKm !== billingKm) {
+      next.billingKm = billingKm;
       changed = true;
     }
     if (!Array.isArray(next.photos)) {
@@ -639,6 +658,40 @@ function cleanUserId(value) {
   const id = String(value || "").trim();
   return /^[a-z0-9][a-z0-9_-]{0,63}$/i.test(id) ? id : "";
 }
+function nonnegativeNumber(value, fallback = null, maximum = Number.MAX_SAFE_INTEGER) {
+  if (value === "" || value === null || value === undefined) return fallback;
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 && number <= maximum ? number : fallback;
+}
+
+function defaultHourlyRateForUser(db, userId) {
+  return nonnegativeNumber(
+    db.users?.[userId]?.billing?.hourlyRate,
+    nonnegativeNumber(db.settings?.billing?.hourlyRate, 15, 10_000),
+    10_000
+  );
+}
+
+function todoForUserRole(user, db, previous, todo) {
+  const previousRate = nonnegativeNumber(previous?.billingHourlyRate, null, 10_000);
+  const previousKm = nonnegativeNumber(previous?.billingKm, 0, 1_000_000);
+  if (todo.status !== "execution") {
+    return { ...todo, billingHourlyRate: previousRate, billingKm: previousKm };
+  }
+  const defaultRate = defaultHourlyRateForUser(db, todo.syncUser || previous?.syncUser || user.id);
+  if (user.role !== "boss") {
+    return {
+      ...todo,
+      billingHourlyRate: previousRate ?? defaultRate,
+      billingKm: previousKm
+    };
+  }
+  return {
+    ...todo,
+    billingHourlyRate: nonnegativeNumber(todo.billingHourlyRate, previousRate ?? defaultRate, 10_000),
+    billingKm: nonnegativeNumber(todo.billingKm, previousKm, 1_000_000)
+  };
+}
 
 function syncUserForRequest(user, requested, fallback = "", users = defaultUsers) {
   const allowed = new Set(Object.keys(users || {}));
@@ -789,6 +842,8 @@ function cleanTodo(input) {
     order: Number.isFinite(Number(input.order)) ? Number(input.order) : 0,
     syncUser: cleanUserId(input.syncUser),
     done: Boolean(input.done),
+    billingHourlyRate: nonnegativeNumber(input.billingHourlyRate, null, 10_000),
+    billingKm: nonnegativeNumber(input.billingKm, null, 1_000_000),
     photos: photos
       .map((photo) => ({
         id: photo.id || crypto.randomUUID(),
@@ -1215,6 +1270,7 @@ function todoFromGoogleEvent(event, user, db = {}, existing = null) {
   const parsed = parseGoogleEventDescription(event.description);
   const clientRef = resolveGoogleClient(db, parsed, event.summary, existing || {});
   const now = new Date().toISOString();
+  const status = todoStatusFromGoogle(parsed.fields.status, existing?.status || "open");
   return {
     id: existing?.id || crypto.randomUUID(),
     title: String(event.summary || "Google opravilo").replace(/^TODO:\s*/i, ""),
@@ -1222,9 +1278,13 @@ function todoFromGoogleEvent(event, user, db = {}, existing = null) {
     client: clientRef.client,
     clientId: clientRef.clientId,
     notes: parsed.notes,
-    status: todoStatusFromGoogle(parsed.fields.status, existing?.status || "open"),
+    status,
     order: Number(existing?.order || 0),
     done: false,
+    billingHourlyRate: status === "execution"
+      ? nonnegativeNumber(existing?.billingHourlyRate, defaultHourlyRateForUser(db, user.id), 10_000)
+      : nonnegativeNumber(existing?.billingHourlyRate, null, 10_000),
+    billingKm: nonnegativeNumber(existing?.billingKm, 0, 1_000_000),
     photos: existing?.photos || [],
     syncUser: user.id,
     googleEventId: event.id || existing?.googleEventId || "",
@@ -1832,6 +1892,50 @@ async function handleApi(req, res) {
       sendJson(res, 200, { users });
       return;
     }
+    if (url.pathname === "/api/workers/billing" && req.method === "GET") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      if (user.role !== "boss") {
+        sendJson(res, 403, { error: "Samo sef lahko vidi urne postavke delavcev." });
+        return;
+      }
+      const db = await readDbAsync();
+      const workers = Object.values(db.users || {}).map((worker) => ({
+        id: worker.id,
+        name: worker.name,
+        role: worker.role,
+        hourlyRate: defaultHourlyRateForUser(db, worker.id)
+      }));
+      sendJson(res, 200, { workers });
+      return;
+    }
+
+    if (url.pathname === "/api/workers/billing" && req.method === "PUT") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      if (user.role !== "boss") {
+        sendJson(res, 403, { error: "Samo sef lahko spreminja urne postavke delavcev." });
+        return;
+      }
+      const body = await readBody(req);
+      const db = await readDbAsync();
+      const workerId = cleanUserId(body.userId);
+      const hourlyRate = nonnegativeNumber(body.hourlyRate, null, 10_000);
+      if (!db.users?.[workerId] || hourlyRate === null) {
+        sendJson(res, 400, { error: "Delavec ali urna postavka ni pravilna." });
+        return;
+      }
+      db.users[workerId].billing = { ...(db.users[workerId].billing || {}), hourlyRate };
+      await writeDbAsync(db);
+      const workers = Object.values(db.users).map((worker) => ({
+        id: worker.id,
+        name: worker.name,
+        role: worker.role,
+        hourlyRate: defaultHourlyRateForUser(db, worker.id)
+      }));
+      sendJson(res, 200, { workers });
+      return;
+    }
 
     if (url.pathname === "/api/profile" && req.method === "PUT") {
       const user = await requireUser(req, res);
@@ -2088,9 +2192,10 @@ async function handleApi(req, res) {
       const assignmentGroupId = crypto.randomUUID();
       assigneeIds.forEach((assigneeId, index) => {
         const assignee = db.users[assigneeId];
+        const assignedTodo = todoForUserRole(user, db, null, { ...todo, syncUser: assigneeId });
         db.todos.push({
           id: crypto.randomUUID(),
-          ...todo,
+          ...assignedTodo,
           assignmentGroupId,
           photos: stampTodoPhotos(todo, user),
           syncUser: assigneeId,
@@ -2241,6 +2346,7 @@ async function handleApi(req, res) {
         sendJson(res, 403, { error: "Tega opravila ne mores spreminjati." });
         return;
       }
+      todo = todoForUserRole(user, db, db.todos[index], todo);
       db.todos[index] = {
         ...db.todos[index],
         ...todo,
@@ -2422,6 +2528,7 @@ module.exports = {
   pushGoogleItem,
   canManageEntry,
   canManageTodo,
+  defaultHourlyRateForUser,
   entryForUserRole,
   entryFromGoogleEvent,
   entryToGoogleEvent,
@@ -2432,6 +2539,7 @@ module.exports = {
   remoteGoogleChangeWins,
   syncUserForRequest,
   todoAssigneesForRequest,
+  todoForUserRole,
   todoFromGoogleEvent,
   todoToGoogleEvent,
   visibleDebtsForUser,

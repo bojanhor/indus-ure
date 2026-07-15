@@ -5,8 +5,10 @@ const {
   canManageEntry,
   canManageTodo,
   entryForUserRole,
+  defaultHourlyRateForUser,
   syncUserForRequest,
   todoAssigneesForRequest,
+  todoForUserRole,
   visibleDebtsForUser,
   visibleEntriesForUser,
   visibleTodosForUser
@@ -75,5 +77,49 @@ test("delavski vnos ne more nastaviti obracuna ali racuna", () => {
   assert.equal(existing.status, "billed");
   assert.equal(existing.invoiceSent, true);
   assert.equal(existing.invoiceSettled, true);
+
   assert.equal(existing.invoicePaid, false);
+});
+test("obracunske podatke zakljucenega opravila lahko spremeni samo sef", () => {
+  const billingDb = {
+    users: {
+      bojan: { id: "bojan", role: "boss", billing: { hourlyRate: 25 } },
+      ibro: { id: "ibro", role: "worker", billing: { hourlyRate: 18 } }
+    },
+    settings: { billing: { hourlyRate: 15 } }
+  };
+  const previous = {
+    id: "t1",
+    syncUser: "ibro",
+    status: "execution",
+    billingHourlyRate: 22,
+    billingKm: 5
+  };
+
+  assert.equal(defaultHourlyRateForUser(billingDb, "ibro"), 18);
+
+  const workerChange = todoForUserRole(worker, billingDb, previous, {
+    ...previous,
+    billingHourlyRate: 999,
+    billingKm: 999
+  });
+  assert.equal(workerChange.billingHourlyRate, 22);
+  assert.equal(workerChange.billingKm, 5);
+
+  const bossChange = todoForUserRole(boss, billingDb, previous, {
+    ...previous,
+    billingHourlyRate: 30,
+    billingKm: 12.5
+  });
+  assert.equal(bossChange.billingHourlyRate, 30);
+  assert.equal(bossChange.billingKm, 12.5);
+
+  const newlyCompleted = todoForUserRole(worker, billingDb, null, {
+    syncUser: "ibro",
+    status: "execution",
+    billingHourlyRate: 500,
+    billingKm: 100
+  });
+  assert.equal(newlyCompleted.billingHourlyRate, 18);
+  assert.equal(newlyCompleted.billingKm, 0);
 });

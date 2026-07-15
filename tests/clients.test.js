@@ -120,3 +120,15 @@ test("novo opravilo je mogoce dodeliti sebi in vec drugim delavcem", () => {
   assert.match(server, /todoAssigneesForRequest\(user, body\.assigneeIds/);
   assert.match(server, /assigneeIds\.forEach\(\(assigneeId, index\) =>/);
 });
+test("sef ima tabelo privzetih postavk in obracun zakljucenih opravil", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  const server = fs.readFileSync(path.join(__dirname, "..", "outputs", "server.js"), "utf8");
+  assert.match(html, /id="workerBillingRows"/);
+  assert.match(html, /api\("\/api\/workers\/billing"/);
+  assert.match(html, /todo\.status === "execution"/);
+  assert.match(html, /class="todo-billing"/);
+  assert.match(html, /class="todo-billing-hourly"/);
+  assert.match(html, /class="todo-billing-km"/);
+  assert.match(server, /user\.role !== "boss"[\s\S]*Samo sef lahko spreminja urne postavke delavcev/);
+  assert.match(server, /todo = todoForUserRole\(user, db, db\.todos\[index\], todo\)/);
+});
