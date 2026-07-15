@@ -1,0 +1,65 @@
+const assert = require("node:assert/strict");
+const test = require("node:test");
+
+const {
+  clientToSheetRow,
+  findFirstEmptyClientRow,
+  isUsableTaxId,
+  normalizeTaxId,
+  parseSheetClients,
+  rekeyClientReferences,
+  sheetAppendRange,
+  sheetRowRange
+} = require("../outputs/client-sync");
+
+test("davcna stevilka je kanonicni ID stranke", () => {
+  assert.equal(normalizeTaxId(" tax:si 123-45678 "), "SI12345678");
+  assert.equal(isUsableTaxId("SI12345678"), true);
+  assert.equal(isUsableTaxId("29433959"), true);
+  assert.equal(isUsableTaxId("3956478d-92e9-425d-8a1e-3d58c7937ded"), false);
+});
+
+test("Google Sheet A-I se prebere brez spreminjanja njegove strukture", () => {
+  const rows = [
+    ["Srch", "Naziv stranke", "Kontakt (e-mail)", "Naslov", "Kraj", "Posta", "Drzava", "ID za ddv", "DDV"],
+    ["Novak", "NOVAK d.o.o.", "info@novak.si", "Cesta 1", "Kranj", "4000 Kranj", "Slovenija", "SI12345678", "DA"],
+    ["Brez", "Brez davcne", "", "", "", "", "Slovenija", "", "NE"],
+    ["Prvi", "Prvi naziv", "", "", "", "", "Slovenija", "SI87654321", "DA"],
+    ["Drugi", "Drugi naziv", "", "", "", "", "Slovenija", "SI87654321", "DA"]
+  ];
+  const result = parseSheetClients(rows);
+  assert.equal(result.total, 4);
+  assert.equal(result.usable, 1);
+  assert.equal(result.missingTax, 1);
+  assert.equal(result.duplicateTax, 2);
+  assert.equal(result.clients[0].clientId, "SI12345678");
+  assert.equal(result.clients[0].email, "info@novak.si");
+  assert.equal(result.clients[1].clientId, "");
+});
+
+test("GUID reference se migrira na davcno stevilko", () => {
+  const guid = "3956478d-92e9-425d-8a1e-3d58c7937ded";
+  const db = {
+    entries: [{ id: "e1", client: "Stari Novak", clientId: guid }],
+    todos: [{ id: "t1", client: "NOVAK d.o.o.", clientId: "" }]
+  };
+  const previous = [{ id: guid, clientId: guid, name: "Stari Novak", search: "Novak" }];
+  const clients = [{ id: "SI12345678", clientId: "SI12345678", taxId: "SI12345678", name: "NOVAK d.o.o.", search: "Stari Novak" }];
+  const result = rekeyClientReferences(db, previous, clients);
+  assert.equal(result.updated, 2);
+  assert.equal(result.unresolved.length, 0);
+  assert.equal(db.entries[0].clientId, "SI12345678");
+  assert.equal(db.todos[0].clientId, "SI12345678");
+});
+
+test("nova stranka se zapise v devet stolpcev baze strank", () => {
+  const row = clientToSheetRow({
+    name: "NOVAK d.o.o.", search: "Novak", email: "info@novak.si", address: "Cesta 1",
+    city: "Kranj", postal: "4000 Kranj", country: "Slovenija", taxId: "SI12345678", vatPayer: true
+  });
+  assert.deepEqual(row, ["Novak", "NOVAK d.o.o.", "info@novak.si", "Cesta 1", "Kranj", "4000 Kranj", "Slovenija", "SI12345678", "DA"]);
+  assert.equal(sheetRowRange("'Baza Strank'!A:I", 12), "'Baza Strank'!A12:I12");
+  assert.equal(sheetAppendRange("'Baza Strank'!A:I"), "'Baza Strank'!A:I");
+  assert.equal(findFirstEmptyClientRow([["glava"], ["_ROCNI_"], ["x", "Stranka"], [null, null, null, null, null, null, null, null, "NE"]]), 4);
+  assert.equal(findFirstEmptyClientRow([["glava"], ["x", "Stranka"]]), 0);
+});

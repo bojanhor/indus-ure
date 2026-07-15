@@ -3,6 +3,18 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const os = require("os");
+const {
+  DEFAULT_CLIENT_SHEET_RANGE,
+  clientToSheetRow,
+  findFirstEmptyClientRow,
+  isUsableTaxId,
+  normalizeStoredClient,
+  normalizeTaxId,
+  parseSheetClients,
+  rekeyClientReferences,
+  sheetAppendRange,
+  sheetRowRange
+} = require("./client-sync");
 
 const PORT = Number(process.env.PORT || 8123);
 const HOST = process.env.HOST || "127.0.0.1";
@@ -11,7 +23,6 @@ const PUBLIC_BASE_URL = String(process.env.PUBLIC_BASE_URL || "").replace(/\/$/,
 const root = __dirname;
 const dataDir = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(root, "data");
 const dbFile = path.join(dataDir, "db.json");
-const clientsSeedFile = path.join(root, "clients-seed.json");
 const DATABASE_URL = process.env.DATABASE_URL || "";
 const configuredBojanPassword = process.env.INITIAL_BOJAN_PASSWORD || "";
 const configuredIbroPassword = process.env.INITIAL_IBRO_PASSWORD || "";
@@ -22,7 +33,7 @@ const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || "";
 const GOOGLE_REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI || "";
 const GOOGLE_SHEETS_ID = process.env.GOOGLE_SHEETS_ID || "";
-const GOOGLE_SHEETS_RANGE = process.env.GOOGLE_SHEETS_RANGE || "Stranke!A:B";
+const GOOGLE_SHEETS_RANGE = process.env.GOOGLE_SHEETS_RANGE || DEFAULT_CLIENT_SHEET_RANGE;
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 let pgPool = null;
 let pgReady = null;
@@ -187,37 +198,8 @@ function normalizeDb(db = {}) {
     changed = true;
   }
 
-  const seedClients = readSeedClients();
-  if (seedClients.length > 0) {
-    const existing = new Set(db.clients.map((client) => String(client.name || "").toLowerCase()).filter(Boolean));
-    for (const client of seedClients) {
-      if (!existing.has(client.name.toLowerCase())) {
-        db.clients.push(client);
-        existing.add(client.name.toLowerCase());
-        changed = true;
-      }
-    }
-  }
-
   db.clients = db.clients
-    .map((client) => {
-      const stableClientId = client.clientId || client.id || crypto.randomUUID();
-      return {
-        id: stableClientId,
-        clientId: stableClientId,
-        name: String(client.name || "").trim(),
-        search: String(client.search || client.name || "").trim(),
-        email: String(client.email || "").trim(),
-        address: String(client.address || "").trim(),
-        city: String(client.city || "").trim(),
-        postal: String(client.postal || "").trim(),
-        country: String(client.country || "").trim(),
-        taxId: String(client.taxId || "").trim(),
-        vatPayer: Boolean(client.vatPayer),
-        createdBy: client.createdBy || "system",
-        createdAt: client.createdAt || new Date().toISOString()
-      };
-    })
+    .map((client) => normalizeStoredClient(client))
     .filter((client) => client.name);
 
   const clientByText = new Map();
@@ -293,7 +275,7 @@ function normalizeDb(db = {}) {
     }
     if (!next.clientId && next.client) {
       const client = resolveClient(next.client);
-      if (client) {
+      if (client?.clientId) {
         next.clientId = client.clientId;
         next.client = client.name;
         changed = true;
@@ -328,7 +310,7 @@ function normalizeDb(db = {}) {
     }
     if (!next.clientId && next.client) {
       const client = resolveClient(next.client);
-      if (client) {
+      if (client?.clientId) {
         next.clientId = client.clientId;
         next.client = client.name;
         changed = true;
@@ -377,40 +359,10 @@ function normalizeDb(db = {}) {
   return { db, changed };
 }
 
-function readSeedClients() {
-  try {
-    if (!fs.existsSync(clientsSeedFile)) return [];
-    const clients = JSON.parse(fs.readFileSync(clientsSeedFile, "utf8").replace(/^\uFEFF/, ""));
-    if (!Array.isArray(clients)) return [];
-    return clients
-      .map((client) => {
-        const stableClientId = client.clientId || client.id || crypto.randomUUID();
-        return {
-          id: stableClientId,
-          clientId: stableClientId,
-          name: String(client.name || "").trim(),
-          search: String(client.search || client.name || "").trim(),
-          email: String(client.email || "").trim(),
-          address: String(client.address || "").trim(),
-          city: String(client.city || "").trim(),
-          postal: String(client.postal || "").trim(),
-          country: String(client.country || "").trim(),
-          taxId: String(client.taxId || "").trim(),
-          vatPayer: Boolean(client.vatPayer),
-          createdBy: "import",
-          createdAt: new Date().toISOString()
-        };
-      })
-      .filter((client) => client.name);
-  } catch {
-    return [];
-  }
-}
-
 function ensureDb() {
   if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
   if (!fs.existsSync(dbFile)) {
-    fs.writeFileSync(dbFile, JSON.stringify({ users: defaultUsers, entries: [], todos: [], debts: [], clients: readSeedClients() }, null, 2), "utf8");
+    fs.writeFileSync(dbFile, JSON.stringify({ users: defaultUsers, entries: [], todos: [], debts: [], clients: [] }, null, 2), "utf8");
     return;
   }
 
@@ -454,7 +406,7 @@ async function ensurePostgresDb() {
     if (existing.rowCount === 0) {
       await pool.query(
         "insert into app_state (id, data) values ($1, $2::jsonb)",
-        ["main", JSON.stringify({ users: defaultUsers, entries: [], todos: [], debts: [], clients: readSeedClients(), calendarToken: crypto.randomBytes(24).toString("hex") })]
+        ["main", JSON.stringify({ users: defaultUsers, entries: [], todos: [], debts: [], clients: [], calendarToken: crypto.randomBytes(24).toString("hex") })]
       );
       return;
     }
@@ -617,42 +569,13 @@ function lockedFieldChanged(oldEntry, newEntry) {
     || Boolean(oldEntry.fromHome) !== Boolean(newEntry.fromHome);
 }
 
-function mergeClientList(existingClients, incomingClients, source) {
-  const map = new Map();
-  const add = (client) => {
-    const name = String(client.name || "").trim();
-    if (!name) return;
-    const key = String(client.clientId || client.id || client.taxId || name).toLowerCase();
-    const previous = map.get(key);
-    const clientId = previous?.clientId || client.clientId || client.id || (client.taxId ? `tax:${client.taxId}` : "");
-    map.set(key, {
-      id: clientId || previous?.id || client.id || crypto.randomUUID(),
-      clientId: clientId || previous?.clientId || previous?.id || client.id || "",
-      name: previous?.name || name,
-      search: [previous?.search || "", String(client.search || name).trim()].filter(Boolean).join(" "),
-      taxId: previous?.taxId || client.taxId || "",
-      email: previous?.email || client.email || "",
-      address: previous?.address || client.address || "",
-      city: previous?.city || client.city || "",
-      postal: previous?.postal || client.postal || "",
-      country: previous?.country || client.country || "",
-      vatPayer: Boolean(previous?.vatPayer || client.vatPayer),
-      createdBy: previous?.createdBy || client.createdBy || source || "sync",
-      createdAt: previous?.createdAt || client.createdAt || new Date().toISOString()
-    });
-  };
-  (existingClients || []).forEach(add);
-  (incomingClients || []).forEach(add);
-  return [...map.values()].sort((a, b) => a.name.localeCompare(b.name, "sl"));
-}
-
 function attachResolvedClient(db, item) {
   if (!item.client && !item.clientId) return item;
   const wanted = String(item.clientId || item.client || "").trim().toLowerCase();
   const client = (db.clients || []).find((row) => [row.clientId, row.id, row.name, row.search, row.taxId]
     .filter(Boolean)
     .some((value) => String(value).trim().toLowerCase() === wanted));
-  if (!client) return item;
+  if (!client?.clientId) return item;
   return { ...item, clientId: client.clientId || client.id, client: client.name };
 }
 
@@ -727,6 +650,7 @@ function cleanEntry(input) {
 function validateEntry(entry) {
   if (!entry.date || !entry.start || !entry.end) return "Manjka datum ali cas.";
   if (!["errand", "vacation"].includes(entry.status) && !entry.client) return "Manjka stranka.";
+  if (!["errand", "vacation"].includes(entry.status) && !isUsableTaxId(entry.clientId)) return "Stranka nima veljavne davcne stevilke.";
   if (!/^\d{4}-\d{2}-\d{2}$/.test(entry.date)) return "Datum ni pravilen.";
   if (!/^\d{2}:\d{2}$/.test(entry.start) || !/^\d{2}:\d{2}$/.test(entry.end)) return "Cas ni pravilen.";
   if (entry.end <= entry.start) return "Ura do mora biti kasneje kot ura od.";
@@ -760,10 +684,10 @@ function cleanTodo(input) {
 }
 
 function cleanClient(input) {
-  const clientId = String(input.clientId || input.id || "").trim() || `internal:${crypto.randomUUID()}`;
-  return {
-    id: clientId,
-    clientId,
+  const taxId = normalizeTaxId(input.taxId || input.clientId || input.id);
+  return normalizeStoredClient({
+    id: taxId,
+    clientId: taxId,
     name: String(input.name || "").trim(),
     search: String(input.search || input.name || "").trim(),
     email: String(input.email || "").trim(),
@@ -771,9 +695,9 @@ function cleanClient(input) {
     city: String(input.city || "").trim(),
     postal: String(input.postal || "").trim(),
     country: String(input.country || "").trim(),
-    taxId: String(input.taxId || "").trim(),
+    taxId,
     vatPayer: Boolean(input.vatPayer)
-  };
+  }, { preserveLegacyId: false });
 }
 
 function cleanDebt(input) {
@@ -787,6 +711,8 @@ function cleanDebt(input) {
 
 function validateClient(client) {
   if (!client.name) return "Manjka naziv stranke.";
+  if (!client.taxId) return "Manjka davcna stevilka stranke.";
+  if (!isUsableTaxId(client.taxId)) return "Davcna stevilka ni veljavna.";
   return "";
 }
 
@@ -799,6 +725,7 @@ function validateDebt(debt) {
 
 function validateTodo(todo) {
   if (!todo.title) return "Manjka opis opravila.";
+  if (todo.client && !isUsableTaxId(todo.clientId)) return "Stranka nima veljavne davcne stevilke.";
   if (todo.date && !/^\d{4}-\d{2}-\d{2}$/.test(todo.date)) return "Datum opravila ni pravilen.";
   if ((todo.photos || []).some((photo) => photo.data.length > 700_000)) return "Ena fotografija je prevelika.";
   return "";
@@ -1182,23 +1109,66 @@ async function syncClientsWithSheets(db, user) {
     throw new Error(`Google Sheets ni mogoce prebrati (${GOOGLE_SHEETS_RANGE}): ${error.message}`);
   });
   const rows = remote.data.values || [];
-  const dataRows = rows.slice(1);
-  const sheetClients = dataRows
-    .map((row) => ({ name: String(row[0] || "").trim(), search: String(row[1] || row[0] || "").trim(), createdBy: "google-sheets" }))
-    .filter((client) => client.name);
-  const merged = mergeClientList(db.clients || [], sheetClients, "google-sheets");
-  db.clients = merged;
-  const values = [
-    ["Naziv stranke", "Search"],
-    ...merged.map((client) => [client.name, client.search || client.name])
-  ];
-  await sheets.spreadsheets.values.update({
+  const previousClients = db.clients || [];
+  const parsed = parseSheetClients(rows, previousClients);
+  const references = rekeyClientReferences(db, previousClients, parsed.clients);
+  db.clients = parsed.clients;
+  return {
+    imported: parsed.total,
+    total: parsed.total,
+    usable: parsed.usable,
+    missingTax: parsed.missingTax,
+    duplicateTax: parsed.duplicateTax,
+    issues: parsed.issues.slice(0, 100),
+    updatedReferences: references.updated,
+    unresolvedReferences: references.unresolved.slice(0, 100)
+  };
+}
+
+async function upsertClientInSheets(client, user) {
+  if (!GOOGLE_SHEETS_ID) throw new Error("GOOGLE_SHEETS_ID ni nastavljen na strezniku.");
+  if (!user.google?.tokens) throw new Error("Najprej povezi Google racun z dovoljenjem za Google Sheets.");
+  const { google } = require("googleapis");
+  const auth = googleClient({ headers: { host: "localhost" } }, user.google.tokens);
+  const sheets = google.sheets({ version: "v4", auth });
+  const remote = await sheets.spreadsheets.values.get({
     spreadsheetId: GOOGLE_SHEETS_ID,
-    range: GOOGLE_SHEETS_RANGE,
-    valueInputOption: "RAW",
-    requestBody: { values }
+    range: GOOGLE_SHEETS_RANGE
   });
-  return { imported: sheetClients.length, total: merged.length };
+  const rows = remote.data.values || [];
+  const matches = rows.slice(1)
+    .map((row, index) => ({ row, rowNumber: index + 2, taxId: normalizeTaxId(row[7]) }))
+    .filter((item) => item.taxId === client.taxId);
+  if (matches.length > 1) {
+    throw new Error(`Davcna ${client.taxId} se v Google Sheetu pojavi veckrat. Najprej odpravi podvojene vrstice.`);
+  }
+  if (matches.length === 1) {
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: GOOGLE_SHEETS_ID,
+      range: sheetRowRange(GOOGLE_SHEETS_RANGE, matches[0].rowNumber),
+      valueInputOption: "USER_ENTERED",
+      requestBody: { values: [clientToSheetRow(client, matches[0].row)] }
+    });
+    return { action: "updated", row: matches[0].rowNumber };
+  }
+  const emptyRow = findFirstEmptyClientRow(rows);
+  if (emptyRow) {
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: GOOGLE_SHEETS_ID,
+      range: sheetRowRange(GOOGLE_SHEETS_RANGE, emptyRow),
+      valueInputOption: "USER_ENTERED",
+      requestBody: { values: [clientToSheetRow(client, rows[emptyRow - 1] || [])] }
+    });
+    return { action: "created", row: emptyRow };
+  }
+  const appended = await sheets.spreadsheets.values.append({
+    spreadsheetId: GOOGLE_SHEETS_ID,
+    range: sheetAppendRange(GOOGLE_SHEETS_RANGE),
+    valueInputOption: "USER_ENTERED",
+    insertDataOption: "INSERT_ROWS",
+    requestBody: { values: [clientToSheetRow(client)] }
+  });
+  return { action: "created", range: appended.data.updates?.updatedRange || "" };
 }
 
 async function deleteGoogleEventForItem(req, db, item) {
@@ -1633,22 +1603,11 @@ async function handleApi(req, res) {
         return;
       }
       const db = await readDbAsync();
-      const existing = (db.clients || []).find((item) => String(item.clientId || item.id || "").toLowerCase() === String(client.clientId || "").toLowerCase() || item.name.toLowerCase() === client.name.toLowerCase());
-      if (existing) {
-        existing.search = client.search || existing.search || existing.name;
-        existing.taxId = client.taxId || existing.taxId || "";
-        existing.clientId = existing.clientId || client.clientId || existing.id;
-        existing.id = existing.clientId;
-      } else {
-        db.clients.push({
-          id: crypto.randomUUID(),
-          ...client,
-          createdBy: user.id,
-          createdAt: new Date().toISOString()
-        });
-      }
+      const current = db.users[user.id];
+      const sheetWrite = await upsertClientInSheets(client, current);
+      const sync = await syncClientsWithSheets(db, current);
       await writeDbAsync(db);
-      sendJson(res, 200, { clients: db.clients });
+      sendJson(res, 200, { clients: db.clients, sheetWrite, sync });
       return;
     }
 
@@ -1756,6 +1715,11 @@ async function handleApi(req, res) {
       const now = new Date().toISOString();
       const db = await readDbAsync();
       todo = attachResolvedClient(db, todo);
+      const resolvedValidation = validateTodo(todo);
+      if (resolvedValidation) {
+        sendJson(res, 400, { error: resolvedValidation });
+        return;
+      }
       const maxOrder = db.todos.reduce((max, item) => Math.max(max, Number(item.order || 0)), 0);
       db.todos.push({
         id: crypto.randomUUID(),
@@ -1789,6 +1753,11 @@ async function handleApi(req, res) {
       const now = new Date().toISOString();
       const db = await readDbAsync();
       entry = attachResolvedClient(db, entry);
+      const resolvedValidation = validateEntry(entry);
+      if (resolvedValidation) {
+        sendJson(res, 400, { error: resolvedValidation });
+        return;
+      }
       db.entries.push({
         id: crypto.randomUUID(),
         ...entry,
@@ -1819,6 +1788,11 @@ async function handleApi(req, res) {
       }
       const db = await readDbAsync();
       entry = attachResolvedClient(db, entry);
+      const resolvedValidation = validateEntry(entry);
+      if (resolvedValidation) {
+        sendJson(res, 400, { error: resolvedValidation });
+        return;
+      }
       const index = db.entries.findIndex((item) => item.id === id);
       if (index < 0) {
         sendJson(res, 404, { error: "Vnos ne obstaja." });
@@ -1881,6 +1855,11 @@ async function handleApi(req, res) {
       }
       const db = await readDbAsync();
       todo = attachResolvedClient(db, todo);
+      const resolvedValidation = validateTodo(todo);
+      if (resolvedValidation) {
+        sendJson(res, 400, { error: resolvedValidation });
+        return;
+      }
       const index = db.todos.findIndex((item) => item.id === id);
       if (index < 0) {
         sendJson(res, 404, { error: "Opravilo ne obstaja." });
@@ -1983,6 +1962,22 @@ async function start() {
   } else {
     ensureDb();
     console.log(`Shranjevanje: lokalna datoteka ${dbFile}`);
+  }
+
+  if (GOOGLE_SHEETS_ID) {
+    try {
+      const db = await readDbAsync();
+      const bojan = db.users?.bojan;
+      if (bojan?.google?.tokens) {
+        const result = await syncClientsWithSheets(db, bojan);
+        await writeDbAsync(db);
+        console.log(`Google Sheets stranke: ${result.usable}/${result.total} uporabnih, ${result.updatedReferences} referenc posodobljenih.`);
+      } else {
+        console.warn("Google Sheets stranke: Bojanov Google racun se ni povezan.");
+      }
+    } catch (error) {
+      console.error(`Google Sheets strank ob zagonu ni bilo mogoce sinhronizirati: ${error.message || error}`);
+    }
   }
 
   const server = http.createServer((req, res) => {

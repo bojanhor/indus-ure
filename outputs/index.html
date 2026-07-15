@@ -510,6 +510,8 @@
       font-size: 12px;
     }
 
+    .todo-meta.error { color: var(--red); font-weight: 700; }
+
     .todo-panel {
       min-width: 0;
       display: grid;
@@ -1381,11 +1383,33 @@
           <label>Search / vzdevek
             <input id="newClientSearch" placeholder="Kako jo isces">
           </label>
-          <label>Dav&#269;na / fiksni ID
+          <label>Dav&#269;na &#353;tevilka (obvezno)
             <input id="newClientTax" placeholder="npr. SI12345678">
+          </label>
+          <label>E-po&#353;ta
+            <input id="newClientEmail" type="email" placeholder="racuni@stranka.si">
+          </label>
+          <label>Naslov
+            <input id="newClientAddress" placeholder="Ulica in hi&#353;na &#353;tevilka">
+          </label>
+          <label>Kraj
+            <input id="newClientCity" placeholder="Kraj">
+          </label>
+          <label>Po&#353;ta
+            <input id="newClientPostal" placeholder="1000 Ljubljana">
+          </label>
+          <label>Dr&#382;ava
+            <input id="newClientCountry" value="Slovenija">
+          </label>
+          <label>Zavezanec za DDV
+            <select id="newClientVatPayer">
+              <option value="false">NE</option>
+              <option value="true">DA</option>
+            </select>
           </label>
           <button class="primary" id="addClientBtn" type="button">Dodaj stranko</button>
           <button class="secondary" id="syncClientsFromTabBtn" type="button">Sync stranke</button>
+          <span class="todo-meta">Google Sheet Baza Strank je osnovna baza. Dav&#269;na &#353;tevilka je ID v vseh vnosih.</span>
         </div>
         <div class="todo-head">
           <strong>Vse stranke</strong>
@@ -1848,7 +1872,9 @@
       refreshClientList();
       renderSearch();
       renderReport();
-      alert(`Sync strank koncan. Iz Sheets prebrano: ${data.imported || 0}, skupaj strank: ${data.total || state.clients.length}.`);
+      renderClients();
+      const problems = Number(data.missingTax || 0) + Number(data.duplicateTax || 0);
+      alert(`Sync strank koncan. Iz Google Sheets prebrano: ${data.total || 0}, uporabnih z enolicno davcno: ${data.usable || 0}.${problems ? ` Popraviti je treba ${problems} vrstic brez davcne ali s podvojeno davcno.` : ""}`);
     }
 
     async function lockCurrentReportRange() {
@@ -1907,6 +1933,7 @@
       refreshClientList();
       renderSearch();
       renderClients();
+      return data;
     }
 
     async function saveEntryToServer(entry) {
@@ -2076,6 +2103,10 @@
         alert("Vpisi stranko.");
         return false;
       }
+      if (!["errand", "vacation"].includes(entry.status) && !entry.clientId) {
+        alert("Izbrana stranka nima veljavne davcne stevilke v Google Sheets bazi.");
+        return false;
+      }
       if (minutes(entry.end) <= minutes(entry.start)) {
         alert("Ura 'do' mora biti kasneje kot ura 'od'.");
         return false;
@@ -2086,6 +2117,10 @@
     function validateTodo(todo) {
       if (!todo.title) {
         alert("Vpisi, kaj je treba narediti.");
+        return false;
+      }
+      if (todo.client && !todo.clientId) {
+        alert("Izbrana stranka nima veljavne davcne stevilke v Google Sheets bazi.");
         return false;
       }
       return true;
@@ -2331,17 +2366,23 @@
       const list = $("clientsList");
       if (!list) return;
       const records = allClientRecords();
-      $("clientsCount").textContent = `${records.length} strank`;
+      const usable = records.filter((client) => client.clientId).length;
+      $("clientsCount").textContent = `${records.length} strank, ${usable} uporabnih`;
       list.innerHTML = records.map((client) => `
         <div class="client-row">
           <div>
             <strong>${escapeHtml(client.name)}</strong>
             <span class="todo-meta">${escapeHtml([client.search, client.taxId, client.address, client.postal, client.city].filter(Boolean).join(" | "))}</span>
-            <span class="todo-meta">ID: ${escapeHtml(client.clientId || client.id || "-")}</span>
+            <span class="todo-meta">Dav&#269;na / ID: ${escapeHtml(client.clientId || "MANJKA ALI JE PODVOJENA")}</span>
+            ${client.syncError ? `<span class="todo-meta error">${escapeHtml(client.syncError)}</span>` : ""}
           </div>
-          <button class="secondary open-client" type="button" data-client-id="${escapeHtml(client.clientId || client.id || "")}" data-client-name="${escapeHtml(client.name)}">Odpri</button>
+          <button class="secondary open-client" type="button" data-client-id="${escapeHtml(client.clientId || "")}" data-client-name="${escapeHtml(client.name)}" ${client.clientId ? "" : "disabled"}>Odpri</button>
         </div>
       `).join("");
+    }
+
+    function normalizeTaxId(value) {
+      return String(value || "").trim().replace(/^tax:/i, "").replace(/[^A-Za-z0-9]/g, "").toUpperCase();
     }
 
     async function addClientFromForm() {
@@ -2350,18 +2391,28 @@
         alert("Vpisi naziv stranke.");
         return;
       }
-      const taxId = $("newClientTax").value.trim().replace(/[^A-Za-z0-9]/g, "").toUpperCase();
-      const clientId = taxId ? `tax:${taxId}` : "";
-      await saveClientToServer({
-        clientId,
+      const taxId = normalizeTaxId($("newClientTax").value);
+      if (!/^(?=.{8,20}$)(?=.*\d)[A-Z0-9]+$/.test(taxId)) {
+        alert("Vpisi veljavno davcno stevilko. Uporabi samo crke in stevilke, na primer SI12345678.");
+        return;
+      }
+      const data = await saveClientToServer({
+        clientId: taxId,
         name,
         search: $("newClientSearch").value.trim() || name,
-        taxId
+        taxId,
+        email: $("newClientEmail").value.trim(),
+        address: $("newClientAddress").value.trim(),
+        city: $("newClientCity").value.trim(),
+        postal: $("newClientPostal").value.trim(),
+        country: $("newClientCountry").value.trim() || "Slovenija",
+        vatPayer: $("newClientVatPayer").value === "true"
       });
-      $("newClientName").value = "";
-      $("newClientSearch").value = "";
-      $("newClientTax").value = "";
+      ["newClientName", "newClientSearch", "newClientTax", "newClientEmail", "newClientAddress", "newClientCity", "newClientPostal"].forEach((id) => { $(id).value = ""; });
+      $("newClientCountry").value = "Slovenija";
+      $("newClientVatPayer").value = "false";
       renderClients();
+      alert(data.sheetWrite?.action === "updated" ? "Stranka je posodobljena tudi v Google Sheetu." : "Stranka je dodana tudi v Google Sheet Baza Strank.");
     }
 
     function renderTodoItems() {
@@ -2713,7 +2764,8 @@
           taxId: existing?.taxId || source.taxId || "",
           address: existing?.address || source.address || "",
           city: existing?.city || source.city || "",
-          postal: existing?.postal || source.postal || ""
+          postal: existing?.postal || source.postal || "",
+          syncError: existing?.syncError || source.syncError || ""
         });
       };
       state.clients.forEach((client) => add(client.name, client));
@@ -2758,11 +2810,13 @@
           <span>${escapeHtml(client.name)}<br><small>${escapeHtml([client.search, client.taxId, client.address].filter(Boolean).join(" | "))}</small></span>
           <span class="todo-chip">baza strank</span>
         `;
-        item.addEventListener("click", () => {
+        item.disabled = !client.clientId;
+        item.title = client.clientId ? "" : "Stranka nima enolicne davcne stevilke v Google Sheetu.";
+        if (client.clientId) item.addEventListener("click", () => {
           $("quickClient").value = client.name;
           $("pageTodoClient").value = client.name;
           state.selectedClient = client.name;
-          openClientReport(client.name, client.clientId || client.id || "");
+          openClientReport(client.name, client.clientId);
         });
         panel.appendChild(item);
       });
@@ -2795,9 +2849,9 @@
     }
 
     function refreshClientList() {
-      const clients = allClientRecords().map((client) => client.name);
+      const clients = allClientRecords().filter((client) => client.clientId).map((client) => client.name);
       const aliases = state.clients
-        .filter((client) => client.search && client.search !== client.name)
+        .filter((client) => client.clientId && client.search && client.search !== client.name)
         .map((client) => `<option value="${escapeHtml(client.search)}" label="${escapeHtml(client.name)}"></option>`);
       $("clientList").innerHTML = [
         ...clients.map((client) => `<option value="${escapeHtml(client)}"></option>`),

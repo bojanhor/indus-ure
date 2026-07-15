@@ -48,6 +48,19 @@ Nastavi dolgo DB geslo ter Google OAuth podatke. `PUBLIC_BASE_URL` in `GOOGLE_RE
 
 Google Cloud OAuth client mora imeti natanko ta Authorized redirect URI. Prijava zahteva samo profil/e-posto; Calendar in Sheets se nato povezeta loceno z gumbom Google sync.
 
+### Osnovna baza strank v Google Sheets
+
+Google Sheet je avtoritativni vir strank:
+
+```env
+GOOGLE_SHEETS_ID=1lQ2D1ZQlQyBZfih0B1-Jx-8UI58PK-vRzNbjW1V2MiM
+GOOGLE_SHEETS_RANGE="'Baza Strank'!A:I"
+```
+
+Stolpci A-I ostanejo: `Srch`, naziv, e-posta, naslov, kraj, posta, drzava, davcna in zavezanec za DDV. Davcna stevilka je `clientId` v strankah, vnosih in opravilih; aplikacija za stranke ne ustvarja GUID-ov. Nova stranka se najprej zapise v Google Sheet in sele nato osvezi v PostgreSQL.
+
+Vrstice brez davcne ali s podvojeno davcno ostanejo vidne kot napaka, vendar jih ni mogoce uporabiti pri novem vnosu, dokler se ne popravijo v osnovnem Sheetu. Bojan mora v aplikaciji enkrat izvesti `Google sync`, da podeli dovoljenje `spreadsheets`.
+
 ## 4. Prenos obstojecih podatkov
 
 Pred prenosom ustavi stare vnose in naredi backup.

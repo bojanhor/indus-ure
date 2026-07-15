@@ -6,7 +6,7 @@
   "main": "outputs/server.js",
   "scripts": {
     "start": "node outputs/server.js",
-    "test": "node --check outputs/server.js && node scripts/check-inline-js.js && node --test tests/roles.test.js",
+    "test": "node --check outputs/server.js && node --check outputs/client-sync.js && node --check scripts/migrate-clients-from-sheet-json.js && node scripts/check-inline-js.js && node --test tests/roles.test.js tests/clients.test.js",
     "import:json": "node scripts/import-json-to-postgres.js"
   },
   "dependencies": {
