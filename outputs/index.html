@@ -583,7 +583,8 @@
     }
 
     .todo-client-option:hover,
-    .todo-client-option:focus { background: #edf2ee; }
+    .todo-client-option:focus,
+    .todo-client-option.active { background: #edf2ee; }
 
     .todo-client-option span {
       color: var(--muted);
@@ -1721,6 +1722,7 @@
       todos: [],
       debts: [],
       clients: [],
+      todoClientSuggestionIndex: -1,
       selectedClient: "",
       expandedTodoPhotos: "",
       reportClient: "",
@@ -2946,6 +2948,28 @@
     function closeTodoClientSuggestions() {
       $("todoClientSuggestions").classList.add("hidden");
       $("pageTodoClient").setAttribute("aria-expanded", "false");
+      state.todoClientSuggestionIndex = -1;
+    }
+
+    function selectTodoClientSuggestion(alias) {
+      $("pageTodoClient").value = alias;
+      closeTodoClientSuggestions();
+      $("pageTodoClient").focus();
+    }
+
+    function setTodoClientSuggestionIndex(index) {
+      const options = [...$("todoClientSuggestions").querySelectorAll(".todo-client-option")];
+      if (!options.length) {
+        state.todoClientSuggestionIndex = -1;
+        return;
+      }
+      const next = (index + options.length) % options.length;
+      state.todoClientSuggestionIndex = next;
+      options.forEach((option, optionIndex) => {
+        option.classList.toggle("active", optionIndex === next);
+        option.setAttribute("aria-selected", optionIndex === next ? "true" : "false");
+      });
+      options[next].scrollIntoView({ block: "nearest" });
     }
 
     function renderTodoClientSuggestions() {
@@ -2956,11 +2980,13 @@
         .filter((client) => !query || normalizeText(client.search).includes(query))
         .slice(0, 12);
       panel.replaceChildren();
+      state.todoClientSuggestionIndex = -1;
       matches.forEach((client) => {
         const option = document.createElement("button");
         option.type = "button";
         option.className = "todo-client-option";
         option.setAttribute("role", "option");
+        option.dataset.clientAlias = client.search;
         const alias = document.createElement("strong");
         alias.textContent = client.search;
         const name = document.createElement("span");
@@ -2968,9 +2994,7 @@
         option.append(alias, name);
         option.addEventListener("pointerdown", (event) => {
           event.preventDefault();
-          input.value = client.search;
-          closeTodoClientSuggestions();
-          input.focus();
+          selectTodoClientSuggestion(client.search);
         });
         panel.appendChild(option);
       });
@@ -3464,7 +3488,23 @@
       closeTodoClientSuggestions();
     }, 150));
     $("pageTodoClient").addEventListener("keydown", (event) => {
-      if (event.key === "Escape") closeTodoClientSuggestions();
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        if ($("todoClientSuggestions").classList.contains("hidden")) renderTodoClientSuggestions();
+        const options = $("todoClientSuggestions").querySelectorAll(".todo-client-option");
+        if (!options.length) return;
+        const current = state.todoClientSuggestionIndex;
+        setTodoClientSuggestionIndex(event.key === "ArrowDown"
+          ? (current < 0 ? 0 : current + 1)
+          : (current < 0 ? options.length - 1 : current - 1));
+      } else if (event.key === "Enter" && state.todoClientSuggestionIndex >= 0) {
+        const option = $("todoClientSuggestions").querySelectorAll(".todo-client-option")[state.todoClientSuggestionIndex];
+        if (!option) return;
+        event.preventDefault();
+        selectTodoClientSuggestion(option.dataset.clientAlias);
+      } else if (event.key === "Escape") {
+        closeTodoClientSuggestions();
+      }
     });
     $("calendarViewBtn").addEventListener("click", () => setView("calendar"));
     $("todosViewBtn").addEventListener("click", () => setView("todos"));

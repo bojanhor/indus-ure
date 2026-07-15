@@ -76,6 +76,9 @@ test("novo opravilo ponuja aliase iz prvega stolpca Google Sheeta", () => {
   assert.match(html, /function findTodoClient\(value\)/);
   assert.match(html, /client\?\.search \|\| todo\.client/);
   assert.match(html, /minmax\(300px, 420px\)/);
+  assert.match(html, /event\.key === "ArrowDown" \|\| event\.key === "ArrowUp"/);
+  assert.match(html, /event\.key === "Enter" && state\.todoClientSuggestionIndex >= 0/);
+  assert.match(html, /scrollIntoView\(\{ block: "nearest" \}\)/);
 });
 
 test("spletne povezave v naslovu opravila so varno klikljive", () => {
