@@ -579,3 +579,12 @@ test("sefovski koledar zdruzi skupna opravila in ponudi locena feeda", () => {
   assert.match(html, /id="copyWorkerCalendar"/);
   assert.match(html, /id="copyCombinedCalendar"/);
 });
+
+test("mobilni tagi in gumbi ne lomijo kartice opravila", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  assert.match(html, /@media \(max-width: 760px\)[\s\S]*?\.todo-primary-meta \{[\s\S]*?display: flex;[\s\S]*?flex-wrap: wrap;/);
+  assert.match(html, /\.todo-primary-meta > \.todo-assignees-chip \{[\s\S]*?width: 100%;[\s\S]*?flex: 1 1 100%;[\s\S]*?white-space: normal;/);
+  assert.match(html, /\.todo-primary-meta > \.todo-chip \{[\s\S]*?white-space: nowrap;[\s\S]*?word-break: normal;/);
+  assert.match(html, /\.todo-secondary-meta > \.todo-chip \{[\s\S]*?max-width: 100%;[\s\S]*?word-break: normal;/);
+  assert.match(html, /\.todo-tools \{[\s\S]*?flex-wrap: nowrap;[\s\S]*?flex: 0 0 auto;/);
+});
