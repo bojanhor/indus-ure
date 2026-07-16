@@ -2,7 +2,7 @@
 
 const crypto = require("crypto");
 
-const DEFAULT_CLIENT_SHEET_RANGE = "'Baza Strank'!A:J";
+const DEFAULT_CLIENT_SHEET_RANGE = "'Baza Strank'!A:M";
 const CLIENT_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function isStableClientId(value) {
@@ -73,7 +73,7 @@ function sheetRowToClient(row, rowNumber) {
     name,
     search: String(row?.[0] || name).trim(),
     email: String(row?.[2] || "").trim(),
-    phone: String(row?.[9] || "").trim(),
+    phone: String(row?.[12] || "").trim(),
     address: String(row?.[3] || "").trim(),
     city: String(row?.[4] || "").trim(),
     postal: String(row?.[5] || "").trim(),
@@ -198,7 +198,10 @@ function clientToSheetRow(client, existingRow = []) {
     value("country", 6, "Slovenija"),
     normalizeTaxId(client.taxId),
     client.vatPayer ? "DA" : "NE",
-    value("phone", 9)
+    String(existingRow[9] || "").trim(),
+    String(existingRow[10] || "").trim(),
+    String(existingRow[11] || "").trim(),
+    value("phone", 12)
   ];
 }
 
@@ -208,11 +211,11 @@ function sheetPrefix(range = DEFAULT_CLIENT_SHEET_RANGE) {
 }
 
 function sheetRowRange(range, rowNumber) {
-  return `${sheetPrefix(range)}!A${rowNumber}:J${rowNumber}`;
+  return `${sheetPrefix(range)}!A${rowNumber}:M${rowNumber}`;
 }
 
 function sheetAppendRange(range) {
-  return `${sheetPrefix(range)}!A:J`;
+  return `${sheetPrefix(range)}!A:M`;
 }
 
 function findFirstEmptyClientRow(rows = []) {

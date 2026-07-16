@@ -22,10 +22,10 @@ test("davcna stevilka je locena od stabilnega internega ID stranke", () => {
   assert.equal(isUsableTaxId("3956478d-92e9-425d-8a1e-3d58c7937ded"), false);
 });
 
-test("Google Sheet A-J prebere tudi telefonsko stevilko", () => {
+test("Google Sheet A-M prebere telefonsko stevilko iz stolpca M", () => {
   const rows = [
-    ["Srch", "Naziv stranke", "Kontakt (e-mail)", "Naslov", "Kraj", "Posta", "Drzava", "ID za ddv", "DDV", "Telefon"],
-    ["Novak", "NOVAK d.o.o.", "info@novak.si", "Cesta 1", "Kranj", "4000 Kranj", "Slovenija", "SI12345678", "DA", "+38640111222"],
+    ["Srch", "Naziv stranke", "Kontakt (e-mail)", "Naslov", "Kraj", "Posta", "Drzava", "ID za ddv", "DDV", "TRR", "BIC", "Referenca", "Telefon"],
+    ["Novak", "NOVAK d.o.o.", "info@novak.si", "Cesta 1", "Kranj", "4000 Kranj", "Slovenija", "SI12345678", "DA", "SI56...", "BACXSI22", "SI00 123", "+38640111222"],
     ["Brez", "Brez davcne", "", "", "", "", "Slovenija", "", "NE"],
     ["Prvi", "Prvi naziv", "", "", "", "", "Slovenija", "SI87654321", "DA"],
     ["Drugi", "Drugi naziv", "", "", "", "", "Slovenija", "SI87654321", "DA"]
@@ -73,14 +73,15 @@ test("sprememba podatkov v isti Sheets vrstici ohrani stabilni ID", () => {
   assert.equal(result.clients[0].taxId, "SI87654321");
 });
 
-test("nova stranka se zapise v deset stolpcev baze strank", () => {
+test("nova stranka se zapise v A-M brez poseganja v financne stolpce", () => {
+  const existing = ["", "", "", "", "", "", "", "", "", "SI56...", "BACXSI22", "SI00 123", ""];
   const row = clientToSheetRow({
     name: "NOVAK d.o.o.", search: "Novak", email: "info@novak.si", address: "Cesta 1",
     city: "Kranj", postal: "4000 Kranj", country: "Slovenija", taxId: "SI12345678", vatPayer: true, phone: "+38640111222"
-  });
-  assert.deepEqual(row, ["Novak", "NOVAK d.o.o.", "info@novak.si", "Cesta 1", "Kranj", "4000 Kranj", "Slovenija", "SI12345678", "DA", "+38640111222"]);
-  assert.equal(sheetRowRange("'Baza Strank'!A:J", 12), "'Baza Strank'!A12:J12");
-  assert.equal(sheetAppendRange("'Baza Strank'!A:J"), "'Baza Strank'!A:J");
+  }, existing);
+  assert.deepEqual(row, ["Novak", "NOVAK d.o.o.", "info@novak.si", "Cesta 1", "Kranj", "4000 Kranj", "Slovenija", "SI12345678", "DA", "SI56...", "BACXSI22", "SI00 123", "+38640111222"]);
+  assert.equal(sheetRowRange("'Baza Strank'!A:M", 12), "'Baza Strank'!A12:M12");
+  assert.equal(sheetAppendRange("'Baza Strank'!A:M"), "'Baza Strank'!A:M");
   assert.equal(findFirstEmptyClientRow([["glava"], ["_ROCNI_"], ["x", "Stranka"], [null, null, null, null, null, null, null, null, "NE"]]), 4);
   assert.equal(findFirstEmptyClientRow([["glava"], ["x", "Stranka"]]), 0);
 });
@@ -113,7 +114,7 @@ test("nova stranka sprejme e-posto in telefon ter ju pripravi za Google Sheet", 
   assert.match(html, /id="newClientEmail" type="email"/);
   assert.match(html, /id="newClientPhone" type="tel"/);
   assert.match(html, /email: \$\("newClientEmail"\)\.value\.trim\(\),[\s\S]*?phone: \$\("newClientPhone"\)\.value\.trim\(\)/);
-  assert.match(server, /const GOOGLE_SHEETS_RANGE =[\s\S]*?replace\(\/:I\$\/i, ":J"\)/);
+  assert.match(server, /const GOOGLE_SHEETS_RANGE =[\s\S]*?replace\(\/\:\[I-L\]\$\/i, ":M"\)/);
   assert.match(server, /email: String\(input\.email \|\| ""\)\.trim\(\),[\s\S]*?phone: String\(input\.phone \|\| ""\)\.trim\(\)/);
 });
 test("novo opravilo ponuja aliase iz prvega stolpca Google Sheeta", () => {
