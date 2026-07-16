@@ -520,15 +520,43 @@
       display: block;
     }
 
-    .search {
+    .search-control {
+      position: relative;
       min-width: 260px;
       max-width: 420px;
       width: 30vw;
+    }
+
+    .search {
+      width: 100%;
       border: 1px solid var(--line);
       border-radius: 8px;
-      padding: 10px 12px;
+      padding: 10px 44px 10px 12px;
       outline: none;
       background: #fbfcfa;
+      color: var(--ink);
+    }
+
+    .search-clear {
+      position: absolute;
+      top: 50%;
+      right: 4px;
+      width: 34px;
+      height: 34px;
+      padding: 0;
+      transform: translateY(-50%);
+      border: 0;
+      border-radius: 7px;
+      background: transparent;
+      color: var(--muted);
+      font-size: 25px;
+      line-height: 1;
+      cursor: pointer;
+    }
+
+    .search-clear:hover,
+    .search-clear:focus-visible {
+      background: var(--soft);
       color: var(--ink);
     }
 
@@ -611,9 +639,13 @@
 
     .todo-layout {
       display: grid;
-      grid-template-columns: minmax(220px, 240px) minmax(0, 1fr);
+      grid-template-columns: minmax(0, 1fr);
       gap: 14px;
       padding: 14px;
+    }
+
+    .todo-layout.client-filter-active {
+      grid-template-columns: minmax(220px, 240px) minmax(0, 1fr);
     }
 
     .client-list {
@@ -1825,7 +1857,8 @@
         justify-self: end;
         margin-left: 0;
       }
-      .todo-layout { grid-template-columns: 1fr; }
+      .todo-layout,
+      .todo-layout.client-filter-active { grid-template-columns: 1fr; }
       .client-list {
         display: flex;
         overflow-x: auto;
@@ -1925,8 +1958,10 @@
         display: grid;
         grid-template-columns: 1fr 1fr;
       }
-      .search {
+      .search-control {
         grid-column: 1 / -1;
+        width: 100%;
+        max-width: none;
       }
       .topbar-view-row {
         display: grid;
@@ -1961,6 +1996,7 @@
         padding-left: 6px;
         padding-right: 6px;
       }
+      .search-control,
       .search,
       .tools .secondary { width: 100%; max-width: none; }
       .stats {
@@ -2069,6 +2105,7 @@
           <div class="view-switch" aria-label="Pogled">
             <button class="view-btn active" id="todosViewBtn" type="button">Opravila</button>
             <button class="view-btn" id="calendarViewBtn" type="button">Koledar</button>
+            <button class="view-btn worker-only" id="billingViewBtn" type="button">Obra&#269;un</button>
             <button class="view-btn admin-only" id="clientsViewBtn" type="button">Stranke</button>
             <button class="view-btn admin-only" id="reportViewBtn" type="button">Obra&#269;un</button>
           </div>
@@ -2111,21 +2148,21 @@
           </button>
         </div>
         <div class="tools">
-          <input class="search" id="clientSearch" placeholder="I&#353;&#269;i stranko, opravilo ali opis">
+          <div class="search-control">
+            <input class="search" id="clientSearch" placeholder="I&#353;&#269;i stranko, opravilo ali opis">
+            <button class="search-clear hidden" id="clearClientSearch" type="button" aria-label="Po&#269;isti iskanje" title="Po&#269;isti iskanje">&times;</button>
+          </div>
         </div>
-      </section>
-
-      <section class="stats calendar-view worker-only">
-        <div class="stat"><strong id="statHoursIbro">0 h</strong><span id="statHoursPrimaryLabel">Ibro ure</span></div>
-        <div class="stat" id="statHoursBojanBox"><strong id="statHoursBojan">0 h</strong><span>Bojan ure</span></div>
-        <div class="stat"><strong id="statKm">0 km</strong><span id="statKmLabel">kilometrina</span></div>
-        <button class="stat clickable debt-stat admin-only" data-debt-person="ibro" type="button"><strong id="statDebtIbro">0 EUR</strong><span>Ibro dolg</span></button>
-        <button class="stat clickable debt-stat admin-only" data-debt-person="bojan" type="button"><strong id="statDebtBojan">0 EUR</strong><span>Bojan dolg</span></button>
-        <div class="stat"><strong id="statUnbilled">0</strong><span>neobra&#269;unani vnosi</span></div>
       </section>
 
 
       <section class="panel search-panel" id="searchPanel"></section>
+
+      <section class="panel billing-screen worker-only view-hidden">
+        <div class="todo-head">
+          <strong id="billingViewTitle">Obra&#269;un</strong>
+        </div>
+      </section>
 
       <section class="panel report-view clients-screen view-hidden">
         <div class="report-controls">
@@ -2140,6 +2177,9 @@
           </label>
           <label>E-po&#353;ta
             <input id="newClientEmail" type="email" placeholder="racuni@stranka.si">
+          </label>
+          <label>Telefon
+            <input id="newClientPhone" type="tel" placeholder="+386 40 123 456">
           </label>
           <label>Naslov
             <input id="newClientAddress" placeholder="Ulica in hi&#353;na &#353;tevilka">
@@ -2169,7 +2209,7 @@
         <div id="clientsList" class="client-directory"></div>
       </section>
 
-      <section class="panel todo-layout todos-view view-hidden">
+      <section class="panel todo-layout todos-view view-hidden" id="todoLayout">
         <div class="client-list" id="clientTodoList"></div>
         <div class="todo-panel">
           <div class="todo-actions-bar">
@@ -2182,6 +2222,7 @@
                 <span>Prikaz</span>
                 <select id="todoSortMode">
                   <option value="manual">RO&#268;NO</option>
+                  <option value="client">PO STRANKAH</option>
                   <option value="date">DATUMSKO</option>
                   <option value="order">NARO&#268;I</option>
                   <option value="completed">ZAKLJU&#268;ENO</option>
@@ -2189,7 +2230,6 @@
                   <option value="in_progress">V TEKU</option>
                 </select>
               </label>
-              <button class="secondary" id="clearClientFilter" type="button">Vse stranke</button>
             </div>
           </div>
           <div id="todoItems"></div>
@@ -2469,7 +2509,7 @@
     const loggedInHistoryStateKey = "indusUreLoggedIn";
     const workContextKey = "indus-ure-work-context";
     const todoSortModeKey = "indus-ure-todo-sort-mode";
-    const todoSortModes = ["manual", "date", "order", "completed", "open", "in_progress"];
+    const todoSortModes = ["manual", "client", "date", "order", "completed", "open", "in_progress"];
     const statusLabels = {
       billed: "Ze obracunano",
       warranty: "Garancija",
@@ -2548,9 +2588,8 @@
       workerBilling: [],
       workContext: "",
       googleSyncing: false,
-      todoSortMode: todoSortModes.includes(localStorage.getItem(todoSortModeKey))
-        ? localStorage.getItem(todoSortModeKey)
-        : "manual",
+      todoSortMode: "manual",
+      searchReturnState: null,
       sharedDataRefreshing: false,
       todoEditLock: null,
       todoLockHeartbeat: null,
@@ -2560,6 +2599,19 @@
     };
 
     const $ = (id) => document.getElementById(id);
+
+    function todoSortStorageKey() {
+      const userId = state.user?.id || "anonymous";
+      const context = state.workContext || `worker:${userId}`;
+      return `${todoSortModeKey}:${userId}:${context}`;
+    }
+
+    function loadTodoSortMode() {
+      const stored = localStorage.getItem(todoSortStorageKey());
+      state.todoSortMode = todoSortModes.includes(stored) ? stored : "manual";
+      if ($("todoSortMode")) $("todoSortMode").value = state.todoSortMode;
+    }
+
     function closeToolsMenu() {
       $("toolsMenu")?.removeAttribute("open");
     }
@@ -2701,6 +2753,7 @@
       const stored = localStorage.getItem(workContextKey) || "";
       state.workContext = state.user.role === "boss" && allowed.has(stored) ? stored : contexts[0].value;
       select.value = state.workContext;
+      loadTodoSortMode();
       $("workContextControl").classList.toggle("hidden", contexts.length <= 1);
     }
 
@@ -2739,24 +2792,37 @@
       return state.entries.filter((entry) => (entry.syncUser || entry.createdBy) === workerId);
     }
 
+    function todoEventId(todo = {}) {
+      return String(todo.assignmentGroupId || todo.id || "");
+    }
+
+    function uniqueTodosByEventId(todos = []) {
+      const groups = new Map();
+      todos.forEach((todo) => {
+        const eventId = todoEventId(todo);
+        if (!eventId) return;
+        const existing = groups.get(eventId);
+        if (!existing) {
+          groups.set(eventId, {
+            ...todo,
+            assignmentGroupId: eventId,
+            assigneeIds: todoAssigneeIds(todo)
+          });
+          return;
+        }
+        existing.assigneeIds = [...new Set([...todoAssigneeIds(existing), ...todoAssigneeIds(todo)])];
+      });
+      return [...groups.values()];
+    }
+
     function contextTodos() {
-      if (isAdminView()) return state.todos;
+      if (isAdminView()) return uniqueTodosByEventId(state.todos);
       const workerId = activeWorkerId();
       return state.todos.filter((todo) => (todo.syncUser || todo.createdBy) === workerId);
     }
 
     function calendarTodos() {
-      const todos = contextTodos();
-      if (!isAdminView()) return todos;
-      const groups = new Map();
-      todos.forEach((todo) => {
-        const key = todo.assignmentGroupId || todo.id;
-        if (!groups.has(key)) groups.set(key, {
-          ...todo,
-          assigneeIds: todoAssigneeIds(todo)
-        });
-      });
-      return [...groups.values()];
+      return uniqueTodosByEventId(contextTodos());
     }
 
     function applyWorkContextUi() {
@@ -2778,6 +2844,7 @@
       if (!allowed.has(context)) return;
       state.workContext = context;
       localStorage.setItem(workContextKey, context);
+      loadTodoSortMode();
       state.selectedClient = "";
       state.reportClient = "";
       state.reportClientId = "";
@@ -3147,6 +3214,7 @@
     }
 
     function setView(view) {
+      if (isAdminView() && view === "billing") view = "todos";
       if (!isAdminView() && ["clients", "report"].includes(view)) view = "todos";
       state.view = view;
       document.querySelectorAll(".calendar-view").forEach((element) => {
@@ -3161,11 +3229,16 @@
       document.querySelectorAll(".clients-screen").forEach((element) => {
         element.classList.toggle("view-hidden", view !== "clients");
       });
+      document.querySelectorAll(".billing-screen").forEach((element) => {
+        element.classList.toggle("view-hidden", view !== "billing");
+      });
       $("calendarViewBtn").classList.toggle("active", view === "calendar");
       $("todosViewBtn").classList.toggle("active", view === "todos");
+      $("billingViewBtn").classList.toggle("active", view === "billing");
       $("clientsViewBtn").classList.toggle("active", view === "clients");
       $("reportViewBtn").classList.toggle("active", view === "report");
       if (view === "todos") renderTodos();
+      if (view === "billing") renderBillingView();
       if (view === "clients") renderClients();
       if (view === "report") renderReport();
     }
@@ -3249,7 +3322,6 @@
     function render() {
       if (!$("app").classList.contains("hidden")) {
         renderMonth();
-        renderStats();
         renderSearch();
         renderTodos();
         renderClients();
@@ -3319,44 +3391,10 @@
       }
     }
 
-    function renderStats() {
-      const year = state.current.getFullYear();
-      const month = state.current.getMonth();
-      const monthEntries = contextEntries().filter((entry) => {
-        const d = parseDate(entry.date);
-        return d.getFullYear() === year && d.getMonth() === month;
-      });
-
-      const monthKey = `${year}-${String(month + 1).padStart(2, "0")}`;
-      const hourEntries = monthEntries.filter((entry) => entry.status !== "vacation");
-      const admin = isAdminView();
+    function renderBillingView() {
       const worker = activeWorker();
-      const primaryHours = admin
-        ? uniqueHours(hourEntries.filter((entry) => (entry.syncUser || entry.createdBy) === "ibro"))
-        : uniqueHours(hourEntries);
-      const bojanHours = admin
-        ? uniqueHours(hourEntries.filter((entry) => (entry.syncUser || entry.createdBy) === "bojan"))
-        : 0;
-      const km = hourEntries.reduce((sum, entry) => sum + Number(entry.km || 0), 0);
-      const ibroDebt = state.debts
-        .filter((debt) => debt.month === monthKey && debt.person === "ibro")
-        .reduce((sum, debt) => sum + Number(debt.amount || 0), 0);
-      const bojanDebt = state.debts
-        .filter((debt) => debt.month === monthKey && debt.person === "bojan")
-        .reduce((sum, debt) => sum + Number(debt.amount || 0), 0);
-      const unbilled = monthEntries.filter((entry) => entry.status === "unbilled").length;
-
-      $("statHoursIbro").textContent = `${primaryHours.toLocaleString("sl-SI", { maximumFractionDigits: 1 })} h`;
-      $("statHoursPrimaryLabel").textContent = admin ? "Ibro ure" : `${worker?.name || "Delavec"} ure`;
-      $("statHoursBojan").textContent = `${bojanHours.toLocaleString("sl-SI", { maximumFractionDigits: 1 })} h`;
-      $("statHoursBojanBox").classList.toggle("hidden", !admin);
-      $("statKm").textContent = `${km.toLocaleString("sl-SI", { maximumFractionDigits: 1 })} km`;
-      $("statKmLabel").textContent = admin ? "kilometrina skupaj" : `${worker?.name || "Delavec"} kilometrina`;
-      $("statDebtIbro").textContent = `${money(ibroDebt)} EUR`;
-      $("statDebtBojan").textContent = `${money(bojanDebt)} EUR`;
-      $("statUnbilled").textContent = unbilled;
+      $("billingViewTitle").textContent = `Obračun: ${worker?.name || "Delavec"}`;
     }
-
     function renderTodos() {
       renderClientTodoList();
       renderTodoItems();
@@ -3375,18 +3413,15 @@
 
     function renderClientTodoList() {
       const list = $("clientTodoList");
+      const active = state.todoSortMode === "client";
+      $("todoLayout").classList.toggle("client-filter-active", active);
+      list.classList.toggle("hidden", !active);
       list.innerHTML = "";
-      const modeTodos = sortedTodosForMode();
-      const all = document.createElement("button");
-      all.type = "button";
-      all.className = `client-card ${state.selectedClient ? "" : "active"}`;
-      all.innerHTML = `<strong>Vse stranke</strong><span>${modeTodos.filter((todo) => !todo.done).length} odprtih opravil</span>`;
-      all.addEventListener("click", () => {
+      if (!active) {
         state.selectedClient = "";
-        renderTodos();
-      });
-      list.appendChild(all);
-
+        return;
+      }
+      const modeTodos = sortedTodosForMode();
       todoClients().forEach((client) => {
         const clientTodos = modeTodos.filter((todo) => todo.client === client);
         const open = clientTodos.filter((todo) => !todo.done).length;
@@ -3395,7 +3430,7 @@
         card.className = `client-card ${state.selectedClient === client ? "active" : ""}`;
         card.innerHTML = `<strong>${escapeHtml(client)}</strong><span>${open} odprtih, ${clientTodos.length} skupaj</span>`;
         card.addEventListener("click", () => {
-          state.selectedClient = client;
+          state.selectedClient = state.selectedClient === client ? "" : client;
           renderTodos();
         });
         list.appendChild(card);
@@ -3412,7 +3447,7 @@
         <div class="client-row">
           <div>
             <strong>${escapeHtml(client.name)}</strong>
-            <span class="todo-meta">${escapeHtml([client.search, client.taxId, client.address, client.postal, client.city].filter(Boolean).join(" | "))}</span>
+            <span class="todo-meta">${escapeHtml([client.search, client.taxId, client.email, client.phone, client.address, client.postal, client.city].filter(Boolean).join(" | "))}</span>
             <span class="todo-meta">Dav&#269;na / ID: ${escapeHtml(client.clientId || "MANJKA ALI JE PODVOJENA")}</span>
             ${client.syncError ? `<span class="todo-meta error">${escapeHtml(client.syncError)}</span>` : ""}
           </div>
@@ -3443,13 +3478,14 @@
         search: alias || name,
         taxId,
         email: $("newClientEmail").value.trim(),
+        phone: $("newClientPhone").value.trim(),
         address: $("newClientAddress").value.trim(),
         city: $("newClientCity").value.trim(),
         postal: $("newClientPostal").value.trim(),
         country: $("newClientCountry").value.trim() || "Slovenija",
         vatPayer: $("newClientVatPayer").value === "true"
       });
-      ["newClientName", "newClientSearch", "newClientTax", "newClientEmail", "newClientAddress", "newClientCity", "newClientPostal"].forEach((id) => { $(id).value = ""; });
+      ["newClientName", "newClientSearch", "newClientTax", "newClientEmail", "newClientPhone", "newClientAddress", "newClientCity", "newClientPostal"].forEach((id) => { $(id).value = ""; });
       $("newClientCountry").value = "Slovenija";
       $("newClientVatPayer").value = "false";
       renderClients();
@@ -3906,7 +3942,7 @@
       const to = $("reportTo").value;
       const client = findClient(state.reportClientId || $("reportClient").value || state.reportClient || "");
       const clientName = normalizeClientName($("reportClient").value || state.reportClient || "");
-      return state.todos
+      return contextTodos()
         .filter((todo) => !todo.date || inDateRange(todo.date, from, to))
         .filter((todo) => !clientName || todo.clientId === (client?.clientId || client?.id) || normalizeText(todo.client) === normalizeText(clientName))
         .sort(todoSort);
@@ -4044,7 +4080,6 @@
       state.reportClient = client;
       state.reportClientId = clientId;
       $("reportClient").value = client;
-      $("clientSearch").value = client;
       setView("report");
       renderReport();
     }
@@ -4167,7 +4202,7 @@
     }
 
     function clientMatches(client, query) {
-      const haystack = normalizeText(`${client.name} ${client.search}`);
+      const haystack = normalizeText(`${client.name} ${client.search} ${client.email || ""} ${client.phone || ""}`);
       return haystack.includes(normalizeText(query));
     }
 
@@ -4191,6 +4226,8 @@
           clientId: existing?.clientId || source.clientId || source.id || "",
           id: existing?.id || source.clientId || source.id || "",
           taxId: existing?.taxId || source.taxId || "",
+          email: existing?.email || source.email || "",
+          phone: existing?.phone || source.phone || "",
           address: existing?.address || source.address || "",
           city: existing?.city || source.city || "",
           postal: existing?.postal || source.postal || "",
@@ -4215,6 +4252,38 @@
       return partial ? partial.name : input;
     }
 
+    function rememberSearchReturnState() {
+      if (state.searchReturnState) return;
+      state.searchReturnState = {
+        view: state.view,
+        selectedClient: state.selectedClient,
+        reportClient: state.reportClient,
+        reportClientId: state.reportClientId
+      };
+    }
+
+    function handleClientSearchInput() {
+      const hasQuery = Boolean($("clientSearch").value.trim());
+      if (hasQuery) rememberSearchReturnState();
+      else state.searchReturnState = null;
+      $("clearClientSearch").classList.toggle("hidden", !hasQuery);
+      renderSearch();
+    }
+
+    function clearClientSearchAndRestoreView() {
+      const previous = state.searchReturnState;
+      $("clientSearch").value = "";
+      $("clearClientSearch").classList.add("hidden");
+      state.searchReturnState = null;
+      renderSearch();
+      if (!previous) return;
+      state.selectedClient = previous.selectedClient;
+      state.reportClient = previous.reportClient;
+      state.reportClientId = previous.reportClientId;
+      $("reportClient").value = previous.reportClient || "";
+      setView(previous.view);
+    }
+
     function renderSearch() {
       const panel = $("searchPanel");
       const query = $("clientSearch").value.trim();
@@ -4236,7 +4305,7 @@
         item.innerHTML = `
           <strong>Stranka</strong>
           <span></span>
-          <span>${escapeHtml(client.name)}<br><small>${escapeHtml([client.search, client.taxId, client.address].filter(Boolean).join(" | "))}</small></span>
+          <span>${escapeHtml(client.name)}<br><small>${escapeHtml([client.search, client.taxId, client.email, client.phone, client.address].filter(Boolean).join(" | "))}</small></span>
           <span class="todo-chip">baza strank</span>
         `;
         item.disabled = !client.clientId;
@@ -4691,7 +4760,8 @@
     $("todoSortMode").value = state.todoSortMode;
     $("todoSortMode").addEventListener("change", (event) => {
       state.todoSortMode = todoSortModes.includes(event.target.value) ? event.target.value : "manual";
-      localStorage.setItem(todoSortModeKey, state.todoSortMode);
+      if (state.todoSortMode !== "client") state.selectedClient = "";
+      localStorage.setItem(todoSortStorageKey(), state.todoSortMode);
       renderTodos();
     });
     $("closeAccount").addEventListener("click", () => $("accountDialog").close());
@@ -4761,6 +4831,7 @@
 
     $("calendarViewBtn").addEventListener("click", () => setView("calendar"));
     $("todosViewBtn").addEventListener("click", () => setView("todos"));
+    $("billingViewBtn").addEventListener("click", () => setView("billing"));
     $("clientsViewBtn").addEventListener("click", () => setView("clients"));
     $("reportViewBtn").addEventListener("click", () => setView("report"));
     $("reportFrom").addEventListener("change", renderReport);
@@ -4839,10 +4910,6 @@
       button.addEventListener("click", () => editBillingSetting(button.dataset.setting).catch((error) => alert(error.message)));
     });
 
-    $("clearClientFilter").addEventListener("click", () => {
-      state.selectedClient = "";
-      renderTodos();
-    });
 
     $("todoItems").addEventListener("click", async (event) => {
       const preview = event.target.closest(".todo-image-preview");
@@ -4901,7 +4968,8 @@
       render();
     });
     $("syncClientsBtn").addEventListener("click", () => syncClients().catch((error) => alert(error.message)));
-    $("clientSearch").addEventListener("input", renderSearch);
+    $("clientSearch").addEventListener("input", handleClientSearchInput);
+    $("clearClientSearch").addEventListener("click", clearClientSearchAndRestoreView);
     $("exportCsv").addEventListener("click", exportCsv);
     $("googleCalendar").addEventListener("click", () => syncGoogle(true));
     $("downloadBackup").addEventListener("click", downloadBackup);

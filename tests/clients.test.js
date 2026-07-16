@@ -22,10 +22,10 @@ test("davcna stevilka je locena od stabilnega internega ID stranke", () => {
   assert.equal(isUsableTaxId("3956478d-92e9-425d-8a1e-3d58c7937ded"), false);
 });
 
-test("Google Sheet A-I se prebere brez spreminjanja njegove strukture", () => {
+test("Google Sheet A-J prebere tudi telefonsko stevilko", () => {
   const rows = [
-    ["Srch", "Naziv stranke", "Kontakt (e-mail)", "Naslov", "Kraj", "Posta", "Drzava", "ID za ddv", "DDV"],
-    ["Novak", "NOVAK d.o.o.", "info@novak.si", "Cesta 1", "Kranj", "4000 Kranj", "Slovenija", "SI12345678", "DA"],
+    ["Srch", "Naziv stranke", "Kontakt (e-mail)", "Naslov", "Kraj", "Posta", "Drzava", "ID za ddv", "DDV", "Telefon"],
+    ["Novak", "NOVAK d.o.o.", "info@novak.si", "Cesta 1", "Kranj", "4000 Kranj", "Slovenija", "SI12345678", "DA", "+38640111222"],
     ["Brez", "Brez davcne", "", "", "", "", "Slovenija", "", "NE"],
     ["Prvi", "Prvi naziv", "", "", "", "", "Slovenija", "SI87654321", "DA"],
     ["Drugi", "Drugi naziv", "", "", "", "", "Slovenija", "SI87654321", "DA"]
@@ -38,6 +38,7 @@ test("Google Sheet A-I se prebere brez spreminjanja njegove strukture", () => {
   assert.equal(isStableClientId(result.clients[0].clientId), true);
   assert.equal(result.clients[0].search, "Novak");
   assert.equal(result.clients[0].email, "info@novak.si");
+  assert.equal(result.clients[0].phone, "+38640111222");
   assert.equal(isStableClientId(result.clients[1].clientId), true);
 });
 
@@ -72,18 +73,49 @@ test("sprememba podatkov v isti Sheets vrstici ohrani stabilni ID", () => {
   assert.equal(result.clients[0].taxId, "SI87654321");
 });
 
-test("nova stranka se zapise v devet stolpcev baze strank", () => {
+test("nova stranka se zapise v deset stolpcev baze strank", () => {
   const row = clientToSheetRow({
     name: "NOVAK d.o.o.", search: "Novak", email: "info@novak.si", address: "Cesta 1",
-    city: "Kranj", postal: "4000 Kranj", country: "Slovenija", taxId: "SI12345678", vatPayer: true
+    city: "Kranj", postal: "4000 Kranj", country: "Slovenija", taxId: "SI12345678", vatPayer: true, phone: "+38640111222"
   });
-  assert.deepEqual(row, ["Novak", "NOVAK d.o.o.", "info@novak.si", "Cesta 1", "Kranj", "4000 Kranj", "Slovenija", "SI12345678", "DA"]);
-  assert.equal(sheetRowRange("'Baza Strank'!A:I", 12), "'Baza Strank'!A12:I12");
-  assert.equal(sheetAppendRange("'Baza Strank'!A:I"), "'Baza Strank'!A:I");
+  assert.deepEqual(row, ["Novak", "NOVAK d.o.o.", "info@novak.si", "Cesta 1", "Kranj", "4000 Kranj", "Slovenija", "SI12345678", "DA", "+38640111222"]);
+  assert.equal(sheetRowRange("'Baza Strank'!A:J", 12), "'Baza Strank'!A12:J12");
+  assert.equal(sheetAppendRange("'Baza Strank'!A:J"), "'Baza Strank'!A:J");
   assert.equal(findFirstEmptyClientRow([["glava"], ["_ROCNI_"], ["x", "Stranka"], [null, null, null, null, null, null, null, null, "NE"]]), 4);
   assert.equal(findFirstEmptyClientRow([["glava"], ["x", "Stranka"]]), 0);
 });
 
+test("filter opravil je locen po prijavljenem uporabniku in delovnem pogledu", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  assert.match(html, /function todoSortStorageKey\(\)/);
+  assert.ok(html.includes('return `${todoSortModeKey}:${userId}:${context}`;'));
+  assert.match(html, /function loadTodoSortMode\(\)/);
+  assert.match(html, /state\.workContext = state\.user\.role[\s\S]*?loadTodoSortMode\(\)/);
+  assert.match(html, /state\.workContext = context;[\s\S]*?loadTodoSortMode\(\)/);
+  assert.match(html, /localStorage\.setItem\(todoSortStorageKey\(\), state\.todoSortMode\)/);
+  assert.doesNotMatch(html, /localStorage\.setItem\(todoSortModeKey, state\.todoSortMode\)/);
+});
+
+test("iskalnik ima praznjenje in vrnitev na prejsnji pogled", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  assert.match(html, /id="clearClientSearch"/);
+  assert.match(html, /function rememberSearchReturnState\(\)/);
+  assert.match(html, /view: state\.view,[\s\S]*?selectedClient: state\.selectedClient/);
+  assert.match(html, /function clearClientSearchAndRestoreView\(\)/);
+  assert.match(html, /\$\("clientSearch"\)\.value = "";[\s\S]*?setView\(previous\.view\)/);
+  assert.match(html, /\$\("clientSearch"\)\.addEventListener\("input", handleClientSearchInput\)/);
+  assert.match(html, /\$\("clearClientSearch"\)\.addEventListener\("click", clearClientSearchAndRestoreView\)/);
+});
+
+test("nova stranka sprejme e-posto in telefon ter ju pripravi za Google Sheet", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  const server = fs.readFileSync(path.join(__dirname, "..", "outputs", "server.js"), "utf8");
+  assert.match(html, /id="newClientEmail" type="email"/);
+  assert.match(html, /id="newClientPhone" type="tel"/);
+  assert.match(html, /email: \$\("newClientEmail"\)\.value\.trim\(\),[\s\S]*?phone: \$\("newClientPhone"\)\.value\.trim\(\)/);
+  assert.match(server, /const GOOGLE_SHEETS_RANGE =[\s\S]*?replace\(\/:I\$\/i, ":J"\)/);
+  assert.match(server, /email: String\(input\.email \|\| ""\)\.trim\(\),[\s\S]*?phone: String\(input\.phone \|\| ""\)\.trim\(\)/);
+});
 test("novo opravilo ponuja aliase iz prvega stolpca Google Sheeta", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
   assert.match(html, /id="todoFormClient" list="clientList"/);
@@ -287,9 +319,15 @@ test("razlagalni AI teksti niso prikazani v uporabniskem vmesniku", () => {
   }
   assert.doesNotMatch(html, /workContextHint/);
 });
-test("sefovski pogled ne prikazuje statistik zacetne strani", () => {
+test("koledar nima starih statistik delavec pa dobi zavihek Obracun", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
-  assert.match(html, /<section class="stats calendar-view worker-only">/);
+  assert.doesNotMatch(html, /id="statHoursIbro"|id="statKm"|id="statUnbilled"/);
+  assert.doesNotMatch(html, /function renderStats\(\)/);
+  assert.match(html, /class="view-btn worker-only" id="billingViewBtn"[^>]*>Obra&#269;un/);
+  assert.match(html, /class="panel billing-screen worker-only view-hidden"/);
+  assert.match(html, /function renderBillingView\(\)[\s\S]*?activeWorker\(\)[\s\S]*?billingViewTitle/);
+  assert.match(html, /if \(isAdminView\(\) && view === "billing"\) view = "todos"/);
+  assert.match(html, /billingViewBtn"\)\.addEventListener\("click", \(\) => setView\("billing"\)\)/);
   assert.match(html, /querySelectorAll\("\.worker-only"\)[\s\S]*toggle\("hidden", admin\)/);
 });
 test("sefovski seznam privzeto prikaze zakljucena opravila", () => {
@@ -468,6 +506,17 @@ test("skupni obrazec opravila uporablja strezniski zaklep", () => {
   assert.match(server, /releaseTodoAssignmentEditLock\(db, previousTodo, user, editLockToken\)/);
 });
 
+test("filtriranje po strankah je samostojen prikaz brez gumba Vse stranke", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  assert.match(html, /id="todoSortMode"[\s\S]*?value="client">PO STRANKAH/);
+  assert.match(html, /id="todoLayout"/);
+  assert.doesNotMatch(html, /id="clearClientFilter"/);
+  assert.match(html, /const active = state\.todoSortMode === "client"/);
+  assert.match(html, /\$\("todoLayout"\)\.classList\.toggle\("client-filter-active", active\)/);
+  assert.match(html, /list\.classList\.toggle\("hidden", !active\)/);
+  assert.match(html, /if \(!active\) \{[\s\S]*?state\.selectedClient = "";[\s\S]*?return;/);
+  assert.match(html, /state\.selectedClient = state\.selectedClient === client \? "" : client/);
+});
 test("opravila imajo rocno in datumsko razvrscanje ter neobvezni uri", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
   assert.match(html, /id="todoSortMode"[\s\S]*?value="manual">RO&#268;NO[\s\S]*?value="date">DATUMSKO/);
@@ -487,7 +536,7 @@ test("opravila imajo rocno in datumsko razvrscanje ter neobvezni uri", () => {
   assert.match(html, /end: \$\("todoFormEnd"\)\.value/);
   assert.match(html, /Za opravilo z uro vnesi tudi datum/);
   assert.match(html, /\$\("todoFormStart"\)\.value = ""/);
-  assert.match(html, /localStorage\.setItem\(todoSortModeKey, state\.todoSortMode\)/);
+  assert.match(html, /localStorage\.setItem\(todoSortStorageKey\(\), state\.todoSortMode\)/);
   assert.match(html, /return \(orders\.length \? Math\.min\(\.\.\.orders\) : 0\) - 1/);
   assert.doesNotMatch(html, /id: "billing", label: "Obra/);
 });
@@ -512,6 +561,15 @@ test("nujno opravilo je na vrhu in ga ni mogoce rocno prestavljati", () => {
   assert.match(html, /Odstranil si sebe iz opravila[\s\S]*?ne bos vec videl ali mogel odpreti/);
 });
 
+test("sefovski pogled prikaze skupno opravilo samo enkrat po skritem ID", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  assert.match(html, /function todoEventId\(todo = \{\}\)/);
+  assert.match(html, /return String\(todo\.assignmentGroupId \|\| todo\.id \|\| ""\)/);
+  assert.match(html, /function uniqueTodosByEventId\(todos = \[\]\)/);
+  assert.match(html, /if \(isAdminView\(\)\) return uniqueTodosByEventId\(state\.todos\)/);
+  assert.match(html, /function reportTodos\(\)[\s\S]*?return contextTodos\(\)/);
+  assert.match(html, /existing\.assigneeIds = \[\.\.\.new Set/);
+});
 test("sefovski koledar zdruzi skupna opravila in ponudi locena feeda", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
   assert.match(html, /function calendarTodos\(\)/);

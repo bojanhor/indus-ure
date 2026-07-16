@@ -17,6 +17,7 @@ const {
   sourceTodoForNewEntry,
   entryForUserRole,
   defaultHourlyRateForUser,
+  normalizeDb,
   releaseEntryEditLock,
   releaseTodoEditLock,
   releaseTodoAssignmentEditLock,
@@ -61,6 +62,18 @@ test("sef vidi vse, delavec pa samo svoje podatke", () => {
   assert.deepEqual(visibleDebtsForUser(db, worker).map((item) => item.id), ["d1"]);
 });
 
+test("vsako opravilo dobi skriti skupni ID dogodka", () => {
+  const legacyDb = {
+    users: {},
+    entries: [],
+    todos: [{ id: "legacy-todo", title: "Staro opravilo", status: "open", syncUser: "ibro" }],
+    debts: [],
+    clients: []
+  };
+  const result = normalizeDb(legacyDb);
+  assert.equal(result.changed, true);
+  assert.equal(legacyDb.todos[0].assignmentGroupId, "legacy-todo");
+});
 test("vsak delavec vidi vse dodeljene osebe skupnega opravila", () => {
   const groupedDb = {
     todos: [

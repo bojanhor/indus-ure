@@ -33,7 +33,7 @@ const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || "";
 const GOOGLE_REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI || "";
 const GOOGLE_SHEETS_ID = process.env.GOOGLE_SHEETS_ID || "";
-const GOOGLE_SHEETS_RANGE = process.env.GOOGLE_SHEETS_RANGE || DEFAULT_CLIENT_SHEET_RANGE;
+const GOOGLE_SHEETS_RANGE = String(process.env.GOOGLE_SHEETS_RANGE || DEFAULT_CLIENT_SHEET_RANGE).replace(/:I$/i, ":J");
 const GOOGLE_CALENDAR_SCOPE_VERSION = 2;
 const INDUS_GOOGLE_APP_ID = "indus-ure-v1";
 const GOOGLE_SYNC_INTERVAL_MS = Math.max(60_000, Number(process.env.GOOGLE_SYNC_INTERVAL_MS || 60_000));
@@ -483,6 +483,11 @@ function normalizeDb(db = {}) {
 
   db.todos = db.todos.map((todo, index) => {
     const next = { ...todo };
+    const assignmentGroupId = String(next.assignmentGroupId || next.id || crypto.randomUUID()).trim();
+    if (next.assignmentGroupId !== assignmentGroupId) {
+      next.assignmentGroupId = assignmentGroupId;
+      changed = true;
+    }
     if (next.status === "billing") {
       next.status = "execution";
       changed = true;
@@ -1175,6 +1180,7 @@ function cleanClient(input) {
     name: String(input.name || "").trim(),
     search: String(input.search || input.name || "").trim(),
     email: String(input.email || "").trim(),
+    phone: String(input.phone || "").trim(),
     address: String(input.address || "").trim(),
     city: String(input.city || "").trim(),
     postal: String(input.postal || "").trim(),
