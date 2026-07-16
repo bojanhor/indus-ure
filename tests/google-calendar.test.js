@@ -218,7 +218,9 @@ test("statusi opravil uporabljajo dogovorjene Google barve", () => {
     order_warehouse: ["Naro\u010di Sklad.", "11"],
     add_to_car: ["Dodaj v avto", "4"],
     return_and_bill: ["Vrne naj/Pora\u010dunaj", "6"],
-    return: ["!!Vrni", "3"]
+    return: ["!!Vrni", "3"],
+    meal: ["Malica", "5"],
+    internal: ["Razno/Interno", "5"]
   };
   assert.deepEqual(Object.keys(TODO_STATUS_DEFINITIONS), Object.keys(expected));
   for (const [status, [label, colorId]] of Object.entries(expected)) {

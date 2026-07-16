@@ -955,6 +955,8 @@
     .todo-status-add_to_car { --todo-bg: #ff887c; --todo-fg: #202124; --todo-border: #d95f54; }
     .todo-status-return_and_bill { --todo-bg: #ffb878; --todo-fg: #202124; --todo-border: #d8883f; }
     .todo-status-return { --todo-bg: #dbadff; --todo-fg: #202124; --todo-border: #8e5bb7; }
+    .todo-status-meal,
+    .todo-status-internal { --todo-bg: #fbd75b; --todo-fg: #202124; --todo-border: #d6ad2f; }
 
 
     .day-todo.todo-status-color {
@@ -1217,8 +1219,28 @@
       background: #fff1f1;
       color: #a52e2e;
       font-size: 22px;
+      position: relative;
+      overflow: hidden;
       font-weight: 900;
       text-decoration: none;
+    }
+
+    .todo-pdf-preview img {
+      width: 100%;
+      height: 100%;
+      display: block;
+      object-fit: cover;
+    }
+
+    .pdf-thumbnail-badge {
+      position: absolute;
+      right: 7px;
+      bottom: 7px;
+      padding: 3px 6px;
+      border-radius: 5px;
+      background: rgba(165, 46, 46, 0.92);
+      color: #fff;
+      font-size: 11px;
     }
 
     .todo-pdf-preview:hover,
@@ -1529,6 +1551,164 @@
     .billed { background: var(--green); }
     .warranty { background: var(--red); }
     .unbilled { background: var(--orange); }
+    .day-head[role="button"] { cursor: pointer; border-radius: 6px; }
+    .day-head[role="button"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+    #dayTimelineDialog {
+      width: min(920px, calc(100vw - 20px));
+      max-width: none;
+      height: min(92svh, 980px);
+      overflow: hidden;
+    }
+
+    #dayTimelineDialog > form {
+      height: 100%;
+      display: grid;
+      grid-template-rows: auto auto auto minmax(0, 1fr);
+    }
+
+    .day-timeline-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 9px 14px;
+      border-bottom: 1px solid var(--line);
+      background: #f6f8f5;
+    }
+
+    .day-timeline-toolbar .gesture-zoom-controls { flex-wrap: nowrap; }
+    .day-timeline-hint { color: var(--muted); font-size: 12px; }
+
+    .day-all-day {
+      display: grid;
+      grid-template-columns: 58px minmax(0, 1fr);
+      gap: 8px;
+      align-items: start;
+      padding: 8px 14px;
+      border-bottom: 1px solid var(--line);
+      background: #fff;
+    }
+
+    .day-all-day.hidden { display: none; }
+    .day-all-day-label { padding-top: 7px; color: var(--muted); font-size: 11px; font-weight: 800; }
+    .day-all-day-items { display: flex; flex-wrap: wrap; gap: 6px; }
+    .day-all-day-item {
+      min-height: 34px;
+      max-width: 100%;
+      padding: 7px 9px;
+      border-radius: 7px;
+      background: var(--todo-bg);
+      color: var(--todo-fg);
+      border-left: 4px solid var(--todo-border, var(--todo-bg));
+      text-align: left;
+      font-weight: 750;
+    }
+
+    .day-timeline-scroll {
+      position: relative;
+      min-height: 0;
+      overflow: auto;
+      overscroll-behavior: contain;
+      touch-action: none;
+      background: #fff;
+      cursor: grab;
+    }
+
+    .day-timeline-scroll.is-panning { cursor: grabbing; }
+    .day-timeline {
+      position: relative;
+      min-width: 310px;
+      margin-left: 0;
+      background: #fff;
+    }
+
+    .day-time-line {
+      position: absolute;
+      left: 62px;
+      right: 0;
+      height: 1px;
+      border-top: 1px solid #d9dfdb;
+      pointer-events: none;
+    }
+
+    .day-time-line.half { border-top-style: dotted; border-top-color: #e5e9e6; }
+    .day-time-label {
+      position: absolute;
+      left: 8px;
+      width: 46px;
+      transform: translateY(-50%);
+      color: var(--muted);
+      font-size: 11px;
+      text-align: right;
+      pointer-events: none;
+    }
+
+    .day-timeline-events { position: absolute; inset: 0 8px 0 66px; }
+    .day-timeline-event {
+      position: absolute;
+      min-height: 18px;
+      padding: 6px 8px;
+      overflow: hidden;
+      border: 1px solid var(--todo-border, var(--todo-bg));
+      border-left-width: 5px;
+      border-radius: 7px;
+      background: var(--todo-bg);
+      color: var(--todo-fg);
+      box-shadow: 0 2px 5px rgba(22, 38, 31, 0.18);
+      cursor: grab;
+      touch-action: none;
+      user-select: none;
+      z-index: 3;
+    }
+
+    .day-timeline-event.is-moving { opacity: 0.88; cursor: grabbing; z-index: 8; }
+    .day-timeline-event-title { display: block; font-size: 13px; line-height: 1.2; overflow-wrap: anywhere; }
+    .day-timeline-event-meta { display: block; margin-top: 2px; font-size: 11px; line-height: 1.15; opacity: 0.86; }
+    .day-resize-handle {
+      position: absolute;
+      left: 0;
+      right: 0;
+      height: 12px;
+      z-index: 2;
+      cursor: ns-resize;
+    }
+
+    .day-resize-handle.start { top: -3px; }
+    .day-resize-handle.end { bottom: -3px; }
+    .day-resize-handle::after {
+      content: "";
+      position: absolute;
+      left: 35%;
+      right: 35%;
+      top: 5px;
+      height: 2px;
+      border-radius: 2px;
+      background: currentColor;
+      opacity: 0.55;
+    }
+
+    .day-now-line {
+      position: absolute;
+      left: 54px;
+      right: 0;
+      height: 2px;
+      background: #e53935;
+      pointer-events: none;
+      z-index: 10;
+    }
+
+    .day-now-line::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: -4px;
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: #e53935;
+    }
+
     .errand { background: var(--blue); }
     .vacation { background: var(--purple); }
 
@@ -1729,7 +1909,12 @@
       overflow: auto;
       padding: 10px;
       background: #11181c;
+      overscroll-behavior: contain;
+      touch-action: none;
+      cursor: grab;
     }
+
+    .attachment-preview-body.is-panning { cursor: grabbing; }
 
     .attachment-preview-body img {
       display: block;
@@ -1737,6 +1922,9 @@
       height: auto;
       margin: auto;
       border-radius: 4px;
+      touch-action: none;
+      user-select: none;
+      -webkit-user-drag: none;
     }
 
 
@@ -1751,14 +1939,26 @@
       border-bottom: 1px solid var(--line);
     }
 
-    .zoom-control {
+    .gesture-zoom-controls {
       display: flex;
       align-items: center;
       gap: 7px;
-      min-width: min(260px, 100%);
     }
 
-    .zoom-control input { min-width: 110px; }
+    .gesture-zoom-controls .zoom-step {
+      width: 44px;
+      min-width: 44px;
+      min-height: 44px;
+      padding: 0;
+      font-size: 24px;
+      line-height: 1;
+    }
+
+    .gesture-hint {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
 
     .zoom-value {
       min-width: 48px;
@@ -1778,6 +1978,8 @@
       overflow: auto;
       padding: 10px;
       background: #11181c;
+      overscroll-behavior: contain;
+      touch-action: none;
     }
 
     #photoEditorCanvas {
@@ -1788,6 +1990,8 @@
       background: #fff;
       cursor: crosshair;
       touch-action: none;
+      user-select: none;
+      -webkit-user-drag: none;
     }
     .todo-form-assignees {
       display: grid;
@@ -2155,6 +2359,14 @@
         grid-template-columns: 1fr;
       }
       .result { grid-template-columns: 1fr; gap: 5px; }
+      #dayTimelineDialog { width: 100vw; height: 100svh; max-height: none; border-radius: 0; }
+      #dayTimelineDialog .modal-head { padding: 13px 14px; }
+      .day-timeline-toolbar { align-items: flex-start; }
+      .day-timeline-hint { display: none; }
+      .day-all-day { grid-template-columns: 48px minmax(0, 1fr); padding-left: 8px; padding-right: 8px; }
+      .day-time-line { left: 52px; }
+      .day-time-label { left: 2px; width: 42px; }
+      .day-timeline-events { left: 56px; right: 4px; }
     }
   </style>
 </head>
@@ -2372,6 +2584,32 @@
     </main>
   </div>
 
+  <dialog id="dayTimelineDialog">
+    <form method="dialog">
+      <div class="modal-head">
+        <h3 id="dayTimelineTitle">Dnevni pregled</h3>
+        <button class="icon-btn" id="closeDayTimeline" type="submit" title="Zapri" aria-label="Zapri dnevni pregled">&times;</button>
+      </div>
+      <div class="day-timeline-toolbar">
+        <div class="gesture-zoom-controls" aria-label="Povecava dnevne casovnice">
+          <button class="secondary zoom-step" id="dayTimelineZoomOut" type="button" aria-label="Pomanjsaj casovnico">&minus;</button>
+          <span class="zoom-value" id="dayTimelineZoomValue">100 %</span>
+          <button class="secondary zoom-step" id="dayTimelineZoomIn" type="button" aria-label="Povecaj casovnico">&plus;</button>
+          <button class="secondary" id="dayTimelineFit" type="button">24 h</button>
+        </div>
+        <span class="day-timeline-hint">Dva prsta ali Ctrl + kole&#353;&#269;ek za pove&#269;avo</span>
+      </div>
+      <div class="day-all-day hidden" id="dayAllDay">
+        <span class="day-all-day-label">VES DAN</span>
+        <div class="day-all-day-items" id="dayAllDayItems"></div>
+      </div>
+      <div class="day-timeline-scroll" id="dayTimelineScroll">
+        <div class="day-timeline" id="dayTimeline">
+          <div class="day-timeline-events" id="dayTimelineEvents"></div>
+        </div>
+      </div>
+    </form>
+  </dialog>
   <dialog id="todoDialog">
     <form method="dialog" id="todoForm">
       <div class="modal-head">
@@ -2416,7 +2654,7 @@
         <label>Opis
           <textarea id="todoFormNotes" placeholder="Dalj&#353;i opis naloge"></textarea>
         </label>
-        <label class="todo-form-urgent">
+        <label class="todo-form-urgent" id="todoFormUrgentField">
           <input id="todoFormUrgent" type="checkbox">
           NUJNO
         </label>
@@ -2441,6 +2679,7 @@
         <div class="audit-box hidden" id="todoFormAudit"></div>
         <div class="actions">
           <button type="button" class="danger" id="deleteTodoFromDialog">Izbri&#353;i opravilo</button>
+          <button type="button" class="secondary hidden" id="writeHoursFromTodo">Pi&#353;i ure na ta projekt</button>
           <button type="button" class="secondary" id="cancelTodoDialog">Prekli&#269;i</button>
           <button type="submit" class="primary" id="saveTodoDialog">Shrani</button>
         </div>
@@ -2455,11 +2694,13 @@
         <button class="icon-btn" type="submit" title="Zapri" aria-label="Zapri predogled">&times;</button>
       </div>
       <div class="attachment-preview-toolbar">
-        <label class="zoom-control">Pove&#269;ava
-          <input id="attachmentPreviewZoom" type="range" min="10" max="300" step="10" value="100">
+        <div class="gesture-zoom-controls" aria-label="Pove&#269;ava slike">
+          <button class="secondary zoom-step" id="attachmentPreviewZoomOut" type="button" aria-label="Pomanj&#353;aj">&minus;</button>
           <span class="zoom-value" id="attachmentPreviewZoomValue">100 %</span>
-        </label>
-        <button class="secondary" id="attachmentPreviewActualSize" type="button">100 %</button>
+          <button class="secondary zoom-step" id="attachmentPreviewZoomIn" type="button" aria-label="Pove&#269;aj">&plus;</button>
+          <button class="secondary" id="attachmentPreviewFit" type="button">Prilagodi</button>
+        </div>
+        <span class="gesture-hint">Pove&#269;aj z dvema prstoma</span>
         <button class="primary" id="attachmentPreviewEdit" type="button">Uredi</button>
       </div>
       <div class="attachment-preview-body">
@@ -2482,10 +2723,12 @@
           <input id="photoEditorSize" type="range" min="2" max="30" value="8">
         </label>
         <button class="secondary" id="photoEditorUndo" type="button">Razveljavi</button>
-        <label class="zoom-control">Pove&#269;ava
-          <input id="photoEditorZoom" type="range" min="10" max="300" step="10" value="100">
+        <div class="gesture-zoom-controls" aria-label="Pove&#269;ava urejevalnika">
+          <button class="secondary zoom-step" id="photoEditorZoomOut" type="button" aria-label="Pomanj&#353;aj">&minus;</button>
           <span class="zoom-value" id="photoEditorZoomValue">100 %</span>
-        </label>
+          <button class="secondary zoom-step" id="photoEditorZoomIn" type="button" aria-label="Pove&#269;aj">&plus;</button>
+          <button class="secondary" id="photoEditorFit" type="button">Prilagodi</button>
+        </div>
         <button class="secondary" id="photoEditorClear" type="button">Po&#269;isti</button>
       </div>
       <div class="photo-editor-canvas-shell">
@@ -2607,7 +2850,9 @@
       { id: "in_progress", label: "V teku" },
       { id: "execution", label: "Zaklju\u010deno" },
       { id: "open", label: "\u010caka" },
-      { id: "return", label: "!!Vrni" }
+      { id: "return", label: "!!Vrni" },
+      { id: "meal", label: "Malica" },
+      { id: "internal", label: "Razno/Interno" }
     ];
     const todoStatusById = Object.fromEntries(todoStatusDefinitions.map((status) => [status.id, status]));
 
@@ -2647,6 +2892,13 @@
       debts: [],
       clients: [],
       selectedClient: "",
+      todoHoursSourceId: "",
+      dayTimelineDate: "",
+      dayTimelineMinuteHeight: 1,
+      dayTimelinePointers: new Map(),
+      dayTimelineGesture: null,
+      dayTimelineInteraction: null,
+      dayTimelineSuppressClick: false,
       todoDialogPhotos: [],
       photoEditor: null,
       reportClient: "",
@@ -2921,6 +3173,7 @@
       state.selectedClient = "";
       state.reportClient = "";
       state.reportClientId = "";
+      state.todoHoursSourceId = "";
       if ($("todoDialog").open) $("todoDialog").close();
       if ($("debtDialog").open) $("debtDialog").close();
       if (!isAdminView() && ["clients", "report"].includes(state.view)) state.view = "todos";
@@ -3458,6 +3711,7 @@
         renderClients();
         renderReport();
         renderWorkerBillingTable();
+        if ($("dayTimelineDialog").open) renderDayTimeline();
       }
     }
 
@@ -3493,10 +3747,23 @@
 
         const head = document.createElement("div");
         head.className = "day-head";
+        head.dataset.date = key;
+        head.setAttribute("role", "button");
+        head.tabIndex = 0;
+        head.setAttribute("aria-label", `Odpri dnevni pregled za ${dayDate.toLocaleDateString("sl-SI")}`);
+        head.addEventListener("click", () => openDayTimeline(key));
+        head.addEventListener("keydown", (event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            openDayTimeline(key);
+          }
+        });
+
         head.innerHTML = `<span class="day-number">${dayDate.getDate()}</span>`;
 
         if (!isAdminView()) {
           const add = document.createElement("button");
+          add.addEventListener("click", (event) => event.stopPropagation());
           add.className = "quick-add";
           add.type = "button";
           add.textContent = "+";
@@ -3519,6 +3786,365 @@
           });
 
         calendar.appendChild(day);
+      }
+    }
+
+    function dayTimelineMinutes(value) {
+      const match = /^(\d{2}):(\d{2})$/.exec(String(value || ""));
+      if (!match) return null;
+      return Number(match[1]) * 60 + Number(match[2]);
+    }
+
+    function dayTimelineTime(minutes) {
+      const value = Math.max(0, Math.min(1440, Math.round(Number(minutes) || 0)));
+      const hours = Math.floor(value / 60);
+      const mins = value % 60;
+      return String(hours).padStart(2, "0") + ":" + String(mins).padStart(2, "0");
+    }
+
+    function dayTimelineLayouts(todos) {
+      const layouts = new Map();
+      let group = [];
+      let groupEnd = -1;
+      const flush = () => {
+        if (!group.length) return;
+        const laneEnds = [];
+        group.forEach((item) => {
+          let lane = laneEnds.findIndex((end) => end <= item.startMinute);
+          if (lane < 0) lane = laneEnds.length;
+          laneEnds[lane] = item.endMinute;
+          item.lane = lane;
+        });
+        const laneCount = Math.max(1, laneEnds.length);
+        group.forEach((item) => layouts.set(item.todo.id, { ...item, laneCount }));
+        group = [];
+        groupEnd = -1;
+      };
+
+      todos
+        .map((todo) => ({
+          todo,
+          startMinute: dayTimelineMinutes(todo.start),
+          endMinute: dayTimelineMinutes(todo.end)
+        }))
+        .filter((item) => item.startMinute !== null && item.endMinute !== null)
+        .sort((a, b) => a.startMinute - b.startMinute || a.endMinute - b.endMinute)
+        .forEach((item) => {
+          if (group.length && item.startMinute >= groupEnd) flush();
+          group.push(item);
+          groupEnd = Math.max(groupEnd, item.endMinute);
+        });
+      flush();
+      return layouts;
+    }
+
+    function dayTimelineTodos() {
+      if (!state.dayTimelineDate) return [];
+      return calendarTodos().filter((todo) => todo.date === state.dayTimelineDate);
+    }
+
+    async function openTodoFromDayTimeline(todo) {
+      if (!todo) return;
+      $("dayTimelineDialog").close();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      await openTodoDialog(todo);
+    }
+
+    function renderDayTimeline() {
+      if (!state.dayTimelineDate) return;
+      const selectedDate = parseDate(state.dayTimelineDate);
+      $("dayTimelineTitle").textContent = selectedDate.toLocaleDateString("sl-SI", {
+        weekday: "long",
+        day: "numeric",
+        month: "long",
+        year: "numeric"
+      });
+      $("dayTimelineZoomValue").textContent = Math.round(state.dayTimelineMinuteHeight * 100) + " %";
+
+      const todos = dayTimelineTodos();
+      const allDay = todos.filter((todo) => !todo.start || !todo.end).sort(todoSort);
+      const allDayShell = $("dayAllDay");
+      const allDayItems = $("dayAllDayItems");
+      allDayShell.classList.toggle("hidden", !allDay.length);
+      allDayItems.replaceChildren();
+      allDay.forEach((todo) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "day-all-day-item todo-status-color " + todoStatusClass(todo.status);
+        button.textContent = todo.title + (todo.client ? " - " + todo.client : "");
+        button.addEventListener("click", () => openTodoFromDayTimeline(todo).catch((error) => alert(error.message)));
+        allDayItems.appendChild(button);
+      });
+
+      const minuteHeight = state.dayTimelineMinuteHeight;
+      const timeline = $("dayTimeline");
+      timeline.replaceChildren();
+      timeline.style.height = Math.round(1440 * minuteHeight) + "px";
+
+      for (let minute = 0; minute <= 1440; minute += 30) {
+        const line = document.createElement("span");
+        line.className = "day-time-line" + (minute % 60 ? " half" : "");
+        line.style.top = Math.round(minute * minuteHeight) + "px";
+        timeline.appendChild(line);
+        if (minute % 60 === 0) {
+          const label = document.createElement("span");
+          label.className = "day-time-label";
+          label.style.top = Math.round(minute * minuteHeight) + "px";
+          label.textContent = dayTimelineTime(minute);
+          timeline.appendChild(label);
+        }
+      }
+
+      const eventsLayer = document.createElement("div");
+      eventsLayer.className = "day-timeline-events";
+      eventsLayer.id = "dayTimelineEvents";
+      const layouts = dayTimelineLayouts(todos);
+      layouts.forEach((layout) => {
+        const { todo, startMinute, endMinute, lane, laneCount } = layout;
+        const event = document.createElement("div");
+        event.className = "day-timeline-event todo-status-color " + todoStatusClass(todo.status);
+        event.dataset.todoId = todo.id;
+        event.dataset.start = dayTimelineTime(startMinute);
+        event.dataset.end = dayTimelineTime(endMinute);
+        event.tabIndex = 0;
+        event.setAttribute("role", "button");
+        event.setAttribute("aria-label", todo.title + ", " + dayTimelineTime(startMinute) + " do " + dayTimelineTime(endMinute));
+        event.style.top = Math.round(startMinute * minuteHeight) + "px";
+        event.style.height = Math.max(18, Math.round((endMinute - startMinute) * minuteHeight)) + "px";
+        event.style.left = "calc(" + (lane * 100 / laneCount) + "% + 2px)";
+        event.style.width = "calc(" + (100 / laneCount) + "% - 4px)";
+
+        const startHandle = document.createElement("span");
+        startHandle.className = "day-resize-handle start";
+        startHandle.dataset.mode = "resize-start";
+        const title = document.createElement("strong");
+        title.className = "day-timeline-event-title";
+        title.textContent = todo.title;
+        const meta = document.createElement("span");
+        meta.className = "day-timeline-event-meta";
+        meta.textContent = dayTimelineTime(startMinute) + "-" + dayTimelineTime(endMinute)
+          + (todo.client ? " | " + todo.client : "")
+          + (isAdminView() ? " | Za: " + todoAssigneeNames(todo) : "");
+        const endHandle = document.createElement("span");
+        endHandle.className = "day-resize-handle end";
+        endHandle.dataset.mode = "resize-end";
+        event.append(startHandle, title, meta, endHandle);
+        event.addEventListener("pointerdown", (pointerEvent) => beginDayTimelineEventPointer(pointerEvent, todo));
+        event.addEventListener("keydown", (keyEvent) => {
+          if (keyEvent.key !== "Enter" && keyEvent.key !== " ") return;
+          keyEvent.preventDefault();
+          openTodoFromDayTimeline(todo).catch((error) => alert(error.message));
+        });
+        eventsLayer.appendChild(event);
+      });
+      timeline.appendChild(eventsLayer);
+
+      if (state.dayTimelineDate === dateKey(new Date())) {
+        const now = new Date();
+        const currentMinute = now.getHours() * 60 + now.getMinutes();
+        const line = document.createElement("span");
+        line.className = "day-now-line";
+        line.style.top = Math.round(currentMinute * minuteHeight) + "px";
+        timeline.appendChild(line);
+      }
+    }
+
+    function setDayTimelineZoom(nextMinuteHeight, clientY = null) {
+      const scroll = $("dayTimelineScroll");
+      const oldHeight = state.dayTimelineMinuteHeight;
+      const nextHeight = Math.max(0.35, Math.min(2.4, Number(nextMinuteHeight) || 1));
+      if (Math.abs(nextHeight - oldHeight) < 0.001) return;
+      const rect = scroll.getBoundingClientRect();
+      const viewportY = clientY === null
+        ? scroll.clientHeight / 2
+        : Math.max(0, Math.min(scroll.clientHeight, clientY - rect.top));
+      const anchorMinute = (scroll.scrollTop + viewportY) / oldHeight;
+      state.dayTimelineMinuteHeight = nextHeight;
+      renderDayTimeline();
+      scroll.scrollTop = Math.max(0, anchorMinute * nextHeight - viewportY);
+    }
+
+    function fitDayTimeline() {
+      const scroll = $("dayTimelineScroll");
+      setDayTimelineZoom(Math.max(0.35, scroll.clientHeight / 1440), scroll.getBoundingClientRect().top);
+      scroll.scrollTop = 0;
+    }
+
+    function openDayTimeline(date) {
+      state.dayTimelineDate = date;
+      state.dayTimelineInteraction = null;
+      state.dayTimelinePointers.clear();
+      state.dayTimelineGesture = null;
+      renderDayTimeline();
+      const dialog = $("dayTimelineDialog");
+      if (!dialog.open) dialog.showModal();
+      requestAnimationFrame(() => {
+        const timed = dayTimelineTodos()
+          .map((todo) => dayTimelineMinutes(todo.start))
+          .filter((minute) => minute !== null);
+        const now = new Date();
+        const focusMinute = date === dateKey(now)
+          ? now.getHours() * 60 + now.getMinutes()
+          : timed.length ? Math.min(...timed) : 8 * 60;
+        $("dayTimelineScroll").scrollTop = Math.max(0, focusMinute * state.dayTimelineMinuteHeight - 90);
+      });
+    }
+
+    function beginDayTimelineEventPointer(event, todo) {
+      if (event.pointerType === "mouse" && event.button !== 0) return;
+      const eventElement = event.currentTarget;
+      const mode = event.target.closest("[data-mode]")?.dataset.mode || "move";
+      const startMinute = dayTimelineMinutes(todo.start);
+      const endMinute = dayTimelineMinutes(todo.end);
+      if (startMinute === null || endMinute === null) return;
+      event.preventDefault();
+      event.stopPropagation();
+      eventElement.setPointerCapture?.(event.pointerId);
+      state.dayTimelineInteraction = {
+        pointerId: event.pointerId,
+        todoId: todo.id,
+        mode,
+        startY: event.clientY,
+        originalStart: startMinute,
+        originalEnd: endMinute,
+        startMinute,
+        endMinute,
+        moved: false,
+        lockPromise: null,
+        element: eventElement
+      };
+    }
+
+    function updateDayTimelineEventPointer(event) {
+      const interaction = state.dayTimelineInteraction;
+      if (!interaction || interaction.pointerId !== event.pointerId) return;
+      const rawDelta = (event.clientY - interaction.startY) / state.dayTimelineMinuteHeight;
+      const delta = Math.round(rawDelta / 5) * 5;
+      if (!interaction.moved && Math.abs(event.clientY - interaction.startY) < 4) return;
+      event.preventDefault();
+      if (!interaction.moved) {
+        interaction.moved = true;
+        interaction.element.classList.add("is-moving");
+        interaction.lockPromise = acquireTodoEditLockForDialog(interaction.todoId);
+      }
+
+      if (interaction.mode === "resize-start") {
+        interaction.startMinute = Math.max(0, Math.min(interaction.originalEnd - 5, interaction.originalStart + delta));
+        interaction.endMinute = interaction.originalEnd;
+      } else if (interaction.mode === "resize-end") {
+        interaction.startMinute = interaction.originalStart;
+        interaction.endMinute = Math.min(1440, Math.max(interaction.originalStart + 5, interaction.originalEnd + delta));
+      } else {
+        const duration = interaction.originalEnd - interaction.originalStart;
+        interaction.startMinute = Math.max(0, Math.min(1440 - duration, interaction.originalStart + delta));
+        interaction.endMinute = interaction.startMinute + duration;
+      }
+
+      interaction.element.style.top = Math.round(interaction.startMinute * state.dayTimelineMinuteHeight) + "px";
+      interaction.element.style.height = Math.max(18, Math.round((interaction.endMinute - interaction.startMinute) * state.dayTimelineMinuteHeight)) + "px";
+      const meta = interaction.element.querySelector(".day-timeline-event-meta");
+      if (meta) {
+        const suffix = meta.textContent.includes(" | ") ? meta.textContent.slice(meta.textContent.indexOf(" | ")) : "";
+        meta.textContent = dayTimelineTime(interaction.startMinute) + "-" + dayTimelineTime(interaction.endMinute) + suffix;
+      }
+    }
+
+    async function finishDayTimelineEventPointer(event, cancelled = false) {
+      const interaction = state.dayTimelineInteraction;
+      if (!interaction || interaction.pointerId !== event.pointerId) return;
+      state.dayTimelineInteraction = null;
+      interaction.element.classList.remove("is-moving");
+      if (cancelled) {
+        if (interaction.lockPromise && await interaction.lockPromise) await releaseTodoEditLockForDialog();
+        renderDayTimeline();
+        return;
+      }
+      const todo = state.todos.find((item) => item.id === interaction.todoId);
+      if (!interaction.moved) {
+        if (interaction.mode === "move" && todo) await openTodoFromDayTimeline(todo);
+        return;
+      }
+      const locked = await interaction.lockPromise;
+      if (!locked || !todo) {
+        renderDayTimeline();
+        return;
+      }
+      try {
+        await saveTodoToServer({
+          ...todo,
+          start: dayTimelineTime(interaction.startMinute),
+          end: dayTimelineTime(interaction.endMinute)
+        });
+        clearTodoEditLockState();
+        renderDayTimeline();
+      } catch (error) {
+        await releaseTodoEditLockForDialog();
+        renderDayTimeline();
+        alert(error.message);
+      }
+    }
+
+    function dayTimelinePointerMetrics() {
+      const points = [...state.dayTimelinePointers.values()].slice(0, 2);
+      if (points.length < 2) return null;
+      return {
+        distance: Math.hypot(points[1].x - points[0].x, points[1].y - points[0].y),
+        center: { x: (points[0].x + points[1].x) / 2, y: (points[0].y + points[1].y) / 2 }
+      };
+    }
+
+    function startDayTimelineViewportPointer(event) {
+      if (event.target.closest(".day-timeline-event")) return;
+      if (event.pointerType === "mouse" && event.button !== 0) return;
+      event.preventDefault();
+      const scroll = $("dayTimelineScroll");
+      scroll.setPointerCapture?.(event.pointerId);
+      state.dayTimelinePointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      scroll.classList.add("is-panning");
+      const metrics = dayTimelinePointerMetrics();
+      state.dayTimelineGesture = metrics
+        ? { type: "pinch", lastDistance: metrics.distance, lastCenter: metrics.center }
+        : { type: "pan", pointerId: event.pointerId, lastX: event.clientX, lastY: event.clientY };
+    }
+
+    function updateDayTimelineViewportPointer(event) {
+      if (!state.dayTimelinePointers.has(event.pointerId)) return;
+      event.preventDefault();
+      const scroll = $("dayTimelineScroll");
+      state.dayTimelinePointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      const metrics = dayTimelinePointerMetrics();
+      if (metrics) {
+        if (state.dayTimelineGesture?.type !== "pinch") {
+          state.dayTimelineGesture = { type: "pinch", lastDistance: metrics.distance, lastCenter: metrics.center };
+          return;
+        }
+        const ratio = metrics.distance / Math.max(1, state.dayTimelineGesture.lastDistance);
+        setDayTimelineZoom(state.dayTimelineMinuteHeight * ratio, state.dayTimelineGesture.lastCenter.y);
+        scroll.scrollLeft -= metrics.center.x - state.dayTimelineGesture.lastCenter.x;
+        state.dayTimelineGesture = { type: "pinch", lastDistance: metrics.distance, lastCenter: metrics.center };
+        return;
+      }
+      const gesture = state.dayTimelineGesture;
+      if (gesture?.type !== "pan" || gesture.pointerId !== event.pointerId) return;
+      scroll.scrollLeft -= event.clientX - gesture.lastX;
+      scroll.scrollTop -= event.clientY - gesture.lastY;
+      gesture.lastX = event.clientX;
+      gesture.lastY = event.clientY;
+    }
+
+    function finishDayTimelineViewportPointer(event) {
+      state.dayTimelinePointers.delete(event.pointerId);
+      const remaining = [...state.dayTimelinePointers.entries()][0];
+      if (remaining) {
+        state.dayTimelineGesture = {
+          type: "pan",
+          pointerId: remaining[0],
+          lastX: remaining[1].x,
+          lastY: remaining[1].y
+        };
+      } else {
+        state.dayTimelineGesture = null;
+        $("dayTimelineScroll").classList.remove("is-panning");
       }
     }
 
@@ -3757,12 +4383,46 @@
       return String(photo?.data || "").startsWith("data:application/pdf;base64,");
     }
 
-    function setAttachmentPreviewZoom(value) {
+    function pdfThumbnailMarkup(photo, showBadge = false) {
+      const thumbnail = String(photo?.thumbnailData || "");
+      if (!thumbnail.startsWith("data:image/")) return "PDF";
+      return `<img src="${escapeHtml(thumbnail)}" alt="Predogled prve strani PDF">${showBadge ? `<span class="pdf-thumbnail-badge">PDF</span>` : ""}`;
+    }
+
+    function pointerGestureMetrics(pointers) {
+      const points = [...pointers.values()].slice(0, 2);
+      if (points.length < 2) return null;
+      const [first, second] = points;
+      return {
+        distance: Math.max(1, Math.hypot(second.x - first.x, second.y - first.y)),
+        center: { x: (first.x + second.x) / 2, y: (first.y + second.y) / 2 }
+      };
+    }
+
+    function scrollerViewportCenter(scroller) {
+      const rect = scroller.getBoundingClientRect();
+      return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    }
+
+    function setZoomedElementWidth(scroller, element, width, anchor = null) {
+      const before = element.getBoundingClientRect();
+      const ratioX = anchor && before.width ? (anchor.x - before.left) / before.width : 0.5;
+      const ratioY = anchor && before.height ? (anchor.y - before.top) / before.height : 0.5;
+      element.style.width = `${Math.max(1, Math.round(width))}px`;
+      if (!anchor || !before.width || !before.height) return;
+      const after = element.getBoundingClientRect();
+      scroller.scrollLeft += after.left + ratioX * after.width - anchor.x;
+      scroller.scrollTop += after.top + ratioY * after.height - anchor.y;
+    }
+
+    function setAttachmentPreviewZoom(value, anchor = null) {
+      const preview = state.attachmentPreview;
       const image = $("attachmentPreviewImage");
-      const zoom = Math.max(10, Math.min(300, Number(value) || 100));
-      $("attachmentPreviewZoom").value = String(Math.round(zoom / 10) * 10);
+      const body = image.closest(".attachment-preview-body");
+      const zoom = Math.max(10, Math.min(500, Number(value) || 100));
+      if (preview) preview.zoom = zoom;
       $("attachmentPreviewZoomValue").textContent = `${Math.round(zoom)} %`;
-      if (image.naturalWidth) image.style.width = `${Math.round(image.naturalWidth * zoom / 100)}px`;
+      if (image.naturalWidth && body) setZoomedElementWidth(body, image, image.naturalWidth * zoom / 100, anchor);
     }
 
     function fitAttachmentPreview() {
@@ -3771,8 +4431,10 @@
       if (!image.naturalWidth || !image.naturalHeight || !body) return;
       const widthRatio = Math.max(0.1, (body.clientWidth - 20) / image.naturalWidth);
       const heightRatio = Math.max(0.1, (window.innerHeight - 190) / image.naturalHeight);
-      const zoom = Math.min(100, Math.floor(Math.min(widthRatio, heightRatio) * 100 / 10) * 10);
+      const zoom = Math.min(100, Math.floor(Math.min(widthRatio, heightRatio) * 100));
       setAttachmentPreviewZoom(Math.max(10, zoom));
+      body.scrollLeft = 0;
+      body.scrollTop = 0;
     }
 
     function openAttachmentPreview(photo, context = {}) {
@@ -3786,11 +4448,18 @@
         link.remove();
         return;
       }
-      state.attachmentPreview = { photo, todoId: context.todoId || "" };
+      state.attachmentPreview = {
+        photo,
+        todoId: context.todoId || "",
+        zoom: 100,
+        pointers: new Map(),
+        gesture: null
+      };
       const name = photo.name || "Fotografija";
       $("attachmentPreviewTitle").textContent = name;
       const image = $("attachmentPreviewImage");
       image.alt = `Predogled: ${name}`;
+      image.draggable = false;
       const dialog = $("attachmentPreviewDialog");
       if (!dialog.open) dialog.showModal();
 
@@ -3841,12 +4510,14 @@
       };
     }
 
-    function setPhotoEditorZoom(value) {
+    function setPhotoEditorZoom(value, anchor = null) {
+      const editor = state.photoEditor;
       const canvas = $("photoEditorCanvas");
-      const zoom = Math.max(10, Math.min(300, Number(value) || 100));
-      $("photoEditorZoom").value = String(Math.round(zoom / 10) * 10);
+      const shell = canvas.closest(".photo-editor-canvas-shell");
+      const zoom = Math.max(10, Math.min(500, Number(value) || 100));
+      if (editor) editor.zoom = zoom;
       $("photoEditorZoomValue").textContent = `${Math.round(zoom)} %`;
-      if (canvas.width) canvas.style.width = `${Math.round(canvas.width * zoom / 100)}px`;
+      if (canvas.width && shell) setZoomedElementWidth(shell, canvas, canvas.width * zoom / 100, anchor);
     }
 
     function fitPhotoEditorZoom() {
@@ -3855,8 +4526,10 @@
       if (!canvas.width || !canvas.height || !shell) return;
       const widthRatio = Math.max(0.1, (shell.clientWidth - 20) / canvas.width);
       const heightRatio = Math.max(0.1, (window.innerHeight - 230) / canvas.height);
-      const zoom = Math.min(100, Math.floor(Math.min(widthRatio, heightRatio) * 100 / 10) * 10);
+      const zoom = Math.min(100, Math.floor(Math.min(widthRatio, heightRatio) * 100));
       setPhotoEditorZoom(Math.max(10, zoom));
+      shell.scrollLeft = 0;
+      shell.scrollTop = 0;
     }
 
     function openPhotoEditor(photo) {
@@ -3866,7 +4539,16 @@
         const canvas = $("photoEditorCanvas");
         canvas.width = Math.max(1, image.naturalWidth);
         canvas.height = Math.max(1, image.naturalHeight);
-        state.photoEditor = { photoId: photo.id, image, strokes: [], activeStroke: null };
+        state.photoEditor = {
+          photoId: photo.id,
+          image,
+          strokes: [],
+          activeStroke: null,
+          zoom: 100,
+          pointers: new Map(),
+          pinch: null,
+          gestureUsed: false
+        };
         $("photoEditorTitle").textContent = `Uredi: ${photo.name || "Fotografija"}`;
         redrawPhotoEditor();
         $("photoEditorDialog").showModal();
@@ -3904,7 +4586,7 @@
       return `<div class="todo-photos-inline">${todo.photos.map((photo) => {
         const pdf = isPdfAttachment(photo);
         return `<article class="photo-card">
-          ${pdf ? `<a class="todo-pdf-preview" href="${escapeHtml(photo.data)}" target="_blank" rel="noopener noreferrer" aria-label="Odpri PDF ${escapeHtml(photo.name || "Priloga")}">PDF</a>` : `<button class="todo-image-preview" type="button" data-photo-id="${escapeHtml(photo.id)}" aria-label="Povecaj sliko ${escapeHtml(photo.name || "Fotografija")}"><img src="${escapeHtml(photo.data)}" alt="${escapeHtml(photo.name || "Fotografija")}"></button>`}
+          ${pdf ? `<a class="todo-pdf-preview" href="${escapeHtml(photo.data)}" target="_blank" rel="noopener noreferrer" aria-label="Odpri PDF ${escapeHtml(photo.name || "Priloga")}">${pdfThumbnailMarkup(photo, true)}</a>` : `<button class="todo-image-preview" type="button" data-photo-id="${escapeHtml(photo.id)}" aria-label="Povecaj sliko ${escapeHtml(photo.name || "Fotografija")}"><img src="${escapeHtml(photo.data)}" alt="${escapeHtml(photo.name || "Fotografija")}"></button>`}
           <div>
             <strong>${escapeHtml(photo.name || "Priloga")}</strong>
             <span class="todo-meta">dodal: ${escapeHtml(photo.createdByName || "-")}</span>
@@ -3914,11 +4596,12 @@
       }).join("")}</div>`;
     }
 
-    function renderTodoFormAssignees(selectedIds = []) {
+    function renderTodoFormAssignees(selectedIds = [], onlyIds = null) {
       const selected = new Set(selectedIds);
-      $("todoFormAssignees").innerHTML = state.users.map((user) => `
+      const allowed = onlyIds ? new Set(onlyIds) : null;
+      $("todoFormAssignees").innerHTML = state.users.filter((user) => !allowed || allowed.has(user.id)).map((user) => `
         <label>
-          <input type="checkbox" value="${escapeHtml(user.id)}" ${selected.has(user.id) ? "checked" : ""}>
+          <input type="checkbox" value="${escapeHtml(user.id)}" ${selected.has(user.id) ? "checked" : ""} ${allowed ? "disabled" : ""}>
           ${escapeHtml(user.name || user.id)}
         </label>
       `).join("");
@@ -3934,7 +4617,7 @@
       list.innerHTML = state.todoDialogPhotos.map((photo) => `
         <div class="todo-form-photo-row">
           <button class="todo-form-attachment-preview" type="button" data-photo-id="${escapeHtml(photo.id)}">
-            <span class="todo-form-attachment-thumb">${isPdfAttachment(photo) ? "PDF" : `<img src="${escapeHtml(photo.data)}" alt="">`}</span>
+            <span class="todo-form-attachment-thumb">${isPdfAttachment(photo) ? pdfThumbnailMarkup(photo) : `<img src="${escapeHtml(photo.data)}" alt="">`}</span>
             <span>${escapeHtml(photo.name || "Priloga")}</span>
           </button>
           <div class="todo-form-photo-actions">
@@ -3943,6 +4626,18 @@
           </div>
         </div>
       `).join("");
+    }
+
+    async function fillMissingPdfThumbnailsForDialog(photos) {
+      for (const photo of photos) {
+        if (!isPdfAttachment(photo) || photo.thumbnailData) continue;
+        const thumbnailData = await createPdfThumbnailSafely(photo.data);
+        if (state.todoDialogPhotos !== photos) return;
+        const current = photos.find((item) => item.id === photo.id);
+        if (!current || !thumbnailData) continue;
+        current.thumbnailData = thumbnailData;
+        renderTodoFormPhotos();
+      }
     }
 
     function renderTodoFormAudit(todo) {
@@ -3966,15 +4661,19 @@
 
     function updateTodoFormStatus() {
       updateTodoStatusControl($("todoFormStatus"));
-      const showBilling = isAdminView() && $("todoFormStatus").value === "execution";
+      const completed = $("todoFormStatus").value === "execution";
+      const showBilling = isAdminView() && completed;
       $("todoFormBilling").classList.toggle("hidden", !showBilling);
+      $("todoFormUrgentField").classList.toggle("hidden", completed);
+      if (completed) $("todoFormUrgent").checked = false;
     }
 
     async function openTodoDialog(todo = {}) {
       const editing = Boolean(todo.id);
       if (editing && !(await acquireTodoEditLockForDialog(todo.id))) return;
+      state.todoHoursSourceId = String(todo._hoursSourceId || "");
       const client = findClient(todo.clientId || todo.client);
-      $("todoFormTitle").textContent = editing ? "Uredi opravilo" : "Novo opravilo";
+      $("todoFormTitle").textContent = state.todoHoursSourceId ? "Pi\u0161i ure na projekt" : editing ? "Uredi opravilo" : "Novo opravilo";
       $("todoFormId").value = todo.id || "";
       $("todoFormStart").value = todo.start || "";
       $("todoFormEnd").value = todo.end || "";
@@ -3987,16 +4686,19 @@
       renderTodoStatusChoices(todo.status || "open");
       $("todoFormUrgent").checked = Boolean(todo.urgent);
       updateTodoFormStatus();
-      renderTodoFormAssignees(editing ? todoAssigneeIds(todo) : [activeWorkerId()]);
+      const selectedAssignees = editing ? todoAssigneeIds(todo) : [activeWorkerId()];
+      renderTodoFormAssignees(selectedAssignees, state.todoHoursSourceId ? selectedAssignees : null);
       state.todoDialogPhotos = (todo.photos || []).map((photo) => ({ ...photo }));
       renderTodoFormPhotos();
       $("todoFormHourlyRate").value = editing ? todoHourlyRate(todo) : workerDefaultHourlyRate(activeWorkerId());
       $("todoFormBillingKm").value = Number(todo.billingKm || 0);
       $("deleteTodoFromDialog").classList.toggle("hidden", !editing);
+      $("writeHoursFromTodo").classList.toggle("hidden", !editing);
       renderTodoFormAudit(todo);
       $("todoFormPhotoInput").value = "";
       $("todoDialog").showModal();
       requestAnimationFrame(() => $("todoFormTask").focus());
+      fillMissingPdfThumbnailsForDialog(state.todoDialogPhotos).catch((error) => console.warn(error));
     }
 
     async function saveTodoFromDialog() {
@@ -4020,7 +4722,8 @@
         order: existing?.order || nextTodoOrder(),
         assigneeIds,
         syncUser: existing?.syncUser || assigneeIds[0] || activeWorkerId(),
-        urgent: $("todoFormUrgent").checked,
+        urgent: $("todoFormStatus").value === "execution" ? false : $("todoFormUrgent").checked,
+        sourceProjectTodoId: existing?.sourceProjectTodoId || state.todoHoursSourceId || "",
         done: $("todoFormStatus").value === "execution",
         billingHourlyRate: hourlyRate,
         billingKm,
@@ -4036,6 +4739,30 @@
       }
       await saveTodoToServer(todo);
       $("todoDialog").close();
+    }
+
+    async function openHoursTodoFromCurrent() {
+      const sourceId = $("todoFormId").value;
+      const source = state.todos.find((todo) => todo.id === sourceId);
+      if (!source) return;
+      await releaseTodoEditLockForDialog();
+      $("todoDialog").close();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      await openTodoDialog({
+        _hoursSourceId: source.id,
+        client: source.client,
+        clientId: source.clientId,
+        title: source.title,
+        notes: source.notes,
+        date: source.date,
+        start: "",
+        end: "",
+        status: "execution",
+        urgent: false,
+        photos: (source.photos || []).map((photo) => ({ ...photo })),
+        billingHourlyRate: workerDefaultHourlyRate(activeWorkerId()),
+        billingKm: 0
+      });
     }
 
     async function deleteTodoFromDialog() {
@@ -4770,16 +5497,69 @@
       });
     }
 
+    let pdfJsModulePromise = null;
+
+    async function loadPdfJs() {
+      if (!pdfJsModulePromise) {
+        pdfJsModulePromise = import("/vendor/pdfjs/build/pdf.min.mjs").then((pdfjs) => {
+          pdfjs.GlobalWorkerOptions.workerSrc = "/vendor/pdfjs/build/pdf.worker.min.mjs";
+          return pdfjs;
+        });
+      }
+      return pdfJsModulePromise;
+    }
+
+    async function createPdfThumbnail(data) {
+      const pdfjs = await loadPdfJs();
+      const encoded = String(data || "").split(",", 2)[1] || "";
+      const bytes = Uint8Array.from(atob(encoded), (character) => character.charCodeAt(0));
+      const loadingTask = pdfjs.getDocument({
+        data: bytes,
+        isEvalSupported: false,
+        standardFontDataUrl: "/vendor/pdfjs/standard_fonts/",
+        wasmUrl: "/vendor/pdfjs/wasm/"
+      });
+      let pdfDocument = null;
+      try {
+        pdfDocument = await loadingTask.promise;
+        const page = await pdfDocument.getPage(1);
+        const original = page.getViewport({ scale: 1 });
+        const scale = Math.min(2, 320 / Math.max(1, original.width), 420 / Math.max(1, original.height));
+        const viewport = page.getViewport({ scale });
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(viewport.width));
+        canvas.height = Math.max(1, Math.round(viewport.height));
+        const context = canvas.getContext("2d", { alpha: false });
+        context.fillStyle = "#ffffff";
+        context.fillRect(0, 0, canvas.width, canvas.height);
+        await page.render({ canvasContext: context, viewport, background: "#ffffff" }).promise;
+        return canvasAsLimitedJpegDataUrl(canvas, 95_000);
+      } finally {
+        if (pdfDocument) await pdfDocument.destroy();
+      }
+    }
+
+    async function createPdfThumbnailSafely(data) {
+      try {
+        return await createPdfThumbnail(data);
+      } catch (error) {
+        console.warn("PDF thumbnail ni bil ustvarjen:", error);
+        return "";
+      }
+    }
+
     async function todoAttachmentFromFile(file) {
       const pdf = file.type === "application/pdf" || /\.pdf$/i.test(file.name);
       if (pdf) {
         if (file.size > 1_500_000) throw new Error("PDF je prevelik. Najvecja dovoljena velikost je 1,5 MB.");
         let data = await readFileAsDataUrl(file, "PDF datoteke ni bilo mogoce prebrati.");
         data = data.replace(/^data:[^;]*;base64,/, "data:application/pdf;base64,");
+        const thumbnailData = await createPdfThumbnailSafely(data);
         return {
           id: window.crypto?.randomUUID ? window.crypto.randomUUID() : `${Date.now()}-${Math.random()}`,
           name: file.name || "priloga.pdf",
           data,
+          thumbnailData,
           createdBy: state.user?.id || "",
           createdByName: state.user?.name || "",
           createdAt: new Date().toISOString()
@@ -5002,6 +5782,7 @@
       saveTodoFromDialog().catch((error) => alert(error.message));
     });
     $("deleteTodoFromDialog").addEventListener("click", () => deleteTodoFromDialog().catch((error) => alert(error.message)));
+    $("writeHoursFromTodo").addEventListener("click", () => openHoursTodoFromCurrent().catch((error) => alert(error.message)));
     $("todoFormPhotoInput").addEventListener("change", async (event) => {
       try {
         const remaining = Math.max(0, 8 - state.todoDialogPhotos.length);
@@ -5110,6 +5891,37 @@
       state.current = new Date();
       render();
     });
+    $("dayTimelineZoomOut").addEventListener("click", () => setDayTimelineZoom(state.dayTimelineMinuteHeight / 1.25));
+    $("dayTimelineZoomIn").addEventListener("click", () => setDayTimelineZoom(state.dayTimelineMinuteHeight * 1.25));
+    $("dayTimelineFit").addEventListener("click", fitDayTimeline);
+    $("dayTimelineScroll").addEventListener("wheel", (event) => {
+      if (!event.ctrlKey && !event.metaKey) return;
+      event.preventDefault();
+      setDayTimelineZoom(state.dayTimelineMinuteHeight * Math.exp(-event.deltaY * 0.002), event.clientY);
+    }, { passive: false });
+    $("dayTimelineScroll").addEventListener("pointerdown", startDayTimelineViewportPointer);
+    $("dayTimelineScroll").addEventListener("pointermove", updateDayTimelineViewportPointer);
+    $("dayTimelineScroll").addEventListener("pointerup", finishDayTimelineViewportPointer);
+    $("dayTimelineScroll").addEventListener("pointercancel", finishDayTimelineViewportPointer);
+    document.addEventListener("pointermove", updateDayTimelineEventPointer, { passive: false });
+    document.addEventListener("pointerup", (event) => {
+      finishDayTimelineEventPointer(event).catch((error) => alert(error.message));
+    });
+    document.addEventListener("pointercancel", (event) => {
+      finishDayTimelineEventPointer(event, true).catch(() => {});
+    });
+    $("dayTimelineDialog").addEventListener("close", () => {
+      const interaction = state.dayTimelineInteraction;
+      state.dayTimelineInteraction = null;
+      state.dayTimelinePointers.clear();
+      state.dayTimelineGesture = null;
+      $("dayTimelineScroll").classList.remove("is-panning");
+      if (interaction?.lockPromise) {
+        interaction.lockPromise.then((locked) => {
+          if (locked) return releaseTodoEditLockForDialog();
+        }).catch(() => {});
+      }
+    });
     $("syncClientsBtn").addEventListener("click", () => syncClients().catch((error) => alert(error.message)));
     $("clientSearch").addEventListener("input", handleClientSearchInput);
     $("clearClientSearch").addEventListener("click", clearClientSearchAndRestoreView);
@@ -5117,6 +5929,17 @@
     $("googleCalendar").addEventListener("click", () => syncGoogle(true));
     $("downloadBackup").addEventListener("click", downloadBackup);
     $("todoDialog").addEventListener("close", releaseTodoEditLockForDialog);
+    $("todoDialog").addEventListener("close", () => {
+      const sourceId = state.todoHoursSourceId;
+      state.todoHoursSourceId = "";
+      if (!sourceId) return;
+      setTimeout(() => {
+        const source = state.todos.find((todo) => todo.id === sourceId);
+        if (source && !$("todoDialog").open) {
+          openTodoDialog(source).catch((error) => alert(error.message));
+        }
+      }, 0);
+    });
     $("todoDialog").addEventListener("close", hideTodoClientSuggestions);
     $("photoEditorCanvas").addEventListener("pointerdown", (event) => {
       const editor = state.photoEditor;
@@ -5124,6 +5947,16 @@
       event.preventDefault();
       const canvas = event.currentTarget;
       canvas.setPointerCapture(event.pointerId);
+      editor.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      if (editor.pointers.size >= 2) {
+        editor.activeStroke = null;
+        editor.gestureUsed = true;
+        redrawPhotoEditor();
+        const metrics = pointerGestureMetrics(editor.pointers);
+        editor.pinch = metrics ? { lastDistance: metrics.distance, lastCenter: metrics.center } : null;
+        return;
+      }
+      if (editor.gestureUsed) return;
       const rect = canvas.getBoundingClientRect();
       editor.activeStroke = {
         pointerId: event.pointerId,
@@ -5134,26 +5967,61 @@
       drawPhotoEditorStroke(canvas.getContext("2d"), editor.activeStroke);
     });
     $("photoEditorCanvas").addEventListener("pointermove", (event) => {
-      const stroke = state.photoEditor?.activeStroke;
-      if (!stroke || stroke.pointerId !== event.pointerId) return;
+      const editor = state.photoEditor;
+      if (!editor?.pointers.has(event.pointerId)) return;
       event.preventDefault();
+      editor.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      if (editor.pointers.size >= 2) {
+        const metrics = pointerGestureMetrics(editor.pointers);
+        if (!metrics) return;
+        if (!editor.pinch) {
+          editor.pinch = { lastDistance: metrics.distance, lastCenter: metrics.center };
+          return;
+        }
+        const shell = $("photoEditorCanvas").closest(".photo-editor-canvas-shell");
+        const ratio = metrics.distance / Math.max(1, editor.pinch.lastDistance);
+        setPhotoEditorZoom(editor.zoom * ratio, editor.pinch.lastCenter);
+        shell.scrollLeft -= metrics.center.x - editor.pinch.lastCenter.x;
+        shell.scrollTop -= metrics.center.y - editor.pinch.lastCenter.y;
+        editor.pinch = { lastDistance: metrics.distance, lastCenter: metrics.center };
+        return;
+      }
+      const stroke = editor.activeStroke;
+      if (!stroke || stroke.pointerId !== event.pointerId || editor.gestureUsed) return;
       stroke.points.push(photoEditorPoint(event));
       drawPhotoEditorStroke(event.currentTarget.getContext("2d"), { ...stroke, points: stroke.points.slice(-2) });
     });
+    function finishPhotoEditorPointer(event, cancelled = false) {
+      const editor = state.photoEditor;
+      if (!editor) return;
+      if (!cancelled && !editor.gestureUsed && editor.activeStroke?.pointerId === event.pointerId) finishPhotoEditorStroke();
+      if (cancelled && editor.activeStroke?.pointerId === event.pointerId) {
+        editor.activeStroke = null;
+        redrawPhotoEditor();
+      }
+      editor.pointers.delete(event.pointerId);
+      editor.pinch = null;
+      if (!editor.pointers.size) editor.gestureUsed = false;
+    }
     $("photoEditorCanvas").addEventListener("pointerup", (event) => {
-      if (state.photoEditor?.activeStroke?.pointerId !== event.pointerId) return;
       event.preventDefault();
-      finishPhotoEditorStroke();
+      finishPhotoEditorPointer(event);
     });
-    $("photoEditorCanvas").addEventListener("pointercancel", (event) => {
-      if (state.photoEditor?.activeStroke?.pointerId === event.pointerId) finishPhotoEditorStroke();
-    });
+    $("photoEditorCanvas").addEventListener("pointercancel", (event) => finishPhotoEditorPointer(event, true));
     $("photoEditorUndo").addEventListener("click", () => {
       finishPhotoEditorStroke();
       state.photoEditor?.strokes.pop();
       redrawPhotoEditor();
     });
-    $("photoEditorZoom").addEventListener("input", (event) => setPhotoEditorZoom(event.target.value));
+    $("photoEditorZoomOut").addEventListener("click", () => {
+      const shell = $("photoEditorCanvas").closest(".photo-editor-canvas-shell");
+      setPhotoEditorZoom((state.photoEditor?.zoom || 100) / 1.25, scrollerViewportCenter(shell));
+    });
+    $("photoEditorZoomIn").addEventListener("click", () => {
+      const shell = $("photoEditorCanvas").closest(".photo-editor-canvas-shell");
+      setPhotoEditorZoom((state.photoEditor?.zoom || 100) * 1.25, scrollerViewportCenter(shell));
+    });
+    $("photoEditorFit").addEventListener("click", fitPhotoEditorZoom);
     $("photoEditorClear").addEventListener("click", () => {
       if (!state.photoEditor) return;
       state.photoEditor.activeStroke = null;
@@ -5173,14 +6041,80 @@
       canvas.width = 1;
       canvas.height = 1;
       canvas.style.width = "";
+      const shell = canvas.closest(".photo-editor-canvas-shell");
+      shell.scrollLeft = 0;
+      shell.scrollTop = 0;
       $("photoEditorZoomValue").textContent = "100 %";
     });
     $("photoEditorDialog").addEventListener("click", (event) => {
       if (event.target === event.currentTarget) event.currentTarget.close();
     });
 
-    $("attachmentPreviewZoom").addEventListener("input", (event) => setAttachmentPreviewZoom(event.target.value));
-    $("attachmentPreviewActualSize").addEventListener("click", () => setAttachmentPreviewZoom(100));
+    $("attachmentPreviewZoomOut").addEventListener("click", () => {
+      const body = $("attachmentPreviewImage").closest(".attachment-preview-body");
+      setAttachmentPreviewZoom((state.attachmentPreview?.zoom || 100) / 1.25, scrollerViewportCenter(body));
+    });
+    $("attachmentPreviewZoomIn").addEventListener("click", () => {
+      const body = $("attachmentPreviewImage").closest(".attachment-preview-body");
+      setAttachmentPreviewZoom((state.attachmentPreview?.zoom || 100) * 1.25, scrollerViewportCenter(body));
+    });
+    $("attachmentPreviewFit").addEventListener("click", fitAttachmentPreview);
+    const attachmentPreviewBody = $("attachmentPreviewImage").closest(".attachment-preview-body");
+    attachmentPreviewBody.addEventListener("pointerdown", (event) => {
+      const preview = state.attachmentPreview;
+      if (!preview || (event.pointerType === "mouse" && event.button !== 0)) return;
+      event.preventDefault();
+      attachmentPreviewBody.setPointerCapture(event.pointerId);
+      preview.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      attachmentPreviewBody.classList.add("is-panning");
+      if (preview.pointers.size >= 2) {
+        const metrics = pointerGestureMetrics(preview.pointers);
+        preview.gesture = metrics ? { type: "pinch", lastDistance: metrics.distance, lastCenter: metrics.center } : null;
+      } else {
+        preview.gesture = { type: "pan", pointerId: event.pointerId, lastX: event.clientX, lastY: event.clientY };
+      }
+    });
+    attachmentPreviewBody.addEventListener("pointermove", (event) => {
+      const preview = state.attachmentPreview;
+      if (!preview?.pointers.has(event.pointerId)) return;
+      event.preventDefault();
+      preview.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      if (preview.pointers.size >= 2) {
+        const metrics = pointerGestureMetrics(preview.pointers);
+        if (!metrics) return;
+        if (preview.gesture?.type !== "pinch") {
+          preview.gesture = { type: "pinch", lastDistance: metrics.distance, lastCenter: metrics.center };
+          return;
+        }
+        const ratio = metrics.distance / Math.max(1, preview.gesture.lastDistance);
+        setAttachmentPreviewZoom(preview.zoom * ratio, preview.gesture.lastCenter);
+        attachmentPreviewBody.scrollLeft -= metrics.center.x - preview.gesture.lastCenter.x;
+        attachmentPreviewBody.scrollTop -= metrics.center.y - preview.gesture.lastCenter.y;
+        preview.gesture = { type: "pinch", lastDistance: metrics.distance, lastCenter: metrics.center };
+        return;
+      }
+      const gesture = preview.gesture;
+      if (gesture?.type !== "pan" || gesture.pointerId !== event.pointerId) return;
+      attachmentPreviewBody.scrollLeft -= event.clientX - gesture.lastX;
+      attachmentPreviewBody.scrollTop -= event.clientY - gesture.lastY;
+      gesture.lastX = event.clientX;
+      gesture.lastY = event.clientY;
+    });
+    function finishAttachmentPreviewPointer(event) {
+      const preview = state.attachmentPreview;
+      if (!preview) return;
+      preview.pointers.delete(event.pointerId);
+      const remaining = [...preview.pointers.entries()][0];
+      if (remaining) {
+        preview.gesture = { type: "pan", pointerId: remaining[0], lastX: remaining[1].x, lastY: remaining[1].y };
+      } else {
+        preview.gesture = null;
+        attachmentPreviewBody.classList.remove("is-panning");
+      }
+    }
+    attachmentPreviewBody.addEventListener("pointerup", finishAttachmentPreviewPointer);
+    attachmentPreviewBody.addEventListener("pointercancel", finishAttachmentPreviewPointer);
+
     $("attachmentPreviewEdit").addEventListener("click", async () => {
       const preview = state.attachmentPreview;
       if (!preview?.photo) return;
@@ -5204,6 +6138,10 @@
       image.removeAttribute("src");
       image.style.width = "";
       state.attachmentPreview = null;
+      const body = image.closest(".attachment-preview-body");
+      body.scrollLeft = 0;
+      body.scrollTop = 0;
+      body.classList.remove("is-panning");
     });
     $("attachmentPreviewDialog").addEventListener("click", (event) => {
       if (event.target === event.currentTarget) event.currentTarget.close();

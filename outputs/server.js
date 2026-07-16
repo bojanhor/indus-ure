@@ -51,7 +51,9 @@ const TODO_STATUS_DEFINITIONS = Object.freeze({
   order_warehouse: { label: "Naroči Sklad.", googleColorId: "11" },
   add_to_car: { label: "Dodaj v avto", googleColorId: "4" },
   return_and_bill: { label: "Vrne naj/Poračunaj", googleColorId: "6" },
-  return: { label: "!!Vrni", googleColorId: "3" }
+  return: { label: "!!Vrni", googleColorId: "3" },
+  meal: { label: "Malica", googleColorId: "5" },
+  internal: { label: "Razno/Interno", googleColorId: "5" }
 });
 const TODO_STATUSES = new Set(Object.keys(TODO_STATUS_DEFINITIONS));
 
@@ -63,6 +65,7 @@ const IMAGE_SIGNATURES = {
 const MAX_TODO_IMAGE_DATA_LENGTH = 700_000;
 const MAX_TODO_PDF_DATA_LENGTH = 2_100_000;
 const MAX_TODO_ATTACHMENTS_DATA_LENGTH = 5_000_000;
+const MAX_TODO_THUMBNAIL_DATA_LENGTH = 100_000;
 
 
 function validImageDataUrl(value, maxEncodedLength) {
@@ -96,6 +99,10 @@ function validTodoAttachmentDataUrl(value) {
   return validImageDataUrl(value, MAX_TODO_IMAGE_DATA_LENGTH) || validPdfDataUrl(value);
 }
 
+function validTodoThumbnailDataUrl(value) {
+  return validImageDataUrl(value, MAX_TODO_THUMBNAIL_DATA_LENGTH);
+}
+
 function limitTodoAttachmentsData(items) {
   let total = 0;
   return items.filter((item) => {
@@ -105,6 +112,76 @@ function limitTodoAttachmentsData(items) {
     return true;
   });
 }
+
+function validTodoAttachmentId(value) {
+  return /^[a-f0-9]{64}$/.test(String(value || ""));
+}
+
+function todoAttachmentContentId(data) {
+  const encoded = String(data || "").split(",", 2)[1] || "";
+  const bytes = Buffer.from(encoded, "base64");
+  return crypto.createHash("sha256").update(bytes).digest("hex");
+}
+
+function storeTodoAttachments(db, todo, user = {}) {
+  if (!db.attachments || typeof db.attachments !== "object" || Array.isArray(db.attachments)) db.attachments = {};
+  const photos = (todo.photos || []).map((photo) => {
+    const data = String(photo.data || "");
+    const thumbnailData = String(photo.thumbnailData || "");
+    let attachmentId = validTodoAttachmentId(photo.attachmentId) && db.attachments[photo.attachmentId]
+      ? photo.attachmentId
+      : "";
+    if (validTodoAttachmentDataUrl(data)) {
+      attachmentId = todoAttachmentContentId(data);
+      if (!db.attachments[attachmentId]) {
+        db.attachments[attachmentId] = {
+          id: attachmentId,
+          data,
+          thumbnailData: validTodoThumbnailDataUrl(thumbnailData) ? thumbnailData : "",
+          createdBy: photo.createdBy || user.id || "system",
+          createdByName: photo.createdByName || user.name || "",
+          createdAt: photo.createdAt || new Date().toISOString()
+        };
+      }
+    }
+    if (!attachmentId) return null;
+    if (validTodoThumbnailDataUrl(thumbnailData) && !db.attachments[attachmentId].thumbnailData) {
+      db.attachments[attachmentId].thumbnailData = thumbnailData;
+    }
+    return {
+      id: photo.id || crypto.randomUUID(),
+      attachmentId,
+      name: String(photo.name || "priloga").slice(0, 120),
+      createdBy: photo.createdBy || user.id || "system",
+      createdByName: photo.createdByName || user.name || "",
+      createdAt: photo.createdAt || new Date().toISOString()
+    };
+  }).filter(Boolean).slice(0, 8);
+  return { ...todo, photos };
+}
+
+function hydrateTodoAttachments(db, todo) {
+  return {
+    ...todo,
+    photos: (todo.photos || []).map((photo) => ({
+      ...photo,
+      data: String(photo.data || db.attachments?.[photo.attachmentId]?.data || ""),
+      thumbnailData: String(photo.thumbnailData || db.attachments?.[photo.attachmentId]?.thumbnailData || "")
+    })).filter((photo) => validTodoAttachmentDataUrl(photo.data))
+  };
+}
+
+function pruneUnusedTodoAttachments(db) {
+  const used = new Set((db.todos || []).flatMap((todo) => (todo.photos || []).map((photo) => photo.attachmentId)).filter(validTodoAttachmentId));
+  let changed = false;
+  for (const attachmentId of Object.keys(db.attachments || {})) {
+    if (used.has(attachmentId)) continue;
+    delete db.attachments[attachmentId];
+    changed = true;
+  }
+  return changed;
+}
+
 
 function hashPassword(password, salt = crypto.randomBytes(16).toString("hex")) {
   const hash = crypto.pbkdf2Sync(String(password), salt, 120000, 32, "sha256").toString("hex");
@@ -312,6 +389,11 @@ function normalizeDb(db = {}) {
     changed = true;
   }
 
+  if (!db.attachments || typeof db.attachments !== "object" || Array.isArray(db.attachments)) {
+    db.attachments = {};
+    changed = true;
+  }
+
   if (!Array.isArray(db.debts)) {
     db.debts = [];
     changed = true;
@@ -508,6 +590,10 @@ function normalizeDb(db = {}) {
       changed = true;
     }
     const completed = next.status === "execution";
+    if (completed && next.urgent) {
+      next.urgent = false;
+      changed = true;
+    }
     if (next.done !== completed) {
       next.done = completed;
       changed = true;
@@ -520,6 +606,10 @@ function normalizeDb(db = {}) {
     }
     if (!next.syncUser) {
       next.syncUser = next.createdBy || "ibro";
+      changed = true;
+    }
+    if (typeof next.sourceProjectTodoId !== "string") {
+      next.sourceProjectTodoId = "";
       changed = true;
     }
     if (next.clientId || next.client) {
@@ -568,19 +658,16 @@ function normalizeDb(db = {}) {
       next.photos = [];
       changed = true;
     }
-    next.photos = limitTodoAttachmentsData(next.photos
-      .map((photo) => ({
-        id: photo.id || crypto.randomUUID(),
-        name: String(photo.name || "priloga").slice(0, 120),
-        data: String(photo.data || ""),
-        createdBy: photo.createdBy || next.createdBy || "system",
-        createdByName: photo.createdByName || next.createdByName || "",
-        createdAt: photo.createdAt || new Date().toISOString()
-      }))
-      .filter((photo) => validTodoAttachmentDataUrl(photo.data))
-      .slice(0, 8));
+    const photosBefore = JSON.stringify(next.photos);
+    next.photos = storeTodoAttachments(db, next, {
+      id: next.createdBy || "system",
+      name: next.createdByName || ""
+    }).photos;
+    if (JSON.stringify(next.photos) !== photosBefore) changed = true;
     return next;
   });
+
+  if (pruneUnusedTodoAttachments(db)) changed = true;
 
   db.debts = db.debts.map((debt) => ({
     id: debt.id || crypto.randomUUID(),
@@ -602,7 +689,7 @@ function normalizeDb(db = {}) {
 function ensureDb() {
   if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
   if (!fs.existsSync(dbFile)) {
-    fs.writeFileSync(dbFile, JSON.stringify({ users: defaultUsers, sessions: {}, entries: [], todos: [], debts: [], clients: [] }, null, 2), "utf8");
+    fs.writeFileSync(dbFile, JSON.stringify({ users: defaultUsers, sessions: {}, entries: [], todos: [], attachments: {}, debts: [], clients: [] }, null, 2), "utf8");
     return;
   }
 
@@ -646,7 +733,7 @@ async function ensurePostgresDb() {
     if (existing.rowCount === 0) {
       await pool.query(
         "insert into app_state (id, data) values ($1, $2::jsonb)",
-        ["main", JSON.stringify({ users: defaultUsers, sessions: {}, entries: [], todos: [], debts: [], clients: [], calendarToken: crypto.randomBytes(24).toString("hex") })]
+        ["main", JSON.stringify({ users: defaultUsers, sessions: {}, entries: [], todos: [], attachments: {}, debts: [], clients: [], calendarToken: crypto.randomBytes(24).toString("hex") })]
       );
       return;
     }
@@ -779,7 +866,7 @@ function visibleTodosForUser(db, user) {
   const visible = user.role === "boss"
     ? todos
     : todos.filter((todo) => (todo.syncUser || todo.createdBy) === user.id);
-  return visible.map((todo) => ({
+  return visible.map((todo) => hydrateTodoAttachments(db, {
     ...todo,
     assigneeIds: todoAssignmentAssigneeIds(db, todo)
   }));
@@ -1152,8 +1239,9 @@ function cleanTodo(input) {
     notes: String(input.notes || "").trim(),
     status: input.status === "billing" ? "execution" : TODO_STATUSES.has(input.status) ? input.status : "open",
     order: Number.isFinite(Number(input.order)) ? Number(input.order) : 0,
-    urgent: Boolean(input.urgent),
+    urgent: ["execution", "billing"].includes(input.status) ? false : Boolean(input.urgent),
     syncUser: cleanUserId(input.syncUser),
+    sourceProjectTodoId: String(input.sourceProjectTodoId || "").trim().slice(0, 100),
     done: input.status === "execution",
     billingHourlyRate: nonnegativeNumber(input.billingHourlyRate, null, 10_000),
     billingKm: nonnegativeNumber(input.billingKm, null, 1_000_000),
@@ -1161,12 +1249,14 @@ function cleanTodo(input) {
       .map((photo) => ({
         id: photo.id || crypto.randomUUID(),
         name: String(photo.name || "priloga").slice(0, 120),
+        attachmentId: String(photo.attachmentId || ""),
         data: String(photo.data || ""),
+        thumbnailData: String(photo.thumbnailData || ""),
         createdBy: photo.createdBy || "",
         createdByName: photo.createdByName || "",
         createdAt: photo.createdAt || new Date().toISOString()
       }))
-      .filter((photo) => validTodoAttachmentDataUrl(photo.data))
+      .filter((photo) => validTodoAttachmentDataUrl(photo.data) || validTodoAttachmentId(photo.attachmentId))
       .slice(0, 8))
   };
 }
@@ -1224,8 +1314,9 @@ function validateTodo(todo, { requireClientId = false } = {}) {
   if ((todo.start || todo.end) && !todo.date) return "Za opravilo z uro vnesi tudi datum.";
   if (todo.start && (!/^\d{2}:\d{2}$/.test(todo.start) || !/^\d{2}:\d{2}$/.test(todo.end))) return "Cas opravila ni pravilen.";
   if (todo.start && todo.end <= todo.start) return "Ura do mora biti kasneje kot ura od.";
-  if ((todo.photos || []).some((photo) => !validTodoAttachmentDataUrl(photo.data))) return "Priloga ni veljavna slika ali PDF.";
-  if ((todo.photos || []).reduce((total, photo) => total + photo.data.length, 0) > MAX_TODO_ATTACHMENTS_DATA_LENGTH) return "Priloge so skupaj prevelike.";
+  if ((todo.photos || []).some((photo) => !validTodoAttachmentDataUrl(photo.data) && !validTodoAttachmentId(photo.attachmentId))) return "Priloga ni veljavna slika ali PDF.";
+  if ((todo.photos || []).reduce((total, photo) => total + String(photo.data || "").length, 0) > MAX_TODO_ATTACHMENTS_DATA_LENGTH) return "Priloge so skupaj prevelike.";
+  if ((todo.photos || []).some((photo) => photo.thumbnailData && !validTodoThumbnailDataUrl(photo.thumbnailData))) return "Predogled PDF priloge ni veljaven.";
   return "";
 }
 
@@ -1962,7 +2053,11 @@ async function deleteGoogleEventForItem(req, db, item) {
 const STATIC_TYPES = {
   ".html": "text/html; charset=utf-8",
   ".css": "text/css; charset=utf-8",
+  ".ttf": "font/ttf",
   ".js": "text/javascript; charset=utf-8",
+  ".mjs": "text/javascript; charset=utf-8",
+  ".wasm": "application/wasm",
+  ".pfb": "application/octet-stream",
   ".png": "image/png",
   ".jpg": "image/jpeg",
   ".jpeg": "image/jpeg",
@@ -1995,6 +2090,17 @@ function serveStatic(req, res) {
   let cacheControl = "no-store";
   if (pathname === "/" || pathname === "/index.html") {
     filePath = path.join(root, "index.html");
+  } else if (pathname.startsWith("/vendor/pdfjs/")) {
+    const vendorRoot = path.resolve(root, "..", "node_modules", "pdfjs-dist");
+    const relativePath = pathname.slice("/vendor/pdfjs/".length);
+    const allowedVendorPath = ["build/", "standard_fonts/", "wasm/"]
+      .some((prefix) => relativePath.startsWith(prefix));
+    filePath = path.resolve(vendorRoot, relativePath);
+    if (!allowedVendorPath || (filePath !== vendorRoot && !filePath.startsWith(`${vendorRoot}${path.sep}`))) {
+      sendText(res, 404, "Not found", "text/plain");
+      return;
+    }
+    cacheControl = "public, max-age=31536000, immutable";
   } else if (pathname.startsWith("/assets/")) {
     const assetsRoot = path.join(root, "assets");
     filePath = path.resolve(root, `.${pathname}`);
@@ -2576,6 +2682,7 @@ async function handleApi(req, res) {
         sendJson(res, 400, { error: resolvedValidation });
         return;
       }
+      todo = storeTodoAttachments(db, todo, user);
       const minOrder = db.todos.reduce((min, item) => Math.min(min, Number(item.order || 0)), 0);
       const newOrder = todo.order || minOrder - 1;
       const assigneeIds = todoAssigneesForRequest(user, body.assigneeIds || todo.syncUser, db.users);
@@ -2835,6 +2942,7 @@ async function handleApi(req, res) {
         sendJson(res, 400, { error: resolvedValidation });
         return;
       }
+      todo = storeTodoAttachments(db, todo, user);
       const index = db.todos.findIndex((item) => item.id === id);
       if (index < 0) {
         sendJson(res, 404, { error: "Opravilo ne obstaja." });
@@ -2946,6 +3054,7 @@ async function handleApi(req, res) {
       const oldGroupIds = new Set(assignmentItems.map((item) => item.id));
       db.todos = db.todos.filter((item) => !oldGroupIds.has(item.id));
       db.todos.push(...updatedGroup);
+      pruneUnusedTodoAttachments(db);
       await writeDbAsync(db);
       setTimeout(queueBackgroundGoogleSync, 0);
       sendJson(res, 200, { todos: visibleTodosForUser(db, user) });
@@ -2972,6 +3081,7 @@ async function handleApi(req, res) {
       await deleteGoogleEventForItem(req, db, todo);
       releaseTodoAssignmentEditLock(db, todo, user, editLockToken);
       db.todos = db.todos.filter((item) => item.id !== id);
+      pruneUnusedTodoAttachments(db);
       await writeDbAsync(db);
       sendJson(res, 200, { todos: visibleTodosForUser(db, user) });
       return;

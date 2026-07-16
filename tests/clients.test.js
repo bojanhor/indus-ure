@@ -143,6 +143,7 @@ test("neposredna izbira statusov prikaze koledarske barve za vsako moznost", () 
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
   assert.match(html, /\.todo-status-execution \{ --todo-bg: #51b749; --todo-fg: #fff; \}/);
   assert.match(html, /\.todo-status-return \{ --todo-bg: #dbadff; --todo-fg: #202124;/);
+  assert.match(html, /\.todo-status-meal,[\s\S]*?\.todo-status-internal \{ --todo-bg: #fbd75b; --todo-fg: #202124;/);
   assert.match(html, /class="todo-status-choice todo-status-color \$\{todoStatusClass\(status\.id\)\}"/);
   assert.doesNotMatch(html, /class="todo-option-\$\{status\.id\}"/);
   assert.match(html, /id: "execution", label: "Zaklju\\u010deno"/);
@@ -159,7 +160,7 @@ test("osnovni pogled priloge samo prikazuje, dodajanje pa ostane v obrazcu", () 
   assert.match(html, /file\.size > 1_500_000/);
   assert.match(html, /todoAttachmentsDataLength\(state\.todoDialogPhotos\) \+ attachment\.data\.length > 4_800_000/);
   assert.match(html, /class="todo-pdf-preview"[^>]*target="_blank"[^>]*rel="noopener noreferrer"/);
-  assert.match(html, /class="todo-form-attachment-thumb"[\s\S]*?isPdfAttachment\(photo\) \? "PDF" : `<img/);
+  assert.match(html, /class="todo-form-attachment-thumb"[\s\S]*?isPdfAttachment\(photo\) \? pdfThumbnailMarkup\(photo\) : `<img/);
   assert.match(html, /<dialog id="attachmentPreviewDialog">[\s\S]*?id="attachmentPreviewImage"/);
   assert.match(html, /class="todo-image-preview"[^>]*data-photo-id=/);
   assert.match(html, /class="todo-form-attachment-preview"[^>]*data-photo-id=/);
@@ -246,7 +247,8 @@ test("novo opravilo je mogoce dodeliti sebi in vec drugim delavcem", () => {
   const server = fs.readFileSync(path.join(__dirname, "..", "outputs", "server.js"), "utf8");
   assert.match(html, /id="todoFormAssignees"/);
   assert.match(html, /<input type="checkbox" value="\$\{escapeHtml\(user\.id\)\}"/);
-  assert.match(html, /renderTodoFormAssignees\(editing \? todoAssigneeIds\(todo\) : \[activeWorkerId\(\)\]\)/);
+  assert.match(html, /const selectedAssignees = editing \? todoAssigneeIds\(todo\) : \[activeWorkerId\(\)\]/);
+  assert.match(html, /renderTodoFormAssignees\(selectedAssignees,/);
   assert.match(html, /const assigneeIds = selectedTodoFormAssignees\(\)/);
   assert.match(html, /Za: \$\{escapeHtml\(todoAssigneeNames\(todo\)\)\}/);
   assert.doesNotMatch(html, /class="todo-assignee-select"/);
@@ -592,4 +594,18 @@ test("mobilni tagi in gumbi ne lomijo kartice opravila", () => {
   assert.match(html, /\.todo-primary-meta > \.todo-chip \{[\s\S]*?white-space: nowrap;[\s\S]*?word-break: normal;/);
   assert.match(html, /\.todo-secondary-meta > \.todo-chip \{[\s\S]*?max-width: 100%;[\s\S]*?word-break: normal;/);
   assert.match(html, /\.todo-tools \{[\s\S]*?flex-wrap: nowrap;[\s\S]*?flex: 0 0 auto;/);
+});
+
+test("klik na datum odpre dnevno casovnico z gestami in urejanjem casa", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  assert.match(html, /id="dayTimelineDialog"/);
+  assert.match(html, /head\.addEventListener\("click", \(\) => openDayTimeline\(key\)\)/);
+  assert.match(html, /for \(let minute = 0; minute <= 1440; minute \+= 30\)/);
+  assert.match(html, /function dayTimelineLayouts\(todos\)/);
+  assert.match(html, /data-mode = "resize-start"|dataset\.mode = "resize-start"/);
+  assert.match(html, /dataset\.mode = "resize-end"/);
+  assert.match(html, /function updateDayTimelineEventPointer\(event\)/);
+  assert.match(html, /setDayTimelineZoom\(state\.dayTimelineMinuteHeight \* ratio/);
+  assert.match(html, /Ctrl \+ kole&#353;&#269;ek/);
+  assert.match(html, /await saveTodoToServer\(\{[\s\S]*?start: dayTimelineTime\(interaction\.startMinute\),[\s\S]*?end: dayTimelineTime\(interaction\.endMinute\)/);
 });
