@@ -123,8 +123,9 @@ test("novo opravilo ponuja aliase iz prvega stolpca Google Sheeta", () => {
   assert.match(html, /id="todoFormClientSuggestions" role="listbox"/);
   assert.match(html, /<datalist id="clientList"><\/datalist>/);
   assert.match(html, /function clientSuggestionValues\(\)/);
-  assert.match(html, /state\.clients\.forEach\(\(client\) => add\(client\.search, client\.name\)\)/);
-  assert.match(html, /if \(!key \|\| suggestions\.has\(key\)\) return/);
+  assert.match(html, /const alias = String\(client\?\.search \|\| client\?\.name \|\| ""\)\.trim\(\)/);
+  assert.match(html, /const key = stableId \? `id:\$\{stableId\}` : normalizeText\(`\$\{alias\}\|\$\{name\}`\)/);
+  assert.match(html, /state\.clients\.forEach\(add\)/);
   assert.match(html, /todoFormClient"\)\.addEventListener\("input", renderTodoClientSuggestions\)/);
   assert.match(html, /todoFormClientSuggestions"\)\.addEventListener\("pointerdown"/);
   assert.match(html, /event\.key === "ArrowDown" \|\| event\.key === "ArrowUp"/);

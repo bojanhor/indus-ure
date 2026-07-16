@@ -614,6 +614,25 @@
       padding-top: 4px;
     }
 
+    .billing-screen { display: grid; gap: 14px; }
+    .billing-period { display: flex; align-items: end; gap: 8px; flex-wrap: wrap; }
+    .billing-period label { display: grid; gap: 4px; color: var(--muted); font-size: 12px; font-weight: 800; }
+    .billing-period input { min-height: 40px; border: 1px solid var(--line); border-radius: 8px; padding: 7px 9px; background: #fff; }
+    .billing-month-step { min-width: 40px; min-height: 40px; padding: 0; }
+    .billing-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+    .billing-summary-card { padding: 13px; border: 1px solid var(--line); border-radius: 8px; background: #f8faf7; }
+    .billing-summary-card strong { display: block; font-size: 23px; line-height: 1.1; }
+    .billing-summary-card span { display: block; margin-top: 5px; color: var(--muted); font-size: 12px; }
+    .billing-day-list { display: grid; gap: 9px; }
+    .billing-day { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: #fff; }
+    .billing-day summary { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 10px; align-items: center; padding: 12px; cursor: pointer; font-weight: 800; }
+    .billing-day summary span { color: var(--muted); font-size: 13px; }
+    .billing-day-summary-pay { color: var(--accent-dark) !important; font-weight: 900; }
+    .billing-task-row { display: grid; grid-template-columns: 92px minmax(0, 1fr) 64px 92px; gap: 10px; align-items: center; padding: 10px 12px; border-top: 1px solid var(--line); }
+    .billing-task-row small { color: var(--muted); }
+    .billing-task-hours, .billing-task-pay { text-align: right; font-weight: 800; }
+    .billing-empty { padding: 20px 12px; color: var(--muted); text-align: center; }
+
     .worker-billing-head {
       display: flex;
       align-items: baseline;
@@ -2404,6 +2423,12 @@
       .day-time-label { left: 2px; width: 42px; }
       .day-timeline-events { left: 56px; right: 70px; }
       .day-work-blocks { width: 58px; right: 3px; }
+      .billing-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .billing-summary-card:last-child { grid-column: 1 / -1; }
+      .billing-day summary { grid-template-columns: minmax(0, 1fr) auto; }
+      .billing-day-summary-pay { grid-column: 2; }
+      .billing-task-row { grid-template-columns: 72px minmax(0, 1fr) auto; gap: 7px; }
+      .billing-task-pay { grid-column: 3; }
     }
   </style>
 </head>
@@ -2486,6 +2511,15 @@
         <div class="todo-head">
           <strong id="billingViewTitle">Obra&#269;un</strong>
         </div>
+        <div class="billing-period">
+          <button class="secondary billing-month-step" id="billingPrevMonth" type="button" aria-label="Prej&#353;nji mesec">&lsaquo;</button>
+          <label>Obdobje
+            <input id="billingMonth" type="month">
+          </label>
+          <button class="secondary billing-month-step" id="billingNextMonth" type="button" aria-label="Naslednji mesec">&rsaquo;</button>
+        </div>
+        <div class="billing-summary" id="billingSummary"></div>
+        <div class="billing-day-list" id="billingDayList"></div>
       </section>
 
       <section class="panel report-view clients-screen view-hidden">
@@ -2671,10 +2705,10 @@
             </span>
           </label>
           <label>Ura od
-            <input id="todoFormStart" type="time">
+            <input id="todoFormStart" type="time" step="900">
           </label>
           <label>Ura do
-            <input id="todoFormEnd" type="time">
+            <input id="todoFormEnd" type="time" step="900">
           </label>
           <div class="todo-client-field" id="todoFormClientField">
             <label for="todoFormClient">Stranka</label>
@@ -2960,6 +2994,7 @@
       todoHoursSourceOriginal: null,
       todoHoursSavedSourceId: "",
       todoHoursCompletionSourceId: "",
+      todoDialogReturnDayDate: "",
       dayTimelineDate: "",
       dayTimelineDrafts: new Map(),
       dayTimelineHoursWarning: null,
@@ -3700,17 +3735,22 @@
 
     function clientSuggestionValues() {
       const suggestions = new Map();
-      const add = (value, label = "") => {
-        const clean = String(value || "").trim();
-        const key = normalizeText(clean);
-        if (!key || suggestions.has(key)) return;
-        suggestions.set(key, { value: clean, label: String(label || "").trim() });
+      const add = (client) => {
+        const alias = String(client?.search || client?.name || "").trim();
+        const name = String(client?.name || alias).trim();
+        const stableId = String(client?.clientId || client?.id || "").trim();
+        const key = stableId ? `id:${stableId}` : normalizeText(`${alias}|${name}`);
+        if (!alias || !key || suggestions.has(key)) return;
+        suggestions.set(key, {
+          value: alias,
+          label: normalizeText(name) === normalizeText(alias) ? "" : name
+        });
       };
-      state.clients.forEach((client) => add(client.search, client.name));
-      allClientRecords().forEach((client) => add(client.name, client.search));
+      // State vsebuje kanonicne zapise iz Sheetsa; ostali zapisi dopolnijo le stare/ad-hoc stranke.
+      state.clients.forEach(add);
+      allClientRecords().forEach(add);
       return [...suggestions.values()];
     }
-
     function hideTodoClientSuggestions() {
       state.todoClientSuggestions = [];
       state.todoClientSuggestionIndex = -1;
@@ -3873,7 +3913,11 @@
           const countDifference = (counts.get(bKey) || 0) - (counts.get(aKey) || 0);
           if (countDifference) return countDifference;
           const clientDifference = String(a.client || "Brez stranke").localeCompare(String(b.client || "Brez stranke"), "sl");
-          return clientDifference || todoSort(a, b);
+          if (clientDifference) return clientDifference;
+          const dateDifference = String(b.date || "").localeCompare(String(a.date || ""));
+          if (dateDifference) return dateDifference;
+          const startDifference = String(b.start || "").localeCompare(String(a.start || ""));
+          return startDifference || todoSort(a, b);
         });
       }
       return list.sort(todoSort);
@@ -3897,6 +3941,7 @@
         renderTodos();
         renderClients();
         renderReport();
+        renderBillingView();
         renderWorkerBillingTable();
         if ($("dayTimelineDialog").open) renderDayTimeline();
       }
@@ -3997,6 +4042,19 @@
       return String(hours).padStart(2, "0") + ":" + String(mins).padStart(2, "0");
     }
 
+    function roundTimeToQuarter(value) {
+      const minutes = dayTimelineMinutes(value);
+      if (minutes === null) return "";
+      return dayTimelineTime(Math.min(23 * 60 + 45, Math.round(minutes / 15) * 15));
+    }
+
+    function normalizeTodoFormTimes() {
+      ["todoFormStart", "todoFormEnd"].forEach((id) => {
+        const input = $(id);
+        if (input.value) input.value = roundTimeToQuarter(input.value);
+      });
+    }
+
     function dayTimelineLayouts(todos) {
       const layouts = new Map();
       let group = [];
@@ -4047,7 +4105,14 @@
     function firstFreeDayTimelineSlot(date) {
       const intervals = calendarTodos()
         .filter((todo) => todo.date === date && todo.start && todo.end)
-        .map((todo) => ({ start: dayTimelineMinutes(todo.start), end: dayTimelineMinutes(todo.end) }))
+        .map((todo) => {
+          const start = dayTimelineMinutes(todo.start);
+          const end = dayTimelineMinutes(todo.end);
+          return {
+            start: start === null ? null : Math.round(start / 15) * 15,
+            end: end === null ? null : Math.round(end / 15) * 15
+          };
+        })
         .filter((item) => item.start !== null && item.end !== null);
       for (let start = 5 * 60; start <= 22 * 60 + 45; start += 15) {
         const end = start + 60;
@@ -4075,6 +4140,7 @@
         alert("Najprej shrani ali preklici spremembe dnevne casovnice.");
         return;
       }
+      state.todoDialogReturnDayDate = state.dayTimelineDate;
       $("dayTimelineDialog").close();
       await new Promise((resolve) => setTimeout(resolve, 0));
       await openTodoDialog(todo);
@@ -4103,7 +4169,14 @@
     }
     function dayWorkBlocks(todos) {
       const intervals = todos
-        .map((todo) => ({ start: dayTimelineMinutes(todo.start), end: dayTimelineMinutes(todo.end) }))
+        .map((todo) => {
+          const start = dayTimelineMinutes(todo.start);
+          const end = dayTimelineMinutes(todo.end);
+          return {
+            start: start === null ? null : Math.round(start / 15) * 15,
+            end: end === null ? null : Math.round(end / 15) * 15
+          };
+        })
         .filter((item) => item.start !== null && item.end !== null)
         .sort((a, b) => a.start - b.start || a.end - b.end);
       const blocks = [];
@@ -4471,9 +4544,62 @@
       }
     }
 
+    function billingMonthLabel(month) {
+      const [year, monthNumber] = String(month).split("-").map(Number);
+      return new Date(year, monthNumber - 1, 1).toLocaleDateString("sl-SI", { month: "long", year: "numeric" });
+    }
+
+    function billingMonthTodos(month) {
+      return contextTodos()
+        .filter((todo) => todo.status === "execution" && todo.date.startsWith(month) && todo.start && todo.end)
+        .map((todo) => {
+          const hours = duration(todo);
+          const hourlyRate = todoHourlyRate(todo);
+          return { ...todo, hours, hourlyRate, pay: hours * hourlyRate };
+        })
+        .filter((todo) => todo.hours > 0)
+        .sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(a.start).localeCompare(String(b.start)));
+    }
+
     function renderBillingView() {
       const worker = activeWorker();
-      $("billingViewTitle").textContent = `Obračun: ${worker?.name || "Delavec"}`;
+      const monthInput = $("billingMonth");
+      if (!/^\d{4}-\d{2}$/.test(monthInput.value)) monthInput.value = dateKey(new Date()).slice(0, 7);
+      const month = monthInput.value;
+      const todos = billingMonthTodos(month);
+      const totalHours = todos.reduce((total, todo) => total + todo.hours, 0);
+      const totalPay = todos.reduce((total, todo) => total + todo.pay, 0);
+      const averageRate = totalHours ? totalPay / totalHours : workerDefaultHourlyRate(activeWorkerId());
+      $("billingViewTitle").textContent = `Obračun ur: ${worker?.name || "Delavec"} · ${billingMonthLabel(month)}`;
+      $("billingSummary").innerHTML = [
+        [`${totalHours.toLocaleString("sl-SI", { maximumFractionDigits: 2 })} h`, "Oddelane ure"],
+        [`${money(totalPay)} EUR`, "Za izplačilo"],
+        [`${money(averageRate)} EUR/h`, "Postavka"]
+      ].map(([value, label]) => `<div class="billing-summary-card"><strong>${escapeHtml(value)}</strong><span>${escapeHtml(label)}</span></div>`).join("");
+      const list = $("billingDayList");
+      if (!todos.length) {
+        list.innerHTML = `<div class="billing-empty">V tem obdobju ni zaključenih vnosov ur.</div>`;
+        return;
+      }
+      const days = new Map();
+      todos.forEach((todo) => {
+        const rows = days.get(todo.date) || [];
+        rows.push(todo);
+        days.set(todo.date, rows);
+      });
+      list.innerHTML = [...days.entries()].map(([date, rows]) => {
+        const dayHours = rows.reduce((total, todo) => total + todo.hours, 0);
+        const dayPay = rows.reduce((total, todo) => total + todo.pay, 0);
+        return `<details class="billing-day" open>
+          <summary><strong>${escapeHtml(formatDate(date))}</strong><span>${dayHours.toLocaleString("sl-SI", { maximumFractionDigits: 2 })} h</span><span class="billing-day-summary-pay">${money(dayPay)} EUR</span></summary>
+          ${rows.map((todo) => `<div class="billing-task-row">
+            <small>${escapeHtml(todo.start)}-${escapeHtml(todo.end)}</small>
+            <span><strong>${linkifyText(todo.title)}</strong>${todo.notes ? `<br><small>${linkifyText(todo.notes)}</small>` : ""}</span>
+            <span class="billing-task-hours">${todo.hours.toLocaleString("sl-SI", { maximumFractionDigits: 2 })} h</span>
+            <span class="billing-task-pay">${money(todo.pay)} EUR</span>
+          </div>`).join("")}
+        </details>`;
+      }).join("");
     }
     function renderTodos() {
       renderClientTodoList();
@@ -4502,13 +4628,21 @@
         return;
       }
       const modeTodos = sortedTodosForMode();
-      todoClients().forEach((client) => {
+      const clientsByEnteredHours = todoClients().map((client) => {
         const clientTodos = modeTodos.filter((todo) => todo.client === client);
+        const enteredMinutes = clientTodos.reduce((total, todo) => {
+          const start = dayTimelineMinutes(todo.start);
+          const end = dayTimelineMinutes(todo.end);
+          return start === null || end === null || end <= start ? total : total + end - start;
+        }, 0);
+        return { client, clientTodos, enteredMinutes };
+      }).sort((a, b) => b.enteredMinutes - a.enteredMinutes || a.client.localeCompare(b.client, "sl"));
+      clientsByEnteredHours.forEach(({ client, clientTodos, enteredMinutes }) => {
         const open = clientTodos.filter((todo) => !todo.done).length;
         const card = document.createElement("button");
         card.type = "button";
         card.className = `client-card ${state.selectedClient === client ? "active" : ""}`;
-        card.innerHTML = `<strong>${escapeHtml(client)}</strong><span>${open} odprtih, ${clientTodos.length} skupaj</span>`;
+        card.innerHTML = `<strong>${escapeHtml(client)}</strong><span>${open} odprtih, ${(enteredMinutes / 60).toLocaleString("sl-SI", { maximumFractionDigits: 2 })} h skupaj</span>`;
         card.addEventListener("click", () => {
           state.selectedClient = state.selectedClient === client ? "" : client;
           renderTodos();
@@ -4623,6 +4757,10 @@
             ${todo.notes ? `<details class="todo-description-details">
               <summary>Opis</summary>
               <div class="todo-description todo-meta">${linkifyText(todo.notes)}</div>
+            </details>` : ""}
+            ${todo.material ? `<details class="todo-description-details">
+              <summary>Material</summary>
+              <div class="todo-description todo-meta">${linkifyText(todo.material)}</div>
             </details>` : ""}
             ${(todo.photos || []).length ? `<details class="todo-description-details todo-attachments-details">
               <summary>Priloge <span class="todo-details-count">${(todo.photos || []).length}</span></summary>
@@ -4985,7 +5123,7 @@
 
     function applyMealDefaults() {
       const now = new Date();
-      const startMinutes = Math.min(23 * 60, now.getHours() * 60 + now.getMinutes());
+      const startMinutes = Math.min(23 * 60, Math.round((now.getHours() * 60 + now.getMinutes()) / 15) * 15);
       $("todoFormTask").value = "Malica";
       if (!$("todoFormDate").value) $("todoFormDate").value = dateKey(now);
       $("todoFormStart").value = dayTimelineTime(startMinutes);
@@ -5058,6 +5196,7 @@
     }
 
     async function saveTodoFromDialog() {
+      normalizeTodoFormTimes();
       const id = $("todoFormId").value;
       const existing = id ? state.todos.find((todo) => todo.id === id) : null;
       const client = findTodoClient($("todoFormClient").value);
@@ -5191,8 +5330,14 @@
     async function deleteTodoFromDialog() {
       const id = $("todoFormId").value;
       if (!id || !confirm("Izbrisem to opravilo?")) return;
+      const returnDayDate = state.todoDialogReturnDayDate;
+      state.todoDialogReturnDayDate = "";
       await deleteTodoFromServer(id);
       $("todoDialog").close();
+      if (returnDayDate) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        openDayTimeline(returnDayDate);
+      }
     }
 
     function setDefaultReportRange() {
@@ -6131,6 +6276,15 @@
     $("calendarViewBtn").addEventListener("click", () => setView("calendar"));
     $("todosViewBtn").addEventListener("click", () => setView("todos"));
     $("billingViewBtn").addEventListener("click", () => setView("billing"));
+    $("billingMonth").addEventListener("change", renderBillingView);
+    ["billingPrevMonth", "billingNextMonth"].forEach((id) => $(id).addEventListener("click", () => {
+      const input = $("billingMonth");
+      if (!/^\d{4}-\d{2}$/.test(input.value)) input.value = dateKey(new Date()).slice(0, 7);
+      const [year, month] = input.value.split("-").map(Number);
+      const next = new Date(year, month - 1 + (id === "billingNextMonth" ? 1 : -1), 1);
+      input.value = `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}`;
+      renderBillingView();
+    }));
     $("clientsViewBtn").addEventListener("click", () => setView("clients"));
     $("reportViewBtn").addEventListener("click", () => setView("report"));
     $("reportFrom").addEventListener("change", renderReport);
@@ -6140,6 +6294,7 @@
     $("newReportTodo").addEventListener("click", () => openTodoDialog());
     $("closeTodoDialog").addEventListener("click", () => $("todoDialog").close());
     $("cancelTodoDialog").addEventListener("click", () => $("todoDialog").close());
+    ["todoFormStart", "todoFormEnd"].forEach((id) => $(id).addEventListener("change", normalizeTodoFormTimes));
     $("clearTodoFormDate").addEventListener("click", () => {
       $("todoFormDate").value = "";
       $("todoFormStart").value = "";
@@ -6339,6 +6494,7 @@
     $("googleCalendar").addEventListener("click", () => syncGoogle(true));
     $("downloadBackup").addEventListener("click", downloadBackup);
     $("todoDialog").addEventListener("close", releaseTodoEditLockForDialog);
+    $("todoDialog").addEventListener("close", () => { state.todoDialogReturnDayDate = ""; });
     $("todoDialog").addEventListener("close", () => {
       const sourceId = state.todoHoursSourceId;
       state.todoHoursSourceId = "";

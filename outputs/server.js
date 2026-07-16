@@ -1184,11 +1184,20 @@ function audit(user, action) {
   };
 }
 
+function roundTimeToQuarterHour(value) {
+  const time = String(value || "").trim();
+  const match = /^(\d{2}):(\d{2})$/.exec(time);
+  if (!match) return time;
+  const minutes = Number(match[1]) * 60 + Number(match[2]);
+  const rounded = Math.min(23 * 60 + 45, Math.round(minutes / 15) * 15);
+  return `${String(Math.floor(rounded / 60)).padStart(2, "0")}:${String(rounded % 60).padStart(2, "0")}`;
+}
+
 function cleanEntry(input) {
   const entry = {
     date: String(input.date || ""),
-    start: String(input.start || ""),
-    end: String(input.end || ""),
+    start: roundTimeToQuarterHour(input.start),
+    end: roundTimeToQuarterHour(input.end),
     client: String(input.client || "").trim(),
     clientId: String(input.clientId || "").trim(),
     status: ["billed", "warranty", "unbilled", "errand", "vacation"].includes(input.status) ? input.status : "unbilled",
@@ -1232,8 +1241,8 @@ function cleanTodo(input) {
   return {
     title: String(input.title || "").trim(),
     date: String(input.date || ""),
-    start: String(input.start || "").trim(),
-    end: String(input.end || "").trim(),
+    start: roundTimeToQuarterHour(input.start),
+    end: roundTimeToQuarterHour(input.end),
     client: String(input.client || "").trim(),
     clientId: String(input.clientId || "").trim(),
     notes: String(input.notes || "").trim(),
