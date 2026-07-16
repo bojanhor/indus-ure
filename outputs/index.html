@@ -2918,6 +2918,7 @@
       clients: [],
       selectedClient: "",
       todoHoursSourceId: "",
+      todoHoursSourceOriginal: null,
       todoHoursSavedSourceId: "",
       todoHoursCompletionSourceId: "",
       dayTimelineDate: "",
@@ -4817,6 +4818,10 @@
       const sourceId = $("todoFormId").value;
       const source = state.todos.find((todo) => todo.id === sourceId);
       if (!source) return;
+      state.todoHoursSourceOriginal = {
+        status: source.status,
+        done: Boolean(source.done)
+      };
       await releaseTodoEditLockForDialog();
       $("todoDialog").close();
       await new Promise((resolve) => setTimeout(resolve, 0));
@@ -4837,12 +4842,15 @@
     }
     async function handleHoursProjectCompletion(deleteProject) {
       const sourceId = state.todoHoursCompletionSourceId;
+      const sourceOriginal = state.todoHoursSourceOriginal;
       state.todoHoursCompletionSourceId = "";
+      state.todoHoursSourceOriginal = null;
       $("projectCompletionDialog").close();
       const source = state.todos.find((todo) => todo.id === sourceId);
       if (!source) return;
       if (!deleteProject) {
-        await openTodoDialog(source);
+        const originalStatus = sourceOriginal?.status || (source.status === "execution" ? "open" : source.status);
+        await openTodoDialog({ ...source, status: originalStatus, done: false });
         return;
       }
       if (!(await acquireTodoEditLockForDialog(sourceId))) return;

@@ -2754,18 +2754,6 @@ async function handleApi(req, res) {
         updatedAt: now,
         history: [audit(user, "dodano iz opravila")]
       });
-      const completedTodo = todoForUserRole(user, db, sourceTodo, {
-        ...sourceTodo,
-        status: "execution",
-        done: true
-      });
-      Object.assign(sourceTodo, completedTodo, {
-        billingKm: Number(entry.km || 0),
-        updatedBy: user.id,
-        updatedByName: user.name,
-        updatedAt: now,
-        history: [...(sourceTodo.history || []), audit(user, "zakljuceno z vnosom v koledar")]
-      });
       await writeDbAsync(db);
       sendJson(res, 200, {
         entries: visibleEntriesForUser(db, user),
@@ -3082,9 +3070,16 @@ async function handleApi(req, res) {
         sendJson(res, 409, { error: `Opravilo trenutno ureja ${editLock.lockedByName || editLock.lockedById}.`, lock: editLock });
         return;
       }
-      await deleteGoogleEventForItem(req, db, todo);
+      const assignmentItems = todoAssignmentItems(db, todo);
+      for (const item of assignmentItems) {
+        if (item.googleEventId && !(await deleteGoogleEventForItem(req, db, item))) {
+          sendJson(res, 502, { error: "Opravila ni bilo mogoce varno odstraniti iz koledarja." });
+          return;
+        }
+      }
       releaseTodoAssignmentEditLock(db, todo, user, editLockToken);
-      db.todos = db.todos.filter((item) => item.id !== id);
+      const removedIds = new Set(assignmentItems.map((item) => item.id));
+      db.todos = db.todos.filter((item) => !removedIds.has(item.id));
       pruneUnusedTodoAttachments(db);
       await writeDbAsync(db);
       sendJson(res, 200, { todos: visibleTodosForUser(db, user) });

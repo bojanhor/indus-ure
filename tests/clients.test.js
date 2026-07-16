@@ -629,6 +629,20 @@ test("globalni iskalnik vrne samo dogodke stranke pa imajo svoj zavihek", () => 
   assert.match(html, /function renderSearch\(\)[\s\S]*?const results = contextTodos\(\)/);
   assert.doesNotMatch(html, /function renderSearch\(\)[\s\S]*?const clientResults/);
 });
+test("vpis ur ne zakljuci izvornega opravila pred potrditvijo", () => {
+  const server = fs.readFileSync(path.join(__dirname, "..", "outputs", "server.js"), "utf8");
+  const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  assert.doesNotMatch(server, /zakljuceno z vnosom v koledar/);
+  assert.match(html, /todoHoursSourceOriginal: null/);
+  assert.match(html, /const originalStatus = sourceOriginal\?\.status \|\| \(source\.status === "execution" \? "open" : source\.status\)/);
+});
+test("brisanje skupnega opravila odstrani vse dodelitve", () => {
+  const server = fs.readFileSync(path.join(__dirname, "..", "outputs", "server.js"), "utf8");
+  assert.match(server, /const assignmentItems = todoAssignmentItems\(db, todo\);/);
+  assert.match(server, /for \(const item of assignmentItems\) \{/);
+  assert.match(server, /const removedIds = new Set\(assignmentItems\.map\(\(item\) => item\.id\)\);/);
+  assert.match(server, /db\.todos = db\.todos\.filter\(\(item\) => !removedIds\.has\(item\.id\)\);/);
+});
 test("po vpisu ur uporabnik potrdi zakljucek projekta", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
   assert.match(html, /id="projectCompletionDialog"/);
@@ -638,5 +652,5 @@ test("po vpisu ur uporabnik potrdi zakljucek projekta", () => {
   assert.match(html, /if \(state\.todoHoursSourceId\) state\.todoHoursSavedSourceId = state\.todoHoursSourceId/);
   assert.match(html, /async function handleHoursProjectCompletion\(deleteProject\)/);
   assert.match(html, /await deleteTodoFromServer\(sourceId\)/);
-  assert.match(html, /await openTodoDialog\(source\)/);
+  assert.match(html, /await openTodoDialog\(\{ \.\.\.source, status: originalStatus, done: false \}\)/);
 });
