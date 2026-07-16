@@ -901,10 +901,20 @@
       border-color: var(--todo-border, var(--todo-bg)) !important;
     }
 
+    .todo-status-direct-field {
+      display: grid;
+      gap: 7px;
+    }
+
+    .todo-status-direct-label {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
     .todo-status-open { --todo-bg: #e1e1e1; --todo-fg: #202124; --todo-border: #9aa0a6; }
     .todo-status-mobile-options {
-      display: none;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
       gap: 7px;
     }
 
@@ -946,16 +956,6 @@
     .todo-status-return_and_bill { --todo-bg: #ffb878; --todo-fg: #202124; --todo-border: #d8883f; }
     .todo-status-return { --todo-bg: #dbadff; --todo-fg: #202124; --todo-border: #8e5bb7; }
 
-    .todo-status option[value="open"] { background: #e1e1e1; color: #202124; }
-    .todo-status option[value="in_progress"] { background: #5484ed; color: #fff; }
-    .todo-status option[value="execution"] { background: #51b749; color: #fff; }
-    .todo-status option[value="billing"] { background: #7ae7bf; color: #202124; }
-    .todo-status option[value="order"],
-    .todo-status option[value="order_car"],
-    .todo-status option[value="order_warehouse"] { background: #dc2127; color: #fff; }
-    .todo-status option[value="add_to_car"] { background: #ff887c; color: #202124; }
-    .todo-status option[value="return_and_bill"] { background: #ffb878; color: #202124; }
-    .todo-status option[value="return"] { background: #dbadff; color: #202124; }
 
     .day-todo.todo-status-color {
       background: var(--todo-bg);
@@ -1900,8 +1900,7 @@
     }
 
     @media (max-width: 760px) {
-      .todo-status-native-field { display: none; }
-      .todo-status-mobile-options { display: grid; }
+      .todo-status-mobile-options { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .todo-primary-meta {
         grid-template-columns: max-content 140px minmax(0, 1fr);
       }
@@ -2352,11 +2351,12 @@
           <label>Stranka
             <input id="todoFormClient" list="clientList" placeholder="Alias ali naziv stranke">
           </label>
-          <label class="todo-status-native-field">Status
-            <select id="todoFormStatus" class="todo-status todo-status-color"></select>
-          </label>
         </div>
-        <div class="todo-status-mobile-options" id="todoFormStatusChoices" aria-label="Status opravila"></div>
+        <div class="todo-status-direct-field">
+          <span class="todo-status-direct-label">Status</span>
+          <input id="todoFormStatus" type="hidden" value="open">
+          <div class="todo-status-mobile-options" id="todoFormStatusChoices" aria-label="Status opravila"></div>
+        </div>
         <div id="todoFormAssigneeField">
           <label>Dodeljeno delavcem</label>
           <div class="todo-form-assignees" id="todoFormAssignees"></div>
@@ -2570,13 +2570,6 @@
       return `todo-status-${todoStatus(status).id}`;
     }
 
-    function todoStatusOptions(selected) {
-      const current = todoStatus(selected).id;
-      return todoStatusDefinitions
-        .map((status) => `<option class="todo-option-${status.id}" value="${status.id}" ${status.id === current ? "selected" : ""}>${status.label}</option>`)
-        .join("");
-    }
-
     function renderTodoStatusChoices(selected) {
       const current = todoStatus(selected).id;
       $("todoFormStatusChoices").innerHTML = todoStatusDefinitions.map((status) => `
@@ -2587,8 +2580,6 @@
     }
 
     function updateTodoStatusControl(control) {
-      todoStatusDefinitions.forEach((status) => control.classList.remove(`todo-status-${status.id}`));
-      control.classList.add("todo-status", "todo-status-color", todoStatusClass(control.value));
       $("todoFormStatusChoices")?.querySelectorAll("[data-status]").forEach((button) => {
         button.setAttribute("aria-pressed", String(button.dataset.status === control.value));
       });
@@ -3882,7 +3873,7 @@
       $("todoFormClient").value = client?.search || todo.client || $("reportClient").value || "";
       $("todoFormTask").value = todo.title || "";
       $("todoFormNotes").value = todo.notes || "";
-      $("todoFormStatus").innerHTML = todoStatusOptions(todo.status || "open");
+      $("todoFormStatus").value = todoStatus(todo.status || "open").id;
       renderTodoStatusChoices(todo.status || "open");
       $("todoFormUrgent").checked = Boolean(todo.urgent);
       updateTodoFormStatus();
@@ -4878,7 +4869,6 @@
       $("todoFormEnd").value = "";
       $("todoFormDate").focus();
     });
-    $("todoFormStatus").addEventListener("change", updateTodoFormStatus);
     $("todoFormStatusChoices").addEventListener("click", (event) => {
       const button = event.target.closest("[data-status]");
       if (!button) return;

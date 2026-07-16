@@ -136,12 +136,12 @@ test("spletne povezave v naslovu opravila so varno klikljive", () => {
   assert.match(html, /target="_blank" rel="noopener noreferrer"/);
 });
 
-test("dropdown statusov prikaze koledarske barve za vsako moznost", () => {
+test("neposredna izbira statusov prikaze koledarske barve za vsako moznost", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
-  assert.match(html, /\.todo-status option\[value="execution"\] \{ background: #51b749; color: #fff; \}/);
-  assert.match(html, /\.todo-status option\[value="return"\] \{ background: #dbadff; color: #202124; \}/);
-  assert.match(html, /\.todo-status option\[value="order"\]/);
-  assert.match(html, /class="todo-option-\$\{status\.id\}"/);
+  assert.match(html, /\.todo-status-execution \{ --todo-bg: #51b749; --todo-fg: #fff; \}/);
+  assert.match(html, /\.todo-status-return \{ --todo-bg: #dbadff; --todo-fg: #202124;/);
+  assert.match(html, /class="todo-status-choice todo-status-color \$\{todoStatusClass\(status\.id\)\}"/);
+  assert.doesNotMatch(html, /class="todo-option-\$\{status\.id\}"/);
   assert.match(html, /id: "execution", label: "Zaklju\\u010deno"/);
   assert.doesNotMatch(html, />Izvedba<\/option>/);
 });
@@ -542,13 +542,15 @@ test("opravila imajo rocno in datumsko razvrscanje ter neobvezni uri", () => {
   assert.doesNotMatch(html, /id: "billing", label: "Obra/);
 });
 
-test("opravila so privzeti levi pogled in mobilni statusi so barvni", () => {
+test("opravila so privzeti levi pogled in status se izbira neposredno brez dropdowna", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
   assert.match(html, /view: "todos"/);
   const switchMarkup = html.match(/<div class="view-switch"[\s\S]*?<\/div>/)?.[0] || "";
   assert.ok(switchMarkup.indexOf('id="todosViewBtn"') < switchMarkup.indexOf('id="calendarViewBtn"'));
   assert.match(html, /id="todoFormStatusChoices"/);
-  assert.match(html, /\.todo-status-native-field \{ display: none; \}/);
+  assert.match(html, /id="todoFormStatus" type="hidden"/);
+  assert.doesNotMatch(html, /<select id="todoFormStatus"/);
+  assert.match(html, /\.todo-status-mobile-options \{[\s\S]*?display: grid;/);
   assert.doesNotMatch(html, /id="todoFormDone"/);
   assert.match(html, /done: \$\("todoFormStatus"\)\.value === "execution"/);
 });
