@@ -1313,6 +1313,7 @@ function validateTodo(todo, { requireClientId = false } = {}) {
   if (Boolean(todo.start) !== Boolean(todo.end)) return "Vnesi obe uri: od in do.";
   if ((todo.start || todo.end) && !todo.date) return "Za opravilo z uro vnesi tudi datum.";
   if (todo.start && (!/^\d{2}:\d{2}$/.test(todo.start) || !/^\d{2}:\d{2}$/.test(todo.end))) return "Cas opravila ni pravilen.";
+  if (todo.status === "execution" && (!todo.date || !todo.start || !todo.end)) return "Za zakljuceno opravilo vnesi datum ter uro od in do.";
   if (todo.start && todo.end <= todo.start) return "Ura do mora biti kasneje kot ura od.";
   if ((todo.photos || []).some((photo) => !validTodoAttachmentDataUrl(photo.data) && !validTodoAttachmentId(photo.attachmentId))) return "Priloga ni veljavna slika ali PDF.";
   if ((todo.photos || []).reduce((total, photo) => total + String(photo.data || "").length, 0) > MAX_TODO_ATTACHMENTS_DATA_LENGTH) return "Priloge so skupaj prevelike.";

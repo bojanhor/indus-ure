@@ -194,6 +194,8 @@ test("opravilo z uro postane casovni Google dogodek", () => {
 test("ura opravila zahteva datum in veljaven par od-do", () => {
   assert.equal(validateTodo({ title: "Brez ure", date: "", start: "", end: "" }), "");
   assert.equal(validateTodo({ title: "Manjka do", date: "2026-07-16", start: "08:00", end: "" }), "Vnesi obe uri: od in do.");
+  assert.equal(validateTodo({ title: "Zakljuceno brez ure", status: "execution", date: "", start: "", end: "" }), "Za zakljuceno opravilo vnesi datum ter uro od in do.");
+  assert.equal(validateTodo({ title: "Zakljuceno z uro", status: "execution", date: "2026-07-16", start: "08:00", end: "09:00" }), "");
   assert.equal(validateTodo({ title: "Brez datuma", date: "", start: "08:00", end: "09:00" }), "Za opravilo z uro vnesi tudi datum.");
   assert.equal(validateTodo({ title: "Napacen vrstni red", date: "2026-07-16", start: "10:00", end: "09:00" }), "Ura do mora biti kasneje kot ura od.");
   assert.equal(validateTodo({ title: "Veljavno", date: "2026-07-16", start: "08:00", end: "09:00" }), "");

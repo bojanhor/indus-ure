@@ -605,7 +605,15 @@ test("klik na datum odpre dnevno casovnico z gestami in urejanjem casa", () => {
   assert.match(html, /data-mode = "resize-start"|dataset\.mode = "resize-start"/);
   assert.match(html, /dataset\.mode = "resize-end"/);
   assert.match(html, /function updateDayTimelineEventPointer\(event\)/);
+  assert.match(html, /const delta = Math\.round\(rawDelta \/ 15\) \* 15;/);
   assert.match(html, /setDayTimelineZoom\(state\.dayTimelineMinuteHeight \* ratio/);
   assert.match(html, /Ctrl \+ kole&#353;&#269;ek/);
   assert.match(html, /await saveTodoToServer\(\{[\s\S]*?start: dayTimelineTime\(interaction\.startMinute\),[\s\S]*?end: dayTimelineTime\(interaction\.endMinute\)/);
+});
+
+test("vlecenje dogodka na dotik zahteva kratek pridrzan dotik", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  assert.match(html, /const touchHoldRequired = event\.pointerType === "touch" && mode === "move"/);
+  assert.match(html, /touchReady: !touchHoldRequired/);
+  assert.match(html, /setTimeout\(\(\) => \{[\s\S]*?interaction\.touchReady = true;[\s\S]*?\}, 350\)/);
 });

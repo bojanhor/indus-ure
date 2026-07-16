@@ -1774,6 +1774,8 @@
 
     .modal-head h3 { margin: 0; font-size: 20px; }
 
+    .modal-head-actions { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+
     .modal-body {
       padding: 18px 20px 20px;
       display: grid;
@@ -2588,7 +2590,10 @@
     <form method="dialog">
       <div class="modal-head">
         <h3 id="dayTimelineTitle">Dnevni pregled</h3>
-        <button class="icon-btn" id="closeDayTimeline" type="submit" title="Zapri" aria-label="Zapri dnevni pregled">&times;</button>
+        <div class="modal-head-actions">
+          <button class="primary" id="saveDayTimeline" type="button" disabled>Shrani</button>
+          <button class="icon-btn" id="closeDayTimeline" type="submit" title="Prekliči spremembe" aria-label="Prekliči spremembe in zapri dnevni pregled">&times;</button>
+        </div>
       </div>
       <div class="day-timeline-toolbar">
         <div class="gesture-zoom-controls" aria-label="Povecava dnevne casovnice">
@@ -2679,7 +2684,6 @@
         <div class="audit-box hidden" id="todoFormAudit"></div>
         <div class="actions">
           <button type="button" class="danger" id="deleteTodoFromDialog">Izbri&#353;i opravilo</button>
-          <button type="button" class="secondary hidden" id="writeHoursFromTodo">Pi&#353;i ure na ta projekt</button>
           <button type="button" class="secondary" id="cancelTodoDialog">Prekli&#269;i</button>
           <button type="submit" class="primary" id="saveTodoDialog">Shrani</button>
         </div>
@@ -2866,8 +2870,11 @@
 
     function renderTodoStatusChoices(selected) {
       const current = todoStatus(selected).id;
-      $("todoFormStatusChoices").innerHTML = todoStatusDefinitions.map((status) => `
-        <button class="todo-status-choice todo-status-color ${todoStatusClass(status.id)}" type="button" data-status="${status.id}" aria-pressed="${status.id === current}">
+      const availableStatuses = current === "execution"
+        ? [todoStatus("execution")]
+        : todoStatusDefinitions.filter((status) => $("todoFormId").value || status.id !== "execution");
+      $("todoFormStatusChoices").innerHTML = availableStatuses.map((status) => `
+        <button class="todo-status-choice todo-status-color ${todoStatusClass(status.id)}" type="button" data-status="${status.id}" aria-pressed="${status.id === current}" ${current === "execution" ? "disabled" : ""}>
           ${status.label}
         </button>
       `).join("");
@@ -2894,6 +2901,7 @@
       selectedClient: "",
       todoHoursSourceId: "",
       dayTimelineDate: "",
+      dayTimelineDrafts: new Map(),
       dayTimelineMinuteHeight: 1,
       dayTimelinePointers: new Map(),
       dayTimelineGesture: null,
@@ -3590,6 +3598,10 @@
         alert("Za opravilo z uro vnesi tudi datum.");
         return false;
       }
+      if (todo.status === "execution" && (!todo.date || !todo.start || !todo.end)) {
+        alert("Za zakljuceno opravilo vnesi datum ter uro od in do.");
+        return false;
+      }
       if (todo.start && todo.end <= todo.start) {
         alert("Ura do mora biti kasneje kot ura od.");
         return false;
@@ -3840,11 +3852,18 @@
 
     function dayTimelineTodos() {
       if (!state.dayTimelineDate) return [];
-      return calendarTodos().filter((todo) => todo.date === state.dayTimelineDate);
+      return calendarTodos().filter((todo) => todo.date === state.dayTimelineDate).map((todo) => {
+        const draft = state.dayTimelineDrafts.get(todo.id);
+        return draft ? { ...todo, ...draft } : todo;
+      });
     }
 
     async function openTodoFromDayTimeline(todo) {
       if (!todo) return;
+      if (state.dayTimelineDrafts.size) {
+        alert("Najprej shrani ali preklici spremembe dnevne casovnice.");
+        return;
+      }
       $("dayTimelineDialog").close();
       await new Promise((resolve) => setTimeout(resolve, 0));
       await openTodoDialog(todo);
@@ -3860,6 +3879,10 @@
         year: "numeric"
       });
       $("dayTimelineZoomValue").textContent = Math.round(state.dayTimelineMinuteHeight * 100) + " %";
+      const saveButton = $("saveDayTimeline");
+      const draftCount = state.dayTimelineDrafts.size;
+      saveButton.disabled = !draftCount;
+      saveButton.textContent = draftCount ? "Shrani (" + draftCount + ")" : "Shrani";
 
       const todos = dayTimelineTodos();
       const allDay = todos.filter((todo) => !todo.start || !todo.end).sort(todoSort);
@@ -3979,14 +4002,10 @@
       const dialog = $("dayTimelineDialog");
       if (!dialog.open) dialog.showModal();
       requestAnimationFrame(() => {
-        const timed = dayTimelineTodos()
-          .map((todo) => dayTimelineMinutes(todo.start))
-          .filter((minute) => minute !== null);
-        const now = new Date();
-        const focusMinute = date === dateKey(now)
-          ? now.getHours() * 60 + now.getMinutes()
-          : timed.length ? Math.min(...timed) : 8 * 60;
-        $("dayTimelineScroll").scrollTop = Math.max(0, focusMinute * state.dayTimelineMinuteHeight - 90);
+        const scroll = $("dayTimelineScroll");
+        state.dayTimelineMinuteHeight = Math.max(0.35, Math.min(2.4, scroll.clientHeight / 900));
+        renderDayTimeline();
+        scroll.scrollTop = 5 * 60 * state.dayTimelineMinuteHeight;
       });
     }
 
@@ -3995,6 +4014,7 @@
       const eventElement = event.currentTarget;
       const mode = event.target.closest("[data-mode]")?.dataset.mode || "move";
       const startMinute = dayTimelineMinutes(todo.start);
+      const touchHoldRequired = event.pointerType === "touch" && mode === "move";
       const endMinute = dayTimelineMinutes(todo.end);
       if (startMinute === null || endMinute === null) return;
       event.preventDefault();
@@ -4010,16 +4030,32 @@
         startMinute,
         endMinute,
         moved: false,
+        touchReady: !touchHoldRequired,
+        touchHoldRequired,
+        holdTimer: null,
         lockPromise: null,
         element: eventElement
       };
-    }
+      if (touchHoldRequired) {
+        const interaction = state.dayTimelineInteraction;
+        interaction.holdTimer = setTimeout(() => {
+          if (state.dayTimelineInteraction === interaction) interaction.touchReady = true;
+        }, 350);
+      }
 
+    }
     function updateDayTimelineEventPointer(event) {
       const interaction = state.dayTimelineInteraction;
       if (!interaction || interaction.pointerId !== event.pointerId) return;
       const rawDelta = (event.clientY - interaction.startY) / state.dayTimelineMinuteHeight;
-      const delta = Math.round(rawDelta / 5) * 5;
+      const delta = Math.round(rawDelta / 15) * 15;
+      if (!interaction.touchReady) {
+        if (Math.abs(event.clientY - interaction.startY) > 12) {
+          clearTimeout(interaction.holdTimer);
+          state.dayTimelineInteraction = null;
+        }
+        return;
+      }
       if (!interaction.moved && Math.abs(event.clientY - interaction.startY) < 4) return;
       event.preventDefault();
       if (!interaction.moved) {
@@ -4029,11 +4065,11 @@
       }
 
       if (interaction.mode === "resize-start") {
-        interaction.startMinute = Math.max(0, Math.min(interaction.originalEnd - 5, interaction.originalStart + delta));
+        interaction.startMinute = Math.max(0, Math.min(interaction.originalEnd - 15, interaction.originalStart + delta));
         interaction.endMinute = interaction.originalEnd;
       } else if (interaction.mode === "resize-end") {
         interaction.startMinute = interaction.originalStart;
-        interaction.endMinute = Math.min(1440, Math.max(interaction.originalStart + 5, interaction.originalEnd + delta));
+        interaction.endMinute = Math.min(1440, Math.max(interaction.originalStart + 15, interaction.originalEnd + delta));
       } else {
         const duration = interaction.originalEnd - interaction.originalStart;
         interaction.startMinute = Math.max(0, Math.min(1440 - duration, interaction.originalStart + delta));
@@ -4054,36 +4090,47 @@
       if (!interaction || interaction.pointerId !== event.pointerId) return;
       state.dayTimelineInteraction = null;
       interaction.element.classList.remove("is-moving");
-      if (cancelled) {
-        if (interaction.lockPromise && await interaction.lockPromise) await releaseTodoEditLockForDialog();
-        renderDayTimeline();
-        return;
-      }
+      clearTimeout(interaction.holdTimer);
+      if (cancelled) { renderDayTimeline(); return; }
       const todo = state.todos.find((item) => item.id === interaction.todoId);
       if (!interaction.moved) {
-        if (interaction.mode === "move" && todo) await openTodoFromDayTimeline(todo);
+        if (interaction.mode === "move" && todo && (!interaction.touchHoldRequired || !interaction.touchReady)) await openTodoFromDayTimeline(todo);
         return;
       }
-      const locked = await interaction.lockPromise;
-      if (!locked || !todo) {
-        renderDayTimeline();
-        return;
-      }
+      if (!todo) { renderDayTimeline(); return; }
+      state.dayTimelineDrafts.set(todo.id, {
+        start: dayTimelineTime(interaction.startMinute),
+        end: dayTimelineTime(interaction.endMinute)
+      });
+      renderDayTimeline();
+    }
+
+    async function saveDayTimelineChanges() {
+      const drafts = [...state.dayTimelineDrafts.entries()];
+      if (!drafts.length) return;
+      const button = $("saveDayTimeline");
+      button.disabled = true;
       try {
-        await saveTodoToServer({
-          ...todo,
-          start: dayTimelineTime(interaction.startMinute),
-          end: dayTimelineTime(interaction.endMinute)
-        });
-        clearTodoEditLockState();
-        renderDayTimeline();
+        for (const [todoId, draft] of drafts) {
+          const todo = state.todos.find((item) => item.id === todoId);
+          if (!todo) { state.dayTimelineDrafts.delete(todoId); continue; }
+          const locked = await acquireTodoEditLockForDialog(todoId);
+          if (!locked) throw new Error("Opravila ni bilo mogoče varno shraniti.");
+          try {
+            await saveTodoToServer({ ...todo, ...draft });
+            clearTodoEditLockState();
+            state.dayTimelineDrafts.delete(todoId);
+          } catch (error) {
+            await releaseTodoEditLockForDialog();
+            throw error;
+          }
+        }
+        $("dayTimelineDialog").close();
       } catch (error) {
-        await releaseTodoEditLockForDialog();
         renderDayTimeline();
         alert(error.message);
       }
     }
-
     function dayTimelinePointerMetrics() {
       const points = [...state.dayTimelinePointers.values()].slice(0, 2);
       if (points.length < 2) return null;
@@ -4662,6 +4709,7 @@
     function updateTodoFormStatus() {
       updateTodoStatusControl($("todoFormStatus"));
       const completed = $("todoFormStatus").value === "execution";
+      $("todoFormTitle").textContent = completed ? "Pi\u0161i ure na projekt" : $("todoFormId").value ? "Uredi opravilo" : "Novo opravilo";
       const showBilling = isAdminView() && completed;
       $("todoFormBilling").classList.toggle("hidden", !showBilling);
       $("todoFormUrgentField").classList.toggle("hidden", completed);
@@ -4673,7 +4721,6 @@
       if (editing && !(await acquireTodoEditLockForDialog(todo.id))) return;
       state.todoHoursSourceId = String(todo._hoursSourceId || "");
       const client = findClient(todo.clientId || todo.client);
-      $("todoFormTitle").textContent = state.todoHoursSourceId ? "Pi\u0161i ure na projekt" : editing ? "Uredi opravilo" : "Novo opravilo";
       $("todoFormId").value = todo.id || "";
       $("todoFormStart").value = todo.start || "";
       $("todoFormEnd").value = todo.end || "";
@@ -4693,7 +4740,6 @@
       $("todoFormHourlyRate").value = editing ? todoHourlyRate(todo) : workerDefaultHourlyRate(activeWorkerId());
       $("todoFormBillingKm").value = Number(todo.billingKm || 0);
       $("deleteTodoFromDialog").classList.toggle("hidden", !editing);
-      $("writeHoursFromTodo").classList.toggle("hidden", !editing);
       renderTodoFormAudit(todo);
       $("todoFormPhotoInput").value = "";
       $("todoDialog").showModal();
@@ -4739,30 +4785,6 @@
       }
       await saveTodoToServer(todo);
       $("todoDialog").close();
-    }
-
-    async function openHoursTodoFromCurrent() {
-      const sourceId = $("todoFormId").value;
-      const source = state.todos.find((todo) => todo.id === sourceId);
-      if (!source) return;
-      await releaseTodoEditLockForDialog();
-      $("todoDialog").close();
-      await new Promise((resolve) => setTimeout(resolve, 0));
-      await openTodoDialog({
-        _hoursSourceId: source.id,
-        client: source.client,
-        clientId: source.clientId,
-        title: source.title,
-        notes: source.notes,
-        date: source.date,
-        start: "",
-        end: "",
-        status: "execution",
-        urgent: false,
-        photos: (source.photos || []).map((photo) => ({ ...photo })),
-        billingHourlyRate: workerDefaultHourlyRate(activeWorkerId()),
-        billingKm: 0
-      });
     }
 
     async function deleteTodoFromDialog() {
@@ -5754,6 +5776,7 @@
       const button = event.target.closest("[data-status]");
       if (!button) return;
       $("todoFormStatus").value = button.dataset.status;
+      renderTodoStatusChoices(button.dataset.status);
       updateTodoFormStatus();
     });
     $("todoFormClient").addEventListener("focus", renderTodoClientSuggestions);
@@ -5782,7 +5805,6 @@
       saveTodoFromDialog().catch((error) => alert(error.message));
     });
     $("deleteTodoFromDialog").addEventListener("click", () => deleteTodoFromDialog().catch((error) => alert(error.message)));
-    $("writeHoursFromTodo").addEventListener("click", () => openHoursTodoFromCurrent().catch((error) => alert(error.message)));
     $("todoFormPhotoInput").addEventListener("change", async (event) => {
       try {
         const remaining = Math.max(0, 8 - state.todoDialogPhotos.length);
@@ -5894,6 +5916,7 @@
     $("dayTimelineZoomOut").addEventListener("click", () => setDayTimelineZoom(state.dayTimelineMinuteHeight / 1.25));
     $("dayTimelineZoomIn").addEventListener("click", () => setDayTimelineZoom(state.dayTimelineMinuteHeight * 1.25));
     $("dayTimelineFit").addEventListener("click", fitDayTimeline);
+    $("saveDayTimeline").addEventListener("click", () => saveDayTimelineChanges());
     $("dayTimelineScroll").addEventListener("wheel", (event) => {
       if (!event.ctrlKey && !event.metaKey) return;
       event.preventDefault();
@@ -5914,13 +5937,10 @@
       const interaction = state.dayTimelineInteraction;
       state.dayTimelineInteraction = null;
       state.dayTimelinePointers.clear();
+      if (interaction?.holdTimer) clearTimeout(interaction.holdTimer);
       state.dayTimelineGesture = null;
       $("dayTimelineScroll").classList.remove("is-panning");
-      if (interaction?.lockPromise) {
-        interaction.lockPromise.then((locked) => {
-          if (locked) return releaseTodoEditLockForDialog();
-        }).catch(() => {});
-      }
+      state.dayTimelineDrafts.clear();
     });
     $("syncClientsBtn").addEventListener("click", () => syncClients().catch((error) => alert(error.message)));
     $("clientSearch").addEventListener("input", handleClientSearchInput);
