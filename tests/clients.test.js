@@ -629,6 +629,29 @@ test("globalni iskalnik vrne samo dogodke stranke pa imajo svoj zavihek", () => 
   assert.match(html, /function renderSearch\(\)[\s\S]*?const results = contextTodos\(\)/);
   assert.doesNotMatch(html, /function renderSearch\(\)[\s\S]*?const clientResults/);
 });
+test("dnevna casovnica zdruzi neprekinjene delovne bloke", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  assert.match(html, /function dayWorkBlocks\(todos\)/);
+  assert.match(html, /interval\.start <= previous\.end/);
+  assert.match(html, /className = "day-work-blocks"/);
+  assert.match(html, /\(duration \/ 60\)\.toLocaleString\("sl-SI"/);
+});
+test("offline vrsta opravil ostane na napravi in preprecuje tihi prepis", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  const server = fs.readFileSync(path.join(__dirname, "..", "outputs", "server.js"), "utf8");
+  assert.match(html, /indexedDB\.open\(offlineTodoDbName, 1\)/);
+  assert.match(html, /function flushOfflineTodoQueue\(\)/);
+  assert.match(html, /window\.addEventListener\("online", \(\) => flushOfflineTodoQueue/);
+  assert.match(server, /baseUpdatedAt && baseUpdatedAt !== String\(db\.todos\[index\]\.updatedAt \|\| ""\)/);
+});
+test("klik na prazno dnevno casovnico pripravi enourno opravilo", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  assert.match(html, /async function openNewTodoFromDayTimeline\(clientY\)/);
+  assert.match(html, /Math\.floor\(clickedMinute \/ 15\) \* 15/);
+  assert.match(html, /const endMinute = startMinute \+ 60/);
+  assert.match(html, /date: state\.dayTimelineDate,/);
+  assert.match(html, /openNewTodoFromDayTimeline\(event\.clientY\)/);
+});
 test("vpis ur ne zakljuci izvornega opravila pred potrditvijo", () => {
   const server = fs.readFileSync(path.join(__dirname, "..", "outputs", "server.js"), "utf8");
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");

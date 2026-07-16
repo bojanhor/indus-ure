@@ -99,6 +99,20 @@
       grid-template-columns: 1fr;
     }
 
+    .offline-sync-notice {
+      position: fixed;
+      right: 14px;
+      bottom: 14px;
+      z-index: 80;
+      max-width: min(360px, calc(100vw - 28px));
+      padding: 10px 13px;
+      border-radius: 8px;
+      color: #fff;
+      background: #58656a;
+      box-shadow: var(--shadow);
+      font-weight: 700;
+    }
+    .offline-sync-notice.conflict { background: #9f5a24; }
     .hidden,
     .view-hidden { display: none !important; }
 
@@ -1645,6 +1659,24 @@
     }
 
     .day-timeline-events { position: absolute; inset: 0 8px 0 66px; }
+    .day-timeline-events { right: 74px; }
+    .day-work-blocks { position: absolute; top: 0; right: 6px; bottom: 0; width: 62px; border-left: 1px solid var(--line); }
+    .day-work-block {
+      position: absolute;
+      left: 7px;
+      right: 0;
+      display: grid;
+      place-items: center;
+      padding: 3px;
+      border-radius: 6px;
+      color: var(--accent-dark);
+      background: #e4eee9;
+      font-size: 12px;
+      font-weight: 800;
+      text-align: center;
+      line-height: 1.1;
+    }
+
     .day-timeline-event {
       position: absolute;
       min-height: 18px;
@@ -2368,7 +2400,8 @@
       .day-all-day { grid-template-columns: 48px minmax(0, 1fr); padding-left: 8px; padding-right: 8px; }
       .day-time-line { left: 52px; }
       .day-time-label { left: 2px; width: 42px; }
-      .day-timeline-events { left: 56px; right: 4px; }
+      .day-timeline-events { left: 56px; right: 70px; }
+      .day-work-blocks { width: 58px; right: 3px; }
     }
   </style>
 </head>
@@ -2588,6 +2621,8 @@
       </section>
     </main>
   </div>
+
+  <div class="offline-sync-notice hidden" id="offlineSyncNotice" role="status"></div>
 
   <dialog id="dayTimelineDialog">
     <form method="dialog">
@@ -2931,6 +2966,7 @@
       todoDialogPhotos: [],
       photoEditor: null,
       reportClient: "",
+      offlineTodoSyncing: false,
       attachmentPreview: null,
       reportClientId: "",
       settings: { billing: { hourlyRate: 15, kmRate: 0.22, commuteKmPerDay: 28 } },
@@ -3007,6 +3043,90 @@
       return sessionRecoveryPromise;
     }
 
+    const offlineTodoDbName = "indus-ure-offline";
+    function offlineTodoDb() {
+      return new Promise((resolve, reject) => {
+        const request = indexedDB.open(offlineTodoDbName, 1);
+        request.onupgradeneeded = () => request.result.createObjectStore("todoOps", { keyPath: "id", autoIncrement: true });
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+    }
+    async function offlineTodoOps() {
+      const db = await offlineTodoDb();
+      return new Promise((resolve, reject) => {
+        const request = db.transaction("todoOps", "readonly").objectStore("todoOps").getAll();
+        request.onsuccess = () => resolve(request.result || []);
+        request.onerror = () => reject(request.error);
+      });
+    }
+    async function putOfflineTodoOp(operation) {
+      const db = await offlineTodoDb();
+      return new Promise((resolve, reject) => {
+        const request = db.transaction("todoOps", "readwrite").objectStore("todoOps").put(operation);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+    }
+    async function removeOfflineTodoOp(id) {
+      const db = await offlineTodoDb();
+      return new Promise((resolve, reject) => {
+        const request = db.transaction("todoOps", "readwrite").objectStore("todoOps").delete(id);
+        request.onsuccess = () => resolve();
+        request.onerror = () => reject(request.error);
+      });
+    }
+    function isNetworkError(error) { return !navigator.onLine || !error?.status; }
+    async function updateOfflineSyncNotice() {
+      const notice = $("offlineSyncNotice");
+      if (!state.user) return;
+      const ops = (await offlineTodoOps()).filter((item) => item.userId === state.user.id);
+      const conflicts = ops.filter((item) => item.conflict).length;
+      notice.classList.toggle("hidden", !ops.length);
+      notice.classList.toggle("conflict", Boolean(conflicts));
+      notice.textContent = conflicts
+        ? `${conflicts} sprememba potrebuje pregled povezave.`
+        : `${ops.length} sprememba ${ops.length === 1 ? "čaka" : "čaka"} na povezavo.`;
+    }
+    async function queueOfflineTodo(operation) {
+      const ops = await offlineTodoOps();
+      const existing = ops.find((item) => item.userId === state.user.id && item.todoId === operation.todoId && !item.conflict);
+      if (existing) {
+        if (existing.kind === "create") existing.todo = operation.todo;
+        else Object.assign(existing, operation);
+        await putOfflineTodoOp(existing);
+      } else {
+        await putOfflineTodoOp({ ...operation, userId: state.user.id, createdAt: new Date().toISOString() });
+      }
+      await updateOfflineSyncNotice();
+    }
+    async function flushOfflineTodoQueue() {
+      if (state.offlineTodoSyncing || !state.user || !state.token || !navigator.onLine) return;
+      state.offlineTodoSyncing = true;
+      try {
+        const ops = (await offlineTodoOps()).filter((item) => item.userId === state.user.id && !item.conflict).sort((a, b) => a.id - b.id);
+        for (const op of ops) {
+          try {
+            if (op.kind === "create") await api("/api/todos", { method: "POST", body: JSON.stringify(op.todo) });
+            else {
+              const lock = await api(todoLockUrl(op.todoId), { method: "POST", body: JSON.stringify({}) });
+              try {
+                if (op.kind === "update") await api(`/api/todos/${op.todoId}`, { method: "PUT", body: JSON.stringify({ ...op.todo, baseUpdatedAt: op.baseUpdatedAt, editLockToken: lock.lockToken }) });
+                else await api(`/api/todos/${op.todoId}`, { method: "DELETE", body: JSON.stringify({ baseUpdatedAt: op.baseUpdatedAt, editLockToken: lock.lockToken }) });
+              } finally { await api(todoLockUrl(op.todoId), { method: "DELETE", body: JSON.stringify({ lockToken: lock.lockToken }) }).catch(() => {}); }
+            }
+            await removeOfflineTodoOp(op.id);
+          } catch (error) {
+            if (isNetworkError(error)) break;
+            if (error.status === 409) { op.conflict = true; await putOfflineTodoOp(op); }
+          }
+        }
+        await loadTodos();
+      } finally {
+        state.offlineTodoSyncing = false;
+        await updateOfflineSyncNotice();
+      }
+    }
     async function api(path, options = {}) {
       const { recoverSession = true, ...requestOptions } = options;
       const headers = {
@@ -3042,6 +3162,8 @@
         initializeWorkContext();
         showApp();
         await loadAll();
+        await updateOfflineSyncNotice();
+        await flushOfflineTodoQueue();
         syncGoogle(false);
       } catch {
         localStorage.removeItem(tokenKey);
@@ -3423,11 +3545,23 @@
         ? state.todoEditLock.token
         : "";
       const payload = editLockToken ? { ...todo, editLockToken } : todo;
-      const data = await api(path, { method, body: JSON.stringify(payload) });
-      state.todos = data.todos;
-      refreshClientList();
-      render();
-      return data;
+      try {
+        const data = await api(path, { method, body: JSON.stringify({ ...payload, baseUpdatedAt: todo.updatedAt || "" }) });
+        state.todos = data.todos;
+        refreshClientList();
+        render();
+        return data;
+      } catch (error) {
+        if (!isNetworkError(error)) throw error;
+        const localTodo = todo.id ? { ...todo, offlinePending: true } : { ...todo, id: "offline-" + crypto.randomUUID(), offlinePending: true };
+        await queueOfflineTodo({ kind: todo.id ? "update" : "create", todoId: localTodo.id, todo: { ...todo }, baseUpdatedAt: todo.updatedAt || "" });
+        const index = state.todos.findIndex((item) => item.id === todo.id);
+        if (index >= 0) state.todos[index] = localTodo;
+        else state.todos.unshift(localTodo);
+        refreshClientList();
+        render();
+        return { todos: state.todos, queued: true };
+      }
     }
 
     async function deleteTodoFromServer(id) {
@@ -3442,13 +3576,24 @@
       try {
         const data = await api(`/api/todos/${id}`, {
           method: "DELETE",
-          body: JSON.stringify({ editLockToken })
+          body: JSON.stringify({ editLockToken, baseUpdatedAt: previousTodos.find((todo) => todo.id === id)?.updatedAt || "" })
         });
         state.todos = data.todos;
         refreshClientList();
         render();
         syncGoogle(false);
       } catch (error) {
+        if (isNetworkError(error)) {
+          const deleted = previousTodos.find((todo) => todo.id === id);
+          if (deleted?.id?.startsWith("offline-")) {
+            const op = (await offlineTodoOps()).find((item) => item.todoId === id && item.userId === state.user.id);
+            if (op) await removeOfflineTodoOp(op.id);
+          } else {
+            await queueOfflineTodo({ kind: "delete", todoId: id, baseUpdatedAt: deleted?.updatedAt || "" });
+          }
+          await updateOfflineSyncNotice();
+          return { todos: state.todos, queued: true };
+        }
         state.todos = previousTodos;
         refreshClientList();
         render();
@@ -3890,6 +4035,40 @@
       await openTodoDialog(todo);
     }
 
+    async function openNewTodoFromDayTimeline(clientY) {
+      if (state.dayTimelineDrafts.size) {
+        alert("Najprej shrani ali preklici spremembe dnevne casovnice.");
+        return;
+      }
+      if (isAdminView()) {
+        alert("Za novo opravilo najprej izberi delavski pogled.");
+        return;
+      }
+      const timelineRect = $("dayTimeline").getBoundingClientRect();
+      const clickedMinute = (clientY - timelineRect.top) / state.dayTimelineMinuteHeight;
+      const startMinute = Math.max(0, Math.min(1380, Math.floor(clickedMinute / 15) * 15));
+      const endMinute = startMinute + 60;
+      $("dayTimelineDialog").close();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      await openTodoDialog({
+        date: state.dayTimelineDate,
+        start: dayTimelineTime(startMinute),
+        end: dayTimelineTime(endMinute)
+      });
+    }
+    function dayWorkBlocks(todos) {
+      const intervals = todos
+        .map((todo) => ({ start: dayTimelineMinutes(todo.start), end: dayTimelineMinutes(todo.end) }))
+        .filter((item) => item.start !== null && item.end !== null)
+        .sort((a, b) => a.start - b.start || a.end - b.end);
+      const blocks = [];
+      intervals.forEach((interval) => {
+        const previous = blocks.at(-1);
+        if (previous && interval.start <= previous.end) previous.end = Math.max(previous.end, interval.end);
+        else blocks.push({ ...interval });
+      });
+      return blocks;
+    }
     function renderDayTimeline() {
       if (!state.dayTimelineDate) return;
       const selectedDate = parseDate(state.dayTimelineDate);
@@ -3982,6 +4161,19 @@
         eventsLayer.appendChild(event);
       });
       timeline.appendChild(eventsLayer);
+      const workBlocksLayer = document.createElement("div");
+      workBlocksLayer.className = "day-work-blocks";
+      dayWorkBlocks(todos).forEach((block) => {
+        const element = document.createElement("div");
+        const duration = block.end - block.start;
+        element.className = "day-work-block";
+        element.style.top = Math.round(block.start * minuteHeight) + "px";
+        element.style.height = Math.max(18, Math.round(duration * minuteHeight)) + "px";
+        element.textContent = (duration / 60).toLocaleString("sl-SI", { maximumFractionDigits: 2 }) + " h";
+        element.title = dayTimelineTime(block.start) + "-" + dayTimelineTime(block.end) + ": " + element.textContent;
+        workBlocksLayer.appendChild(element);
+      });
+      timeline.appendChild(workBlocksLayer);
 
       if (state.dayTimelineDate === dateKey(new Date())) {
         const now = new Date();
@@ -4172,7 +4364,15 @@
       const metrics = dayTimelinePointerMetrics();
       state.dayTimelineGesture = metrics
         ? { type: "pinch", lastDistance: metrics.distance, lastCenter: metrics.center }
-        : { type: "pan", pointerId: event.pointerId, lastX: event.clientX, lastY: event.clientY };
+        : {
+          type: "pan",
+          pointerId: event.pointerId,
+          startX: event.clientX,
+          startY: event.clientY,
+          lastX: event.clientX,
+          lastY: event.clientY,
+          moved: false
+        };
     }
 
     function updateDayTimelineViewportPointer(event) {
@@ -4194,6 +4394,7 @@
       }
       const gesture = state.dayTimelineGesture;
       if (gesture?.type !== "pan" || gesture.pointerId !== event.pointerId) return;
+      if (Math.hypot(event.clientX - gesture.startX, event.clientY - gesture.startY) > 7) gesture.moved = true;
       scroll.scrollLeft -= event.clientX - gesture.lastX;
       scroll.scrollTop -= event.clientY - gesture.lastY;
       gesture.lastX = event.clientX;
@@ -4201,18 +4402,29 @@
     }
 
     function finishDayTimelineViewportPointer(event) {
+      const gesture = state.dayTimelineGesture;
+      const isEmptyTap = gesture?.type === "pan"
+        && gesture.pointerId === event.pointerId
+        && !gesture.moved
+        && !event.target.closest(".day-timeline-event");
       state.dayTimelinePointers.delete(event.pointerId);
       const remaining = [...state.dayTimelinePointers.entries()][0];
       if (remaining) {
         state.dayTimelineGesture = {
           type: "pan",
           pointerId: remaining[0],
+          startX: remaining[1].x,
+          startY: remaining[1].y,
           lastX: remaining[1].x,
-          lastY: remaining[1].y
+          lastY: remaining[1].y,
+          moved: true
         };
       } else {
         state.dayTimelineGesture = null;
         $("dayTimelineScroll").classList.remove("is-panning");
+      }
+      if (isEmptyTap && !remaining) {
+        openNewTodoFromDayTimeline(event.clientY).catch((error) => alert(error.message));
       }
     }
 
@@ -6228,6 +6440,8 @@
       if (event.target === event.currentTarget) event.currentTarget.close();
     });
 
+    window.addEventListener("online", () => flushOfflineTodoQueue().catch(() => {}));
+    window.addEventListener("offline", () => updateOfflineSyncNotice().catch(() => {}));
     window.addEventListener("pagehide", releaseTodoEditLockOnPageHide);
 
     window.addEventListener("popstate", (event) => {

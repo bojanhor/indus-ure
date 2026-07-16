@@ -2944,6 +2944,11 @@ async function handleApi(req, res) {
         sendJson(res, 403, { error: "Tega opravila ne mores spreminjati." });
         return;
       }
+      const baseUpdatedAt = String(body.baseUpdatedAt || "");
+      if (baseUpdatedAt && baseUpdatedAt !== String(db.todos[index].updatedAt || "")) {
+        sendJson(res, 409, { error: "Opravilo je bilo medtem spremenjeno na drugi napravi." });
+        return;
+      }
       const previousTodo = db.todos[index];
       const assignmentItems = todoAssignmentItems(db, previousTodo);
       const editLock = todoAssignmentEditLockConflict(db, previousTodo, user, editLockToken);
@@ -3061,6 +3066,11 @@ async function handleApi(req, res) {
       const editLockToken = String(body.editLockToken || "");
       const db = await readDbAsync();
       const todo = db.todos.find((item) => item.id === id);
+      const baseUpdatedAt = String(body.baseUpdatedAt || "");
+      if (todo && baseUpdatedAt && baseUpdatedAt !== String(todo.updatedAt || "")) {
+        sendJson(res, 409, { error: "Opravilo je bilo medtem spremenjeno na drugi napravi." });
+        return;
+      }
       if (!canManageTodo(user, todo)) {
         sendJson(res, 403, { error: "Tega opravila ne mores izbrisati." });
         return;
