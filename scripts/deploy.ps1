@@ -80,9 +80,23 @@ try {
   Invoke-Native ssh @sshOptions $target $remoteCommand
 
   Write-Host "[6/6] Preverjanje produkcije"
-  $response = Invoke-WebRequest -Uri $PublicUrl -MaximumRedirection 5 -TimeoutSec 30
-  if ($response.StatusCode -ne 200) {
-    throw "Produkcija je vrnila HTTP $($response.StatusCode)."
+  $healthy = $false
+  for ($attempt = 1; $attempt -le 10; $attempt++) {
+    try {
+      $response = Invoke-WebRequest -Uri $PublicUrl -MaximumRedirection 5 -TimeoutSec 10
+      if ($response.StatusCode -eq 200) {
+        $healthy = $true
+        break
+      }
+    } catch {
+      if ($attempt -eq 10) {
+        throw
+      }
+    }
+    Start-Sleep -Seconds 1
+  }
+  if (-not $healthy) {
+    throw "Produkcija po desetih poskusih ni vrnila HTTP 200."
   }
 
   Write-Host "Objavljeno: $release ($PublicUrl)" -ForegroundColor Green

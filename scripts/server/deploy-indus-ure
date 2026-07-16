@@ -32,12 +32,18 @@ if [[ ! -d "$destination" ]]; then
   chown -R root:root "$destination"
 fi
 
+# Pripravljalna korenska mapa je 0700; systemd uporabnik mora vanjo vstopiti.
+chmod 0755 "$destination"
+
 temporary_link="$base/.current-$release"
 rm -f "$temporary_link"
 ln -s "$destination" "$temporary_link"
 mv -Tf "$temporary_link" "$current"
 
-if ! systemctl restart indus-ure || ! systemctl is-active --quiet indus-ure; then
+restart_ok=true
+systemctl restart indus-ure || restart_ok=false
+sleep 2
+if [[ "$restart_ok" != true ]] || ! systemctl is-active --quiet indus-ure; then
   if [[ -n "$previous" && -d "$previous" ]]; then
     ln -sfn "$previous" "$current"
     systemctl restart indus-ure
