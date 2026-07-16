@@ -80,7 +80,7 @@ test("novo opravilo ponuja aliase iz prvega stolpca Google Sheeta", () => {
 
 test("spletne povezave v naslovu opravila so varno klikljive", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
-  assert.match(html, /todo-title">\$\{linkifyText\(todo\.title\)\}/);
+  assert.match(html, /todo-title">[\s\S]*?\$\{linkifyText\(todo\.title\)\}/);
   assert.match(html, /function linkifyText\(value\)/);
   assert.match(html, /target="_blank" rel="noopener noreferrer"/);
 });
@@ -159,7 +159,7 @@ test("razvrscanje opravil deluje z rocajem, misjo in dotikom", () => {
   assert.match(html, /function todosCanReorderTogether\(sourceId, targetId\)/);
   assert.match(html, /async function reorderTodos\(sourceId, targetId\)/);
   assert.match(html, /const orderDifference = Number\(a\.order \|\| 0\) - Number\(b\.order \|\| 0\)/);
-  assert.match(html, /const ordered = contextTodos\(\)\.filter\(\(todo\) => !todo\.done\)\.sort\(todoSort\)/);
+  assert.match(html, /const ordered = contextTodos\(\)\.filter\(\(todo\) => !todo\.done && !todo\.urgent\)\.sort\(todoSort\)/);
   assert.match(server, /order: isOpenedTodo \? todo\.order : existing\.order/);
   assert.doesNotMatch(html, /todoReorderGroup|todoNativeDragSourceId|addEventListener\("dragstart"|draggable="\$\{reorderable/);
 });
@@ -168,7 +168,8 @@ test("mobilna kartica zdruzi kontrole v dve kompaktni vrstici", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
   const card = html.match(/item\.innerHTML = `([\s\S]*?)`;\s*const openTodoEditor/)?.[1] || "";
   assert.ok(card);
-  assert.match(card, /todo-control-stack[\s\S]*?type="checkbox"[\s\S]*?class="drag-handle"[\s\S]*?class="todo-summary"/);
+  assert.match(card, /todo-control-stack[\s\S]*?class="drag-handle"[\s\S]*?class="todo-summary"/);
+  assert.doesNotMatch(card, /aria-label="Opravljeno"/);
   assert.equal((card.match(/class="drag-handle"/g) || []).length, 1);
   assert.match(card, /todo-compact-actions[\s\S]*?todo-description-details[\s\S]*?todo-attachments-details[\s\S]*?todo-tools[\s\S]*?edit-todo[\s\S]*?delete-todo/);
   assert.match(html, /\.todo-compact-actions \{[\s\S]*?display: flex;[\s\S]*?flex-wrap: wrap;/);
@@ -298,7 +299,7 @@ test("vsi pogledi uporabljajo en sam obrazec opravila", () => {
   assert.equal((html.match(/<dialog id="todoDialog">/g) || []).length, 1);
   for (const id of [
     "todoFormId", "todoFormDate", "todoFormClient", "todoFormStatus", "todoFormAssigneeField",
-    "todoFormAssignees", "todoFormTask", "todoFormNotes", "todoFormDone", "todoFormHourlyRate",
+    "todoFormAssignees", "todoFormTask", "todoFormNotes", "todoFormUrgent", "todoFormHourlyRate",
     "todoFormBillingKm", "todoFormPhotoInput", "todoFormAudit"
   ]) {
     assert.match(html, new RegExp(`id="${id}"`));
@@ -461,4 +462,33 @@ test("opravila imajo rocno in datumsko razvrscanje ter neobvezni uri", () => {
   assert.match(html, /Za opravilo z uro vnesi tudi datum/);
   assert.match(html, /\$\("todoFormStart"\)\.value = ""/);
   assert.match(html, /localStorage\.setItem\(todoSortModeKey, state\.todoSortMode\)/);
+});
+
+test("opravila so privzeti levi pogled in mobilni statusi so barvni", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  assert.match(html, /view: "todos"/);
+  const switchMarkup = html.match(/<div class="view-switch"[\s\S]*?<\/div>/)?.[0] || "";
+  assert.ok(switchMarkup.indexOf('id="todosViewBtn"') < switchMarkup.indexOf('id="calendarViewBtn"'));
+  assert.match(html, /id="todoFormStatusChoices"/);
+  assert.match(html, /\.todo-status-native-field \{ display: none; \}/);
+  assert.doesNotMatch(html, /id="todoFormDone"/);
+  assert.match(html, /done: \$\("todoFormStatus"\)\.value === "execution"/);
+});
+
+test("nujno opravilo je na vrhu in ga ni mogoce rocno prestavljati", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  assert.match(html, /id="todoFormUrgent"/);
+  assert.match(html, /Number\(b\.urgent\) - Number\(a\.urgent\)/);
+  assert.match(html, /const reorderable = state\.todoSortMode === "manual" && !todo\.done && !todo\.urgent/);
+  assert.match(html, /!source\.urgent && !target\.urgent/);
+  assert.match(html, /Odstranil si sebe iz opravila[\s\S]*?ne bos vec videl ali mogel odpreti/);
+});
+
+test("sefovski koledar zdruzi skupna opravila in ponudi locena feeda", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  assert.match(html, /function calendarTodos\(\)/);
+  assert.match(html, /const key = todo\.assignmentGroupId \|\| todo\.id/);
+  assert.match(html, /return \[\.\.\.groups\.values\(\)\]/);
+  assert.match(html, /id="copyWorkerCalendar"/);
+  assert.match(html, /id="copyCombinedCalendar"/);
 });

@@ -7,6 +7,7 @@ const {
   GOOGLE_CALENDAR_SCOPE_VERSION,
   INDUS_GOOGLE_APP_ID,
   TODO_STATUS_DEFINITIONS,
+  buildCalendarIcs,
   deleteOwnedGoogleEvent,
   isIndusOwnedGoogleEvent,
   pushGoogleItem,
@@ -398,4 +399,36 @@ test("OAuth uporablja samo namenski Calendar obseg in ne isce koledarja po imenu
   assert.match(source, /auth\/calendar\.app\.created/);
   assert.doesNotMatch(source, /auth\/calendar["']/);
   assert.doesNotMatch(source, /calendarList\.list/);
+});
+
+test("nujno opravilo je oznaceno tudi v Google dogodku", () => {
+  const event = todoToGoogleEvent({
+    id: "urgent-1", title: "Servis", date: "2026-07-20", start: "", end: "",
+    client: "Jerin", clientId: "SI12345678", notes: "", status: "open",
+    urgent: true, syncUser: "ibro"
+  });
+  assert.equal(event.summary, "NUJNO: TODO: Servis");
+  assert.match(event.description, /Nujno: DA/);
+});
+
+test("koledarski feed delavca je locen sefovski pa zdruzi dodelitve", () => {
+  const shared = {
+    assignmentGroupId: "group-1", title: "Skupno", date: "2026-07-20",
+    start: "", end: "", client: "", notes: "", status: "open", done: false,
+    urgent: false, createdBy: "bojan", createdByName: "Bojan"
+  };
+  const db = {
+    users: { ibro: { name: "Ibro" }, bojan: { name: "Bojan" } },
+    entries: [],
+    todos: [
+      { ...shared, id: "todo-ibro", syncUser: "ibro" },
+      { ...shared, id: "todo-bojan", syncUser: "bojan" }
+    ]
+  };
+  const worker = buildCalendarIcs(db, { userId: "ibro" });
+  assert.match(worker, /X-WR-CALNAME:INDUS URE - Ibro/);
+  assert.match(worker, /UID:todo-todo-ibro@indus-ure/);
+  assert.doesNotMatch(worker, /todo-bojan/);
+  const combined = buildCalendarIcs(db, { combined: true });
+  assert.equal((combined.match(/UID:todo-group-1@indus-ure/g) || []).length, 1);
 });

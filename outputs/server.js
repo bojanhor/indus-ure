@@ -367,6 +367,20 @@ function normalizeDb(db = {}) {
     db.calendarToken = crypto.randomBytes(24).toString("hex");
     changed = true;
   }
+  if (!db.calendarFeeds || typeof db.calendarFeeds !== "object") {
+    db.calendarFeeds = {};
+    changed = true;
+  }
+  for (const userId of Object.keys(db.users || {})) {
+    if (!db.calendarFeeds[userId] || String(db.calendarFeeds[userId]).length < 24) {
+      db.calendarFeeds[userId] = crypto.randomBytes(24).toString("hex");
+      changed = true;
+    }
+  }
+  if (!db.calendarFeeds.bossCombined || String(db.calendarFeeds.bossCombined).length < 24) {
+    db.calendarFeeds.bossCombined = db.calendarToken;
+    changed = true;
+  }
 
   db.entries = db.entries.map((entry) => {
     const next = { ...entry };
@@ -467,6 +481,19 @@ function normalizeDb(db = {}) {
     }
     if (typeof next.order !== "number") {
       next.order = index + 1;
+      changed = true;
+    }
+    if (typeof next.urgent !== "boolean") {
+      next.urgent = false;
+      changed = true;
+    }
+    if (next.done && next.status !== "execution") {
+      next.status = "execution";
+      changed = true;
+    }
+    const completed = next.status === "execution";
+    if (next.done !== completed) {
+      next.done = completed;
       changed = true;
     }
     for (const field of ["start", "end"]) {
@@ -1097,8 +1124,9 @@ function cleanTodo(input) {
     notes: String(input.notes || "").trim(),
     status: TODO_STATUSES.has(input.status) ? input.status : "open",
     order: Number.isFinite(Number(input.order)) ? Number(input.order) : 0,
+    urgent: Boolean(input.urgent),
     syncUser: cleanUserId(input.syncUser),
-    done: Boolean(input.done),
+    done: input.status === "execution",
     billingHourlyRate: nonnegativeNumber(input.billingHourlyRate, null, 10_000),
     billingKm: nonnegativeNumber(input.billingKm, null, 1_000_000),
     photos: limitTodoAttachmentsData(photos
@@ -1215,19 +1243,35 @@ function foldIcsLine(line) {
   return chunks.join("\r\n");
 }
 
-function buildCalendarIcs(db) {
+function buildCalendarIcs(db, { userId = "", combined = false } = {}) {
   const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
+  const entries = (db.entries || []).filter((entry) => combined || !userId || (entry.syncUser || entry.createdBy) === userId);
+  const assignedTodos = (db.todos || []).filter((todo) => combined || !userId || (todo.syncUser || todo.createdBy) === userId);
+  const todos = combined
+    ? [...assignedTodos.reduce((groups, todo) => {
+      const key = todo.assignmentGroupId || todo.id;
+      if (!groups.has(key)) groups.set(key, todo);
+      return groups;
+    }, new Map()).values()]
+    : assignedTodos;
+  const assigneeNames = (todo) => todoAssignmentAssigneeIds(db, todo)
+    .map((id) => db.users?.[id]?.name || id)
+    .filter(Boolean)
+    .join(", ");
+  const calendarName = combined
+    ? "INDUS URE - Vsi delavci"
+    : `INDUS URE - ${db.users?.[userId]?.name || "Delovni koledar"}`;
   const lines = [
     "BEGIN:VCALENDAR",
     "VERSION:2.0",
     "PRODID:-//INDUS URE//Delovni koledar//SL",
     "CALSCALE:GREGORIAN",
     "METHOD:PUBLISH",
-    "X-WR-CALNAME:INDUS URE",
+    `X-WR-CALNAME:${calendarName}`,
     "X-WR-TIMEZONE:Europe/Ljubljana"
   ];
 
-  for (const entry of db.entries || []) {
+  for (const entry of entries) {
     if (!entry.date || !entry.start || !entry.end) continue;
     const description = [
       entry.work ? `Delo: ${entry.work}` : "",
@@ -1251,21 +1295,23 @@ function buildCalendarIcs(db) {
     );
   }
 
-  for (const todo of db.todos || []) {
+  for (const todo of todos) {
     if (!todo.date || todo.done) continue;
     const description = [
       todo.client ? `Stranka: ${todo.client}` : "",
+      todo.urgent ? "NUJNO: DA" : "",
+      combined ? `Za: ${assigneeNames(todo)}` : "",
       `Status: ${todoStatusDefinition(todo.status).label}`,
       todo.notes ? `Opombe: ${todo.notes}` : "",
       todo.createdByName ? `Dodal: ${todo.createdByName}` : ""
     ].filter(Boolean).join("\n");
-    lines.push("BEGIN:VEVENT", `UID:todo-${todo.id}@indus-ure`, `DTSTAMP:${stamp}`);
+    lines.push("BEGIN:VEVENT", `UID:todo-${combined ? (todo.assignmentGroupId || todo.id) : todo.id}@indus-ure`, `DTSTAMP:${stamp}`);
     if (todo.start && todo.end) {
       lines.push(`DTSTART;TZID=Europe/Ljubljana:${icsDateTime(todo.date, todo.start)}`, `DTEND;TZID=Europe/Ljubljana:${icsDateTime(todo.date, todo.end)}`);
     } else {
       lines.push(`DTSTART;VALUE=DATE:${icsDate(todo.date)}`, `DTEND;VALUE=DATE:${addDays(todo.date, 1)}`);
     }
-    lines.push(`SUMMARY:${icsEscape(`TODO: ${todo.title}`)}`, `DESCRIPTION:${icsEscape(description)}`, "END:VEVENT");
+    lines.push(`SUMMARY:${icsEscape(`${todo.urgent ? "NUJNO: " : ""}TODO: ${todo.title}`)}`, `DESCRIPTION:${icsEscape(description)}`, "END:VEVENT");
   }
 
   lines.push("END:VCALENDAR");
@@ -1394,12 +1440,13 @@ function entryToGoogleEvent(entry) {
 function todoToGoogleEvent(todo) {
   const status = todoStatusDefinition(todo.status);
   const event = {
-    summary: `TODO: ${todo.title}`,
+    summary: `${todo.urgent ? "NUJNO: " : ""}TODO: ${todo.title}`,
     description: googleEventDescription({
       Vrsta: "opravilo",
       Stranka: todo.client || "",
       Davcna: todo.clientId || "",
-      Status: status.label
+      Status: status.label,
+      Nujno: todo.urgent ? "DA" : "NE"
     }, todo.notes),
     colorId: status.googleColorId,
     extendedProperties: { private: indusGooglePrivateProperties(todo, "todo") }
@@ -1548,7 +1595,7 @@ function todoFromGoogleEvent(event, user, db = {}, existing = null) {
   const status = todoStatusFromGoogle(parsed.fields.status, existing?.status || "open");
   return {
     id: existing?.id || crypto.randomUUID(),
-    title: String(event.summary || "Google opravilo").replace(/^TODO:\s*/i, ""),
+    title: String(event.summary || "Google opravilo").replace(/^NUJNO:\s*/i, "").replace(/^TODO:\s*/i, ""),
     date,
     start: allDay ? "" : time(startDateTime),
     end: allDay ? "" : time(endDateTime),
@@ -1557,7 +1604,8 @@ function todoFromGoogleEvent(event, user, db = {}, existing = null) {
     notes: parsed.notes,
     status,
     order: Number(existing?.order || 0),
-    done: false,
+    urgent: String(parsed.fields.nujno || "").toUpperCase() === "DA" || /^NUJNO:/i.test(String(event.summary || "")),
+    done: status === "execution",
     billingHourlyRate: status === "execution"
       ? nonnegativeNumber(existing?.billingHourlyRate, defaultHourlyRateForUser(db, user.id), 10_000)
       : nonnegativeNumber(existing?.billingHourlyRate, null, 10_000),
@@ -2131,8 +2179,12 @@ async function handleApi(req, res) {
       const user = await requireUser(req, res);
       if (!user) return;
       const db = await readDbAsync();
+      const baseUrl = absoluteBaseUrl(req);
+      const workerUrl = `${baseUrl}/calendar.ics?token=${encodeURIComponent(db.calendarFeeds[user.id])}`;
       sendJson(res, 200, {
-        url: `${absoluteBaseUrl(req)}/calendar.ics?token=${encodeURIComponent(db.calendarToken)}`
+        url: workerUrl,
+        workerUrl,
+        combinedUrl: user.role === "boss" ? `${baseUrl}/calendar.ics?token=${encodeURIComponent(db.calendarFeeds.bossCombined)}` : ""
       });
       return;
     }
@@ -2482,6 +2534,7 @@ async function handleApi(req, res) {
         });
       });
       await writeDbAsync(db);
+      setTimeout(queueBackgroundGoogleSync, 0);
       sendJson(res, 200, {
         todos: visibleTodosForUser(db, user),
         assignedTo: assigneeIds.map((id) => publicDirectoryUser(db.users[id]))
@@ -2830,6 +2883,7 @@ async function handleApi(req, res) {
       db.todos = db.todos.filter((item) => !oldGroupIds.has(item.id));
       db.todos.push(...updatedGroup);
       await writeDbAsync(db);
+      setTimeout(queueBackgroundGoogleSync, 0);
       sendJson(res, 200, { todos: visibleTodosForUser(db, user) });
       return;
     }
@@ -2871,11 +2925,18 @@ async function handleCalendarFeed(req, res) {
   const url = new URL(req.url, `http://${req.headers.host}`);
   try {
     const db = await readDbAsync();
-    if (url.searchParams.get("token") !== db.calendarToken) {
+    const token = url.searchParams.get("token") || "";
+    const combined = token === db.calendarFeeds?.bossCombined;
+    const worker = Object.entries(db.calendarFeeds || {})
+      .find(([id, value]) => id !== "bossCombined" && value === token)?.[0] || "";
+    if (!combined && !worker) {
       sendText(res, 403, "Forbidden", "text/plain");
       return;
     }
-    sendText(res, 200, buildCalendarIcs(db), "text/calendar");
+    sendText(res, 200, buildCalendarIcs(db, {
+      userId: worker,
+      combined
+    }), "text/calendar");
   } catch (error) {
     console.error("Napaka koledarskega feeda:", error);
     const message = NODE_ENV === "production" ? "Napaka na strezniku." : (error.message || "Napaka na strezniku.");
@@ -3021,6 +3082,7 @@ module.exports = {
   isIndusOwnedGoogleEvent,
   pushGoogleItem,
   reconcileGoogleCalendar,
+  buildCalendarIcs,
   canManageEntry,
   canManageTodo,
   sourceTodoForNewEntry,
