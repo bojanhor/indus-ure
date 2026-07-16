@@ -119,14 +119,17 @@ test("nova stranka sprejme e-posto in telefon ter ju pripravi za Google Sheet", 
 });
 test("novo opravilo ponuja aliase iz prvega stolpca Google Sheeta", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
-  assert.match(html, /id="todoFormClient" list="clientList"/);
+  assert.match(html, /id="todoFormClient"[^>]*role="combobox"/);
+  assert.match(html, /id="todoFormClientSuggestions" role="listbox"/);
   assert.match(html, /<datalist id="clientList"><\/datalist>/);
-  assert.match(html, /const suggestions = new Map\(\)/);
+  assert.match(html, /function clientSuggestionValues\(\)/);
   assert.match(html, /state\.clients\.forEach\(\(client\) => add\(client\.search, client\.name\)\)/);
   assert.match(html, /if \(!key \|\| suggestions\.has\(key\)\) return/);
+  assert.match(html, /todoFormClient"\)\.addEventListener\("input", renderTodoClientSuggestions\)/);
+  assert.match(html, /todoFormClientSuggestions"\)\.addEventListener\("pointerdown"/);
+  assert.match(html, /event\.key === "ArrowDown" \|\| event\.key === "ArrowUp"/);
   assert.match(html, /function findTodoClient\(value\)/);
   assert.match(html, /client\?\.search \|\| todo\.client/);
-  assert.doesNotMatch(html, /pageTodoClient|todoClientSuggestions/);
 });
 
 test("spletne povezave v naslovu opravila so varno klikljive", () => {

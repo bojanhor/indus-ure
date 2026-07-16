@@ -1646,6 +1646,51 @@
 
     .modal-body textarea { min-height: 82px; resize: vertical; }
 
+    .todo-client-field {
+      display: grid;
+      gap: 6px;
+      min-width: 0;
+    }
+
+    .client-autocomplete {
+      position: relative;
+      min-width: 0;
+    }
+
+    .client-autocomplete-list {
+      position: absolute;
+      z-index: 140;
+      top: calc(100% + 4px);
+      left: 0;
+      right: 0;
+      max-height: min(42vh, 300px);
+      overflow-y: auto;
+      padding: 4px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      box-shadow: 0 14px 32px rgba(25, 40, 34, 0.2);
+      overscroll-behavior: contain;
+    }
+
+    .client-autocomplete-option {
+      width: 100%;
+      min-height: 44px;
+      display: grid;
+      gap: 2px;
+      padding: 8px 10px;
+      border-radius: 6px;
+      background: #fff;
+      color: var(--ink);
+      text-align: left;
+      touch-action: manipulation;
+    }
+
+    .client-autocomplete-option strong { overflow-wrap: anywhere; }
+    .client-autocomplete-option small { color: var(--muted); overflow-wrap: anywhere; }
+    .client-autocomplete-option:hover,
+    .client-autocomplete-option.active { background: #e4eee9; }
+
     .audit-box {
       padding: 10px 12px;
       border: 1px solid var(--line);
@@ -2348,9 +2393,13 @@
           <label>Ura do
             <input id="todoFormEnd" type="time">
           </label>
-          <label>Stranka
-            <input id="todoFormClient" list="clientList" placeholder="Alias ali naziv stranke">
-          </label>
+          <div class="todo-client-field">
+            <label for="todoFormClient">Stranka</label>
+            <div class="client-autocomplete" id="todoFormClientAutocomplete">
+              <input id="todoFormClient" type="text" placeholder="Alias ali naziv stranke" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="todoFormClientSuggestions">
+              <div class="client-autocomplete-list hidden" id="todoFormClientSuggestions" role="listbox"></div>
+            </div>
+          </div>
         </div>
         <div class="todo-status-direct-field">
           <span class="todo-status-direct-label">Status</span>
@@ -2617,6 +2666,8 @@
       todoLockHeartbeat: null,
       todoLockRenewPromise: null,
       todoLockPending: false,
+      todoClientSuggestions: [],
+      todoClientSuggestionIndex: -1,
       token: localStorage.getItem(tokenKey) || ""
     };
 
@@ -3209,6 +3260,64 @@
       const matches = state.clients.filter((client) => client.clientId && client.search
         && normalizeText(client.search).includes(input));
       return matches.length === 1 ? matches[0] : null;
+    }
+
+    function clientSuggestionValues() {
+      const suggestions = new Map();
+      const add = (value, label = "") => {
+        const clean = String(value || "").trim();
+        const key = normalizeText(clean);
+        if (!key || suggestions.has(key)) return;
+        suggestions.set(key, { value: clean, label: String(label || "").trim() });
+      };
+      state.clients.forEach((client) => add(client.search, client.name));
+      allClientRecords().forEach((client) => add(client.name, client.search));
+      return [...suggestions.values()];
+    }
+
+    function hideTodoClientSuggestions() {
+      state.todoClientSuggestions = [];
+      state.todoClientSuggestionIndex = -1;
+      $("todoFormClientSuggestions").classList.add("hidden");
+      $("todoFormClient").setAttribute("aria-expanded", "false");
+    }
+
+    function renderTodoClientSuggestions() {
+      const query = normalizeText($("todoFormClient").value);
+      const matches = clientSuggestionValues()
+        .filter((item) => !query || normalizeText(`${item.value} ${item.label}`).includes(query))
+        .slice(0, 12);
+      state.todoClientSuggestions = matches;
+      state.todoClientSuggestionIndex = matches.length ? 0 : -1;
+      const list = $("todoFormClientSuggestions");
+      list.innerHTML = matches.map((item, index) => `
+        <button class="client-autocomplete-option ${index === 0 ? "active" : ""}" type="button" role="option" data-index="${index}" aria-selected="${index === 0}">
+          <strong>${escapeHtml(item.value)}</strong>
+          ${item.label && normalizeText(item.label) !== normalizeText(item.value) ? `<small>${escapeHtml(item.label)}</small>` : ""}
+        </button>
+      `).join("");
+      list.classList.toggle("hidden", !matches.length);
+      $("todoFormClient").setAttribute("aria-expanded", String(Boolean(matches.length)));
+    }
+
+    function setTodoClientSuggestionIndex(index) {
+      const count = state.todoClientSuggestions.length;
+      if (!count) return;
+      state.todoClientSuggestionIndex = (index + count) % count;
+      $("todoFormClientSuggestions").querySelectorAll("[data-index]").forEach((button, buttonIndex) => {
+        const active = buttonIndex === state.todoClientSuggestionIndex;
+        button.classList.toggle("active", active);
+        button.setAttribute("aria-selected", String(active));
+        if (active) button.scrollIntoView({ block: "nearest" });
+      });
+    }
+
+    function chooseTodoClientSuggestion(index) {
+      const item = state.todoClientSuggestions[index];
+      if (!item) return;
+      $("todoFormClient").value = item.value;
+      hideTodoClientSuggestions();
+      $("todoFormClient").focus();
     }
 
     function validateTodo(todo) {
@@ -3871,6 +3980,7 @@
       $("todoFormEnd").value = todo.end || "";
       $("todoFormDate").value = todo.date || "";
       $("todoFormClient").value = client?.search || todo.client || $("reportClient").value || "";
+      hideTodoClientSuggestions();
       $("todoFormTask").value = todo.title || "";
       $("todoFormNotes").value = todo.notes || "";
       $("todoFormStatus").value = todoStatus(todo.status || "open").id;
@@ -4365,16 +4475,7 @@
     }
 
     function refreshClientList() {
-      const suggestions = new Map();
-      const add = (value, label = "") => {
-        const clean = String(value || "").trim();
-        const key = normalizeText(clean);
-        if (!key || suggestions.has(key)) return;
-        suggestions.set(key, { value: clean, label });
-      };
-      state.clients.forEach((client) => add(client.search, client.name));
-      allClientRecords().forEach((client) => add(client.name));
-      $("clientList").innerHTML = [...suggestions.values()]
+      $("clientList").innerHTML = clientSuggestionValues()
         .map((item) => `<option value="${escapeHtml(item.value)}" ${item.label && normalizeText(item.label) !== normalizeText(item.value) ? `label="${escapeHtml(item.label)}"` : ""}></option>`)
         .join("");
     }
@@ -4875,6 +4976,27 @@
       $("todoFormStatus").value = button.dataset.status;
       updateTodoFormStatus();
     });
+    $("todoFormClient").addEventListener("focus", renderTodoClientSuggestions);
+    $("todoFormClient").addEventListener("input", renderTodoClientSuggestions);
+    $("todoFormClient").addEventListener("keydown", (event) => {
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        if ($("todoFormClientSuggestions").classList.contains("hidden")) renderTodoClientSuggestions();
+        setTodoClientSuggestionIndex(state.todoClientSuggestionIndex + (event.key === "ArrowDown" ? 1 : -1));
+      } else if (event.key === "Enter" && state.todoClientSuggestionIndex >= 0 && !$("todoFormClientSuggestions").classList.contains("hidden")) {
+        event.preventDefault();
+        chooseTodoClientSuggestion(state.todoClientSuggestionIndex);
+      } else if (event.key === "Escape") {
+        hideTodoClientSuggestions();
+      }
+    });
+    $("todoFormClient").addEventListener("blur", () => setTimeout(hideTodoClientSuggestions, 120));
+    $("todoFormClientSuggestions").addEventListener("pointerdown", (event) => {
+      const option = event.target.closest("[data-index]");
+      if (!option) return;
+      event.preventDefault();
+      chooseTodoClientSuggestion(Number(option.dataset.index));
+    });
     $("todoForm").addEventListener("submit", (event) => {
       event.preventDefault();
       saveTodoFromDialog().catch((error) => alert(error.message));
@@ -4995,6 +5117,7 @@
     $("googleCalendar").addEventListener("click", () => syncGoogle(true));
     $("downloadBackup").addEventListener("click", downloadBackup);
     $("todoDialog").addEventListener("close", releaseTodoEditLockForDialog);
+    $("todoDialog").addEventListener("close", hideTodoClientSuggestions);
     $("photoEditorCanvas").addEventListener("pointerdown", (event) => {
       const editor = state.photoEditor;
       if (!editor) return;
