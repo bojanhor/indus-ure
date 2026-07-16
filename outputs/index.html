@@ -2659,8 +2659,11 @@
         <label>Ime opravila
           <input id="todoFormTask" type="text" placeholder="Ime opravila" required>
         </label>
-        <label>Opis
-          <textarea id="todoFormNotes" placeholder="Dalj&#353;i opis naloge"></textarea>
+        <label>Opis del
+          <textarea id="todoFormNotes" placeholder="Vpi&#353;i, kaj to&#269;no se je delalo"></textarea>
+        </label>
+        <label>Material
+          <textarea id="todoFormMaterial" placeholder="Vpi&#353;i porabljen material"></textarea>
         </label>
         <label class="todo-form-urgent" id="todoFormUrgentField">
           <input id="todoFormUrgent" type="checkbox">
@@ -2694,7 +2697,18 @@
       </div>
     </form>
   </dialog>
-
+  <dialog id="projectCompletionDialog">
+    <form method="dialog">
+      <div class="modal-head"><h3>Zaklju&#269;ek projekta</h3></div>
+      <div class="modal-body">
+        <p>Ali je projekt v celoti zaklju&#269;en (tudi najmanj&#353;e podrobnosti)?</p>
+        <div class="actions">
+          <button type="button" class="danger" id="deleteCompletedProject">Da, izbri&#353;i opravilo</button>
+          <button type="button" class="primary" id="rescheduleProject">Ne, prestavi opravilo na drug dan</button>
+        </div>
+      </div>
+    </form>
+  </dialog>
   <dialog id="attachmentPreviewDialog">
     <form method="dialog">
       <div class="modal-head">
@@ -2904,6 +2918,8 @@
       clients: [],
       selectedClient: "",
       todoHoursSourceId: "",
+      todoHoursSavedSourceId: "",
+      todoHoursCompletionSourceId: "",
       dayTimelineDate: "",
       dayTimelineDrafts: new Map(),
       dayTimelineMinuteHeight: 1,
@@ -4734,7 +4750,8 @@
       $("todoFormClient").value = client?.search || todo.client || $("reportClient").value || "";
       hideTodoClientSuggestions();
       $("todoFormTask").value = todo.title || "";
-      $("todoFormNotes").value = todo.notes || "";
+      $("todoFormNotes").value = state.todoHoursSourceId ? "" : todo.notes || "";
+      $("todoFormMaterial").value = state.todoHoursSourceId ? "" : todo.material || "";
       $("todoFormStatus").value = todoStatus(todo.status || "open").id;
       renderTodoStatusChoices(todo.status || "open");
       $("todoFormUrgent").checked = Boolean(todo.urgent);
@@ -4771,6 +4788,7 @@
         clientId: client?.clientId || client?.id || "",
         title: $("todoFormTask").value.trim(),
         notes: $("todoFormNotes").value.trim(),
+        material: $("todoFormMaterial").value.trim(),
         status: $("todoFormStatus").value,
         order: existing?.order || nextTodoOrder(),
         assigneeIds,
@@ -4791,6 +4809,7 @@
         return;
       }
       await saveTodoToServer(todo);
+      if (state.todoHoursSourceId) state.todoHoursSavedSourceId = state.todoHoursSourceId;
       $("todoDialog").close();
     }
 
@@ -4806,7 +4825,6 @@
         client: source.client,
         clientId: source.clientId,
         title: source.title,
-        notes: source.notes,
         date: source.date,
         start: "",
         end: "",
@@ -4816,6 +4834,25 @@
         billingHourlyRate: workerDefaultHourlyRate(activeWorkerId()),
         billingKm: 0
       });
+    }
+    async function handleHoursProjectCompletion(deleteProject) {
+      const sourceId = state.todoHoursCompletionSourceId;
+      state.todoHoursCompletionSourceId = "";
+      $("projectCompletionDialog").close();
+      const source = state.todos.find((todo) => todo.id === sourceId);
+      if (!source) return;
+      if (!deleteProject) {
+        await openTodoDialog(source);
+        return;
+      }
+      if (!(await acquireTodoEditLockForDialog(sourceId))) return;
+      try {
+        await deleteTodoFromServer(sourceId);
+        clearTodoEditLockState();
+      } catch (error) {
+        await releaseTodoEditLockForDialog();
+        throw error;
+      }
     }
     async function deleteTodoFromDialog() {
       const id = $("todoFormId").value;
@@ -5808,6 +5845,8 @@
     });
     $("deleteTodoFromDialog").addEventListener("click", () => deleteTodoFromDialog().catch((error) => alert(error.message)));
     $("writeHoursFromTodo").addEventListener("click", () => openHoursTodoFromCurrent().catch((error) => alert(error.message)));
+    $("deleteCompletedProject").addEventListener("click", () => handleHoursProjectCompletion(true).catch((error) => alert(error.message)));
+    $("rescheduleProject").addEventListener("click", () => handleHoursProjectCompletion(false).catch((error) => alert(error.message)));
     $("todoFormPhotoInput").addEventListener("change", async (event) => {
       try {
         const remaining = Math.max(0, 8 - state.todoDialogPhotos.length);
@@ -5961,6 +6000,12 @@
       const sourceId = state.todoHoursSourceId;
       state.todoHoursSourceId = "";
       if (!sourceId) return;
+      if (state.todoHoursSavedSourceId === sourceId) {
+        state.todoHoursSavedSourceId = "";
+        state.todoHoursCompletionSourceId = sourceId;
+        $("projectCompletionDialog").showModal();
+        return;
+      }
       setTimeout(() => {
         const source = state.todos.find((todo) => todo.id === sourceId);
         if (source && !$("todoDialog").open) {

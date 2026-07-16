@@ -1237,6 +1237,7 @@ function cleanTodo(input) {
     client: String(input.client || "").trim(),
     clientId: String(input.clientId || "").trim(),
     notes: String(input.notes || "").trim(),
+    material: String(input.material || "").trim(),
     status: input.status === "billing" ? "execution" : TODO_STATUSES.has(input.status) ? input.status : "open",
     order: Number.isFinite(Number(input.order)) ? Number(input.order) : 0,
     urgent: ["execution", "billing"].includes(input.status) ? false : Boolean(input.urgent),
@@ -1576,6 +1577,7 @@ function todoToGoogleEvent(todo, clientTaxId = "") {
       Vrsta: "opravilo",
       Stranka: todo.client || "",
       Davcna: clientTaxId || (isUsableTaxId(todo.clientId) ? todo.clientId : ""),
+      Material: todo.material || "",
       Status: status.label,
       Nujno: todo.urgent ? "DA" : "NE"
     }, todo.notes),
@@ -1734,6 +1736,7 @@ function todoFromGoogleEvent(event, user, db = {}, existing = null) {
     client: clientRef.client,
     clientId: clientRef.clientId,
     notes: parsed.notes,
+    material: parsed.isIndus ? parsed.fields.material || "" : existing?.material || "",
     status,
     order: Number(existing?.order || 0),
     urgent: String(parsed.fields.nujno || "").toUpperCase() === "DA" || /^NUJNO:/i.test(String(event.summary || "")),

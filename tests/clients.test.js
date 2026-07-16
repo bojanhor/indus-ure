@@ -419,7 +419,8 @@ test("mobilni preklopnik je na vrhu in ne prekriva konca strani", () => {
 test("opravilo ima loceno ime in dolg vecvrsticni opis", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
   assert.match(html, /<label>Ime opravila\s*<input id="todoFormTask" type="text"/);
-  assert.match(html, /<label>Opis\s*<textarea id="todoFormNotes"/);
+  assert.match(html, /<label>Opis del\s*<textarea id="todoFormNotes" placeholder="Vpi&#353;i, kaj to&#269;no se je delalo"/);
+  assert.match(html, /<label>Material\s*<textarea id="todoFormMaterial"/);
   assert.match(html, /<details class="todo-description-details">\s*<summary>Opis<\/summary>/);
   assert.match(html, /<div class="todo-description todo-meta">\$\{linkifyText\(todo\.notes\)\}<\/div>/);
   assert.doesNotMatch(html, /<details class="todo-description-details" open>/);
@@ -627,4 +628,15 @@ test("globalni iskalnik vrne samo dogodke stranke pa imajo svoj zavihek", () => 
   assert.match(html, /const visibleRecords = query \? records\.filter\(\(client\) => clientMatches\(client, query\)\) : records;/);
   assert.match(html, /function renderSearch\(\)[\s\S]*?const results = contextTodos\(\)/);
   assert.doesNotMatch(html, /function renderSearch\(\)[\s\S]*?const clientResults/);
+});
+test("po vpisu ur uporabnik potrdi zakljucek projekta", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  assert.match(html, /id="projectCompletionDialog"/);
+  assert.match(html, /Ali je projekt v celoti zaklju&#269;en \(tudi najmanj&#353;e podrobnosti\)\?/);
+  assert.match(html, /id="deleteCompletedProject">Da, izbri&#353;i opravilo/);
+  assert.match(html, /id="rescheduleProject">Ne, prestavi opravilo na drug dan/);
+  assert.match(html, /if \(state\.todoHoursSourceId\) state\.todoHoursSavedSourceId = state\.todoHoursSourceId/);
+  assert.match(html, /async function handleHoursProjectCompletion\(deleteProject\)/);
+  assert.match(html, /await deleteTodoFromServer\(sourceId\)/);
+  assert.match(html, /await openTodoDialog\(source\)/);
 });
