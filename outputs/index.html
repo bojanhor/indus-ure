@@ -2647,7 +2647,7 @@
             </div>
           </div>
         </div>
-        <div class="todo-status-direct-field">
+        <div class="todo-status-direct-field" id="todoFormStatusField">
           <span class="todo-status-direct-label">Status</span>
           <input id="todoFormStatus" type="hidden" value="open">
           <div class="todo-status-mobile-options" id="todoFormStatusChoices" aria-label="Status opravila"></div>
@@ -2874,9 +2874,9 @@
 
     function renderTodoStatusChoices(selected) {
       const current = todoStatus(selected).id;
-      const availableStatuses = current === "execution"
-        ? [todoStatus("execution")]
-        : todoStatusDefinitions.filter((status) => $("todoFormId").value || status.id !== "execution");
+      const availableStatuses = state.todoHoursSourceId || current === "execution"
+        ? []
+        : todoStatusDefinitions.filter((status) => status.id !== "execution");
       $("todoFormStatusChoices").innerHTML = availableStatuses.map((status) => `
         <button class="todo-status-choice todo-status-color ${todoStatusClass(status.id)}" type="button" data-status="${status.id}" aria-pressed="${status.id === current}" ${current === "execution" ? "disabled" : ""}>
           ${status.label}
@@ -4714,7 +4714,8 @@
     function updateTodoFormStatus() {
       updateTodoStatusControl($("todoFormStatus"));
       const completed = $("todoFormStatus").value === "execution";
-      $("todoFormTitle").textContent = completed ? "Pi\u0161i ure na projekt" : $("todoFormId").value ? "Uredi opravilo" : "Novo opravilo";
+      $("todoFormStatusField").classList.toggle("hidden", Boolean(state.todoHoursSourceId) || completed);
+      $("todoFormTitle").textContent = state.todoHoursSourceId ? "Pi\u0161i ure na projekt" : $("todoFormId").value ? "Uredi opravilo" : "Novo opravilo";
       const showBilling = isAdminView() && completed;
       $("todoFormBilling").classList.toggle("hidden", !showBilling);
       $("todoFormUrgentField").classList.toggle("hidden", completed);
@@ -4745,6 +4746,7 @@
       $("todoFormHourlyRate").value = editing ? todoHourlyRate(todo) : workerDefaultHourlyRate(activeWorkerId());
       $("todoFormBillingKm").value = Number(todo.billingKm || 0);
       $("deleteTodoFromDialog").classList.toggle("hidden", !editing);
+      $("writeHoursFromTodo").classList.toggle("hidden", !editing || Boolean(state.todoHoursSourceId) || todoStatus(todo.status).id === "execution");
       renderTodoFormAudit(todo);
       $("todoFormPhotoInput").value = "";
       $("todoDialog").showModal();
