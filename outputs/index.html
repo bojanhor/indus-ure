@@ -2541,6 +2541,7 @@
         <div class="todo-panel">
           <div class="todo-actions-bar">
             <button class="primary" id="newTodoButton" type="button">Dodaj opravilo</button>
+            <button class="secondary" id="writeHoursButton" type="button">Piši ure na projekt</button>
           </div>
           <div class="todo-head">
             <strong id="todoPanelTitle">Vsa opravila</strong>
@@ -2675,7 +2676,7 @@
           <label>Ura do
             <input id="todoFormEnd" type="time">
           </label>
-          <div class="todo-client-field">
+          <div class="todo-client-field" id="todoFormClientField">
             <label for="todoFormClient">Stranka</label>
             <div class="client-autocomplete" id="todoFormClientAutocomplete">
               <input id="todoFormClient" type="text" placeholder="Alias ali naziv stranke" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="todoFormClientSuggestions">
@@ -2716,7 +2717,7 @@
             </label>
           </div>
         </div>
-        <div class="todo-form-attachments">
+        <div class="todo-form-attachments" id="todoFormAttachments">
           <strong>Priloge</strong>
           <div id="todoFormPhotoList"></div>
           <label class="secondary add-photo">Dodaj slike ali PDF
@@ -2925,7 +2926,7 @@
 
     function renderTodoStatusChoices(selected) {
       const current = todoStatus(selected).id;
-      const availableStatuses = state.todoHoursSourceId || current === "execution"
+      const availableStatuses = state.todoHoursSourceId || state.todoStandaloneHours || current === "execution"
         ? []
         : todoStatusDefinitions.filter((status) => status.id !== "execution");
       $("todoFormStatusChoices").innerHTML = availableStatuses.map((status) => `
@@ -2955,12 +2956,14 @@
       clients: [],
       selectedClient: "",
       todoHoursSourceId: "",
+      todoStandaloneHours: false,
       todoHoursSourceOriginal: null,
       todoHoursSavedSourceId: "",
       todoHoursCompletionSourceId: "",
       dayTimelineDate: "",
       dayTimelineDrafts: new Map(),
       dayTimelineHoursWarning: null,
+      dayTimelineHoursResolvedSourceId: "",
       todoHoursFixingTime: false,
       dayTimelineMinuteHeight: 1,
       dayTimelinePointers: new Map(),
@@ -3312,6 +3315,7 @@
       document.querySelectorAll(".admin-only").forEach((element) => element.classList.toggle("hidden", !admin));
       document.querySelectorAll(".worker-only").forEach((element) => element.classList.toggle("hidden", admin));
       $("newTodoButton").classList.toggle("hidden", admin);
+      $("writeHoursButton").classList.toggle("hidden", admin);
       document.querySelectorAll(".admin-entry-field").forEach((element) => element.classList.toggle("hidden", !admin));
       const canSyncOwnGoogle = admin || activeWorkerId() === state.user?.id;
       $("googleCalendar").classList.toggle("hidden", !canSyncOwnGoogle);
@@ -3329,6 +3333,7 @@
       state.reportClient = "";
       state.reportClientId = "";
       state.todoHoursSourceId = "";
+      state.todoStandaloneHours = false;
       if ($("todoDialog").open) $("todoDialog").close();
       if ($("debtDialog").open) $("debtDialog").close();
       if (!isAdminView() && ["clients", "report"].includes(state.view)) state.view = "todos";
@@ -3945,7 +3950,7 @@
         const editHint = document.createElement("button");
         editHint.className = "day-edit-hint";
         editHint.type = "button";
-        editHint.textContent = "\\u270e";
+        editHint.textContent = String.fromCodePoint(0x270e);
         editHint.title = "Odpri dnevni pregled";
         editHint.setAttribute("aria-label", "Odpri dnevni pregled");
         editHint.addEventListener("click", (event) => { event.stopPropagation(); openDayTimeline(key); });
@@ -4033,6 +4038,9 @@
       return calendarTodos().filter((todo) => todo.date === state.dayTimelineDate).map((todo) => {
         const draft = state.dayTimelineDrafts.get(todo.id);
         return draft ? { ...todo, ...draft } : todo;
+      }).sort((a, b) => {
+        const startDifference = (dayTimelineMinutes(a.start) ?? Infinity) - (dayTimelineMinutes(b.start) ?? Infinity);
+        return startDifference || (dayTimelineMinutes(a.end) ?? Infinity) - (dayTimelineMinutes(b.end) ?? Infinity) || a.title.localeCompare(b.title, "sl");
       });
     }
 
@@ -4053,6 +4061,12 @@
     function isDayTimelineHoursWarning(todo) {
       const warning = state.dayTimelineHoursWarning;
       return Boolean(warning && (warning.todoId === todo.id || (warning.assignmentGroupId && warning.assignmentGroupId === todo.assignmentGroupId)));
+    }
+
+    function resolveDayTimelineHoursWarning(todo) {
+      if (!isDayTimelineHoursWarning(todo)) return;
+      state.dayTimelineHoursResolvedSourceId = state.dayTimelineHoursWarning.sourceId;
+      state.dayTimelineHoursWarning = null;
     }
 
     async function openTodoFromDayTimeline(todo) {
@@ -4354,7 +4368,9 @@
           start: dayTimelineTime(interaction.startMinute),
           end: dayTimelineTime(interaction.endMinute)
         });
+        resolveDayTimelineHoursWarning(todo);
         clearTodoEditLockState();
+        renderDayTimeline();
       } catch (error) {
         await releaseTodoEditLockForDialog();
         renderDayTimeline();
@@ -4968,23 +4984,30 @@
     }
 
     function applyMealDefaults() {
-      if ($("todoFormId").value || $("todoFormTask").value.trim()) return;
       const now = new Date();
-      const startMinutes = now.getHours() * 60 + now.getMinutes();
-      const endMinutes = Math.min(1439, startMinutes + 45);
+      const startMinutes = Math.min(23 * 60, now.getHours() * 60 + now.getMinutes());
       $("todoFormTask").value = "Malica";
-      $("todoFormDate").value = dateKey(now);
+      if (!$("todoFormDate").value) $("todoFormDate").value = dateKey(now);
       $("todoFormStart").value = dayTimelineTime(startMinutes);
-      $("todoFormEnd").value = dayTimelineTime(endMinutes);
+      $("todoFormEnd").value = dayTimelineTime(startMinutes + 45);
+      $("todoFormClient").value = "";
+      $("todoFormNotes").value = "";
+      $("todoFormMaterial").value = "";
+      state.todoDialogPhotos = [];
+      renderTodoFormPhotos();
+      renderTodoFormAssignees([activeWorkerId()], [activeWorkerId()]);
     }
     function updateTodoFormStatus() {
       updateTodoStatusControl($("todoFormStatus"));
       const completed = $("todoFormStatus").value === "execution";
-      $("todoFormStatusField").classList.toggle("hidden", Boolean(state.todoHoursSourceId) || completed);
-      $("todoFormTitle").textContent = state.todoHoursSourceId ? "Pi\u0161i ure na projekt" : $("todoFormId").value ? "Uredi opravilo" : "Novo opravilo";
+      const meal = $("todoFormStatus").value === "meal";
+      $("todoFormStatusField").classList.toggle("hidden", Boolean(state.todoHoursSourceId) || state.todoStandaloneHours || completed);
+      $("todoFormTitle").textContent = state.todoHoursSourceId || state.todoStandaloneHours ? "Pi\u0161i ure na projekt" : $("todoFormId").value ? "Uredi opravilo" : "Novo opravilo";
+      ["todoFormClientField", "todoFormAssigneeField", "todoFormAttachments"].forEach((id) => $(id).classList.toggle("hidden", meal));
+      ["todoFormTask", "todoFormNotes", "todoFormMaterial"].forEach((id) => $(id).closest("label").classList.toggle("hidden", meal));
       const showBilling = isAdminView() && completed;
-      $("todoFormBilling").classList.toggle("hidden", !showBilling);
-      $("todoFormUrgentField").classList.toggle("hidden", completed);
+      $("todoFormBilling").classList.toggle("hidden", !showBilling || meal);
+      $("todoFormUrgentField").classList.toggle("hidden", completed || meal);
       if (completed) $("todoFormUrgent").checked = false;
     }
 
@@ -5003,6 +5026,7 @@
       const editing = Boolean(todo.id);
       if (editing && !(await acquireTodoEditLockForDialog(todo.id))) return;
       state.todoHoursSourceId = String(todo._hoursSourceId || "");
+      state.todoStandaloneHours = Boolean(todo._standaloneHours);
       const client = findClient(todo.clientId || todo.client);
       $("todoFormId").value = todo.id || "";
       $("todoFormStart").value = todo.start || "";
@@ -5037,7 +5061,9 @@
       const id = $("todoFormId").value;
       const existing = id ? state.todos.find((todo) => todo.id === id) : null;
       const client = findTodoClient($("todoFormClient").value);
+      const meal = $("todoFormStatus").value === "meal";
       const assigneeIds = selectedTodoFormAssignees();
+      if (meal) assigneeIds.splice(0, assigneeIds.length, activeWorkerId());
       const hourlyRate = parseBillingNumber($("todoFormHourlyRate").value, 10_000);
       const billingKm = parseBillingNumber($("todoFormBillingKm").value, 1_000_000);
       const todo = {
@@ -5046,11 +5072,11 @@
         start: $("todoFormStart").value,
         end: $("todoFormEnd").value,
         date: $("todoFormDate").value,
-        client: client?.name || normalizeClientName($("todoFormClient").value),
-        clientId: client?.clientId || client?.id || "",
-        title: $("todoFormTask").value.trim(),
-        notes: $("todoFormNotes").value.trim(),
-        material: $("todoFormMaterial").value.trim(),
+        client: meal ? "" : client?.name || normalizeClientName($("todoFormClient").value),
+        clientId: meal ? "" : client?.clientId || client?.id || "",
+        title: meal ? "Malica" : $("todoFormTask").value.trim(),
+        notes: meal ? "" : $("todoFormNotes").value.trim(),
+        material: meal ? "" : $("todoFormMaterial").value.trim(),
         status: $("todoFormStatus").value,
         order: existing?.order || nextTodoOrder(),
         assigneeIds,
@@ -5062,6 +5088,9 @@
         billingKm,
         photos: state.todoDialogPhotos
       };
+      if (meal) {
+        todo.photos = [];
+      }
       if (state.todoHoursSourceId && (!todo.start || !todo.end)) {
         if (!todo.date) {
           alert("Za popravljanje delovnih ur izberi datum.");
@@ -5127,6 +5156,16 @@
         billingKm: 0
       });
     }
+    async function openStandaloneHoursDialog() {
+      await openTodoDialog({
+        _standaloneHours: true,
+        date: dateKey(new Date()),
+        status: "execution",
+        urgent: false,
+        photos: []
+      });
+    }
+
     async function handleHoursProjectCompletion(deleteProject) {
       const sourceId = state.todoHoursCompletionSourceId;
       const sourceOriginal = state.todoHoursSourceOriginal;
@@ -6036,6 +6075,7 @@
       }
     });
     $("newTodoButton").addEventListener("click", () => startTodoForDate(dateKey(new Date())));
+    $("writeHoursButton").addEventListener("click", () => openStandaloneHoursDialog().catch((error) => alert(error.message)));
 
     document.querySelectorAll(".debt-stat").forEach((button) => {
       button.addEventListener("click", () => openDebtDialog({ person: button.dataset.debtPerson || "ibro" }));
@@ -6283,9 +6323,11 @@
       $("dayTimelineScroll").classList.remove("is-panning");
       state.dayTimelineDrafts.clear();
       const hoursWarning = state.dayTimelineHoursWarning;
+      const hoursSourceId = hoursWarning?.sourceId || state.dayTimelineHoursResolvedSourceId;
       state.dayTimelineHoursWarning = null;
-      if (hoursWarning?.sourceId) {
-        state.todoHoursCompletionSourceId = hoursWarning.sourceId;
+      state.dayTimelineHoursResolvedSourceId = "";
+      if (hoursSourceId) {
+        state.todoHoursCompletionSourceId = hoursSourceId;
         $("projectCompletionDialog").showModal();
       }
     });
