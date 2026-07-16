@@ -46,7 +46,6 @@ const TODO_STATUS_DEFINITIONS = Object.freeze({
   open: { label: "Čaka", googleColorId: "8" },
   in_progress: { label: "V teku", googleColorId: "9" },
   execution: { label: "Zaklju\u010deno", googleColorId: "10" },
-  billing: { label: "Obračun", googleColorId: "2" },
   order: { label: "Naroči", googleColorId: "11" },
   order_car: { label: "Naroči Avto", googleColorId: "11" },
   order_warehouse: { label: "Naroči Sklad.", googleColorId: "11" },
@@ -351,9 +350,18 @@ function normalizeDb(db = {}) {
     changed = true;
   }
 
-  db.clients = db.clients
+  const clientsBeforeNormalization = JSON.stringify(db.clients);
+  const normalizedClients = db.clients
     .map((client) => normalizeStoredClient(client))
     .filter((client) => client.name);
+  const clientsById = new Map();
+  normalizedClients.forEach((client) => {
+    if (!clientsById.has(client.clientId)) clientsById.set(client.clientId, client);
+  });
+  db.clients = [...clientsById.values()];
+  if (JSON.stringify(db.clients) !== clientsBeforeNormalization) {
+    changed = true;
+  }
 
   const clientByText = new Map();
   for (const client of db.clients) {
@@ -448,9 +456,9 @@ function normalizeDb(db = {}) {
       next.fromHome = false;
       changed = true;
     }
-    if (!next.clientId && next.client) {
-      const client = resolveClient(next.client);
-      if (client?.clientId) {
+    if (next.clientId || next.client) {
+      const client = resolveClient(next.clientId) || resolveClient(next.client);
+      if (client?.clientId && (next.clientId !== client.clientId || next.client !== client.name)) {
         next.clientId = client.clientId;
         next.client = client.name;
         changed = true;
@@ -475,7 +483,10 @@ function normalizeDb(db = {}) {
 
   db.todos = db.todos.map((todo, index) => {
     const next = { ...todo };
-    if (!TODO_STATUSES.has(next.status)) {
+    if (next.status === "billing") {
+      next.status = "execution";
+      changed = true;
+    } else if (!TODO_STATUSES.has(next.status)) {
       next.status = "open";
       changed = true;
     }
@@ -506,9 +517,9 @@ function normalizeDb(db = {}) {
       next.syncUser = next.createdBy || "ibro";
       changed = true;
     }
-    if (!next.clientId && next.client) {
-      const client = resolveClient(next.client);
-      if (client?.clientId) {
+    if (next.clientId || next.client) {
+      const client = resolveClient(next.clientId) || resolveClient(next.client);
+      if (client?.clientId && (next.clientId !== client.clientId || next.client !== client.name)) {
         next.clientId = client.clientId;
         next.client = client.name;
         changed = true;
@@ -1028,12 +1039,24 @@ function lockedFieldChanged(oldEntry, newEntry) {
     || Boolean(oldEntry.fromHome) !== Boolean(newEntry.fromHome);
 }
 
-function attachResolvedClient(db, item) {
+function attachResolvedClient(db, item, { createAdHoc = false, user = null } = {}) {
   if (!item.client && !item.clientId) return item;
   const wanted = String(item.clientId || item.client || "").trim().toLowerCase();
-  const client = (db.clients || []).find((row) => [row.clientId, row.id, row.name, row.search, row.taxId]
+  let client = (db.clients || []).find((row) => [row.clientId, row.id, row.name, row.search, row.taxId]
     .filter(Boolean)
     .some((value) => String(value).trim().toLowerCase() === wanted));
+  if (!client && createAdHoc && item.client) {
+    const alias = String(item.client).trim();
+    client = normalizeStoredClient({
+      name: alias,
+      search: alias,
+      source: "ad-hoc",
+      needsReview: true,
+      createdBy: user?.id || "system",
+      createdAt: new Date().toISOString()
+    });
+    db.clients.push(client);
+  }
   if (!client?.clientId) return item;
   return { ...item, clientId: client.clientId || client.id, client: client.name };
 }
@@ -1105,7 +1128,7 @@ function cleanEntry(input) {
 function validateEntry(entry) {
   if (!entry.date || !entry.start || !entry.end) return "Manjka datum ali cas.";
   if (!["errand", "vacation"].includes(entry.status) && !entry.client) return "Manjka stranka.";
-  if (!["errand", "vacation"].includes(entry.status) && !isUsableTaxId(entry.clientId)) return "Stranka nima veljavne davcne stevilke.";
+  if (!["errand", "vacation"].includes(entry.status) && !entry.clientId) return "Stranke ni bilo mogoce identificirati.";
   if (!/^\d{4}-\d{2}-\d{2}$/.test(entry.date)) return "Datum ni pravilen.";
   if (!/^\d{2}:\d{2}$/.test(entry.start) || !/^\d{2}:\d{2}$/.test(entry.end)) return "Cas ni pravilen.";
   if (entry.end <= entry.start) return "Ura do mora biti kasneje kot ura od.";
@@ -1122,7 +1145,7 @@ function cleanTodo(input) {
     client: String(input.client || "").trim(),
     clientId: String(input.clientId || "").trim(),
     notes: String(input.notes || "").trim(),
-    status: TODO_STATUSES.has(input.status) ? input.status : "open",
+    status: input.status === "billing" ? "execution" : TODO_STATUSES.has(input.status) ? input.status : "open",
     order: Number.isFinite(Number(input.order)) ? Number(input.order) : 0,
     urgent: Boolean(input.urgent),
     syncUser: cleanUserId(input.syncUser),
@@ -1145,9 +1168,10 @@ function cleanTodo(input) {
 
 function cleanClient(input) {
   const taxId = normalizeTaxId(input.taxId || input.clientId || input.id);
+  const requestedId = String(input.clientId || input.id || "").trim();
   return normalizeStoredClient({
-    id: taxId,
-    clientId: taxId,
+    id: requestedId,
+    clientId: requestedId,
     name: String(input.name || "").trim(),
     search: String(input.search || input.name || "").trim(),
     email: String(input.email || "").trim(),
@@ -1156,8 +1180,12 @@ function cleanClient(input) {
     postal: String(input.postal || "").trim(),
     country: String(input.country || "").trim(),
     taxId,
-    vatPayer: Boolean(input.vatPayer)
-  }, { preserveLegacyId: false });
+    vatPayer: Boolean(input.vatPayer),
+    source: input.source || (taxId ? "local" : "ad-hoc"),
+    needsReview: input.needsReview === undefined ? !taxId : Boolean(input.needsReview),
+    createdBy: input.createdBy || "system",
+    createdAt: input.createdAt
+  });
 }
 
 function cleanDebt(input) {
@@ -1171,8 +1199,7 @@ function cleanDebt(input) {
 
 function validateClient(client) {
   if (!client.name) return "Manjka naziv stranke.";
-  if (!client.taxId) return "Manjka davcna stevilka stranke.";
-  if (!isUsableTaxId(client.taxId)) return "Davcna stevilka ni veljavna.";
+  if (client.taxId && !isUsableTaxId(client.taxId)) return "Davcna stevilka ni veljavna.";
   return "";
 }
 
@@ -1183,9 +1210,9 @@ function validateDebt(debt) {
   return "";
 }
 
-function validateTodo(todo) {
+function validateTodo(todo, { requireClientId = false } = {}) {
   if (!todo.title) return "Manjka opis opravila.";
-  if (todo.client && !isUsableTaxId(todo.clientId)) return "Stranka nima veljavne davcne stevilke.";
+  if (requireClientId && todo.client && !todo.clientId) return "Stranke ni bilo mogoce identificirati.";
   if (todo.date && !/^\d{4}-\d{2}-\d{2}$/.test(todo.date)) return "Datum opravila ni pravilen.";
   if (Boolean(todo.start) !== Boolean(todo.end)) return "Vnesi obe uri: od in do.";
   if ((todo.start || todo.end) && !todo.date) return "Za opravilo z uro vnesi tudi datum.";
@@ -1350,6 +1377,7 @@ function todoStatusFromGoogle(value, fallback = "open") {
   if (match) return match[0];
   if (normalized === "odprto") return "open";
   if (normalized === "izvedba") return "execution";
+  if (normalized === "obračun" || normalized === "obracun") return "execution";
   return TODO_STATUSES.has(fallback) ? fallback : "open";
 }
 
@@ -1412,12 +1440,17 @@ function entrySummary(entry) {
   return `${entry.client || "Stranka"} - ${title}`;
 }
 
-function entryToGoogleEvent(entry) {
+function clientTaxIdForItem(db, item) {
+  const client = (db.clients || []).find((candidate) => candidate.clientId === item.clientId);
+  return client?.taxId || "";
+}
+
+function entryToGoogleEvent(entry, clientTaxId = "") {
   const event = {
     summary: entrySummary(entry),
     description: googleEventDescription({
       Stranka: entry.client || "",
-      Davcna: entry.clientId || "",
+      Davcna: clientTaxId || (isUsableTaxId(entry.clientId) ? entry.clientId : ""),
       Delo: entry.work || "",
       Material: entry.material || "",
       Sodelavci: entry.people || "",
@@ -1437,14 +1470,14 @@ function entryToGoogleEvent(entry) {
   };
 }
 
-function todoToGoogleEvent(todo) {
+function todoToGoogleEvent(todo, clientTaxId = "") {
   const status = todoStatusDefinition(todo.status);
   const event = {
     summary: `${todo.urgent ? "NUJNO: " : ""}TODO: ${todo.title}`,
     description: googleEventDescription({
       Vrsta: "opravilo",
       Stranka: todo.client || "",
-      Davcna: todo.clientId || "",
+      Davcna: clientTaxId || (isUsableTaxId(todo.clientId) ? todo.clientId : ""),
       Status: status.label,
       Nujno: todo.urgent ? "DA" : "NE"
     }, todo.notes),
@@ -1504,10 +1537,11 @@ async function ensureGoogleCalendar(calendar, user) {
 
 function resolveGoogleClient(db, parsed, summary, existing = {}) {
   const clients = db.clients || [];
-  const taxId = normalizeTaxId(parsed.fields.davcna || existing.clientId || "");
-  let client = isUsableTaxId(taxId)
-    ? clients.find((item) => normalizeTaxId(item.clientId || item.taxId) === taxId)
-    : null;
+  const taxId = normalizeTaxId(parsed.fields.davcna || "");
+  let client = existing.clientId ? clients.find((item) => item.clientId === existing.clientId) : null;
+  client = client || (isUsableTaxId(taxId)
+    ? clients.find((item) => normalizeTaxId(item.taxId) === taxId)
+    : null);
   const requestedName = String(parsed.fields.stranka || existing.client || "").trim().toLowerCase();
   if (!client && requestedName) {
     client = clients.find((item) => [item.name, item.search].some((value) => String(value || "").trim().toLowerCase() === requestedName));
@@ -1547,7 +1581,7 @@ function entryFromGoogleEvent(event, user, db = {}, existing = null) {
     ? workFromGoogleSummary(event.summary, clientRef.client)
     : parsed.fields.delo || existing?.work || workFromGoogleSummary(event.summary, clientRef.client);
   const now = new Date().toISOString();
-  const hasClient = isUsableTaxId(clientRef.clientId);
+  const hasClient = Boolean(clientRef.clientId);
   return {
     id: existing?.id || crypto.randomUUID(),
     date,
@@ -1795,8 +1829,8 @@ async function reconcileGoogleCalendar(calendar, calendarId, db, user) {
       continue;
     }
     const requestBody = record.type === "entry"
-      ? entryToGoogleEvent(record.item)
-      : todoToGoogleEvent(record.item);
+      ? entryToGoogleEvent(record.item, clientTaxIdForItem(db, record.item))
+      : todoToGoogleEvent(record.item, clientTaxIdForItem(db, record.item));
     if (record.remoteEvent && googleEventMatchesRequest(record.remoteEvent, requestBody)) {
       markGoogleItemSynced(record.item, record.remoteEvent, requestBody, record.type);
       continue;
@@ -1839,8 +1873,13 @@ async function syncClientsWithSheets(db, user) {
   const rows = remote.data.values || [];
   const previousClients = db.clients || [];
   const parsed = parseSheetClients(rows, previousClients);
-  const references = rekeyClientReferences(db, previousClients, parsed.clients);
-  db.clients = parsed.clients;
+  const syncedIds = new Set(parsed.clients.map((client) => client.clientId));
+  const localClients = previousClients
+    .map((client) => normalizeStoredClient(client))
+    .filter((client) => client.source !== "google-sheets" && !syncedIds.has(client.clientId));
+  const nextClients = [...parsed.clients, ...localClients];
+  const references = rekeyClientReferences(db, previousClients, nextClients);
+  db.clients = nextClients;
   return {
     imported: parsed.total,
     total: parsed.total,
@@ -2386,7 +2425,7 @@ async function handleApi(req, res) {
         sendJson(res, 403, { error: "Samo sef lahko dodaja ali spreminja stranke." });
         return;
       }
-      const client = cleanClient(await readBody(req));
+      let client = cleanClient(await readBody(req));
       const validation = validateClient(client);
       if (validation) {
         sendJson(res, 400, { error: validation });
@@ -2394,6 +2433,26 @@ async function handleApi(req, res) {
       }
       const db = await readDbAsync();
       const current = db.users[user.id];
+      const clientText = [client.name, client.search].map((value) => String(value || "").trim().toLowerCase());
+      const existingIndex = db.clients.findIndex((row) => row.clientId === client.clientId
+        || (client.taxId && row.taxId === client.taxId)
+        || [row.name, row.search].some((value) => clientText.includes(String(value || "").trim().toLowerCase())));
+      if (existingIndex >= 0) {
+        client = normalizeStoredClient({
+          ...db.clients[existingIndex],
+          ...client,
+          id: db.clients[existingIndex].clientId,
+          clientId: db.clients[existingIndex].clientId
+        });
+        db.clients[existingIndex] = client;
+      } else {
+        db.clients.push(client);
+      }
+      if (!client.taxId) {
+        await writeDbAsync(db);
+        sendJson(res, 200, { clients: db.clients, sheetWrite: { action: "pending" }, sync: null });
+        return;
+      }
       const sheetWrite = await upsertClientInSheets(client, current);
       const sync = await syncClientsWithSheets(db, current);
       await writeDbAsync(db);
@@ -2505,13 +2564,14 @@ async function handleApi(req, res) {
       }
       const now = new Date().toISOString();
       const db = await readDbAsync();
-      todo = attachResolvedClient(db, todo);
-      const resolvedValidation = validateTodo(todo);
+      todo = attachResolvedClient(db, todo, { createAdHoc: true, user });
+      const resolvedValidation = validateTodo(todo, { requireClientId: true });
       if (resolvedValidation) {
         sendJson(res, 400, { error: resolvedValidation });
         return;
       }
-      const maxOrder = db.todos.reduce((max, item) => Math.max(max, Number(item.order || 0)), 0);
+      const minOrder = db.todos.reduce((min, item) => Math.min(min, Number(item.order || 0)), 0);
+      const newOrder = todo.order || minOrder - 1;
       const assigneeIds = todoAssigneesForRequest(user, body.assigneeIds || todo.syncUser, db.users);
       const assignmentGroupId = crypto.randomUUID();
       assigneeIds.forEach((assigneeId, index) => {
@@ -2523,7 +2583,7 @@ async function handleApi(req, res) {
           assignmentGroupId,
           photos: stampTodoPhotos(todo, user),
           syncUser: assigneeId,
-          order: (todo.order || maxOrder + 1) + index,
+          order: newOrder + index,
           createdBy: user.id,
           createdByName: user.name,
           createdAt: now,
@@ -2763,8 +2823,8 @@ async function handleApi(req, res) {
         return;
       }
       const db = await readDbAsync();
-      todo = attachResolvedClient(db, todo);
-      const resolvedValidation = validateTodo(todo);
+      todo = attachResolvedClient(db, todo, { createAdHoc: true, user });
+      const resolvedValidation = validateTodo(todo, { requireClientId: true });
       if (resolvedValidation) {
         sendJson(res, 400, { error: resolvedValidation });
         return;
@@ -2822,12 +2882,10 @@ async function handleApi(req, res) {
       releaseTodoAssignmentEditLock(db, previousTodo, user, editLockToken);
       const assignmentGroupId = previousTodo.assignmentGroupId || crypto.randomUUID();
       const now = new Date().toISOString();
-      const maxOrder = db.todos.reduce((max, item) => Math.max(max, Number(item.order || 0)), 0);
       const sharedPhotos = stampTodoPhotos(todo, user);
       const assignmentsChanged = [...currentAssigneeIds].sort().join(",") !== [...assigneeIds].sort().join(",");
       const assigneeNames = assigneeIds.map((assigneeId) => db.users[assigneeId]?.name || assigneeId).join(", ");
       const updatedGroup = [];
-      let addedOrder = maxOrder + 1;
 
       for (const assigneeId of assigneeIds) {
         const existing = existingByAssignee.get(assigneeId);
@@ -2868,7 +2926,7 @@ async function handleApi(req, res) {
           assignmentGroupId,
           photos: sharedPhotos.map((photo) => ({ ...photo })),
           syncUser: assigneeId,
-          order: addedOrder++,
+          order: todo.order,
           createdBy: previousTodo.createdBy || user.id,
           createdByName: previousTodo.createdByName || user.name,
           createdAt: previousTodo.createdAt || now,

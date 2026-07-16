@@ -6,6 +6,7 @@ const test = require("node:test");
 const {
   clientToSheetRow,
   findFirstEmptyClientRow,
+  isStableClientId,
   isUsableTaxId,
   normalizeTaxId,
   parseSheetClients,
@@ -14,7 +15,7 @@ const {
   sheetRowRange
 } = require("../outputs/client-sync");
 
-test("davcna stevilka je kanonicni ID stranke", () => {
+test("davcna stevilka je locena od stabilnega internega ID stranke", () => {
   assert.equal(normalizeTaxId(" tax:si 123-45678 "), "SI12345678");
   assert.equal(isUsableTaxId("SI12345678"), true);
   assert.equal(isUsableTaxId("29433959"), true);
@@ -34,25 +35,41 @@ test("Google Sheet A-I se prebere brez spreminjanja njegove strukture", () => {
   assert.equal(result.usable, 1);
   assert.equal(result.missingTax, 1);
   assert.equal(result.duplicateTax, 2);
-  assert.equal(result.clients[0].clientId, "SI12345678");
+  assert.equal(isStableClientId(result.clients[0].clientId), true);
   assert.equal(result.clients[0].search, "Novak");
   assert.equal(result.clients[0].email, "info@novak.si");
-  assert.equal(result.clients[1].clientId, "");
+  assert.equal(isStableClientId(result.clients[1].clientId), true);
 });
 
-test("GUID reference se migrira na davcno stevilko", () => {
+test("stara referenca se migrira na stabilni ID", () => {
   const guid = "3956478d-92e9-425d-8a1e-3d58c7937ded";
   const db = {
     entries: [{ id: "e1", client: "Stari Novak", clientId: guid }],
     todos: [{ id: "t1", client: "NOVAK d.o.o.", clientId: "" }]
   };
   const previous = [{ id: guid, clientId: guid, name: "Stari Novak", search: "Novak" }];
-  const clients = [{ id: "SI12345678", clientId: "SI12345678", taxId: "SI12345678", name: "NOVAK d.o.o.", search: "Stari Novak" }];
+  const stableId = "9e512d4c-0fc7-4fd3-a723-73e277bb65c1";
+  const clients = [{ id: stableId, clientId: stableId, taxId: "SI12345678", name: "NOVAK d.o.o.", search: "Stari Novak" }];
   const result = rekeyClientReferences(db, previous, clients);
   assert.equal(result.updated, 2);
   assert.equal(result.unresolved.length, 0);
-  assert.equal(db.entries[0].clientId, "SI12345678");
-  assert.equal(db.todos[0].clientId, "SI12345678");
+  assert.equal(db.entries[0].clientId, stableId);
+  assert.equal(db.todos[0].clientId, stableId);
+});
+
+test("sprememba podatkov v isti Sheets vrstici ohrani stabilni ID", () => {
+  const stableId = "b56af468-0b15-4af8-ae30-698105615319";
+  const existing = [{
+    id: stableId, clientId: stableId, name: "Stari naziv", search: "Stari vzdevek",
+    taxId: "SI12345678", sheetRow: 2, source: "google-sheets"
+  }];
+  const result = parseSheetClients([
+    ["Vzdevek", "Naziv", "", "", "", "", "", "Davcna", "DDV"],
+    ["Nov vzdevek", "Nov naziv", "", "", "", "", "", "SI87654321", "NE"]
+  ], existing);
+  assert.equal(result.clients[0].clientId, stableId);
+  assert.equal(result.clients[0].name, "Nov naziv");
+  assert.equal(result.clients[0].taxId, "SI87654321");
 });
 
 test("nova stranka se zapise v devet stolpcev baze strank", () => {
@@ -71,8 +88,9 @@ test("novo opravilo ponuja aliase iz prvega stolpca Google Sheeta", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
   assert.match(html, /id="todoFormClient" list="clientList"/);
   assert.match(html, /<datalist id="clientList"><\/datalist>/);
-  assert.match(html, /client\.search !== client\.name/);
-  assert.match(html, /<option value="\$\{escapeHtml\(client\.search\)\}" label="\$\{escapeHtml\(client\.name\)\}"><\/option>/);
+  assert.match(html, /const suggestions = new Map\(\)/);
+  assert.match(html, /state\.clients\.forEach\(\(client\) => add\(client\.search, client\.name\)\)/);
+  assert.match(html, /if \(!key \|\| suggestions\.has\(key\)\) return/);
   assert.match(html, /function findTodoClient\(value\)/);
   assert.match(html, /client\?\.search \|\| todo\.client/);
   assert.doesNotMatch(html, /pageTodoClient|todoClientSuggestions/);
@@ -394,7 +412,7 @@ test("glavni preklop pogleda je na vrhu in na telefonu ne prekriva vsebine", () 
   assert.match(html, /\$\("todayDayNumber"\)\.textContent = todayDate\.getDate\(\)/);
   assert.match(html, /document\.querySelectorAll\("\.calendar-view"\)[\s\S]*?view !== "calendar"/);
   assert.match(html, /\.month-title \{\s*grid-template-columns: 44px minmax\(0, 1fr\) 44px 44px;\s*gap: 8px;/);
-  assert.match(html, /\.topbar-view-row \{\s*display: grid;\s*grid-template-columns: minmax\(0, 1fr\) 44px;/);
+  assert.match(html, /\.topbar-view-row \{\s*display: grid;[\s\S]*?grid-template-columns: minmax\(0, 1fr\) 44px;/);
   assert.match(html, /\.view-switch \{\s*display: flex;\s*width: 100%;\s*position: static;/);
   assert.doesNotMatch(html, /\.view-switch\s*\{[^}]*position:\s*fixed/);
   assert.doesNotMatch(html, /padding-bottom:\s*calc\(104px/);
@@ -453,7 +471,15 @@ test("skupni obrazec opravila uporablja strezniski zaklep", () => {
 test("opravila imajo rocno in datumsko razvrscanje ter neobvezni uri", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
   assert.match(html, /id="todoSortMode"[\s\S]*?value="manual">RO&#268;NO[\s\S]*?value="date">DATUMSKO/);
+  assert.match(html, /value="order">NARO&#268;I/);
+  assert.match(html, /value="completed">ZAKLJU&#268;ENO/);
+  assert.match(html, /value="open">&#268;AKA/);
+  assert.match(html, /value="in_progress">V TEKU/);
   assert.match(html, /if \(state\.todoSortMode === "date"\) return list\.filter\(\(todo\) => todo\.date\)\.sort\(todoDateSort\)/);
+  assert.match(html, /orderStatuses = new Set\(\["order", "order_car", "order_warehouse", "add_to_car"\]\)/);
+  assert.match(html, /state\.todoSortMode === "open"[\s\S]*?todo\.status === "open"/);
+  assert.match(html, /state\.todoSortMode === "in_progress"[\s\S]*?todo\.status === "in_progress"/);
+  assert.match(html, /state\.todoSortMode === "completed"[\s\S]*?counts\.get\(bKey\)/);
   assert.match(html, /const reorderable = state\.todoSortMode === "manual" && !todo\.done/);
   assert.match(html, /id="todoFormStart" type="time"/);
   assert.match(html, /id="todoFormEnd" type="time"/);
@@ -462,6 +488,8 @@ test("opravila imajo rocno in datumsko razvrscanje ter neobvezni uri", () => {
   assert.match(html, /Za opravilo z uro vnesi tudi datum/);
   assert.match(html, /\$\("todoFormStart"\)\.value = ""/);
   assert.match(html, /localStorage\.setItem\(todoSortModeKey, state\.todoSortMode\)/);
+  assert.match(html, /return \(orders\.length \? Math\.min\(\.\.\.orders\) : 0\) - 1/);
+  assert.doesNotMatch(html, /id: "billing", label: "Obra/);
 });
 
 test("opravila so privzeti levi pogled in mobilni statusi so barvni", () => {

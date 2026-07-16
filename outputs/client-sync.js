@@ -1,6 +1,21 @@
 "use strict";
 
+const crypto = require("crypto");
+
 const DEFAULT_CLIENT_SHEET_RANGE = "'Baza Strank'!A:I";
+const CLIENT_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function isStableClientId(value) {
+  return CLIENT_ID_PATTERN.test(String(value || "").trim());
+}
+
+function createClientId() {
+  return crypto.randomUUID();
+}
+
+function normalizedText(value) {
+  return String(value || "").trim().toLocaleLowerCase("sl");
+}
 
 function normalizeTaxId(value) {
   return String(value || "")
@@ -22,15 +37,16 @@ function taxIdFromClient(client = {}) {
   return isUsableTaxId(legacy) ? legacy : "";
 }
 
-function normalizeStoredClient(client = {}, { preserveLegacyId = true } = {}) {
+function normalizeStoredClient(client = {}) {
   const taxId = taxIdFromClient(client);
   const legacyId = String(client.clientId || client.id || "").trim();
-  const usable = Boolean(taxId && !client.syncError);
-  const clientId = usable ? taxId : preserveLegacyId ? legacyId : "";
+  const clientId = isStableClientId(legacyId) ? legacyId : createClientId();
+  const syncError = String(client.syncError || "").trim();
+  const source = String(client.source || (client.sheetRow || client.createdBy === "google-sheets" ? "google-sheets" : "local"));
   return {
     id: clientId,
     clientId,
-    name: String(client.name || "").trim(),
+    name: String(client.name || client.search || "").trim(),
     search: String(client.search || client.name || "").trim(),
     email: String(client.email || "").trim(),
     address: String(client.address || "").trim(),
@@ -39,7 +55,9 @@ function normalizeStoredClient(client = {}, { preserveLegacyId = true } = {}) {
     country: String(client.country || "").trim(),
     taxId,
     vatPayer: Boolean(client.vatPayer),
-    syncError: String(client.syncError || "").trim(),
+    source,
+    needsReview: client.needsReview === undefined ? Boolean(!taxId || syncError) : Boolean(client.needsReview),
+    syncError,
     sheetRow: Number(client.sheetRow || 0),
     createdBy: client.createdBy || "system",
     createdAt: client.createdAt || new Date().toISOString()
@@ -51,8 +69,6 @@ function sheetRowToClient(row, rowNumber) {
   if (!name) return null;
   const taxId = normalizeTaxId(row?.[7]);
   return {
-    id: taxId,
-    clientId: taxId,
     name,
     search: String(row?.[0] || name).trim(),
     email: String(row?.[2] || "").trim(),
@@ -62,10 +78,7 @@ function sheetRowToClient(row, rowNumber) {
     country: String(row?.[6] || "").trim(),
     taxId,
     vatPayer: /^(DA|YES|TRUE|1)$/i.test(String(row?.[8] || "").trim()),
-    syncError: "",
-    sheetRow: rowNumber,
-    createdBy: "google-sheets",
-    createdAt: new Date().toISOString()
+    sheetRow: rowNumber
   };
 }
 
@@ -81,35 +94,51 @@ function parseSheetClients(rows = [], existingClients = []) {
 
   const existingByTax = new Map();
   const existingByName = new Map();
-  existingClients.forEach((client) => {
+  const existingByRow = new Map();
+  existingClients.map((client) => normalizeStoredClient(client)).forEach((client) => {
     const taxId = taxIdFromClient(client);
     if (taxId) existingByTax.set(taxId, client);
-    if (client.name) existingByName.set(String(client.name).trim().toLowerCase(), client);
+    [client.name, client.search].filter(Boolean).forEach((value) => existingByName.set(normalizedText(value), client));
+    if (client.sheetRow) existingByRow.set(client.sheetRow, client);
   });
 
   const issues = [];
-  const clients = records.map((client) => {
+  const seenSignatures = new Set();
+  const clients = [];
+  records.forEach((client) => {
     let syncError = "";
     if (!client.taxId) syncError = "V Google Sheetu manjka davcna stevilka.";
     else if (!isUsableTaxId(client.taxId)) syncError = "Davcna stevilka v Google Sheetu ni veljavna.";
     else if ((taxCounts.get(client.taxId) || 0) > 1) syncError = "Davcna stevilka se v Google Sheetu ponovi.";
     if (syncError) issues.push({ row: client.sheetRow, name: client.name, taxId: client.taxId, error: syncError });
-    const previous = existingByTax.get(client.taxId) || existingByName.get(client.name.toLowerCase()) || {};
-    return {
+    const uniqueTax = client.taxId && (taxCounts.get(client.taxId) || 0) === 1;
+    const previous = (uniqueTax ? existingByTax.get(client.taxId) : null)
+      || existingByName.get(normalizedText(client.search))
+      || existingByName.get(normalizedText(client.name))
+      || existingByRow.get(client.sheetRow)
+      || {};
+    const normalized = normalizeStoredClient({
+      ...previous,
       ...client,
-      id: syncError ? "" : client.taxId,
-      clientId: syncError ? "" : client.taxId,
+      id: previous.clientId || previous.id,
+      clientId: previous.clientId || previous.id,
+      source: "google-sheets",
+      needsReview: Boolean(syncError),
       syncError,
       createdBy: previous.createdBy || "google-sheets",
       createdAt: previous.createdAt || new Date().toISOString()
-    };
+    });
+    const signature = [normalized.taxId, normalizedText(normalized.search), normalizedText(normalized.name)].join("|");
+    if (seenSignatures.has(signature)) return;
+    seenSignatures.add(signature);
+    clients.push(normalized);
   });
 
   return {
     clients,
     issues,
-    total: clients.length,
-    usable: clients.filter((client) => client.clientId).length,
+    total: records.length,
+    usable: clients.filter((client) => !client.syncError).length,
     missingTax: issues.filter((issue) => issue.error.includes("manjka")).length,
     duplicateTax: issues.filter((issue) => issue.error.includes("ponovi")).length
   };
@@ -118,13 +147,15 @@ function parseSheetClients(rows = [], existingClients = []) {
 function rekeyClientReferences(db, previousClients, clients) {
   const previousById = new Map();
   previousClients.forEach((client) => {
-    [client.clientId, client.id].filter(Boolean).forEach((value) => previousById.set(String(value).trim().toLowerCase(), client));
+    [client.clientId, client.id].filter(Boolean).forEach((value) => previousById.set(normalizedText(value), client));
   });
+  const nextById = new Map();
   const nextByTax = new Map();
   const nextByName = new Map();
-  clients.filter((client) => client.clientId).forEach((client) => {
-    nextByTax.set(client.taxId, client);
-    [client.name, client.search].filter(Boolean).forEach((value) => nextByName.set(String(value).trim().toLowerCase(), client));
+  clients.forEach((client) => {
+    [client.clientId, client.id].filter(Boolean).forEach((value) => nextById.set(normalizedText(value), client));
+    if (client.taxId) nextByTax.set(client.taxId, client);
+    [client.name, client.search].filter(Boolean).forEach((value) => nextByName.set(normalizedText(value), client));
   });
 
   let updated = 0;
@@ -133,18 +164,19 @@ function rekeyClientReferences(db, previousClients, clients) {
     if (!item.client && !item.clientId) return;
     const rawId = String(item.clientId || "").trim();
     const normalizedId = normalizeTaxId(rawId);
-    const previous = previousById.get(rawId.toLowerCase());
+    const previous = previousById.get(normalizedText(rawId));
     const previousTax = taxIdFromClient(previous || {});
-    const match = (isUsableTaxId(normalizedId) ? nextByTax.get(normalizedId) : null)
+    const match = nextById.get(normalizedText(rawId))
+      || (isUsableTaxId(normalizedId) ? nextByTax.get(normalizedId) : null)
       || (previousTax ? nextByTax.get(previousTax) : null)
-      || nextByName.get(String(previous?.name || item.client || "").trim().toLowerCase())
-      || nextByName.get(String(previous?.search || "").trim().toLowerCase());
+      || nextByName.get(normalizedText(previous?.name || item.client))
+      || nextByName.get(normalizedText(previous?.search));
     if (!match) {
       unresolved.push({ kind, id: item.id || "", client: item.client || "", clientId: rawId });
       return;
     }
-    if (item.clientId !== match.taxId || item.client !== match.name) updated++;
-    item.clientId = match.taxId;
+    if (item.clientId !== match.clientId || item.client !== match.name) updated++;
+    item.clientId = match.clientId;
     item.client = match.name;
   };
   (db.entries || []).forEach((item) => migrate(item, "entry"));
@@ -191,7 +223,9 @@ function findFirstEmptyClientRow(rows = []) {
 module.exports = {
   DEFAULT_CLIENT_SHEET_RANGE,
   clientToSheetRow,
+  createClientId,
   findFirstEmptyClientRow,
+  isStableClientId,
   isUsableTaxId,
   normalizeStoredClient,
   normalizeTaxId,

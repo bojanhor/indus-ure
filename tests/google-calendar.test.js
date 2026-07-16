@@ -199,12 +199,20 @@ test("ura opravila zahteva datum in veljaven par od-do", () => {
   assert.equal(validateTodo({ title: "Veljavno", date: "2026-07-16", start: "08:00", end: "09:00" }), "");
 });
 
+test("stabilni UUID se v Google opis ne zapise kot davcna", () => {
+  const todo = {
+    id: "todo-client-id", title: "Preveri", date: "2026-07-16", status: "open",
+    client: "NOVAK d.o.o.", clientId: "b56af468-0b15-4af8-ae30-698105615319", syncUser: "bojan"
+  };
+  assert.equal(parseGoogleEventDescription(todoToGoogleEvent(todo).description).fields.davcna, "");
+  assert.equal(parseGoogleEventDescription(todoToGoogleEvent(todo, "SI12345678").description).fields.davcna, "SI12345678");
+});
+
 test("statusi opravil uporabljajo dogovorjene Google barve", () => {
   const expected = {
     open: ["\u010caka", "8"],
     in_progress: ["V teku", "9"],
     execution: ["Zaklju\u010deno", "10"],
-    billing: ["Obra\u010dun", "2"],
     order: ["Naro\u010di", "11"],
     order_car: ["Naro\u010di Avto", "11"],
     order_warehouse: ["Naro\u010di Sklad.", "11"],

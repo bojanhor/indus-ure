@@ -793,6 +793,17 @@
       font-weight: 800;
     }
 
+    .todo-client-group-title {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      margin-top: 14px;
+      padding: 10px 4px 6px;
+      border-bottom: 2px solid var(--line);
+      color: var(--ink);
+      font-weight: 900;
+    }
+
     .todo-item {
       display: grid;
       grid-template-columns: auto minmax(0, 1fr);
@@ -1920,6 +1931,7 @@
       .topbar-view-row {
         display: grid;
         grid-template-columns: minmax(0, 1fr) 44px;
+        position: relative;
         gap: 8px;
       }
       .tools-menu > summary {
@@ -1928,9 +1940,13 @@
         justify-content: center;
       }
       .tools-menu-panel {
-        left: auto;
+        left: 0;
         right: 0;
-        width: min(320px, calc(100vw - 48px));
+        width: 100%;
+        max-width: none;
+      }
+      .tools-menu {
+        position: static;
       }
       .view-switch {
         display: flex;
@@ -2119,7 +2135,7 @@
           <label>Search / vzdevek
             <input id="newClientSearch" placeholder="Kako jo isces">
           </label>
-          <label>Dav&#269;na &#353;tevilka (obvezno)
+          <label>Dav&#269;na &#353;tevilka (lahko pozneje)
             <input id="newClientTax" placeholder="npr. SI12345678">
           </label>
           <label>E-po&#353;ta
@@ -2163,10 +2179,14 @@
             <strong id="todoPanelTitle">Vsa opravila</strong>
             <div class="todo-head-controls">
               <label class="todo-sort-control">
-                <span>Razvr&#353;&#269;anje</span>
+                <span>Prikaz</span>
                 <select id="todoSortMode">
                   <option value="manual">RO&#268;NO</option>
                   <option value="date">DATUMSKO</option>
+                  <option value="order">NARO&#268;I</option>
+                  <option value="completed">ZAKLJU&#268;ENO</option>
+                  <option value="open">&#268;AKA</option>
+                  <option value="in_progress">V TEKU</option>
                 </select>
               </label>
               <button class="secondary" id="clearClientFilter" type="button">Vse stranke</button>
@@ -2449,6 +2469,7 @@
     const loggedInHistoryStateKey = "indusUreLoggedIn";
     const workContextKey = "indus-ure-work-context";
     const todoSortModeKey = "indus-ure-todo-sort-mode";
+    const todoSortModes = ["manual", "date", "order", "completed", "open", "in_progress"];
     const statusLabels = {
       billed: "Ze obracunano",
       warranty: "Garancija",
@@ -2458,7 +2479,6 @@
     };
 
     const todoStatusDefinitions = [
-      { id: "billing", label: "Obra\u010dun" },
       { id: "order", label: "Naro\u010di" },
       { id: "order_car", label: "Naro\u010di Avto" },
       { id: "order_warehouse", label: "Naro\u010di Sklad." },
@@ -2528,7 +2548,9 @@
       workerBilling: [],
       workContext: "",
       googleSyncing: false,
-      todoSortMode: localStorage.getItem(todoSortModeKey) === "date" ? "date" : "manual",
+      todoSortMode: todoSortModes.includes(localStorage.getItem(todoSortModeKey))
+        ? localStorage.getItem(todoSortModeKey)
+        : "manual",
       sharedDataRefreshing: false,
       todoEditLock: null,
       todoLockHeartbeat: null,
@@ -3109,10 +3131,6 @@
         alert("Vpisi, kaj je treba narediti.");
         return false;
       }
-      if (todo.client && !todo.clientId) {
-        alert("Izbrana stranka nima veljavne davcne stevilke v Google Sheets bazi.");
-        return false;
-      }
       if (Boolean(todo.start) !== Boolean(todo.end)) {
         alert("Vnesi obe uri: od in do.");
         return false;
@@ -3161,7 +3179,8 @@
     }
 
     function nextTodoOrder() {
-      return contextTodos().reduce((max, todo) => Math.max(max, Number(todo.order || 0)), 0) + 1;
+      const orders = contextTodos().map((todo) => Number(todo.order || 0));
+      return (orders.length ? Math.min(...orders) : 0) - 1;
     }
 
     function todoSort(a, b) {
@@ -3184,9 +3203,41 @@
     }
 
     function sortedTodosForMode(todos = contextTodos()) {
-      const list = [...todos];
+      let list = [...todos];
       if (state.todoSortMode === "date") return list.filter((todo) => todo.date).sort(todoDateSort);
+      if (state.todoSortMode === "order") {
+        const orderStatuses = new Set(["order", "order_car", "order_warehouse", "add_to_car"]);
+        return list.filter((todo) => orderStatuses.has(todo.status)).sort(todoSort);
+      }
+      if (state.todoSortMode === "open") return list.filter((todo) => todo.status === "open").sort(todoSort);
+      if (state.todoSortMode === "in_progress") return list.filter((todo) => todo.status === "in_progress").sort(todoSort);
+      if (state.todoSortMode === "completed") {
+        const unique = new Map();
+        list.filter((todo) => todo.status === "execution").forEach((todo) => {
+          const key = todo.assignmentGroupId || todo.id;
+          if (!unique.has(key)) unique.set(key, todo);
+        });
+        list = [...unique.values()];
+        const counts = new Map();
+        list.forEach((todo) => {
+          const key = todo.clientId || normalizeText(todo.client) || "__brez_stranke__";
+          counts.set(key, (counts.get(key) || 0) + 1);
+        });
+        return list.sort((a, b) => {
+          const aKey = a.clientId || normalizeText(a.client) || "__brez_stranke__";
+          const bKey = b.clientId || normalizeText(b.client) || "__brez_stranke__";
+          const countDifference = (counts.get(bKey) || 0) - (counts.get(aKey) || 0);
+          if (countDifference) return countDifference;
+          const clientDifference = String(a.client || "Brez stranke").localeCompare(String(b.client || "Brez stranke"), "sl");
+          return clientDifference || todoSort(a, b);
+        });
+      }
       return list.sort(todoSort);
+    }
+
+    function completedTodoGroupCount(todos, todo) {
+      const key = todo.clientId || normalizeText(todo.client) || "__brez_stranke__";
+      return todos.filter((item) => (item.clientId || normalizeText(item.client) || "__brez_stranke__") === key).length;
     }
 
     function todoDateTimeLabel(todo) {
@@ -3375,20 +3426,21 @@
     }
 
     async function addClientFromForm() {
-      const name = $("newClientName").value.trim();
-      if (!name) {
-        alert("Vpisi naziv stranke.");
+      const alias = $("newClientSearch").value.trim();
+      const name = $("newClientName").value.trim() || alias;
+      if (!name && !alias) {
+        alert("Vpisi vsaj vzdevek stranke.");
         return;
       }
       const taxId = normalizeTaxId($("newClientTax").value);
-      if (!/^(?=.{8,20}$)(?=.*\d)[A-Z0-9]+$/.test(taxId)) {
+      if (taxId && !/^(?=.{8,20}$)(?=.*\d)[A-Z0-9]+$/.test(taxId)) {
         alert("Vpisi veljavno davcno stevilko. Uporabi samo crke in stevilke, na primer SI12345678.");
         return;
       }
       const data = await saveClientToServer({
-        clientId: taxId,
+        clientId: "",
         name,
-        search: $("newClientSearch").value.trim() || name,
+        search: alias || name,
         taxId,
         email: $("newClientEmail").value.trim(),
         address: $("newClientAddress").value.trim(),
@@ -3401,7 +3453,11 @@
       $("newClientCountry").value = "Slovenija";
       $("newClientVatPayer").value = "false";
       renderClients();
-      alert(data.sheetWrite?.action === "updated" ? "Stranka je posodobljena tudi v Google Sheetu." : "Stranka je dodana tudi v Google Sheet Baza Strank.");
+      if (data.sheetWrite?.action === "pending") {
+        alert("Ad-hoc stranka je shranjena. Tajnica jo lahko pozneje dopolni.");
+      } else {
+        alert(data.sheetWrite?.action === "updated" ? "Stranka je posodobljena tudi v Google Sheetu." : "Stranka je dodana tudi v Google Sheet Baza Strank.");
+      }
     }
 
     function renderTodoItems() {
@@ -3418,7 +3474,16 @@
         return;
       }
 
+      let completedGroupKey = "";
       todos.forEach((todo) => {
+        const groupKey = todo.clientId || normalizeText(todo.client) || "__brez_stranke__";
+        if (state.todoSortMode === "completed" && groupKey !== completedGroupKey) {
+          completedGroupKey = groupKey;
+          const group = document.createElement("div");
+          group.className = "todo-client-group-title";
+          group.innerHTML = `<span>${escapeHtml(todo.client || "Brez stranke")}</span><span>${completedTodoGroupCount(todos, todo)} opravil</span>`;
+          items.appendChild(group);
+        }
         const item = document.createElement("div");
         const reorderable = state.todoSortMode === "manual" && !todo.done && !todo.urgent;
         item.dataset.todoId = todo.id;
@@ -4111,12 +4176,18 @@
       const add = (name, search = "") => {
         const clean = String(name || "").trim();
         if (!clean) return;
-        const key = normalizeText(clean);
-        const existing = map.get(key);
         const source = typeof search === "object" ? search : { search };
+        const stableId = source.clientId || source.id || "";
+        const key = stableId ? `id:${stableId}` : `name:${normalizeText(clean)}`;
+        const existing = map.get(key);
+        const previousSearch = existing?.search || "";
+        const nextSearch = source.search || "";
+        const mergedSearch = normalizeText(previousSearch) === normalizeText(nextSearch)
+          ? previousSearch || nextSearch
+          : [previousSearch, nextSearch].filter(Boolean).join(" ");
         map.set(key, {
           name: existing?.name || clean,
-          search: [existing?.search || "", source.search || ""].filter(Boolean).join(" "),
+          search: mergedSearch,
           clientId: existing?.clientId || source.clientId || source.id || "",
           id: existing?.id || source.clientId || source.id || "",
           taxId: existing?.taxId || source.taxId || "",
@@ -4203,14 +4274,18 @@
     }
 
     function refreshClientList() {
-      const clients = allClientRecords().filter((client) => client.clientId).map((client) => client.name);
-      const aliases = state.clients
-        .filter((client) => client.clientId && client.search && client.search !== client.name)
-        .map((client) => `<option value="${escapeHtml(client.search)}" label="${escapeHtml(client.name)}"></option>`);
-      $("clientList").innerHTML = [
-        ...clients.map((client) => `<option value="${escapeHtml(client)}"></option>`),
-        ...aliases
-      ].join("");
+      const suggestions = new Map();
+      const add = (value, label = "") => {
+        const clean = String(value || "").trim();
+        const key = normalizeText(clean);
+        if (!key || suggestions.has(key)) return;
+        suggestions.set(key, { value: clean, label });
+      };
+      state.clients.forEach((client) => add(client.search, client.name));
+      allClientRecords().forEach((client) => add(client.name));
+      $("clientList").innerHTML = [...suggestions.values()]
+        .map((item) => `<option value="${escapeHtml(item.value)}" ${item.label && normalizeText(item.label) !== normalizeText(item.value) ? `label="${escapeHtml(item.label)}"` : ""}></option>`)
+        .join("");
     }
 
     function currentMonthKey() {
@@ -4615,7 +4690,7 @@
     $("workContextSelect").addEventListener("change", (event) => setWorkContext(event.target.value));
     $("todoSortMode").value = state.todoSortMode;
     $("todoSortMode").addEventListener("change", (event) => {
-      state.todoSortMode = event.target.value === "date" ? "date" : "manual";
+      state.todoSortMode = todoSortModes.includes(event.target.value) ? event.target.value : "manual";
       localStorage.setItem(todoSortModeKey, state.todoSortMode);
       renderTodos();
     });
