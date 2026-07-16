@@ -2395,7 +2395,7 @@
             <button class="view-btn active" id="todosViewBtn" type="button">Opravila</button>
             <button class="view-btn" id="calendarViewBtn" type="button">Koledar</button>
             <button class="view-btn worker-only" id="billingViewBtn" type="button">Obra&#269;un</button>
-            <button class="view-btn admin-only" id="clientsViewBtn" type="button">Stranke</button>
+            <button class="view-btn" id="clientsViewBtn" type="button">Stranke</button>
             <button class="view-btn admin-only" id="reportViewBtn" type="button">Obra&#269;un</button>
           </div>
           <details class="tools-menu" id="toolsMenu">
@@ -2438,7 +2438,7 @@
         </div>
         <div class="tools">
           <div class="search-control">
-            <input class="search" id="clientSearch" placeholder="I&#353;&#269;i stranko, opravilo ali opis">
+            <input class="search" id="clientSearch" placeholder="I&#353;&#269;i opravilo ali opis">
             <button class="search-clear hidden" id="clearClientSearch" type="button" aria-label="Po&#269;isti iskanje" title="Po&#269;isti iskanje">&times;</button>
           </div>
         </div>
@@ -2454,7 +2454,10 @@
       </section>
 
       <section class="panel report-view clients-screen view-hidden">
-        <div class="report-controls">
+        <div class="search-control">
+          <input class="search" id="clientsSearch" placeholder="I&#353;&#269;i po bazi strank">
+        </div>
+        <div class="report-controls admin-only">
           <label>Naziv stranke
             <input id="newClientName" placeholder="Naziv stranke">
           </label>
@@ -2526,7 +2529,7 @@
       </section>
 
       <section class="panel report-view report-screen view-hidden">
-        <div class="report-controls">
+        <div class="report-controls admin-only">
           <label>Od
             <input id="reportFrom" type="date">
           </label>
@@ -3611,7 +3614,7 @@
 
     function setView(view) {
       if (isAdminView() && view === "billing") view = "todos";
-      if (!isAdminView() && ["clients", "report"].includes(view)) view = "todos";
+      if (!isAdminView() && view === "report") view = "todos";
       state.view = view;
       document.querySelectorAll(".calendar-view").forEach((element) => {
         element.classList.toggle("view-hidden", view !== "calendar");
@@ -3792,7 +3795,7 @@
             const item = document.createElement("button");
             item.type = "button";
             item.className = `day-todo todo-status-color ${todoStatusClass(todo.status)} ${todo.done ? "done" : ""}`;
-            item.innerHTML = `${todo.start && todo.end ? `<small>${escapeHtml(todo.start)}&ndash;${escapeHtml(todo.end)}</small><br>` : ""}${todo.urgent ? "<strong>NUJNO</strong><br>" : ""}${escapeHtml(todo.title)}${todo.client ? `<br><small>${escapeHtml(todo.client)}</small>` : ""}${isAdminView() ? `<br><small>Za: ${escapeHtml(todoAssigneeNames(todo))}</small>` : ""}<br><small>${todoStatus(todo.status).label}</small>`;
+            item.innerHTML = `${todo.start && todo.end ? `<small>${escapeHtml(todo.start)}&ndash;${escapeHtml(todo.end)}</small><br>` : ""}${todo.urgent ? "<strong>NUJNO</strong><br>" : ""}${escapeHtml(todo.title)}${todo.client ? `<br><small>${escapeHtml(todo.client)}</small>` : ""}<br><small>Za: ${escapeHtml(todoAssigneeNames(todo))}</small><br><small>${todoStatus(todo.status).label}</small>`;
             item.addEventListener("click", () => openTodoDialog(todo));
             day.appendChild(item);
           });
@@ -3947,7 +3950,7 @@
         meta.className = "day-timeline-event-meta";
         meta.textContent = dayTimelineTime(startMinute) + "-" + dayTimelineTime(endMinute)
           + (todo.client ? " | " + todo.client : "")
-          + (isAdminView() ? " | Za: " + todoAssigneeNames(todo) : "");
+          + " | Za: " + todoAssigneeNames(todo);
         const endHandle = document.createElement("span");
         endHandle.className = "day-resize-handle end";
         endHandle.dataset.mode = "resize-end";
@@ -4245,9 +4248,11 @@
       const list = $("clientsList");
       if (!list) return;
       const records = allClientRecords();
-      const usable = records.filter((client) => client.clientId).length;
-      $("clientsCount").textContent = `${records.length} strank, ${usable} uporabnih`;
-      list.innerHTML = records.map((client) => `
+      const query = $("clientsSearch")?.value.trim() || "";
+      const visibleRecords = query ? records.filter((client) => clientMatches(client, query)) : records;
+      const usable = visibleRecords.filter((client) => client.clientId).length;
+      $("clientsCount").textContent = `${visibleRecords.length}${query ? ` od ${records.length}` : ""} strank, ${usable} uporabnih`;
+      list.innerHTML = visibleRecords.map((client) => `
         <div class="client-row">
           <div>
             <strong>${escapeHtml(client.name)}</strong>
@@ -4257,9 +4262,8 @@
           </div>
           <button class="secondary open-client" type="button" data-client-id="${escapeHtml(client.clientId || "")}" data-client-name="${escapeHtml(client.name)}" ${client.clientId ? "" : "disabled"}>Odpri</button>
         </div>
-      `).join("");
+      `).join("") || "<p>Ni strank za to iskanje.</p>";
     }
-
     function normalizeTaxId(value) {
       return String(value || "").trim().replace(/^tax:/i, "").replace(/[^A-Za-z0-9]/g, "").toUpperCase();
     }
@@ -5169,45 +5173,18 @@
       const panel = $("searchPanel");
       const query = $("clientSearch").value.trim();
       panel.innerHTML = "";
-
       if (!query) {
         panel.classList.remove("active");
         return;
       }
-
-      const clientResults = allClientRecords()
-        .filter((client) => clientMatches(client, query))
-        .slice(0, 12);
-
-      clientResults.forEach((client) => {
-        const item = document.createElement("button");
-        item.type = "button";
-        item.className = "result";
-        item.innerHTML = `
-          <strong>Stranka</strong>
-          <span></span>
-          <span>${escapeHtml(client.name)}<br><small>${escapeHtml([client.search, client.taxId, client.email, client.phone, client.address].filter(Boolean).join(" | "))}</small></span>
-          <span class="todo-chip">baza strank</span>
-        `;
-        item.disabled = !client.clientId;
-        item.title = client.clientId ? "" : "Stranka nima enolicne davcne stevilke v Google Sheetu.";
-        if (client.clientId) item.addEventListener("click", () => {
-          state.selectedClient = client.name;
-          openClientReport(client.name, client.clientId);
-        });
-        panel.appendChild(item);
-      });
-
       const results = contextTodos()
         .filter((todo) => normalizeText([todo.client, todo.title, todo.notes, todo.createdByName].join(" ")).includes(normalizeText(query)))
         .sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")) || todoSort(a, b));
-
       panel.classList.add("active");
-      if (results.length === 0 && clientResults.length === 0) {
-        panel.innerHTML = "<p>Ni zadetkov za to iskanje.</p>";
+      if (!results.length) {
+        panel.innerHTML = "<p>Ni dogodkov za to iskanje.</p>";
         return;
       }
-
       results.forEach((todo) => {
         const item = document.createElement("button");
         item.type = "button";
@@ -5222,7 +5199,6 @@
         panel.appendChild(item);
       });
     }
-
     function refreshClientList() {
       $("clientList").innerHTML = clientSuggestionValues()
         .map((item) => `<option value="${escapeHtml(item.value)}" ${item.label && normalizeText(item.label) !== normalizeText(item.value) ? `label="${escapeHtml(item.label)}"` : ""}></option>`)
@@ -5898,7 +5874,11 @@
     $("clientsList").addEventListener("click", (event) => {
       const button = event.target.closest(".open-client");
       if (!button) return;
-      openClientReport(button.dataset.clientName, button.dataset.clientId);
+      if (isAdminView()) openClientReport(button.dataset.clientName, button.dataset.clientId);
+      else {
+        state.selectedClient = button.dataset.clientName;
+        setView("todos");
+      }
     });
 
     $("prevMonth").addEventListener("click", () => {
@@ -5944,6 +5924,7 @@
     });
     $("syncClientsBtn").addEventListener("click", () => syncClients().catch((error) => alert(error.message)));
     $("clientSearch").addEventListener("input", handleClientSearchInput);
+    $("clientsSearch").addEventListener("input", renderClients);
     $("clearClientSearch").addEventListener("click", clearClientSearchAndRestoreView);
     $("exportCsv").addEventListener("click", exportCsv);
     $("googleCalendar").addEventListener("click", () => syncGoogle(true));

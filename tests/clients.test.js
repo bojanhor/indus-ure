@@ -617,3 +617,14 @@ test("vlecenje dogodka na dotik zahteva kratek pridrzan dotik", () => {
   assert.match(html, /touchReady: !touchHoldRequired/);
   assert.match(html, /setTimeout\(\(\) => \{[\s\S]*?interaction\.touchReady = true;[\s\S]*?\}, 350\)/);
 });
+
+test("globalni iskalnik vrne samo dogodke stranke pa imajo svoj zavihek", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  assert.match(html, /id="clientSearch" placeholder="I&#353;&#269;i opravilo ali opis"/);
+  assert.match(html, /id="clientsViewBtn" type="button">Stranke<\/button>/);
+  assert.doesNotMatch(html, /id="clientsViewBtn"[^>]*admin-only/);
+  assert.match(html, /id="clientsSearch" placeholder="I&#353;&#269;i po bazi strank"/);
+  assert.match(html, /const visibleRecords = query \? records\.filter\(\(client\) => clientMatches\(client, query\)\) : records;/);
+  assert.match(html, /function renderSearch\(\)[\s\S]*?const results = contextTodos\(\)/);
+  assert.doesNotMatch(html, /function renderSearch\(\)[\s\S]*?const clientResults/);
+});
