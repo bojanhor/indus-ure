@@ -1,0 +1,1 @@
+gpt ALL=(root) NOPASSWD: /usr/local/sbin/deploy-indus-ure

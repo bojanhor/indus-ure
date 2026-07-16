@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+release="${1:-}"
+expected_checksum="${2:-}"
+
+if [[ ! "$release" =~ ^[0-9a-f]{7,40}$ ]]; then
+  echo "Neveljavna oznaka izdaje." >&2
+  exit 2
+fi
+if [[ ! "$expected_checksum" =~ ^[0-9a-f]{64}$ ]]; then
+  echo "Neveljavna kontrolna vsota." >&2
+  exit 2
+fi
+
+archive="/tmp/indus-ure-${release}.tar.gz"
+staging="/tmp/indus-ure-${release}-deploy"
+
+if [[ ! -f "$archive" || -L "$archive" ]]; then
+  echo "Arhiv izdaje ne obstaja ali ni navadna datoteka." >&2
+  exit 3
+fi
+
+actual_checksum="$(sha256sum "$archive" | awk '{print $1}')"
+if [[ "$actual_checksum" != "$expected_checksum" ]]; then
+  echo "Kontrolna vsota arhiva se ne ujema." >&2
+  exit 3
+fi
+
+if [[ -e "$staging" ]]; then
+  echo "Zacasna mapa izdaje ze obstaja: $staging" >&2
+  exit 4
+fi
+
+mkdir -m 0700 "$staging"
+tar -xzf "$archive" --no-same-owner -C "$staging"
+
+if [[ ! -f "$staging/package.json" || ! -f "$staging/package-lock.json" || ! -f "$staging/outputs/server.js" ]]; then
+  echo "Arhiv nima obveznih datotek aplikacije." >&2
+  exit 5
+fi
+
+cd "$staging"
+npm ci --omit=dev --ignore-scripts
+rm -f "$archive"
+
+echo "Izdaja $release je pripravljena."

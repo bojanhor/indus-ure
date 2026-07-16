@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+release="${1:-}"
+base="/opt/indus-ure"
+staging="/tmp/indus-ure-${release}-deploy"
+destination="$base/releases/$release"
+current="$base/current"
+
+if [[ ! "$release" =~ ^[0-9a-f]{7,40}$ ]]; then
+  echo "Neveljavna oznaka izdaje." >&2
+  exit 2
+fi
+
+previous="$(readlink -f "$current" 2>/dev/null || true)"
+
+if [[ ! -d "$destination" ]]; then
+  if [[ ! -d "$staging" || -L "$staging" ]]; then
+    echo "Pripravljena izdaja ne obstaja." >&2
+    exit 3
+  fi
+  if [[ "$(realpath "$staging")" != "$staging" ]]; then
+    echo "Neveljavna pot pripravljene izdaje." >&2
+    exit 3
+  fi
+  if [[ ! -f "$staging/package.json" || ! -f "$staging/outputs/server.js" ]]; then
+    echo "Pripravljena izdaja nima obveznih datotek." >&2
+    exit 3
+  fi
+
+  mv "$staging" "$destination"
+  chown -R root:root "$destination"
+fi
+
+temporary_link="$base/.current-$release"
+rm -f "$temporary_link"
+ln -s "$destination" "$temporary_link"
+mv -Tf "$temporary_link" "$current"
+
+if ! systemctl restart indus-ure || ! systemctl is-active --quiet indus-ure; then
+  if [[ -n "$previous" && -d "$previous" ]]; then
+    ln -sfn "$previous" "$current"
+    systemctl restart indus-ure
+  fi
+  echo "Zagon nove izdaje ni uspel; povrnjena je prejsnja izdaja." >&2
+  exit 4
+fi
+
+echo "Aktivna izdaja: $release"
