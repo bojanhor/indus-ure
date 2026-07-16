@@ -174,7 +174,9 @@ test("obracunske podatke zakljucenega opravila lahko spremeni samo sef", () => {
     syncUser: "ibro",
     status: "execution",
     billingHourlyRate: 22,
-    billingKm: 5
+    billingKm: 5,
+    clientKm: 18,
+    clientVehicle: "van"
   };
 
   assert.equal(defaultHourlyRateForUser(billingDb, "ibro"), 18);
@@ -182,18 +184,26 @@ test("obracunske podatke zakljucenega opravila lahko spremeni samo sef", () => {
   const workerChange = todoForUserRole(worker, billingDb, previous, {
     ...previous,
     billingHourlyRate: 999,
-    billingKm: 999
+    billingKm: 999,
+    clientKm: 999,
+    clientVehicle: "personal"
   });
   assert.equal(workerChange.billingHourlyRate, 22);
   assert.equal(workerChange.billingKm, 5);
+  assert.equal(workerChange.clientKm, 18);
+  assert.equal(workerChange.clientVehicle, "van");
 
   const bossChange = todoForUserRole(boss, billingDb, previous, {
     ...previous,
     billingHourlyRate: 30,
-    billingKm: 12.5
+    billingKm: 12.5,
+    clientKm: 24,
+    clientVehicle: "personal"
   });
   assert.equal(bossChange.billingHourlyRate, 30);
   assert.equal(bossChange.billingKm, 12.5);
+  assert.equal(bossChange.clientKm, 24);
+  assert.equal(bossChange.clientVehicle, "personal");
 
   const newlyCompleted = todoForUserRole(worker, billingDb, null, {
     syncUser: "ibro",

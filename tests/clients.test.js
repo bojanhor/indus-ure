@@ -155,8 +155,11 @@ test("osnovni pogled priloge samo prikazuje, dodajanje pa ostane v obrazcu", () 
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
   assert.match(html, /<details class="todo-description-details todo-attachments-details">[\s\S]*?<summary>Priloge <span class="todo-details-count">/);
   assert.doesNotMatch(html, /class="secondary show-photos"/);
-  assert.match(html, /id="todoFormPhotoInput"[^>]*type="file"/);
-  assert.match(html, /id="todoFormPhotoInput"[^>]*accept="image\/\*,application\/pdf,\.pdf"[^>]*multiple/);
+  assert.match(html, /id="todoFormPhotoInput"[^>]*type="file"[^>]*accept="image\/\*"[^>]*multiple/);
+  assert.match(html, /id="todoFormCameraInput"[^>]*accept="image\/\*"[^>]*capture="environment"/);
+  assert.match(html, /id="todoFormPdfInput"[^>]*accept="application\/pdf,\.pdf"[^>]*multiple/);
+  assert.match(html, /function handleTodoAttachmentsFromInput\(event\)/);
+  assert.match(html, /\["todoFormPhotoInput", "todoFormCameraInput", "todoFormPdfInput"\]\.forEach/);
   assert.match(html, /async function todoAttachmentFromFile\(file\)/);
   assert.match(html, /file\.size > 1_500_000/);
   assert.match(html, /todoAttachmentsDataLength\(state\.todoDialogPhotos\) \+ attachment\.data\.length > 4_800_000/);
@@ -176,13 +179,17 @@ test("osnovni pogled priloge samo prikazuje, dodajanje pa ostane v obrazcu", () 
 
 test("slikovne priloge je mogoce risarsko urediti tudi pri spremembi opravila", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
-  assert.match(html, /<dialog id="photoEditorDialog">[\s\S]*?id="photoEditorColor"[\s\S]*?id="photoEditorSize"[\s\S]*?id="photoEditorCanvas"/);
+  assert.match(html, /<dialog id="photoEditorDialog">[\s\S]*?id="photoEditorColor"[\s\S]*?id="photoEditorSize"[^>]*min="1"[^>]*value="1"[\s\S]*?id="photoEditorCanvas"/);
+  assert.match(html, /id="photoEditorText"[\s\S]*?id="photoEditorAddText"[\s\S]*?id="photoEditorTextSize"[\s\S]*?id="photoEditorTextRotation"/);
   assert.match(html, /isPdfAttachment\(photo\) \? "" : `<button class="secondary edit-todo-form-photo"/);
   assert.match(html, /function openPhotoEditor\(photo\)/);
+  assert.match(html, /function drawPhotoEditorText\(context, text, selected = false\)/);
+  assert.match(html, /function photoEditorTextHitTest\(point\)/);
+  assert.match(html, /action: "rotate"/);
   assert.match(html, /photoEditorCanvas"\)\.addEventListener\("pointerdown"/);
   assert.match(html, /photoEditorCanvas"\)\.addEventListener\("pointermove"/);
   assert.match(html, /#photoEditorCanvas \{[\s\S]*?touch-action: none;/);
-  assert.match(html, /photoEditorUndo"\)\.addEventListener[\s\S]*?strokes\.pop\(\)/);
+  assert.match(html, /function undoPhotoEditorAction\(\)[\s\S]*?strokes\.pop\(\)/);
   assert.match(html, /function canvasAsLimitedJpegDataUrl\(canvas, maxLength = 680_000\)/);
   assert.match(html, /state\.todoDialogPhotos = nextPhotos;[\s\S]*?renderTodoFormPhotos\(\)/);
 });
@@ -262,7 +269,7 @@ test("novo opravilo je mogoce dodeliti sebi in vec drugim delavcem", () => {
   assert.match(server, /const updatedGroup = \[\]/);
   assert.match(server, /db\.todos\.push\(\.\.\.updatedGroup\)/);
 });
-test("sef ima tabelo privzetih postavk in obracun zakljucenih opravil", () => {
+test("sef ureja postavke in kilometrino samo v obrazcu opravila", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
   const server = fs.readFileSync(path.join(__dirname, "..", "outputs", "server.js"), "utf8");
   assert.match(html, /id="workerBillingRows"/);
@@ -271,10 +278,13 @@ test("sef ima tabelo privzetih postavk in obracun zakljucenih opravil", () => {
   assert.match(html, /id="workerBillingBtn"/);
   assert.doesNotMatch(html, /id="bossPanel"/);
   assert.match(html, /api\("\/api\/workers\/billing"/);
-  assert.match(html, /todo\.status === "execution"/);
-  assert.match(html, /class="todo-billing"/);
-  assert.match(html, /class="todo-billing-hourly"/);
-  assert.match(html, /class="todo-billing-km"/);
+  assert.match(html, /id="todoFormHourlyRate"/);
+  assert.match(html, /id="todoFormBillingKm"/);
+  assert.match(html, /id="todoFormClientKm"/);
+  assert.match(html, /id="todoFormClientVehicle"/);
+  assert.match(html, /<option value="personal">Osebni<\/option>/);
+  assert.match(html, /<option value="van">Kombi<\/option>/);
+  assert.doesNotMatch(html, /class="todo-billing"/);
   assert.match(server, /user\.role !== "boss"[\s\S]*Samo sef lahko spreminja urne postavke delavcev/);
   assert.match(server, /const adjusted = todoForUserRole\(user, db, existing/);
   assert.match(server, /billingHourlyRate: isOpenedTodo \? todo\.billingHourlyRate : existing\.billingHourlyRate/);
@@ -283,7 +293,8 @@ test("koledar ustvarja in prikazuje samo kanonicna opravila", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
   const server = fs.readFileSync(path.join(__dirname, "..", "outputs", "server.js"), "utf8");
   assert.match(html, /id="newTodoButton"[^>]*>Dodaj opravilo<\/button>/);
-  assert.match(html, /openTodoDialog\(\{ date: date \|\| dateKey\(new Date\(\)\) \}\)/);
+  assert.match(html, /function startTodoForDate\(date = ""\)[\s\S]*?openTodoDialog\(\{ date \}\)/);
+  assert.match(html, /newTodoButton"\)\.addEventListener\("click", \(\) => startTodoForDate\(\)\)/);
   assert.match(html, /add\.addEventListener\("click", \(\) => startTodoForDate\(key\)\)/);
   assert.match(html, /item\.addEventListener\("click", \(\) => openTodoDialog\(todo\)\)/);
   assert.doesNotMatch(html, /<dialog id="entryDialog">/);
@@ -337,6 +348,10 @@ test("obracun ur podpira delavski in sefovski pogled", () => {
   assert.match(html, /id="billingConfirm"/);
   assert.match(html, /id="billingMarkPaid"/);
   assert.match(html, /function billingLiveLines\(workerId, month\)/);
+  assert.match(html, /function billingDisplayActivities\(workerId, month, billedLines\)/);
+  assert.match(html, /class="billing-gap"/);
+  assert.match(html, /class="billing-task-row \$\{todoExists \? "billing-open-task"/);
+  assert.match(html, /openTodoDialog\(todo\)\.catch/);
   assert.match(html, /function changePayroll\(action\)/);
   assert.match(html, /api\("\/api\/payrolls"\)/);
   assert.doesNotMatch(html, /if \(isAdminView\(\) && view === "billing"\) view = "todos"/);
@@ -424,7 +439,7 @@ test("mobilni preklopnik je na vrhu in ne prekriva konca strani", () => {
 test("opravilo ima loceno ime in dolg vecvrsticni opis", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
   assert.match(html, /<label>Ime opravila\s*<input id="todoFormTask" type="text"/);
-  assert.match(html, /<label>Opis del\s*<textarea id="todoFormNotes" placeholder="Vpi&#353;i, kaj to&#269;no se je delalo"/);
+  assert.match(html, /<label>Opis del\s*<textarea id="todoFormNotes" placeholder="Opi&#353;i, kaj se bo delalo"/);
   assert.match(html, /<label>Material\s*<textarea id="todoFormMaterial"/);
   assert.match(html, /<details class="todo-description-details">\s*<summary>Opis<\/summary>/);
   assert.match(html, /<div class="todo-description todo-meta">\$\{linkifyText\(todo\.notes\)\}<\/div>/);
@@ -537,9 +552,13 @@ test("opravila imajo rocno in datumsko razvrscanje ter neobvezni uri", () => {
   assert.match(html, /value="open">&#268;AKA/);
   assert.match(html, /value="in_progress">V TEKU/);
   assert.match(html, /if \(state\.todoSortMode === "date"\) return list\.filter\(\(todo\) => todo\.date\)\.sort\(todoDateSort\)/);
+  assert.match(html, /function todoNeedsOrdering\(todo\)/);
   assert.match(html, /orderStatuses = new Set\(\["order", "order_car", "order_warehouse", "add_to_car"\]\)/);
+  assert.match(html, /naro\u010di\(\?=\$\|\[\^\\p\{L\}\\p\{N\}_\]\)/);
+  assert.match(html, /state\.todoSortMode === "order"\) return list\.filter\(\(todo\) => todoNeedsOrdering\(todo\)\)\.sort\(todoSort\)/);
   assert.match(html, /state\.todoSortMode === "open"[\s\S]*?todo\.status === "open"/);
   assert.match(html, /state\.todoSortMode === "in_progress"[\s\S]*?todo\.status === "in_progress"/);
+  assert.match(html, /state\.todoSortMode === "manual"[\s\S]*?todo\.status !== "meal"/);
   assert.match(html, /state\.todoSortMode === "completed"[\s\S]*?counts\.get\(bKey\)/);
   assert.match(html, /const reorderable = state\.todoSortMode === "manual" && !todo\.done/);
   assert.match(html, /id="todoFormStart" type="time"/);
@@ -624,6 +643,19 @@ test("vlecenje dogodka na dotik zahteva kratek pridrzan dotik", () => {
   assert.match(html, /setTimeout\(\(\) => \{[\s\S]*?interaction\.touchReady = true;[\s\S]*?\}, 350\)/);
 });
 
+test("stranko iz zavihka Stranke sef odpre v obrazcu za urejanje", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  assert.match(html, /<dialog id="clientEditDialog">/);
+  assert.match(html, /id="clientEditId"/);
+  assert.match(html, /id="clientEditName"/);
+  assert.match(html, /id="clientEditTax"/);
+  assert.match(html, /id="clientEditPhone"/);
+  assert.match(html, /id="clientEditVatPayer"/);
+  assert.match(html, /function openClientEditDialog\(clientId\)/);
+  assert.match(html, /function saveClientFromDialog\(\)/);
+  assert.match(html, /if \(isAdminView\(\)\) openClientEditDialog\(button\.dataset\.clientId\)/);
+  assert.match(html, /\$\("clientEditForm"\)\.addEventListener\("submit"/);
+});
 test("globalni iskalnik vrne samo dogodke stranke pa imajo svoj zavihek", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
   assert.match(html, /id="clientSearch" placeholder="I&#353;&#269;i opravilo ali opis"/);
@@ -674,6 +706,8 @@ test("brisanje skupnega opravila odstrani vse dodelitve", () => {
 test("po vpisu ur uporabnik potrdi zakljucek projekta", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
   assert.match(html, /id="projectCompletionDialog"/);
+  assert.match(html, /id="projectCompletionTask"[\s\S]*?id="projectCompletionClient"/);
+  assert.match(html, /function openProjectCompletionDialog\(sourceId\)[\s\S]*?projectCompletionTask[\s\S]*?projectCompletionClient/);
   assert.match(html, /Ali je projekt v celoti zaklju&#269;en \(tudi najmanj&#353;e podrobnosti\)\?/);
   assert.match(html, /id="deleteCompletedProject">Da, izbri&#353;i opravilo/);
   assert.match(html, /id="rescheduleProject">Ne, prestavi opravilo na drug dan/);

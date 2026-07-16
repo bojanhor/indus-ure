@@ -56,6 +56,12 @@ const TODO_STATUS_DEFINITIONS = Object.freeze({
   internal: { label: "Razno/Interno", googleColorId: "5" }
 });
 const TODO_STATUSES = new Set(Object.keys(TODO_STATUS_DEFINITIONS));
+const TODO_VEHICLES = new Set(["personal", "van"]);
+
+function todoVehicle(value) {
+  const vehicle = String(value || "");
+  return TODO_VEHICLES.has(vehicle) ? vehicle : "personal";
+}
 
 const IMAGE_SIGNATURES = {
   png: (buffer) => buffer.length >= 8 && buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])),
@@ -663,6 +669,16 @@ function normalizeDb(db = {}) {
       next.billingKm = billingKm;
       changed = true;
     }
+    const clientKm = nonnegativeNumber(next.clientKm, 0, 1_000_000);
+    if (next.clientKm !== clientKm) {
+      next.clientKm = clientKm;
+      changed = true;
+    }
+    const clientVehicle = todoVehicle(next.clientVehicle);
+    if (next.clientVehicle !== clientVehicle) {
+      next.clientVehicle = clientVehicle;
+      changed = true;
+    }
     if (!Array.isArray(next.photos)) {
       next.photos = [];
       changed = true;
@@ -1204,21 +1220,25 @@ function defaultHourlyRateForUser(db, userId) {
 function todoForUserRole(user, db, previous, todo) {
   const previousRate = nonnegativeNumber(previous?.billingHourlyRate, null, 10_000);
   const previousKm = nonnegativeNumber(previous?.billingKm, 0, 1_000_000);
-  if (todo.status !== "execution") {
-    return { ...todo, billingHourlyRate: previousRate, billingKm: previousKm };
-  }
+  const previousClientKm = nonnegativeNumber(previous?.clientKm, 0, 1_000_000);
+  const previousClientVehicle = todoVehicle(previous?.clientVehicle);
+  const isCompleted = todo.status === "execution";
   const defaultRate = defaultHourlyRateForUser(db, todo.syncUser || previous?.syncUser || user.id);
   if (user.role !== "boss") {
     return {
       ...todo,
-      billingHourlyRate: previousRate ?? defaultRate,
-      billingKm: previousKm
+      billingHourlyRate: isCompleted ? previousRate ?? defaultRate : previousRate,
+      billingKm: previousKm,
+      clientKm: previousClientKm,
+      clientVehicle: previousClientVehicle
     };
   }
   return {
     ...todo,
-    billingHourlyRate: nonnegativeNumber(todo.billingHourlyRate, previousRate ?? defaultRate, 10_000),
-    billingKm: nonnegativeNumber(todo.billingKm, previousKm, 1_000_000)
+    billingHourlyRate: isCompleted ? nonnegativeNumber(todo.billingHourlyRate, previousRate ?? defaultRate, 10_000) : previousRate,
+    billingKm: isCompleted ? nonnegativeNumber(todo.billingKm, previousKm, 1_000_000) : previousKm,
+    clientKm: nonnegativeNumber(todo.clientKm, previousClientKm, 1_000_000),
+    clientVehicle: todoVehicle(todo.clientVehicle)
   };
 }
 
@@ -1404,6 +1424,8 @@ function cleanTodo(input) {
     done: input.status === "execution",
     billingHourlyRate: nonnegativeNumber(input.billingHourlyRate, null, 10_000),
     billingKm: nonnegativeNumber(input.billingKm, null, 1_000_000),
+    clientKm: nonnegativeNumber(input.clientKm, null, 1_000_000),
+    clientVehicle: todoVehicle(input.clientVehicle),
     photos: limitTodoAttachmentsData(photos
       .map((photo) => ({
         id: photo.id || crypto.randomUUID(),
@@ -1903,6 +1925,8 @@ function todoFromGoogleEvent(event, user, db = {}, existing = null) {
       ? nonnegativeNumber(existing?.billingHourlyRate, defaultHourlyRateForUser(db, user.id), 10_000)
       : nonnegativeNumber(existing?.billingHourlyRate, null, 10_000),
     billingKm: nonnegativeNumber(existing?.billingKm, 0, 1_000_000),
+    clientKm: nonnegativeNumber(existing?.clientKm, 0, 1_000_000),
+    clientVehicle: todoVehicle(existing?.clientVehicle),
     photos: existing?.photos || [],
     syncUser: user.id,
     googleEventId: event.id || existing?.googleEventId || "",

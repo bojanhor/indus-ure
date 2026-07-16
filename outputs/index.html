@@ -644,6 +644,12 @@
     .billing-day-summary-pay { color: var(--accent-dark) !important; font-weight: 900; }
     .billing-task-row { display: grid; grid-template-columns: 92px minmax(0, 1fr) 64px 92px; gap: 10px; align-items: center; padding: 10px 12px; border-top: 1px solid var(--line); }
     .billing-task-row small { color: var(--muted); }
+    .billing-open-task { cursor: pointer; }
+    .billing-open-task:hover { background: #f4f8f5; }
+    .billing-open-task:focus-visible { position: relative; z-index: 1; outline: 2px solid var(--accent); outline-offset: -2px; }
+    .billing-status-chip { display: inline-flex; margin-top: 4px; font-size: 10px; line-height: 1.15; white-space: normal; }
+    .billing-gap { display: flex; align-items: center; gap: 8px; padding: 7px 12px; border-top: 1px dashed var(--line); color: var(--muted); font-size: 12px; font-weight: 800; background: #fbfcfa; }
+    .billing-gap::before, .billing-gap::after { content: ""; height: 1px; flex: 1; background: var(--line); }
     .billing-task-hours, .billing-task-pay { text-align: right; font-weight: 800; }
     .billing-line-edit { display: flex; gap: 6px; align-items: center; justify-content: end; grid-column: 2 / -1; }
     .billing-line-edit label { display: grid; gap: 2px; color: var(--muted); font-size: 11px; font-weight: 800; }
@@ -1092,34 +1098,6 @@
       overflow-wrap: anywhere;
     }
 
-    .todo-billing {
-      grid-column: 2 / -1;
-      display: flex;
-      align-items: end;
-      justify-content: flex-end;
-      gap: 8px;
-      flex-wrap: wrap;
-      padding: 9px;
-      border: 1px solid #91c991;
-      border-radius: 8px;
-      background: #f1fbf1;
-    }
-
-    .todo-billing label {
-      display: grid;
-      gap: 4px;
-      color: var(--muted);
-      font-size: 12px;
-      font-weight: 700;
-    }
-
-    .todo-billing input {
-      width: 135px;
-      min-height: 34px;
-      border: 1px solid var(--line);
-      border-radius: 7px;
-      padding: 6px 8px;
-    }
 
     .todo-item.done .todo-title {
       text-decoration: line-through;
@@ -1853,6 +1831,24 @@
       gap: 14px;
     }
 
+    .project-completion-context {
+      display: grid;
+      gap: 4px;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--soft);
+    }
+
+    .project-completion-context span {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .project-completion-context strong {
+      font-size: 16px;
+    }
     .modal-grid {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2012,6 +2008,56 @@
       border-bottom: 1px solid var(--line);
     }
 
+    .photo-editor-toolbar label {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .photo-editor-text-entry {
+      flex: 1 1 220px;
+      min-width: min(100%, 220px);
+    }
+
+    .photo-editor-text-entry input {
+      min-width: 0;
+      width: 100%;
+    }
+
+    .photo-editor-text-tools {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      padding: 7px 10px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: var(--soft);
+    }
+
+    .photo-editor-text-tools[hidden] {
+      display: none;
+    }
+
+    .photo-editor-text-tools input[type="range"] {
+      width: min(140px, 28vw);
+    }
+
+    .photo-editor-text-step {
+      min-width: 34px;
+      min-height: 34px;
+      padding: 0;
+      line-height: 1;
+      font-size: 20px;
+    }
+
+    .photo-editor-canvas-shell.is-text-editing #photoEditorCanvas {
+      cursor: move;
+    }
+
     .gesture-zoom-controls {
       display: flex;
       align-items: center;
@@ -2102,6 +2148,14 @@
       border-radius: 8px;
       background: #f7faf7;
     }
+
+    .todo-form-attachment-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .todo-form-attachment-actions .add-photo { flex: 1 1 150px; }
 
     .todo-form-photo-row {
       display: flex;
@@ -2747,7 +2801,13 @@
       <div class="modal-body">
         <input type="hidden" id="todoFormId">
         <div class="modal-grid">
-          <label>Datum
+          <div class="todo-client-field" id="todoFormClientField">
+            <label for="todoFormClient">Stranka</label>
+            <div class="client-autocomplete" id="todoFormClientAutocomplete">
+              <input id="todoFormClient" type="text" placeholder="Alias ali naziv stranke" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="todoFormClientSuggestions">
+              <div class="client-autocomplete-list hidden" id="todoFormClientSuggestions" role="listbox"></div>
+            </div>
+          </div>          <label>Datum
             <span class="date-input-with-clear">
               <input id="todoFormDate" type="date">
               <button class="date-clear-button" id="clearTodoFormDate" type="button" title="Odstrani datum" aria-label="Odstrani datum">&times;</button>
@@ -2759,13 +2819,7 @@
           <label>Ura do
             <input id="todoFormEnd" type="time" step="900">
           </label>
-          <div class="todo-client-field" id="todoFormClientField">
-            <label for="todoFormClient">Stranka</label>
-            <div class="client-autocomplete" id="todoFormClientAutocomplete">
-              <input id="todoFormClient" type="text" placeholder="Alias ali naziv stranke" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="todoFormClientSuggestions">
-              <div class="client-autocomplete-list hidden" id="todoFormClientSuggestions" role="listbox"></div>
-            </div>
-          </div>
+
         </div>
         <div class="todo-status-direct-field" id="todoFormStatusField">
           <span class="todo-status-direct-label">Status</span>
@@ -2781,7 +2835,7 @@
           <datalist id="todoFormTaskSuggestions"></datalist>
         </label>
         <label>Opis del
-          <textarea id="todoFormNotes" placeholder="Vpi&#353;i, kaj to&#269;no se je delalo"></textarea>
+          <textarea id="todoFormNotes" placeholder="Opi&#353;i, kaj se bo delalo"></textarea>
         </label>
         <label>Material
           <textarea id="todoFormMaterial" placeholder="Vpi&#353;i porabljen material"></textarea>
@@ -2790,12 +2844,25 @@
           <input id="todoFormUrgent" type="checkbox">
           NUJNO
         </label>
+        <div class="todo-form-billing admin-entry-field" id="todoFormClientBilling">
+          <div class="modal-grid">
+            <label>Kilometrina, ki se zaračuna stranki (obe smeri vožnje)
+              <input id="todoFormClientKm" type="number" min="0" max="1000000" step="0.1">
+            </label>
+            <label>Vozilo
+              <select id="todoFormClientVehicle">
+                <option value="personal">Osebni</option>
+                <option value="van">Kombi</option>
+              </select>
+            </label>
+          </div>
+        </div>
         <div class="todo-form-billing admin-entry-field" id="todoFormBilling">
           <div class="modal-grid">
-            <label>Urna postavka (EUR/h)
+            <label>Urna postavka za delavca (EUR/h)
               <input id="todoFormHourlyRate" type="number" min="0" max="10000" step="0.01">
             </label>
-            <label>Kilometrina (km)
+            <label>Kilometrina za delavca (km)
               <input id="todoFormBillingKm" type="number" min="0" max="1000000" step="0.1">
             </label>
           </div>
@@ -2803,10 +2870,20 @@
         <div class="todo-form-attachments" id="todoFormAttachments">
           <strong>Priloge</strong>
           <div id="todoFormPhotoList"></div>
-          <label class="secondary add-photo">Dodaj slike ali PDF
-            <input class="hidden-file" id="todoFormPhotoInput" type="file" accept="image/*,application/pdf,.pdf" multiple>
-            <span class="sr-only">Izberi slike iz galerije, fotografije ali PDF datoteke</span>
-          </label>
+          <div class="todo-form-attachment-actions">
+            <label class="secondary add-photo">Galerija slik
+              <input class="hidden-file" id="todoFormPhotoInput" type="file" accept="image/*" multiple>
+              <span class="sr-only">Izberi slike iz galerije ali slikovnih datotek</span>
+            </label>
+            <label class="secondary add-photo">Fotografiraj
+              <input class="hidden-file" id="todoFormCameraInput" type="file" accept="image/*" capture="environment">
+              <span class="sr-only">Odpri kamero telefona</span>
+            </label>
+            <label class="secondary add-photo">PDF / datoteka
+              <input class="hidden-file" id="todoFormPdfInput" type="file" accept="application/pdf,.pdf" multiple>
+              <span class="sr-only">Izberi PDF v upravljalniku datotek</span>
+            </label>
+          </div>
         </div>
         <div class="audit-box hidden" id="todoFormAudit"></div>
         <div class="actions">
@@ -2818,10 +2895,66 @@
       </div>
     </form>
   </dialog>
+  <dialog id="clientEditDialog">
+    <form method="dialog" id="clientEditForm">
+      <div class="modal-head">
+        <h3>Uredi stranko</h3>
+        <button class="icon-btn" id="closeClientEdit" type="button" title="Zapri" aria-label="Zapri">&times;</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="clientEditId">
+        <div class="modal-grid">
+          <label>Naziv stranke
+            <input id="clientEditName" required>
+          </label>
+          <label>Search / vzdevek
+            <input id="clientEditSearch">
+          </label>
+          <label>Dav&#269;na &#353;tevilka
+            <input id="clientEditTax" placeholder="npr. SI12345678">
+          </label>
+          <label>E-po&#353;ta
+            <input id="clientEditEmail" type="email">
+          </label>
+          <label>Telefon
+            <input id="clientEditPhone" type="tel">
+          </label>
+          <label>Naslov
+            <input id="clientEditAddress">
+          </label>
+          <label>Kraj
+            <input id="clientEditCity">
+          </label>
+          <label>Po&#353;ta
+            <input id="clientEditPostal">
+          </label>
+          <label>Dr&#382;ava
+            <input id="clientEditCountry">
+          </label>
+          <label>Zavezanec za DDV
+            <select id="clientEditVatPayer">
+              <option value="false">NE</option>
+              <option value="true">DA</option>
+            </select>
+          </label>
+        </div>
+        <div class="actions">
+          <button class="secondary" id="cancelClientEdit" type="button">Prekli&#269;i</button>
+          <button class="primary" id="saveClientEdit" type="submit">Shrani spremembe</button>
+        </div>
+      </div>
+    </form>
+  </dialog>
   <dialog id="projectCompletionDialog">
     <form method="dialog">
       <div class="modal-head"><h3>Zaklju&#269;ek projekta</h3></div>
       <div class="modal-body">
+        <div class="project-completion-context">
+          <span>Opravilo</span>
+          <strong id="projectCompletionTask">&mdash;</strong>
+          <span>Stranka</span>
+          <strong id="projectCompletionClient">&mdash;</strong>
+        </div>
         <p>Ali je projekt v celoti zaklju&#269;en (tudi najmanj&#353;e podrobnosti)?</p>
         <div class="actions">
           <button type="button" class="danger" id="deleteCompletedProject">Da, izbri&#353;i opravilo</button>
@@ -2863,8 +2996,24 @@
           <input id="photoEditorColor" type="color" value="#ff2d2d">
         </label>
         <label>Debelina
-          <input id="photoEditorSize" type="range" min="2" max="30" value="8">
+          <input id="photoEditorSize" type="range" min="1" max="30" value="1">
         </label>
+        <button class="secondary" id="photoEditorDraw" type="button">&#268;rta</button>
+        <label class="photo-editor-text-entry">Besedilo
+          <input id="photoEditorText" type="text" maxlength="160" placeholder="Vpi&#353;i oznako za sliko">
+        </label>
+        <button class="secondary" id="photoEditorAddText" type="button">Dodaj besedilo</button>
+        <div class="photo-editor-text-tools" id="photoEditorTextTools" hidden>
+          <label>Velikost
+            <button class="secondary photo-editor-text-step" id="photoEditorTextSmaller" type="button" aria-label="Manj&#353;a pisava">&minus;</button>
+            <input id="photoEditorTextSize" type="range" min="12" max="160" value="32" aria-label="Velikost besedila">
+            <button class="secondary photo-editor-text-step" id="photoEditorTextLarger" type="button" aria-label="Ve&#269;ja pisava">&plus;</button>
+          </label>
+          <label>Vrtenje
+            <input id="photoEditorTextRotation" type="range" min="-180" max="180" value="0" aria-label="Vrtenje besedila">
+          </label>
+          <button class="secondary" id="photoEditorDeleteText" type="button">Odstrani napis</button>
+        </div>
         <button class="secondary" id="photoEditorUndo" type="button">Razveljavi</button>
         <div class="gesture-zoom-controls" aria-label="Pove&#269;ava urejevalnika">
           <button class="secondary zoom-step" id="photoEditorZoomOut" type="button" aria-label="Pomanj&#353;aj">&minus;</button>
@@ -3601,14 +3750,6 @@
         });
     }
 
-    async function saveTodoBilling(todo, item) {
-      const hourlyRate = parseBillingNumber(item.querySelector(".todo-billing-hourly").value, 10_000);
-      const billingKm = parseBillingNumber(item.querySelector(".todo-billing-km").value, 1_000_000);
-      if (hourlyRate === null || billingKm === null) {
-        throw new Error("Vnesi pravilno urno postavko in kilometrino.");
-      }
-      await saveTodoToServer({ ...todo, billingHourlyRate: hourlyRate, billingKm });
-    }
 
     async function saveDebtToServer(debt) {
       const method = debt.id ? "PUT" : "POST";
@@ -3912,7 +4053,7 @@
         alert("Za novo opravilo najprej izberi delavski pogled.");
         return;
       }
-      openTodoDialog({ date: date || dateKey(new Date()) });
+      openTodoDialog({ date });
     }
 
     function nextTodoOrder() {
@@ -3939,15 +4080,20 @@
       return endDifference || todoSort(a, b);
     }
 
+    function todoNeedsOrdering(todo) {
+      const orderStatuses = new Set(["order", "order_car", "order_warehouse", "add_to_car"]);
+      if (orderStatuses.has(todo.status)) return true;
+      const orderTextMarker = /(^|[^\p{L}\p{N}_])naroči(?=$|[^\p{L}\p{N}_])/iu;
+      return orderTextMarker.test(`${todo.notes || ""}\n${todo.material || ""}`);
+    }
+
     function sortedTodosForMode(todos = contextTodos()) {
       let list = [...todos];
       if (state.todoSortMode === "date") return list.filter((todo) => todo.date).sort(todoDateSort);
-      if (state.todoSortMode === "order") {
-        const orderStatuses = new Set(["order", "order_car", "order_warehouse", "add_to_car"]);
-        return list.filter((todo) => orderStatuses.has(todo.status)).sort(todoSort);
-      }
+      if (state.todoSortMode === "order") return list.filter((todo) => todoNeedsOrdering(todo)).sort(todoSort);
       if (state.todoSortMode === "open") return list.filter((todo) => todo.status === "open").sort(todoSort);
       if (state.todoSortMode === "in_progress") return list.filter((todo) => todo.status === "in_progress").sort(todoSort);
+      if (state.todoSortMode === "manual") return list.filter((todo) => todo.status !== "meal").sort(todoSort);
       if (state.todoSortMode === "completed") {
         const unique = new Map();
         list.filter((todo) => todo.status === "execution").forEach((todo) => {
@@ -4656,6 +4802,56 @@
         .sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.start).localeCompare(String(b.start)) || String(a.title).localeCompare(String(b.title)));
     }
 
+    function billingDisplayActivities(workerId, month, billedLines) {
+      const billedByTodoId = new Map((billedLines || []).map((line) => [String(line.todoId || ""), line]));
+      const activities = state.todos
+        .filter((todo) => (todo.syncUser || todo.createdBy) === workerId && String(todo.date || "").startsWith(month))
+        .map((todo) => {
+          const start = dayTimelineMinutes(todo.start);
+          const end = dayTimelineMinutes(todo.end);
+          if (start === null || end === null || end <= start) return null;
+          const billed = billedByTodoId.get(String(todo.id || ""));
+          return {
+            todoId: todo.id,
+            date: todo.date,
+            start: todo.start,
+            end: todo.end,
+            title: todo.title,
+            client: todo.client,
+            status: todo.status,
+            minutes: billed ? Number(billed.minutes || 0) : 0,
+            hours: billed ? Number(billed.hours || 0) : duration(todo),
+            totalAmount: billed ? Number(billed.totalAmount || 0) : 0,
+            payable: Boolean(billed)
+          };
+        })
+        .filter(Boolean);
+      const presentIds = new Set(activities.map((item) => String(item.todoId || "")));
+      (billedLines || []).forEach((line) => {
+        if (presentIds.has(String(line.todoId || ""))) return;
+        activities.push({
+          ...line,
+          status: "execution",
+          payable: true
+        });
+      });
+      return activities.sort((a, b) => String(a.date).localeCompare(String(b.date))
+        || String(a.start).localeCompare(String(b.start))
+        || String(a.end).localeCompare(String(b.end))
+        || String(a.title).localeCompare(String(b.title), "sl"));
+    }
+
+    function billingGapMinutes(previous, next) {
+      return Math.max(0, minutes(next.start) - minutes(previous.end));
+    }
+
+    function billingGapLabel(value) {
+      const minutes = Math.round(Number(value) || 0);
+      if (minutes < 60) return `${minutes} min`;
+      const hours = Math.floor(minutes / 60);
+      const remaining = minutes % 60;
+      return remaining ? `${hours} h ${remaining} min` : `${hours} h`;
+    }
     function billingLineTotals(lines) {
       const minutes = lines.reduce((total, line) => total + Number(line.minutes || 0), 0);
       const workAmount = Number(lines.reduce((total, line) => total + Number(line.workAmount || 0), 0).toFixed(2));
@@ -4722,33 +4918,57 @@
       $("billingDeleteDraft").classList.toggle("hidden", !draft);
       const editable = admin && (!payroll || payroll.status === "draft");
       const list = $("billingDayList");
-      if (!lines.length) {
-        list.innerHTML = `<div class="billing-empty">V tem obdobju ni zaključenih vnosov ur.</div>`;
+      const activities = billingDisplayActivities(workerId, month, lines);
+      if (!activities.length) {
+        list.innerHTML = `<div class="billing-empty">V tem obdobju ni vnosov z urami.</div>`;
         return;
       }
       const days = new Map();
-      lines.forEach((line) => {
-        const rows = days.get(line.date) || [];
-        rows.push(line);
-        days.set(line.date, rows);
+      activities.forEach((activity) => {
+        const rows = days.get(activity.date) || [];
+        rows.push(activity);
+        days.set(activity.date, rows);
       });
       list.innerHTML = [...days.entries()].map(([date, rows]) => {
-        const day = billingLineTotals(rows);
+        const payableRows = rows.filter((row) => row.payable);
+        const day = billingLineTotals(payableRows);
+        const entries = rows.map((row, index) => {
+          const previous = rows[index - 1];
+          const gap = previous ? billingGapMinutes(previous, row) : 0;
+          const todoExists = Boolean(state.todos.some((todo) => todo.id === row.todoId));
+          const status = todoStatus(row.status || "open");
+          return `${gap ? `<div class="billing-gap" aria-label="Premor med vnosi">Premor med vnosi: ${escapeHtml(billingGapLabel(gap))}</div>` : ""}
+            <div class="billing-task-row ${todoExists ? "billing-open-task" : ""}" data-todo-id="${escapeHtml(row.todoId)}" ${todoExists ? 'role="button" tabindex="0" aria-label="Odpri opravilo"' : ""}>
+              <small>${escapeHtml(row.start)}-${escapeHtml(row.end)}<br><span class="todo-chip todo-status-chip todo-status-color ${todoStatusClass(status.id)} billing-status-chip">${escapeHtml(status.label)}</span></small>
+              <span><strong>${linkifyText(row.title)}</strong>${row.client ? `<br><small>${escapeHtml(row.client)}</small>` : ""}</span>
+              <span class="billing-task-hours">${Number(row.hours).toLocaleString("sl-SI", { maximumFractionDigits: 2 })} h</span>
+              <span class="billing-task-pay">${row.payable ? `${money(row.totalAmount)} EUR` : ""}</span>
+              ${editable && row.payable ? `<div class="billing-line-edit">
+                <label>EUR/h<input class="billing-line-rate" type="number" min="0" max="10000" step="0.01" value="${Number(row.hourlyRate)}"></label>
+                <label>km<input class="billing-line-km" type="number" min="0" max="1000000" step="0.1" value="${Number(row.km)}"></label>
+                <button class="secondary save-billing-line" type="button">Shrani</button>
+              </div>` : ""}
+            </div>`;
+        }).join("");
         return `<details class="billing-day" open>
           <summary><strong>${escapeHtml(formatDate(date))}</strong><span>${day.hours.toLocaleString("sl-SI", { maximumFractionDigits: 2 })} h</span><span class="billing-day-summary-pay">${money(day.totalAmount)} EUR</span></summary>
-          ${rows.map((line) => `<div class="billing-task-row" data-todo-id="${escapeHtml(line.todoId)}">
-            <small>${escapeHtml(line.start)}-${escapeHtml(line.end)}</small>
-            <span><strong>${linkifyText(line.title)}</strong>${line.client ? `<br><small>${escapeHtml(line.client)}</small>` : ""}</span>
-            <span class="billing-task-hours">${Number(line.hours).toLocaleString("sl-SI", { maximumFractionDigits: 2 })} h</span>
-            <span class="billing-task-pay">${money(line.totalAmount)} EUR</span>
-            ${editable ? `<div class="billing-line-edit">
-              <label>EUR/h<input class="billing-line-rate" type="number" min="0" max="10000" step="0.01" value="${Number(line.hourlyRate)}"></label>
-              <label>km<input class="billing-line-km" type="number" min="0" max="1000000" step="0.1" value="${Number(line.km)}"></label>
-              <button class="secondary save-billing-line" type="button">Shrani</button>
-            </div>` : ""}
-          </div>`).join("")}
+          ${entries}
         </details>`;
       }).join("");
+      list.querySelectorAll(".billing-open-task").forEach((row) => {
+        const open = (event) => {
+          if (event.target.closest("a, input, select, button, label")) return;
+          const todo = state.todos.find((item) => item.id === row.dataset.todoId);
+          if (todo) openTodoDialog(todo).catch((error) => alert(error.message));
+        };
+        row.addEventListener("click", open);
+        row.addEventListener("keydown", (event) => {
+          if (["Enter", " "].includes(event.key)) {
+            event.preventDefault();
+            open(event);
+          }
+        });
+      });
       list.querySelectorAll(".save-billing-line").forEach((button) => button.addEventListener("click", async () => {
         const row = button.closest(".billing-task-row");
         const todo = state.todos.find((item) => item.id === row.dataset.todoId);
@@ -4862,7 +5082,7 @@
             <span class="todo-meta">Dav&#269;na / ID: ${escapeHtml(client.clientId || "MANJKA ALI JE PODVOJENA")}</span>
             ${client.syncError ? `<span class="todo-meta error">${escapeHtml(client.syncError)}</span>` : ""}
           </div>
-          <button class="secondary open-client" type="button" data-client-id="${escapeHtml(client.clientId || "")}" data-client-name="${escapeHtml(client.name)}" ${client.clientId ? "" : "disabled"}>Odpri</button>
+          <button class="secondary open-client" type="button" data-client-id="${escapeHtml(client.clientId || "")}" data-client-name="${escapeHtml(client.name)}" ${client.clientId ? "" : "disabled"}>${isAdminView() ? "Uredi" : "Opravila"}</button>
         </div>
       `).join("") || "<p>Ni strank za to iskanje.</p>";
     }
@@ -4906,6 +5126,60 @@
       }
     }
 
+    function openClientEditDialog(clientId) {
+      if (!isAdminView()) return;
+      const client = allClientRecords().find((item) => item.clientId === clientId || item.id === clientId);
+      if (!client) {
+        alert("Stranke ni bilo mogoče najti.");
+        return;
+      }
+      $("clientEditId").value = client.clientId || client.id || "";
+      $("clientEditName").value = client.name || "";
+      $("clientEditSearch").value = client.search || client.name || "";
+      $("clientEditTax").value = client.taxId || "";
+      $("clientEditEmail").value = client.email || "";
+      $("clientEditPhone").value = client.phone || "";
+      $("clientEditAddress").value = client.address || "";
+      $("clientEditCity").value = client.city || "";
+      $("clientEditPostal").value = client.postal || "";
+      $("clientEditCountry").value = client.country || "Slovenija";
+      $("clientEditVatPayer").value = client.vatPayer ? "true" : "false";
+      $("clientEditDialog").showModal();
+      requestAnimationFrame(() => $("clientEditName").focus());
+    }
+
+    async function saveClientFromDialog() {
+      const clientId = $("clientEditId").value;
+      const existing = allClientRecords().find((item) => item.clientId === clientId || item.id === clientId);
+      if (!existing) throw new Error("Stranke ni bilo mogoče najti.");
+      const name = $("clientEditName").value.trim();
+      const search = $("clientEditSearch").value.trim() || name;
+      const taxId = normalizeTaxId($("clientEditTax").value);
+      if (!name) throw new Error("Vpiši naziv stranke.");
+      if (taxId && !/^(?=.{8,20}$)(?=.*\d)[A-Z0-9]+$/.test(taxId)) {
+        throw new Error("Vpiši veljavno davčno številko.");
+      }
+      const data = await saveClientToServer({
+        ...existing,
+        clientId,
+        name,
+        search,
+        taxId,
+        email: $("clientEditEmail").value.trim(),
+        phone: $("clientEditPhone").value.trim(),
+        address: $("clientEditAddress").value.trim(),
+        city: $("clientEditCity").value.trim(),
+        postal: $("clientEditPostal").value.trim(),
+        country: $("clientEditCountry").value.trim() || "Slovenija",
+        vatPayer: $("clientEditVatPayer").value === "true"
+      });
+      $("clientEditDialog").close();
+      if (data.sheetWrite?.action === "pending") {
+        alert("Spremembe so shranjene lokalno; stranka še nima davčne za zapis v Google Sheet.");
+      } else {
+        alert("Spremembe stranke so shranjene tudi v Google Sheet.");
+      }
+    }
     function renderTodoItems() {
       const items = $("todoItems");
       const title = $("todoPanelTitle");
@@ -4975,17 +5249,6 @@
           </div>
             </div>
           </div>
-          ${isAdminView() && todo.status === "execution" ? `
-            <div class="todo-billing">
-              <label>Urna postavka (EUR/h)
-                <input class="todo-billing-hourly" type="number" min="0" max="10000" step="0.01" value="${todoHourlyRate(todo)}">
-              </label>
-              <label>Kilometrina (km)
-                <input class="todo-billing-km" type="number" min="0" max="1000000" step="0.1" value="${Number(todo.billingKm || 0)}">
-              </label>
-              <button class="primary save-todo-billing" type="button">Shrani obracun</button>
-            </div>
-          ` : ""}
         `;
         const openTodoEditor = (event) => {
           event.preventDefault();
@@ -5002,18 +5265,6 @@
           if (!["Enter", " "].includes(event.key) || event.target.closest("a, summary, button, .todo-attachments-details")) return;
           openTodoEditor(event);
         });
-        const saveTodoBillingButton = item.querySelector(".save-todo-billing");
-        if (saveTodoBillingButton) {
-          saveTodoBillingButton.addEventListener("click", async () => {
-            saveTodoBillingButton.disabled = true;
-            try {
-              await saveTodoBilling(todo, item);
-            } catch (error) {
-              saveTodoBillingButton.disabled = false;
-              alert(error.message);
-            }
-          });
-        }
         const dragHandle = item.querySelector(".drag-handle");
         if (reorderable) {
           dragHandle.addEventListener("pointerdown", (event) => {
@@ -5147,7 +5398,113 @@
       context.restore();
     }
 
-    function redrawPhotoEditor() {
+    function photoEditorTextSnapshot(text) {
+      return text ? { id: text.id, text: text.text, x: text.x, y: text.y, size: text.size, color: text.color, rotation: text.rotation } : null;
+    }
+
+    function selectedPhotoEditorText() {
+      const editor = state.photoEditor;
+      return editor?.texts.find((text) => text.id === editor.selectedTextId) || null;
+    }
+
+    function photoEditorTextMetrics(context, text) {
+      context.save();
+      context.font = `800 ${text.size}px system-ui, -apple-system, sans-serif`;
+      const width = Math.max(text.size * 0.8, context.measureText(text.text || " ").width);
+      context.restore();
+      return { width, height: text.size * 1.18 };
+    }
+
+    function drawPhotoEditorText(context, text, selected = false) {
+      const { width, height } = photoEditorTextMetrics(context, text);
+      const rotation = Number(text.rotation || 0) * Math.PI / 180;
+      context.save();
+      context.translate(text.x, text.y);
+      context.rotate(rotation);
+      context.font = `800 ${text.size}px system-ui, -apple-system, sans-serif`;
+      context.textAlign = "center";
+      context.textBaseline = "middle";
+      context.lineJoin = "round";
+      context.lineWidth = Math.max(2, text.size * 0.09);
+      context.strokeStyle = "rgba(0, 0, 0, .66)";
+      context.fillStyle = text.color;
+      context.strokeText(text.text, 0, 0);
+      context.fillText(text.text, 0, 0);
+      if (selected) {
+        const pad = Math.max(9, text.size * 0.22);
+        const handleY = -height / 2 - pad * 2.3;
+        context.strokeStyle = "#087c99";
+        context.fillStyle = "#e9fbff";
+        context.lineWidth = Math.max(2, text.size * 0.035);
+        context.setLineDash([Math.max(4, text.size * 0.12), Math.max(4, text.size * 0.09)]);
+        context.strokeRect(-width / 2 - pad, -height / 2 - pad, width + pad * 2, height + pad * 2);
+        context.setLineDash([]);
+        context.beginPath();
+        context.moveTo(0, -height / 2 - pad);
+        context.lineTo(0, handleY);
+        context.stroke();
+        context.beginPath();
+        context.arc(0, handleY, Math.max(9, text.size * 0.18), 0, Math.PI * 2);
+        context.fill();
+        context.stroke();
+        context.fillStyle = "#087c99";
+        context.font = `800 ${Math.max(13, text.size * 0.28)}px system-ui, sans-serif`;
+        context.fillText(String.fromCodePoint(0x21BB), 0, handleY + 1);
+      }
+      context.restore();
+    }
+
+    function photoEditorTextHitTest(point) {
+      const editor = state.photoEditor;
+      if (!editor) return null;
+      const canvas = $("photoEditorCanvas");
+      const context = canvas.getContext("2d");
+      for (const text of [...editor.texts].reverse()) {
+        const { width, height } = photoEditorTextMetrics(context, text);
+        const angle = Number(text.rotation || 0) * Math.PI / 180;
+        const deltaX = point.x - text.x;
+        const deltaY = point.y - text.y;
+        const localX = Math.cos(angle) * deltaX + Math.sin(angle) * deltaY;
+        const localY = -Math.sin(angle) * deltaX + Math.cos(angle) * deltaY;
+        const pad = Math.max(10, text.size * 0.24);
+        const handleY = -height / 2 - pad * 2.3;
+        if (Math.hypot(localX, localY - handleY) <= Math.max(16, text.size * 0.3)) return { text, action: "rotate" };
+        if (Math.abs(localX) <= width / 2 + pad && Math.abs(localY) <= height / 2 + pad) return { text, action: "move" };
+      }
+      return null;
+    }
+
+    function setPhotoEditorTextSelection(textId = "") {
+      const editor = state.photoEditor;
+      if (!editor) return;
+      editor.selectedTextId = textId;
+      const text = selectedPhotoEditorText();
+      $("photoEditorTextTools").hidden = !text;
+      const shell = $("photoEditorCanvas").closest(".photo-editor-canvas-shell");
+      shell.classList.toggle("is-text-editing", Boolean(text));
+      $("photoEditorDraw").classList.toggle("is-active", editor.mode === "draw");
+      if (text) {
+        $("photoEditorText").value = text.text;
+        $("photoEditorTextSize").value = Math.round(Math.max(12, Math.min(160, text.size)));
+        $("photoEditorTextRotation").value = Math.round(Number(text.rotation || 0));
+        $("photoEditorColor").value = text.color;
+      }
+    }
+
+    function photoEditorHistoryPush(action) {
+      const editor = state.photoEditor;
+      if (!editor) return;
+      editor.history.push(action);
+      if (editor.history.length > 80) editor.history.shift();
+    }
+
+    function rememberPhotoEditorTextChange(text, before) {
+      const after = photoEditorTextSnapshot(text);
+      if (!before || JSON.stringify(before) === JSON.stringify(after)) return;
+      photoEditorHistoryPush({ type: "text-update", id: text.id, before });
+    }
+
+    function redrawPhotoEditor({ includeSelection = true } = {}) {
       const editor = state.photoEditor;
       if (!editor?.image) return;
       const canvas = $("photoEditorCanvas");
@@ -5156,6 +5513,7 @@
       context.drawImage(editor.image, 0, 0, canvas.width, canvas.height);
       editor.strokes.forEach((stroke) => drawPhotoEditorStroke(context, stroke));
       if (editor.activeStroke) drawPhotoEditorStroke(context, editor.activeStroke);
+      editor.texts.forEach((text) => drawPhotoEditorText(context, text, includeSelection && text.id === editor.selectedTextId));
     }
 
     function photoEditorPoint(event) {
@@ -5165,6 +5523,17 @@
         x: (event.clientX - rect.left) * canvas.width / Math.max(1, rect.width),
         y: (event.clientY - rect.top) * canvas.height / Math.max(1, rect.height)
       };
+    }
+
+    function photoEditorVisiblePoint() {
+      const canvas = $("photoEditorCanvas");
+      const shell = canvas.closest(".photo-editor-canvas-shell");
+      const canvasRect = canvas.getBoundingClientRect();
+      const shellRect = shell.getBoundingClientRect();
+      return photoEditorPoint({
+        clientX: Math.max(canvasRect.left, Math.min(canvasRect.right, shellRect.left + shell.clientWidth / 2)),
+        clientY: Math.max(canvasRect.top, Math.min(canvasRect.bottom, shellRect.top + shell.clientHeight / 2))
+      });
     }
 
     function setPhotoEditorZoom(value, anchor = null) {
@@ -5200,13 +5569,24 @@
           photoId: photo.id,
           image,
           strokes: [],
+          texts: [],
+          history: [],
+          selectedTextId: "",
+          textInteraction: null,
+          textControlBefore: null,
+          mode: "draw",
           activeStroke: null,
           zoom: 100,
           pointers: new Map(),
           pinch: null,
           gestureUsed: false
         };
+        $("photoEditorText").value = "";
+        $("photoEditorSize").value = "1";
+        $("photoEditorTextSize").value = "32";
+        $("photoEditorTextRotation").value = "0";
         $("photoEditorTitle").textContent = `Uredi: ${photo.name || "Fotografija"}`;
+        setPhotoEditorTextSelection();
         redrawPhotoEditor();
         $("photoEditorDialog").showModal();
         requestAnimationFrame(fitPhotoEditorZoom);
@@ -5218,18 +5598,77 @@
     function finishPhotoEditorStroke() {
       const editor = state.photoEditor;
       if (!editor?.activeStroke) return;
-      editor.strokes.push(editor.activeStroke);
+      const stroke = editor.activeStroke;
+      editor.strokes.push(stroke);
+      photoEditorHistoryPush({ type: "stroke", stroke });
       editor.activeStroke = null;
+    }
+
+    function addPhotoEditorText() {
+      const editor = state.photoEditor;
+      const value = $("photoEditorText").value.trim();
+      if (!editor || !value) {
+        alert("Najprej vpisi besedilo, ki ga zelis dodati na sliko.");
+        return;
+      }
+      const point = photoEditorVisiblePoint();
+      const text = {
+        id: `photo-text-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        text: value,
+        x: point.x,
+        y: point.y,
+        size: Number($("photoEditorTextSize").value) || 32,
+        color: $("photoEditorColor").value,
+        rotation: 0
+      };
+      editor.texts.push(text);
+      photoEditorHistoryPush({ type: "text-add", id: text.id });
+      editor.mode = "text";
+      setPhotoEditorTextSelection(text.id);
+      redrawPhotoEditor();
+    }
+
+    function undoPhotoEditorAction() {
+      const editor = state.photoEditor;
+      if (!editor) return;
+      finishPhotoEditorStroke();
+      const action = editor.history.pop();
+      if (!action) return;
+      if (action.type === "stroke") {
+        const lastStroke = editor.strokes[editor.strokes.length - 1];
+        if (lastStroke === action.stroke) editor.strokes.pop();
+        else editor.strokes = editor.strokes.filter((stroke) => stroke !== action.stroke);
+      }
+      if (action.type === "text-add") {
+        editor.texts = editor.texts.filter((text) => text.id !== action.id);
+        if (editor.selectedTextId === action.id) setPhotoEditorTextSelection();
+      }
+      if (action.type === "text-update") {
+        const text = editor.texts.find((entry) => entry.id === action.id);
+        if (text) Object.assign(text, action.before);
+        setPhotoEditorTextSelection(action.id);
+      }
+      if (action.type === "text-remove") {
+        editor.texts.push(action.text);
+        setPhotoEditorTextSelection(action.text.id);
+      }
+      if (action.type === "clear") {
+        editor.strokes = action.strokes;
+        editor.texts = action.texts;
+        setPhotoEditorTextSelection(action.selectedTextId);
+      }
+      redrawPhotoEditor();
     }
 
     function savePhotoEditor() {
       const editor = state.photoEditor;
       if (!editor) return;
       finishPhotoEditorStroke();
-      redrawPhotoEditor();
+      redrawPhotoEditor({ includeSelection: false });
       const data = canvasAsLimitedJpegDataUrl($("photoEditorCanvas"));
       const nextPhotos = state.todoDialogPhotos.map((photo) => photo.id === editor.photoId ? { ...photo, data } : photo);
       if (todoAttachmentsDataLength(nextPhotos) > 4_800_000) {
+        redrawPhotoEditor();
         alert("Priloge so skupaj prevelike. Odstrani katero od njih.");
         return;
       }
@@ -5237,7 +5676,6 @@
       renderTodoFormPhotos();
       $("photoEditorDialog").close();
     }
-
     function renderTodoPhotoHtml(todo) {
       if (!(todo.photos || []).length) return "";
       return `<div class="todo-photos-inline">${todo.photos.map((photo) => {
@@ -5339,6 +5777,7 @@
       ["todoFormClientField", "todoFormAssigneeField", "todoFormAttachments"].forEach((id) => $(id).classList.toggle("hidden", meal));
       ["todoFormTask", "todoFormNotes", "todoFormMaterial"].forEach((id) => $(id).closest("label").classList.toggle("hidden", meal));
       const showBilling = isAdminView() && completed;
+      $("todoFormClientBilling").classList.toggle("hidden", !isAdminView() || meal);
       $("todoFormBilling").classList.toggle("hidden", !showBilling || meal);
       $("todoFormUrgentField").classList.toggle("hidden", completed || meal);
       if (completed) $("todoFormUrgent").checked = false;
@@ -5381,12 +5820,14 @@
       renderTodoFormPhotos();
       $("todoFormHourlyRate").value = editing ? todoHourlyRate(todo) : workerDefaultHourlyRate(activeWorkerId());
       $("todoFormBillingKm").value = Number(todo.billingKm || 0);
+      $("todoFormClientKm").value = Number(todo.clientKm || 0);
+      $("todoFormClientVehicle").value = todo.clientVehicle === "van" ? "van" : "personal";
       $("deleteTodoFromDialog").classList.toggle("hidden", !editing);
       $("writeHoursFromTodo").classList.toggle("hidden", !editing || Boolean(state.todoHoursSourceId) || todoStatus(todo.status).id === "execution");
       renderTodoFormAudit(todo);
-      $("todoFormPhotoInput").value = "";
+      ["todoFormPhotoInput", "todoFormCameraInput", "todoFormPdfInput"].forEach((id) => { $(id).value = ""; });
       $("todoDialog").showModal();
-      requestAnimationFrame(() => $("todoFormTask").focus());
+      requestAnimationFrame(() => $(editing ? "todoFormTask" : "todoFormClient").focus());
       fillMissingPdfThumbnailsForDialog(state.todoDialogPhotos).catch((error) => console.warn(error));
     }
 
@@ -5400,6 +5841,8 @@
       if (meal) assigneeIds.splice(0, assigneeIds.length, activeWorkerId());
       const hourlyRate = parseBillingNumber($("todoFormHourlyRate").value, 10_000);
       const billingKm = parseBillingNumber($("todoFormBillingKm").value, 1_000_000);
+      const clientKm = parseBillingNumber($("todoFormClientKm").value, 1_000_000);
+      const clientVehicle = $("todoFormClientVehicle").value === "van" ? "van" : "personal";
       const todo = {
         ...(existing || {}),
         id: id || undefined,
@@ -5420,6 +5863,8 @@
         done: $("todoFormStatus").value === "execution",
         billingHourlyRate: hourlyRate,
         billingKm,
+        clientKm: meal ? 0 : clientKm,
+        clientVehicle: meal ? "personal" : clientVehicle,
         photos: state.todoDialogPhotos
       };
       if (meal) {
@@ -5500,6 +5945,13 @@
       });
     }
 
+    function openProjectCompletionDialog(sourceId) {
+      const source = state.todos.find((todo) => todo.id === sourceId);
+      state.todoHoursCompletionSourceId = sourceId || "";
+      $("projectCompletionTask").textContent = source?.title || "Brez imena opravila";
+      $("projectCompletionClient").textContent = source?.client || "Brez stranke";
+      $("projectCompletionDialog").showModal();
+    }
     async function handleHoursProjectCompletion(deleteProject) {
       const sourceId = state.todoHoursCompletionSourceId;
       const sourceOriginal = state.todoHoursSourceOriginal;
@@ -6414,7 +6866,7 @@
         alert(error.message);
       }
     });
-    $("newTodoButton").addEventListener("click", () => startTodoForDate(dateKey(new Date())));
+    $("newTodoButton").addEventListener("click", () => startTodoForDate());
     $("writeHoursButton").addEventListener("click", () => openStandaloneHoursDialog().catch((error) => alert(error.message)));
 
     document.querySelectorAll(".debt-stat").forEach((button) => {
@@ -6555,7 +7007,7 @@
     $("writeHoursFromTodo").addEventListener("click", () => openHoursTodoFromCurrent().catch((error) => alert(error.message)));
     $("deleteCompletedProject").addEventListener("click", () => handleHoursProjectCompletion(true).catch((error) => alert(error.message)));
     $("rescheduleProject").addEventListener("click", () => handleHoursProjectCompletion(false).catch((error) => alert(error.message)));
-    $("todoFormPhotoInput").addEventListener("change", async (event) => {
+    async function handleTodoAttachmentsFromInput(event) {
       try {
         const remaining = Math.max(0, 8 - state.todoDialogPhotos.length);
         const files = [...event.target.files].slice(0, remaining);
@@ -6570,6 +7022,9 @@
       } finally {
         event.target.value = "";
       }
+    }
+    ["todoFormPhotoInput", "todoFormCameraInput", "todoFormPdfInput"].forEach((id) => {
+      $(id).addEventListener("change", handleTodoAttachmentsFromInput);
     });
     $("todoFormPhotoList").addEventListener("click", (event) => {
       const edit = event.target.closest(".edit-todo-form-photo");
@@ -6648,11 +7103,22 @@
     $("clientsList").addEventListener("click", (event) => {
       const button = event.target.closest(".open-client");
       if (!button) return;
-      if (isAdminView()) openClientReport(button.dataset.clientName, button.dataset.clientId);
+      if (isAdminView()) openClientEditDialog(button.dataset.clientId);
       else {
         state.selectedClient = button.dataset.clientName;
         setView("todos");
       }
+    });
+    $("closeClientEdit").addEventListener("click", () => $("clientEditDialog").close());
+    $("cancelClientEdit").addEventListener("click", () => $("clientEditDialog").close());
+    $("clientEditForm").addEventListener("submit", (event) => {
+      event.preventDefault();
+      const button = $("saveClientEdit");
+      button.disabled = true;
+      saveClientFromDialog().catch((error) => alert(error.message)).finally(() => { button.disabled = false; });
+    });
+    $("clientEditDialog").addEventListener("click", (event) => {
+      if (event.target === event.currentTarget) event.currentTarget.close();
     });
 
     $("prevMonth").addEventListener("click", () => {
@@ -6700,7 +7166,7 @@
       state.dayTimelineHoursResolvedSourceId = "";
       if (hoursSourceId) {
         state.todoHoursCompletionSourceId = hoursSourceId;
-        $("projectCompletionDialog").showModal();
+        openProjectCompletionDialog(hoursSourceId);
       }
     });
     $("syncClientsBtn").addEventListener("click", () => syncClients().catch((error) => alert(error.message)));
@@ -6723,7 +7189,7 @@
       if (state.todoHoursSavedSourceId === sourceId) {
         state.todoHoursSavedSourceId = "";
         state.todoHoursCompletionSourceId = sourceId;
-        $("projectCompletionDialog").showModal();
+        openProjectCompletionDialog(sourceId);
         return;
       }
       setTimeout(() => {
@@ -6734,6 +7200,42 @@
       }, 0);
     });
     $("todoDialog").addEventListener("close", hideTodoClientSuggestions);
+    function beginPhotoEditorTextControlChange() {
+      const editor = state.photoEditor;
+      const text = selectedPhotoEditorText();
+      if (editor && text) editor.textControlBefore = photoEditorTextSnapshot(text);
+    }
+
+    function commitPhotoEditorTextControlChange() {
+      const editor = state.photoEditor;
+      const text = selectedPhotoEditorText();
+      if (!editor || !text) return;
+      rememberPhotoEditorTextChange(text, editor.textControlBefore);
+      editor.textControlBefore = null;
+      setPhotoEditorTextSelection(text.id);
+      redrawPhotoEditor();
+    }
+
+    function updateSelectedPhotoEditorTextFromControls() {
+      const text = selectedPhotoEditorText();
+      if (!text) return;
+      text.text = $("photoEditorText").value.slice(0, 160);
+      text.size = Number($("photoEditorTextSize").value) || 32;
+      text.rotation = Number($("photoEditorTextRotation").value) || 0;
+      text.color = $("photoEditorColor").value;
+      redrawPhotoEditor();
+    }
+
+    function changePhotoEditorTextSize(delta) {
+      const text = selectedPhotoEditorText();
+      if (!text) return;
+      const before = photoEditorTextSnapshot(text);
+      text.size = Math.max(12, Math.min(160, text.size + delta));
+      $("photoEditorTextSize").value = Math.round(text.size);
+      rememberPhotoEditorTextChange(text, before);
+      redrawPhotoEditor();
+    }
+
     $("photoEditorCanvas").addEventListener("pointerdown", (event) => {
       const editor = state.photoEditor;
       if (!editor) return;
@@ -6743,6 +7245,7 @@
       editor.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
       if (editor.pointers.size >= 2) {
         editor.activeStroke = null;
+        editor.textInteraction = null;
         editor.gestureUsed = true;
         redrawPhotoEditor();
         const metrics = pointerGestureMetrics(editor.pointers);
@@ -6750,12 +7253,34 @@
         return;
       }
       if (editor.gestureUsed) return;
+      const point = photoEditorPoint(event);
+      const hit = photoEditorTextHitTest(point);
+      if (hit) {
+        editor.mode = "text";
+        setPhotoEditorTextSelection(hit.text.id);
+        editor.textInteraction = {
+          pointerId: event.pointerId,
+          type: hit.action,
+          before: photoEditorTextSnapshot(hit.text),
+          offsetX: point.x - hit.text.x,
+          offsetY: point.y - hit.text.y,
+          moved: false
+        };
+        redrawPhotoEditor();
+        return;
+      }
+      if (editor.mode === "text") {
+        setPhotoEditorTextSelection();
+        redrawPhotoEditor();
+        return;
+      }
+      setPhotoEditorTextSelection();
       const rect = canvas.getBoundingClientRect();
       editor.activeStroke = {
         pointerId: event.pointerId,
         color: $("photoEditorColor").value,
         size: Number($("photoEditorSize").value) * canvas.width / Math.max(1, rect.width),
-        points: [photoEditorPoint(event)]
+        points: [point]
       };
       drawPhotoEditorStroke(canvas.getContext("2d"), editor.activeStroke);
     });
@@ -6779,6 +7304,23 @@
         editor.pinch = { lastDistance: metrics.distance, lastCenter: metrics.center };
         return;
       }
+      const interaction = editor.textInteraction;
+      if (interaction?.pointerId === event.pointerId && !editor.gestureUsed) {
+        const text = selectedPhotoEditorText();
+        if (!text) return;
+        const point = photoEditorPoint(event);
+        if (interaction.type === "move") {
+          text.x = point.x - interaction.offsetX;
+          text.y = point.y - interaction.offsetY;
+        } else {
+          const angle = Math.atan2(point.y - text.y, point.x - text.x) * 180 / Math.PI + 90;
+          text.rotation = ((angle + 180) % 360 + 360) % 360 - 180;
+          $("photoEditorTextRotation").value = Math.round(text.rotation);
+        }
+        interaction.moved = true;
+        redrawPhotoEditor();
+        return;
+      }
       const stroke = editor.activeStroke;
       if (!stroke || stroke.pointerId !== event.pointerId || editor.gestureUsed) return;
       stroke.points.push(photoEditorPoint(event));
@@ -6787,6 +7329,15 @@
     function finishPhotoEditorPointer(event, cancelled = false) {
       const editor = state.photoEditor;
       if (!editor) return;
+      const interaction = editor.textInteraction;
+      if (interaction?.pointerId === event.pointerId) {
+        const text = selectedPhotoEditorText();
+        if (text && cancelled) Object.assign(text, interaction.before);
+        if (text && !cancelled && interaction.moved) rememberPhotoEditorTextChange(text, interaction.before);
+        editor.textInteraction = null;
+        setPhotoEditorTextSelection(text?.id || "");
+        redrawPhotoEditor();
+      }
       if (!cancelled && !editor.gestureUsed && editor.activeStroke?.pointerId === event.pointerId) finishPhotoEditorStroke();
       if (cancelled && editor.activeStroke?.pointerId === event.pointerId) {
         editor.activeStroke = null;
@@ -6801,10 +7352,39 @@
       finishPhotoEditorPointer(event);
     });
     $("photoEditorCanvas").addEventListener("pointercancel", (event) => finishPhotoEditorPointer(event, true));
-    $("photoEditorUndo").addEventListener("click", () => {
-      finishPhotoEditorStroke();
-      state.photoEditor?.strokes.pop();
+    $("photoEditorDraw").addEventListener("click", () => {
+      if (!state.photoEditor) return;
+      state.photoEditor.mode = "draw";
+      setPhotoEditorTextSelection();
       redrawPhotoEditor();
+    });
+    $("photoEditorAddText").addEventListener("click", addPhotoEditorText);
+    $("photoEditorText").addEventListener("keydown", (event) => {
+      if (event.key !== "Enter") return;
+      event.preventDefault();
+      addPhotoEditorText();
+    });
+    $("photoEditorTextSmaller").addEventListener("click", () => changePhotoEditorTextSize(-2));
+    $("photoEditorTextLarger").addEventListener("click", () => changePhotoEditorTextSize(2));
+    $("photoEditorDeleteText").addEventListener("click", () => {
+      const editor = state.photoEditor;
+      const text = selectedPhotoEditorText();
+      if (!editor || !text) return;
+      photoEditorHistoryPush({ type: "text-remove", text: photoEditorTextSnapshot(text) });
+      editor.texts = editor.texts.filter((entry) => entry.id !== text.id);
+      setPhotoEditorTextSelection();
+      redrawPhotoEditor();
+    });
+    ["photoEditorText", "photoEditorTextSize", "photoEditorTextRotation", "photoEditorColor"].forEach((id) => {
+      $(id).addEventListener("focus", beginPhotoEditorTextControlChange);
+      $(id).addEventListener("pointerdown", beginPhotoEditorTextControlChange);
+    });
+    ["photoEditorText", "photoEditorTextSize", "photoEditorTextRotation", "photoEditorColor"].forEach((id) => {
+      $(id).addEventListener("input", updateSelectedPhotoEditorTextFromControls);
+      $(id).addEventListener("change", commitPhotoEditorTextControlChange);
+    });
+    $("photoEditorUndo").addEventListener("click", () => {
+      undoPhotoEditorAction();
     });
     $("photoEditorZoomOut").addEventListener("click", () => {
       const shell = $("photoEditorCanvas").closest(".photo-editor-canvas-shell");
@@ -6816,9 +7396,19 @@
     });
     $("photoEditorFit").addEventListener("click", fitPhotoEditorZoom);
     $("photoEditorClear").addEventListener("click", () => {
-      if (!state.photoEditor) return;
-      state.photoEditor.activeStroke = null;
-      state.photoEditor.strokes = [];
+      const editor = state.photoEditor;
+      if (!editor || (!(editor.strokes || []).length && !(editor.texts || []).length)) return;
+      finishPhotoEditorStroke();
+      photoEditorHistoryPush({
+        type: "clear",
+        strokes: editor.strokes.slice(),
+        texts: editor.texts.map(photoEditorTextSnapshot),
+        selectedTextId: editor.selectedTextId
+      });
+      editor.strokes = [];
+      editor.texts = [];
+      editor.mode = "draw";
+      setPhotoEditorTextSelection();
       redrawPhotoEditor();
     });
     $("photoEditorSave").addEventListener("click", () => {
@@ -6838,6 +7428,8 @@
       shell.scrollLeft = 0;
       shell.scrollTop = 0;
       $("photoEditorZoomValue").textContent = "100 %";
+      $("photoEditorTextTools").hidden = true;
+      shell.classList.remove("is-text-editing");
     });
     $("photoEditorDialog").addEventListener("click", (event) => {
       if (event.target === event.currentTarget) event.currentTarget.close();
