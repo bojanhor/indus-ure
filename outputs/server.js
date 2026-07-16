@@ -404,6 +404,11 @@ function normalizeDb(db = {}) {
     changed = true;
   }
 
+  if (!Array.isArray(db.payrolls)) {
+    db.payrolls = [];
+    changed = true;
+  }
+
   if (!db.settings || typeof db.settings !== "object") {
     db.settings = {};
     changed = true;
@@ -562,6 +567,10 @@ function normalizeDb(db = {}) {
     createdByName: lock.createdByName || "",
     createdAt: lock.createdAt || new Date().toISOString()
   })).filter((lock) => /^\d{4}-\d{2}-\d{2}$/.test(lock.from) && /^\d{4}-\d{2}-\d{2}$/.test(lock.to));
+
+  const payrollsBeforeNormalization = JSON.stringify(db.payrolls);
+  db.payrolls = db.payrolls.map((payroll) => normalizePayroll(payroll, db)).filter(Boolean);
+  if (JSON.stringify(db.payrolls) !== payrollsBeforeNormalization) changed = true;
 
   db.todos = db.todos.map((todo, index) => {
     const next = { ...todo };
@@ -1044,6 +1053,146 @@ function nonnegativeNumber(value, fallback = null, maximum = Number.MAX_SAFE_INT
   return Number.isFinite(number) && number >= 0 && number <= maximum ? number : fallback;
 }
 
+const PAYROLL_STATUSES = new Set(["draft", "confirmed", "paid"]);
+
+function isPayrollMonth(value) {
+  const match = /^(\d{4})-(\d{2})$/.exec(String(value || ""));
+  return Boolean(match && Number(match[2]) >= 1 && Number(match[2]) <= 12);
+}
+function payrollMinutesForTodo(todo) {
+  if (!todo || todo.status !== "execution" || !/^\d{4}-\d{2}-\d{2}$/.test(String(todo.date || ""))) return null;
+  const start = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(String(todo.start || ""));
+  const end = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(String(todo.end || ""));
+  if (!start || !end) return null;
+  const minutes = (Number(end[1]) * 60 + Number(end[2])) - (Number(start[1]) * 60 + Number(start[2]));
+  return minutes > 0 ? minutes : null;
+}
+
+function payrollLineForTodo(db, todo) {
+  const minutes = payrollMinutesForTodo(todo);
+  if (!minutes) return null;
+  const hourlyRate = nonnegativeNumber(todo.billingHourlyRate, defaultHourlyRateForUser(db, todo.syncUser || todo.createdBy), 10_000);
+  const km = nonnegativeNumber(todo.billingKm, 0, 1_000_000);
+  const kmRate = nonnegativeNumber(db.settings?.billing?.kmRate, 0, 1_000);
+  const hours = minutes / 60;
+  const workAmount = Number((hours * hourlyRate).toFixed(2));
+  const kmAmount = Number((km * kmRate).toFixed(2));
+  return {
+    todoId: String(todo.id || ""),
+    assignmentGroupId: String(todo.assignmentGroupId || todo.id || ""),
+    date: String(todo.date || ""),
+    start: String(todo.start || ""),
+    end: String(todo.end || ""),
+    title: String(todo.title || "").slice(0, 300),
+    client: String(todo.client || "").slice(0, 240),
+    minutes,
+    hours,
+    hourlyRate,
+    km,
+    kmRate,
+    workAmount,
+    kmAmount,
+    totalAmount: Number((workAmount + kmAmount).toFixed(2))
+  };
+}
+
+function payrollTotals(lines = []) {
+  const minutes = lines.reduce((total, line) => total + Number(line.minutes || 0), 0);
+  const workAmount = Number(lines.reduce((total, line) => total + Number(line.workAmount || 0), 0).toFixed(2));
+  const km = Number(lines.reduce((total, line) => total + Number(line.km || 0), 0).toFixed(2));
+  const kmAmount = Number(lines.reduce((total, line) => total + Number(line.kmAmount || 0), 0).toFixed(2));
+  return {
+    minutes,
+    hours: minutes / 60,
+    km,
+    workAmount,
+    kmAmount,
+    totalAmount: Number((workAmount + kmAmount).toFixed(2))
+  };
+}
+
+function normalizePayroll(input, db) {
+  const workerId = cleanUserId(input?.workerId);
+  const month = String(input?.month || "");
+  if (!workerId || !db.users?.[workerId] || !isPayrollMonth(month)) return null;
+  const lines = (Array.isArray(input?.lines) ? input.lines : []).map((line) => {
+    const minutes = Math.round(Number(line?.minutes || 0));
+    const hourlyRate = nonnegativeNumber(line?.hourlyRate, null, 10_000);
+    const km = nonnegativeNumber(line?.km, 0, 1_000_000);
+    const kmRate = nonnegativeNumber(line?.kmRate, 0, 1_000);
+    if (!String(line?.todoId || "") || minutes <= 0 || hourlyRate === null) return null;
+    const hours = minutes / 60;
+    const workAmount = Number((hours * hourlyRate).toFixed(2));
+    const kmAmount = Number((km * kmRate).toFixed(2));
+    return {
+      todoId: String(line.todoId),
+      assignmentGroupId: String(line.assignmentGroupId || line.todoId),
+      date: String(line.date || ""),
+      start: String(line.start || ""),
+      end: String(line.end || ""),
+      title: String(line.title || "").slice(0, 300),
+      client: String(line.client || "").slice(0, 240),
+      minutes,
+      hours,
+      hourlyRate,
+      km,
+      kmRate,
+      workAmount,
+      kmAmount,
+      totalAmount: Number((workAmount + kmAmount).toFixed(2))
+    };
+  }).filter(Boolean);
+  const totals = payrollTotals(lines);
+  const status = PAYROLL_STATUSES.has(input?.status) ? input.status : "draft";
+  const createdAt = String(input?.createdAt || new Date().toISOString());
+  return {
+    id: String(input?.id || crypto.randomUUID()),
+    workerId,
+    month,
+    status,
+    note: String(input?.note || "").trim().slice(0, 2_000),
+    lines,
+    ...totals,
+    createdBy: String(input?.createdBy || "system"),
+    createdByName: String(input?.createdByName || ""),
+    createdAt,
+    updatedBy: String(input?.updatedBy || input?.createdBy || "system"),
+    updatedByName: String(input?.updatedByName || input?.createdByName || ""),
+    updatedAt: String(input?.updatedAt || createdAt),
+    confirmedAt: String(input?.confirmedAt || ""),
+    confirmedBy: String(input?.confirmedBy || ""),
+    confirmedByName: String(input?.confirmedByName || ""),
+    paidAt: String(input?.paidAt || ""),
+    paidBy: String(input?.paidBy || ""),
+    paidByName: String(input?.paidByName || "")
+  };
+}
+
+function buildPayrollSnapshot(db, workerId, month, previous = {}, note = undefined) {
+  const lockedElsewhere = new Set((db.payrolls || [])
+    .filter((payroll) => payroll.id !== previous.id && ["confirmed", "paid"].includes(payroll.status))
+    .flatMap((payroll) => payroll.lines || [])
+    .map((line) => String(line.todoId || "")));
+  const lines = (db.todos || [])
+    .filter((todo) => (todo.syncUser || todo.createdBy) === workerId && String(todo.date || "").startsWith(month))
+    .filter((todo) => !lockedElsewhere.has(String(todo.id || "")))
+    .map((todo) => payrollLineForTodo(db, todo))
+    .filter(Boolean)
+    .sort((a, b) => a.date.localeCompare(b.date) || a.start.localeCompare(b.start) || a.title.localeCompare(b.title));
+  return normalizePayroll({ ...previous, workerId, month, lines, note: note === undefined ? previous.note : note }, db);
+}
+
+function payrollForUser(db, user) {
+  const payrolls = db.payrolls || [];
+  return user.role === "boss" ? payrolls : payrolls.filter((payroll) => payroll.workerId === user.id);
+}
+
+function payrollLockForTodos(db, todos = []) {
+  const ids = new Set(todos.map((todo) => String(todo?.id || "")).filter(Boolean));
+  if (!ids.size) return null;
+  return (db.payrolls || []).find((payroll) => ["confirmed", "paid"].includes(payroll.status)
+    && (payroll.lines || []).some((line) => ids.has(String(line.todoId || "")))) || null;
+}
 function defaultHourlyRateForUser(db, userId) {
   return nonnegativeNumber(
     db.users?.[userId]?.billing?.hourlyRate,
@@ -2380,6 +2529,173 @@ async function handleApi(req, res) {
       sendJson(res, 200, { users });
       return;
     }
+    if (url.pathname === "/api/payrolls" && req.method === "GET") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      const db = await readDbAsync();
+      sendJson(res, 200, { payrolls: payrollForUser(db, user) });
+      return;
+    }
+
+    if (url.pathname === "/api/payrolls" && req.method === "POST") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      if (user.role !== "boss") {
+        sendJson(res, 403, { error: "Samo sef lahko pripravi obracun." });
+        return;
+      }
+      const body = await readBody(req);
+      const workerId = cleanUserId(body.workerId);
+      const month = String(body.month || "");
+      if (!workerId || !isPayrollMonth(month)) {
+        sendJson(res, 400, { error: "Delavec ali obracunsko obdobje ni pravilno." });
+        return;
+      }
+      const db = await readDbAsync();
+      if (!db.users?.[workerId]) {
+        sendJson(res, 400, { error: "Delavec ne obstaja." });
+        return;
+      }
+      const existingIndex = db.payrolls.findIndex((payroll) => payroll.workerId === workerId && payroll.month === month);
+      const previous = existingIndex >= 0 ? db.payrolls[existingIndex] : {};
+      if (previous.status && previous.status !== "draft") {
+        sendJson(res, 409, { error: "Ta obracun je ze potrjen ali placan. Najprej ga izrecno ponovno odpri." });
+        return;
+      }
+      const now = new Date().toISOString();
+      const payroll = buildPayrollSnapshot(db, workerId, month, {
+        ...previous,
+        id: previous.id || crypto.randomUUID(),
+        status: "draft",
+        createdBy: previous.createdBy || user.id,
+        createdByName: previous.createdByName || user.name,
+        createdAt: previous.createdAt || now,
+        updatedBy: user.id,
+        updatedByName: user.name,
+        updatedAt: now
+      }, body.note);
+      if (!payroll?.lines.length) {
+        sendJson(res, 400, { error: "Za izbrani mesec delavec nima zakljucenih vnosov ur." });
+        return;
+      }
+      if (existingIndex >= 0) db.payrolls[existingIndex] = payroll;
+      else db.payrolls.push(payroll);
+      await writeDbAsync(db);
+      sendJson(res, 200, { payrolls: payrollForUser(db, user), payroll });
+      return;
+    }
+
+    const payrollMatch = url.pathname.match(/^\/api\/payrolls\/([^/]+)$/);
+    if (payrollMatch && req.method === "PUT") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      if (user.role !== "boss") {
+        sendJson(res, 403, { error: "Samo sef lahko potrjuje ali odpira obracune." });
+        return;
+      }
+      const body = await readBody(req);
+      const action = String(body.action || "refresh");
+      const db = await readDbAsync();
+      const index = db.payrolls.findIndex((payroll) => payroll.id === decodeURIComponent(payrollMatch[1]));
+      if (index < 0) {
+        sendJson(res, 404, { error: "Obracun ne obstaja." });
+        return;
+      }
+      const current = db.payrolls[index];
+      const now = new Date().toISOString();
+      let payroll;
+      if (action === "refresh") {
+        if (current.status !== "draft") {
+          sendJson(res, 409, { error: "Potrjen obracun najprej ponovno odpri." });
+          return;
+        }
+        payroll = buildPayrollSnapshot(db, current.workerId, current.month, {
+          ...current,
+          updatedBy: user.id,
+          updatedByName: user.name,
+          updatedAt: now
+        }, body.note);
+      } else if (action === "confirm") {
+        if (current.status !== "draft") {
+          sendJson(res, 409, { error: "Potrdi lahko samo osnutek obracuna." });
+          return;
+        }
+        payroll = buildPayrollSnapshot(db, current.workerId, current.month, {
+          ...current,
+          status: "confirmed",
+          updatedBy: user.id,
+          updatedByName: user.name,
+          updatedAt: now,
+          confirmedAt: now,
+          confirmedBy: user.id,
+          confirmedByName: user.name
+        }, body.note);
+      } else if (action === "paid") {
+        if (current.status !== "confirmed") {
+          sendJson(res, 409, { error: "Kot placanega lahko oznacis samo potrjen obracun." });
+          return;
+        }
+        payroll = normalizePayroll({
+          ...current,
+          status: "paid",
+          updatedBy: user.id,
+          updatedByName: user.name,
+          updatedAt: now,
+          paidAt: now,
+          paidBy: user.id,
+          paidByName: user.name
+        }, db);
+      } else if (action === "reopen") {
+        if (current.status === "draft") {
+          sendJson(res, 409, { error: "Obracun je ze odprt za popravke." });
+          return;
+        }
+        payroll = buildPayrollSnapshot(db, current.workerId, current.month, {
+          ...current,
+          status: "draft",
+          updatedBy: user.id,
+          updatedByName: user.name,
+          updatedAt: now,
+          paidAt: "",
+          paidBy: "",
+          paidByName: ""
+        }, body.note);
+      } else {
+        sendJson(res, 400, { error: "Neznano dejanje obracuna." });
+        return;
+      }
+      if (!payroll?.lines.length) {
+        sendJson(res, 400, { error: "Obracun nima zakljucenih vnosov ur." });
+        return;
+      }
+      db.payrolls[index] = payroll;
+      await writeDbAsync(db);
+      sendJson(res, 200, { payrolls: payrollForUser(db, user), payroll });
+      return;
+    }
+
+    if (payrollMatch && req.method === "DELETE") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      if (user.role !== "boss") {
+        sendJson(res, 403, { error: "Samo sef lahko brise osnutek obracuna." });
+        return;
+      }
+      const db = await readDbAsync();
+      const index = db.payrolls.findIndex((payroll) => payroll.id === decodeURIComponent(payrollMatch[1]));
+      if (index < 0) {
+        sendJson(res, 404, { error: "Obracun ne obstaja." });
+        return;
+      }
+      if (db.payrolls[index].status !== "draft") {
+        sendJson(res, 409, { error: "Potrjenega obracuna ni mogoce izbrisati; najprej ga ponovno odpri." });
+        return;
+      }
+      db.payrolls.splice(index, 1);
+      await writeDbAsync(db);
+      sendJson(res, 200, { payrolls: payrollForUser(db, user) });
+      return;
+    }
     if (url.pathname === "/api/workers/billing" && req.method === "GET") {
       const user = await requireUser(req, res);
       if (!user) return;
@@ -2960,6 +3276,11 @@ async function handleApi(req, res) {
       }
       const previousTodo = db.todos[index];
       const assignmentItems = todoAssignmentItems(db, previousTodo);
+      const payrollLock = payrollLockForTodos(db, assignmentItems);
+      if (payrollLock) {
+        sendJson(res, 403, { error: `Opravilo je del potrjenega obracuna za ${db.users?.[payrollLock.workerId]?.name || payrollLock.workerId} (${payrollLock.month}). Sef ga mora najprej ponovno odpreti.` });
+        return;
+      }
       const editLock = todoAssignmentEditLockConflict(db, previousTodo, user, editLockToken);
       if (editLock) {
         sendJson(res, 409, { error: `Opravilo trenutno ureja ${editLock.lockedByName || editLock.lockedById}.`, lock: editLock });
@@ -3090,6 +3411,11 @@ async function handleApi(req, res) {
         return;
       }
       const assignmentItems = todoAssignmentItems(db, todo);
+      const payrollLock = payrollLockForTodos(db, assignmentItems);
+      if (payrollLock) {
+        sendJson(res, 403, { error: `Opravilo je del potrjenega obracuna za ${db.users?.[payrollLock.workerId]?.name || payrollLock.workerId} (${payrollLock.month}). Sef ga mora najprej ponovno odpreti.` });
+        return;
+      }
       for (const item of assignmentItems) {
         if (item.googleEventId && !(await deleteGoogleEventForItem(req, db, item))) {
           sendJson(res, 502, { error: "Opravila ni bilo mogoce varno odstraniti iz koledarja." });
@@ -3275,6 +3601,7 @@ module.exports = {
   pushGoogleItem,
   reconcileGoogleCalendar,
   buildCalendarIcs,
+  buildPayrollSnapshot,
   canManageEntry,
   canManageTodo,
   sourceTodoForNewEntry,
@@ -3286,6 +3613,10 @@ module.exports = {
   googleEventChanged,
   localItemChanged,
   normalizeDb,
+  normalizePayroll,
+  payrollForUser,
+  payrollLockForTodos,
+  payrollTotals,
   parseGoogleEventDescription,
   releaseEntryEditLock,
   releaseTodoEditLock,

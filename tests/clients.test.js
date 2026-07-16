@@ -326,18 +326,22 @@ test("razlagalni AI teksti niso prikazani v uporabniskem vmesniku", () => {
   }
   assert.doesNotMatch(html, /workContextHint/);
 });
-test("koledar nima starih statistik delavec pa dobi zavihek Obracun", () => {
+test("obracun ur podpira delavski in sefovski pogled", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
   assert.doesNotMatch(html, /id="statHoursIbro"|id="statKm"|id="statUnbilled"/);
   assert.doesNotMatch(html, /function renderStats\(\)/);
-  assert.match(html, /class="view-btn worker-only" id="billingViewBtn"[^>]*>Obra&#269;un/);
-  assert.match(html, /class="panel billing-screen worker-only view-hidden"/);
-  assert.match(html, /function renderBillingView\(\)[\s\S]*?activeWorker\(\)[\s\S]*?billingViewTitle/);
-  assert.match(html, /if \(isAdminView\(\) && view === "billing"\) view = "todos"/);
+  assert.match(html, /id="billingViewBtn"[^>]*>Obra&#269;uni/);
+  assert.match(html, /class="panel billing-screen view-hidden"/);
+  assert.match(html, /id="billingWorker"/);
+  assert.match(html, /id="billingSaveDraft"/);
+  assert.match(html, /id="billingConfirm"/);
+  assert.match(html, /id="billingMarkPaid"/);
+  assert.match(html, /function billingLiveLines\(workerId, month\)/);
+  assert.match(html, /function changePayroll\(action\)/);
+  assert.match(html, /api\("\/api\/payrolls"\)/);
+  assert.doesNotMatch(html, /if \(isAdminView\(\) && view === "billing"\) view = "todos"/);
   assert.match(html, /billingViewBtn"\)\.addEventListener\("click", \(\) => setView\("billing"\)\)/);
-  assert.match(html, /querySelectorAll\("\.worker-only"\)[\s\S]*toggle\("hidden", admin\)/);
-});
-test("sefovski seznam privzeto prikaze zakljucena opravila", () => {
+});test("sefovski seznam privzeto prikaze zakljucena opravila", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
   assert.match(html, /id="reportTodoCompletionFilter"/);
   assert.match(html, /<option value="completed" selected>Zaklju&#269;ena<\/option>/);

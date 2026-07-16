@@ -13,11 +13,14 @@ const {
   canManageEntry,
   canManageTodo,
   createSession,
+  buildPayrollSnapshot,
   entryEditLockConflict,
   sourceTodoForNewEntry,
   entryForUserRole,
   defaultHourlyRateForUser,
   normalizeDb,
+  payrollForUser,
+  payrollLockForTodos,
   releaseEntryEditLock,
   releaseTodoEditLock,
   releaseTodoAssignmentEditLock,
@@ -306,4 +309,32 @@ test("priloge sprejmejo pravi PDF in zavrnejo preimenovano datoteko", () => {
   assert.equal(validTodoAttachmentDataUrl(disguised), false);
   const html = `data:text/html;base64,${Buffer.from("<script>alert(1)</script>").toString("base64")}`;
   assert.equal(validTodoAttachmentDataUrl(html), false);
+});
+
+test("obračun naredi nespremenljiv posnetek ur posameznega delavca", () => {
+  const db = {
+    users: {
+      bojan: { id: "bojan", name: "Bojan", role: "boss", billing: { hourlyRate: 25 } },
+      ibro: { id: "ibro", name: "Ibro", role: "worker", billing: { hourlyRate: 18 } }
+    },
+    settings: { billing: { hourlyRate: 15, kmRate: 0.22 } },
+    payrolls: [],
+    todos: [
+      { id: "t-ibro", assignmentGroupId: "g-1", syncUser: "ibro", status: "execution", date: "2026-07-15", start: "08:00", end: "10:30", title: "Montaža", client: "Jerin", billingHourlyRate: 20, billingKm: 12 },
+      { id: "t-bojan", syncUser: "bojan", status: "execution", date: "2026-07-15", start: "08:00", end: "09:00", title: "Pregled", billingHourlyRate: 25, billingKm: 0 },
+      { id: "t-open", syncUser: "ibro", status: "open", date: "2026-07-15", start: "10:30", end: "11:30", title: "Odprto" }
+    ]
+  };
+  const draft = buildPayrollSnapshot(db, "ibro", "2026-07", { id: "p-1", status: "draft" });
+  assert.equal(draft.lines.length, 1);
+  assert.equal(draft.minutes, 150);
+  assert.equal(draft.hours, 2.5);
+  assert.equal(draft.workAmount, 50);
+  assert.equal(draft.kmAmount, 2.64);
+  assert.equal(draft.totalAmount, 52.64);
+  db.payrolls = [{ ...draft, status: "confirmed" }];
+  assert.equal(payrollLockForTodos(db, [db.todos[0]])?.id, "p-1");
+  assert.equal(payrollLockForTodos(db, [db.todos[1]]), null);
+  assert.deepEqual(payrollForUser(db, db.users.ibro).map((payroll) => payroll.id), ["p-1"]);
+  assert.equal(payrollForUser(db, db.users.bojan).length, 1);
 });
