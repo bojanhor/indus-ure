@@ -1551,6 +1551,7 @@
     }
 
     .day-number { font-weight: 800; font-size: 15px; }
+    .day-edit-hint { width: 22px; height: 22px; padding: 0; border-radius: 6px; color: var(--accent-dark); background: transparent; font-size: 15px; }
 
     .quick-add {
       width: 24px;
@@ -1695,6 +1696,7 @@
     }
 
     .day-timeline-event.is-moving { opacity: 0.88; cursor: grabbing; z-index: 8; }
+    .day-hours-warning { display: inline-grid; place-items: center; width: 18px; height: 18px; margin-left: 5px; border-radius: 50%; background: #c93131; color: #fff; font-weight: 900; line-height: 1; }
     .day-timeline-event-title { display: block; font-size: 13px; line-height: 1.2; overflow-wrap: anywhere; }
     .day-timeline-event-meta { display: block; margin-top: 2px; font-size: 11px; line-height: 1.15; opacity: 0.86; }
     .day-resize-handle {
@@ -2629,7 +2631,6 @@
       <div class="modal-head">
         <h3 id="dayTimelineTitle">Dnevni pregled</h3>
         <div class="modal-head-actions">
-          <button class="primary" id="saveDayTimeline" type="button" disabled>Shrani</button>
           <button class="icon-btn" id="closeDayTimeline" type="submit" title="Prekliči spremembe" aria-label="Prekliči spremembe in zapri dnevni pregled">&times;</button>
         </div>
       </div>
@@ -2692,7 +2693,8 @@
           <div class="todo-form-assignees" id="todoFormAssignees"></div>
         </div>
         <label>Ime opravila
-          <input id="todoFormTask" type="text" placeholder="Ime opravila" required>
+          <input id="todoFormTask" type="text" placeholder="Ime opravila" list="todoFormTaskSuggestions" required>
+          <datalist id="todoFormTaskSuggestions"></datalist>
         </label>
         <label>Opis del
           <textarea id="todoFormNotes" placeholder="Vpi&#353;i, kaj to&#269;no se je delalo"></textarea>
@@ -2958,6 +2960,8 @@
       todoHoursCompletionSourceId: "",
       dayTimelineDate: "",
       dayTimelineDrafts: new Map(),
+      dayTimelineHoursWarning: null,
+      todoHoursFixingTime: false,
       dayTimelineMinuteHeight: 1,
       dayTimelinePointers: new Map(),
       dayTimelineGesture: null,
@@ -3938,6 +3942,14 @@
         });
 
         head.innerHTML = `<span class="day-number">${dayDate.getDate()}</span>`;
+        const editHint = document.createElement("button");
+        editHint.className = "day-edit-hint";
+        editHint.type = "button";
+        editHint.textContent = "\\u270e";
+        editHint.title = "Odpri dnevni pregled";
+        editHint.setAttribute("aria-label", "Odpri dnevni pregled");
+        editHint.addEventListener("click", (event) => { event.stopPropagation(); openDayTimeline(key); });
+        head.appendChild(editHint);
 
         if (!isAdminView()) {
           const add = document.createElement("button");
@@ -4024,6 +4036,25 @@
       });
     }
 
+    function firstFreeDayTimelineSlot(date) {
+      const intervals = calendarTodos()
+        .filter((todo) => todo.date === date && todo.start && todo.end)
+        .map((todo) => ({ start: dayTimelineMinutes(todo.start), end: dayTimelineMinutes(todo.end) }))
+        .filter((item) => item.start !== null && item.end !== null);
+      for (let start = 5 * 60; start <= 22 * 60 + 45; start += 15) {
+        const end = start + 60;
+        if (!intervals.some((item) => item.start < end && item.end > start)) {
+          return { start: dayTimelineTime(start), end: dayTimelineTime(end) };
+        }
+      }
+      return { start: "05:00", end: "06:00" };
+    }
+
+    function isDayTimelineHoursWarning(todo) {
+      const warning = state.dayTimelineHoursWarning;
+      return Boolean(warning && (warning.todoId === todo.id || (warning.assignmentGroupId && warning.assignmentGroupId === todo.assignmentGroupId)));
+    }
+
     async function openTodoFromDayTimeline(todo) {
       if (!todo) return;
       if (state.dayTimelineDrafts.size) {
@@ -4079,10 +4110,6 @@
         year: "numeric"
       });
       $("dayTimelineZoomValue").textContent = Math.round(state.dayTimelineMinuteHeight * 100) + " %";
-      const saveButton = $("saveDayTimeline");
-      const draftCount = state.dayTimelineDrafts.size;
-      saveButton.disabled = !draftCount;
-      saveButton.textContent = draftCount ? "Shrani (" + draftCount + ")" : "Shrani";
 
       const todos = dayTimelineTodos();
       const allDay = todos.filter((todo) => !todo.start || !todo.end).sort(todoSort);
@@ -4143,6 +4170,14 @@
         const title = document.createElement("strong");
         title.className = "day-timeline-event-title";
         title.textContent = todo.title;
+        if (isDayTimelineHoursWarning(todo)) {
+          const warning = document.createElement("span");
+          warning.className = "day-hours-warning";
+          warning.textContent = "!";
+          warning.title = "Popravi delovne ure";
+          warning.setAttribute("aria-label", "Popravi delovne ure");
+          title.appendChild(warning);
+        }
         const meta = document.createElement("span");
         meta.className = "day-timeline-event-meta";
         meta.textContent = dayTimelineTime(startMinute) + "-" + dayTimelineTime(endMinute)
@@ -4311,39 +4346,22 @@
         return;
       }
       if (!todo) { renderDayTimeline(); return; }
-      state.dayTimelineDrafts.set(todo.id, {
-        start: dayTimelineTime(interaction.startMinute),
-        end: dayTimelineTime(interaction.endMinute)
-      });
-      renderDayTimeline();
-    }
-
-    async function saveDayTimelineChanges() {
-      const drafts = [...state.dayTimelineDrafts.entries()];
-      if (!drafts.length) return;
-      const button = $("saveDayTimeline");
-      button.disabled = true;
+      const locked = await interaction.lockPromise;
+      if (!locked) { renderDayTimeline(); return; }
       try {
-        for (const [todoId, draft] of drafts) {
-          const todo = state.todos.find((item) => item.id === todoId);
-          if (!todo) { state.dayTimelineDrafts.delete(todoId); continue; }
-          const locked = await acquireTodoEditLockForDialog(todoId);
-          if (!locked) throw new Error("Opravila ni bilo mogoče varno shraniti.");
-          try {
-            await saveTodoToServer({ ...todo, ...draft });
-            clearTodoEditLockState();
-            state.dayTimelineDrafts.delete(todoId);
-          } catch (error) {
-            await releaseTodoEditLockForDialog();
-            throw error;
-          }
-        }
-        $("dayTimelineDialog").close();
+        await saveTodoToServer({
+          ...todo,
+          start: dayTimelineTime(interaction.startMinute),
+          end: dayTimelineTime(interaction.endMinute)
+        });
+        clearTodoEditLockState();
       } catch (error) {
+        await releaseTodoEditLockForDialog();
         renderDayTimeline();
-        alert(error.message);
+        throw error;
       }
     }
+
     function dayTimelinePointerMetrics() {
       const points = [...state.dayTimelinePointers.values()].slice(0, 2);
       if (points.length < 2) return null;
@@ -4403,6 +4421,11 @@
 
     function finishDayTimelineViewportPointer(event) {
       const gesture = state.dayTimelineGesture;
+      const horizontalSwipe = gesture?.type === "pan"
+        && gesture.pointerId === event.pointerId
+        && gesture.moved
+        && Math.abs(event.clientX - gesture.startX) >= 60
+        && Math.abs(event.clientX - gesture.startX) > Math.abs(event.clientY - gesture.startY);
       const isEmptyTap = gesture?.type === "pan"
         && gesture.pointerId === event.pointerId
         && !gesture.moved
@@ -4423,7 +4446,11 @@
         state.dayTimelineGesture = null;
         $("dayTimelineScroll").classList.remove("is-panning");
       }
-      if (isEmptyTap && !remaining) {
+      if (horizontalSwipe && !remaining) {
+        const date = parseDate(state.dayTimelineDate);
+        date.setDate(date.getDate() + (event.clientX < gesture.startX ? 1 : -1));
+        openDayTimeline(dateKey(date));
+      } else if (isEmptyTap && !remaining) {
         openNewTodoFromDayTimeline(event.clientY).catch((error) => alert(error.message));
       }
     }
@@ -4940,6 +4967,16 @@
       `;
     }
 
+    function applyMealDefaults() {
+      if ($("todoFormId").value || $("todoFormTask").value.trim()) return;
+      const now = new Date();
+      const startMinutes = now.getHours() * 60 + now.getMinutes();
+      const endMinutes = Math.min(1439, startMinutes + 45);
+      $("todoFormTask").value = "Malica";
+      $("todoFormDate").value = dateKey(now);
+      $("todoFormStart").value = dayTimelineTime(startMinutes);
+      $("todoFormEnd").value = dayTimelineTime(endMinutes);
+    }
     function updateTodoFormStatus() {
       updateTodoStatusControl($("todoFormStatus"));
       const completed = $("todoFormStatus").value === "execution";
@@ -4951,6 +4988,17 @@
       if (completed) $("todoFormUrgent").checked = false;
     }
 
+    function renderTodoTaskSuggestions() {
+      const cutoff = new Date();
+      cutoff.setFullYear(cutoff.getFullYear() - 1);
+      const cutoffDate = dateKey(cutoff);
+      const names = [...new Set(state.todos
+        .filter((item) => item.title && (!item.date || item.date >= cutoffDate))
+        .map((item) => item.title.trim())
+        .filter(Boolean))]
+        .sort((a, b) => a.localeCompare(b, "sl"));
+      $("todoFormTaskSuggestions").innerHTML = names.map((name) => `<option value="${escapeHtml(name)}"></option>`).join("");
+    }
     async function openTodoDialog(todo = {}) {
       const editing = Boolean(todo.id);
       if (editing && !(await acquireTodoEditLockForDialog(todo.id))) return;
@@ -4963,6 +5011,7 @@
       $("todoFormClient").value = client?.search || todo.client || $("reportClient").value || "";
       hideTodoClientSuggestions();
       $("todoFormTask").value = todo.title || "";
+      renderTodoTaskSuggestions();
       $("todoFormNotes").value = state.todoHoursSourceId ? "" : todo.notes || "";
       $("todoFormMaterial").value = state.todoHoursSourceId ? "" : todo.material || "";
       $("todoFormStatus").value = todoStatus(todo.status || "open").id;
@@ -5013,6 +5062,32 @@
         billingKm,
         photos: state.todoDialogPhotos
       };
+      if (state.todoHoursSourceId && (!todo.start || !todo.end)) {
+        if (!todo.date) {
+          alert("Za popravljanje delovnih ur izberi datum.");
+          return;
+        }
+        alert("Popravi delovne ure: izbran je prvi prost enourni termin.");
+        const slot = firstFreeDayTimelineSlot(todo.date);
+        const data = await saveTodoToServer({ ...todo, ...slot });
+        const saved = (data.todos || []).filter((item) => (
+          item.sourceProjectTodoId === state.todoHoursSourceId
+          && item.date === todo.date
+          && item.start === slot.start
+          && item.end === slot.end
+          && item.title === todo.title
+        )).sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")))[0];
+        state.dayTimelineHoursWarning = {
+          todoId: saved?.id || "",
+          assignmentGroupId: saved?.assignmentGroupId || "",
+          sourceId: state.todoHoursSourceId
+        };
+        state.todoHoursFixingTime = true;
+        $("todoDialog").close();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        openDayTimeline(todo.date);
+        return;
+      }
       if (!validateTodo(todo)) return;
       const activeAssignee = activeWorkerId();
       if (existing && !isAdminView()
@@ -6035,6 +6110,7 @@
       const button = event.target.closest("[data-status]");
       if (!button) return;
       $("todoFormStatus").value = button.dataset.status;
+      if (button.dataset.status === "meal") applyMealDefaults();
       renderTodoStatusChoices(button.dataset.status);
       updateTodoFormStatus();
     });
@@ -6182,7 +6258,6 @@
     $("dayTimelineZoomOut").addEventListener("click", () => setDayTimelineZoom(state.dayTimelineMinuteHeight / 1.25));
     $("dayTimelineZoomIn").addEventListener("click", () => setDayTimelineZoom(state.dayTimelineMinuteHeight * 1.25));
     $("dayTimelineFit").addEventListener("click", fitDayTimeline);
-    $("saveDayTimeline").addEventListener("click", () => saveDayTimelineChanges());
     $("dayTimelineScroll").addEventListener("wheel", (event) => {
       if (!event.ctrlKey && !event.metaKey) return;
       event.preventDefault();
@@ -6207,6 +6282,12 @@
       state.dayTimelineGesture = null;
       $("dayTimelineScroll").classList.remove("is-panning");
       state.dayTimelineDrafts.clear();
+      const hoursWarning = state.dayTimelineHoursWarning;
+      state.dayTimelineHoursWarning = null;
+      if (hoursWarning?.sourceId) {
+        state.todoHoursCompletionSourceId = hoursWarning.sourceId;
+        $("projectCompletionDialog").showModal();
+      }
     });
     $("syncClientsBtn").addEventListener("click", () => syncClients().catch((error) => alert(error.message)));
     $("clientSearch").addEventListener("input", handleClientSearchInput);
@@ -6219,6 +6300,10 @@
     $("todoDialog").addEventListener("close", () => {
       const sourceId = state.todoHoursSourceId;
       state.todoHoursSourceId = "";
+      if (state.todoHoursFixingTime) {
+        state.todoHoursFixingTime = false;
+        return;
+      }
       if (!sourceId) return;
       if (state.todoHoursSavedSourceId === sourceId) {
         state.todoHoursSavedSourceId = "";
