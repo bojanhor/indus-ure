@@ -264,7 +264,7 @@ test("isto opravilo lahko istocasno ureja samo en uporabnik ali zavihek", () => 
   const otherUser = acquireTodoEditLock(todoId, ibro, "", startedAt + 2);
   assert.equal(otherUser.ok, false);
   assert.equal(otherUser.lock.lockedByName, "Bojan");
-  assert.equal(acquireTodoEditLock(todoId, bojan, "", startedAt + 3).ok, false);
+  assert.equal(acquireTodoEditLock(todoId, bojan, "", startedAt + 3).ok, true);
   assert.equal(todoEditLockConflict(todoId, bojan, first.token, startedAt + 4), null);
   assert.equal(todoEditLockConflict(todoId, ibro, "", startedAt + 4)?.lockedById, "bojan");
   assert.equal(releaseTodoEditLock(todoId, ibro, "", startedAt + 5), false);

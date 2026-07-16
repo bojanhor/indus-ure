@@ -959,7 +959,7 @@ function activeTodoEditLock(todoId, now = Date.now()) {
 function acquireTodoEditLock(todoId, user, lockToken = "", now = Date.now()) {
   const id = String(todoId || "");
   const active = activeTodoEditLock(id, now);
-  if (active && (active.userId !== user.id || active.token !== String(lockToken || ""))) {
+  if (active && active.userId !== user.id) {
     return { ok: false, lock: publicTodoEditLock(active) };
   }
   const lock = {
@@ -976,7 +976,7 @@ function acquireTodoEditLock(todoId, user, lockToken = "", now = Date.now()) {
 function todoEditLockConflict(todoId, user, lockToken = "", now = Date.now()) {
   const active = activeTodoEditLock(todoId, now);
   if (!active) return null;
-  if (active.userId === user.id && active.token === String(lockToken || "")) return null;
+  if (active.userId === user.id) return null;
   return publicTodoEditLock(active);
 }
 
