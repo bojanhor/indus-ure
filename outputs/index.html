@@ -2687,6 +2687,7 @@
         <div class="audit-box hidden" id="todoFormAudit"></div>
         <div class="actions">
           <button type="button" class="danger" id="deleteTodoFromDialog">Izbri&#353;i opravilo</button>
+          <button type="button" class="secondary hidden" id="writeHoursFromTodo">Pi&#353;i ure na ta projekt</button>
           <button type="button" class="secondary" id="cancelTodoDialog">Prekli&#269;i</button>
           <button type="submit" class="primary" id="saveTodoDialog">Shrani</button>
         </div>
@@ -4791,6 +4792,29 @@
       $("todoDialog").close();
     }
 
+    async function openHoursTodoFromCurrent() {
+      const sourceId = $("todoFormId").value;
+      const source = state.todos.find((todo) => todo.id === sourceId);
+      if (!source) return;
+      await releaseTodoEditLockForDialog();
+      $("todoDialog").close();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      await openTodoDialog({
+        _hoursSourceId: source.id,
+        client: source.client,
+        clientId: source.clientId,
+        title: source.title,
+        notes: source.notes,
+        date: source.date,
+        start: "",
+        end: "",
+        status: "execution",
+        urgent: false,
+        photos: (source.photos || []).map((photo) => ({ ...photo })),
+        billingHourlyRate: workerDefaultHourlyRate(activeWorkerId()),
+        billingKm: 0
+      });
+    }
     async function deleteTodoFromDialog() {
       const id = $("todoFormId").value;
       if (!id || !confirm("Izbrisem to opravilo?")) return;
@@ -5781,6 +5805,7 @@
       saveTodoFromDialog().catch((error) => alert(error.message));
     });
     $("deleteTodoFromDialog").addEventListener("click", () => deleteTodoFromDialog().catch((error) => alert(error.message)));
+    $("writeHoursFromTodo").addEventListener("click", () => openHoursTodoFromCurrent().catch((error) => alert(error.message)));
     $("todoFormPhotoInput").addEventListener("change", async (event) => {
       try {
         const remaining = Math.max(0, 8 - state.todoDialogPhotos.length);
