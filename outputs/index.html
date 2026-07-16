@@ -96,7 +96,7 @@
     .app {
       min-height: 100vh;
       display: grid;
-      grid-template-columns: 330px 1fr;
+      grid-template-columns: 1fr;
     }
 
     .hidden,
@@ -442,6 +442,42 @@
       text-transform: uppercase;
     }
 
+    .tools-menu-brand {
+      display: grid;
+      gap: 3px;
+      padding: 8px 9px 11px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .tools-menu-brand strong { font-size: 18px; }
+    .tools-menu-brand span { color: var(--muted); font-size: 12px; }
+
+    .tools-menu-context {
+      display: grid;
+      gap: 6px;
+      padding: 8px;
+      border-radius: 8px;
+      background: #f3f7f4;
+    }
+
+    .tools-menu-context label {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 900;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .tools-menu-context select {
+      width: 100%;
+      min-height: 40px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      padding: 8px 10px;
+      background: #fff;
+      color: var(--ink);
+    }
+
     .menu-action {
       width: 100%;
       min-height: 40px;
@@ -731,6 +767,32 @@
       border-bottom: 1px solid var(--line);
     }
 
+    .todo-head-controls {
+      display: flex;
+      align-items: end;
+      justify-content: flex-end;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .todo-sort-control {
+      display: grid;
+      gap: 3px;
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 800;
+    }
+
+    .todo-sort-control select {
+      min-height: 36px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 7px 9px;
+      background: #fff;
+      color: var(--ink);
+      font-weight: 800;
+    }
+
     .todo-item {
       display: grid;
       grid-template-columns: auto minmax(0, 1fr);
@@ -951,7 +1013,7 @@
 
     .todo-primary-meta {
       display: grid;
-      grid-template-columns: 150px 110px minmax(180px, 1fr);
+      grid-template-columns: 150px 170px minmax(180px, 1fr);
       gap: 8px;
       align-items: stretch;
       margin-top: 5px;
@@ -963,6 +1025,11 @@
       justify-content: flex-start;
       white-space: normal;
       overflow-wrap: anywhere;
+    }
+
+    .todo-primary-meta > .todo-assignees-chip {
+      width: fit-content;
+      max-width: 100%;
     }
 
     .todo-date-chip.is-empty {
@@ -1022,6 +1089,9 @@
     .todo-form-attachment-preview {
       min-width: 0;
       flex: 1 1 auto;
+      display: flex;
+      align-items: center;
+      gap: 9px;
       padding: 0;
       border: 0;
       background: transparent;
@@ -1029,6 +1099,27 @@
       text-align: left;
       cursor: pointer;
       overflow-wrap: anywhere;
+    }
+
+    .todo-form-attachment-thumb {
+      width: 54px;
+      height: 42px;
+      flex: 0 0 54px;
+      display: grid;
+      place-items: center;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #edf2ee;
+      color: #a52e2e;
+      font-size: 11px;
+      font-weight: 900;
+    }
+
+    .todo-form-attachment-thumb img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
     }
 
 
@@ -1429,6 +1520,24 @@
       gap: 12px;
     }
 
+    .date-input-with-clear {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 42px;
+      gap: 6px;
+      align-items: stretch;
+    }
+
+    .date-input-with-clear .date-clear-button {
+      width: 42px;
+      min-height: 42px;
+      padding: 0;
+      border-radius: 8px;
+      background: #edf2ee;
+      color: var(--muted);
+      font-size: 21px;
+      line-height: 1;
+    }
+
     .modal-body label,
     .login-card label {
       color: var(--muted);
@@ -1483,26 +1592,25 @@
     }
 
     .attachment-preview-body {
-      display: grid;
-      place-items: center;
+      display: block;
       min-height: 180px;
+      max-height: calc(100vh - 170px);
+      overflow: auto;
       padding: 10px;
       background: #11181c;
     }
 
     .attachment-preview-body img {
-      max-width: 100%;
-      max-height: calc(100vh - 100px);
-      object-fit: contain;
+      display: block;
+      max-width: none;
+      height: auto;
+      margin: auto;
       border-radius: 4px;
     }
 
 
-    #photoEditorDialog {
-      width: min(1100px, calc(100vw - 20px));
-      max-height: calc(100vh - 20px);
-    }
 
+    .attachment-preview-toolbar,
     .photo-editor-toolbar {
       display: flex;
       align-items: center;
@@ -1512,9 +1620,28 @@
       border-bottom: 1px solid var(--line);
     }
 
+    .zoom-control {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      min-width: min(260px, 100%);
+    }
+
+    .zoom-control input { min-width: 110px; }
+
+    .zoom-value {
+      min-width: 48px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+    }
+    #photoEditorDialog {
+      width: min(1100px, calc(100vw - 20px));
+      max-height: calc(100vh - 20px);
+    }
+
     .photo-editor-canvas-shell {
-      display: grid;
-      place-items: center;
+      display: block;
       min-height: 220px;
       max-height: calc(100vh - 210px);
       overflow: auto;
@@ -1524,8 +1651,9 @@
 
     #photoEditorCanvas {
       display: block;
-      max-width: 100%;
+      max-width: none;
       height: auto;
+      margin: auto;
       background: #fff;
       cursor: crosshair;
       touch-action: none;
@@ -1800,7 +1928,7 @@
         padding: 10px;
       }
       .todo-primary-meta {
-        grid-template-columns: minmax(0, 0.9fr) 86px minmax(0, 1.4fr);
+        grid-template-columns: minmax(0, 0.9fr) 140px minmax(0, 1.4fr);
         gap: 5px;
       }
       .todo-item .secondary,
@@ -1875,32 +2003,7 @@
   </section>
 
   <div class="app hidden" id="app">
-    <aside class="sidebar">
-      <div class="brand">
-        <h1>INDUS URE</h1>
-      </div>
-
-      <div class="user-box">
-        <div>
-          <strong id="userName"></strong>
-          <span id="userRole"></span>
-        </div>
-      </div>
-
-      <div class="control view-context hidden" id="workContextControl">
-        <label for="workContextSelect">Delovni pogled</label>
-        <select id="workContextSelect">
-          <option value="admin">&#352;efovski pogled &#8211; obra&#269;uni in upravljanje</option>
-          <optgroup label="Delavski pogledi">
-            <option value="worker:bojan">Delavski pogled &#8211; Bojan</option>
-            <option value="worker:ibro">Delavski pogled &#8211; Ibro</option>
-          </optgroup>
-        </select>
-      </div>
-
-      <datalist id="clientList"></datalist>
-
-    </aside>
+    <datalist id="clientList"></datalist>
 
     <main class="main">
       <section class="topbar">
@@ -1919,6 +2022,15 @@
               </svg>
             </summary>
             <div class="tools-menu-panel" role="group" aria-label="Nastavitve in orodja">
+              <div class="tools-menu-brand">
+                <strong>INDUS URE</strong>
+                <span id="userName"></span>
+                <span id="userRole"></span>
+              </div>
+              <div class="tools-menu-context hidden" id="workContextControl">
+                <label for="workContextSelect">Pogled</label>
+                <select id="workContextSelect"></select>
+              </div>
               <span class="tools-menu-label">Uporabnik</span>
               <button class="menu-action" id="accountBtn" type="button">Ra&#269;un in profil</button>
               <span class="tools-menu-label">Podatki in sinhronizacija</span>
@@ -2007,7 +2119,16 @@
           </div>
           <div class="todo-head">
             <strong id="todoPanelTitle">Vsa opravila</strong>
-            <button class="secondary" id="clearClientFilter" type="button">Vse stranke</button>
+            <div class="todo-head-controls">
+              <label class="todo-sort-control">
+                <span>Razvr&#353;&#269;anje</span>
+                <select id="todoSortMode">
+                  <option value="manual">RO&#268;NO</option>
+                  <option value="date">DATUMSKO</option>
+                </select>
+              </label>
+              <button class="secondary" id="clearClientFilter" type="button">Vse stranke</button>
+            </div>
           </div>
           <div id="todoItems"></div>
         </div>
@@ -2084,7 +2205,16 @@
         <input type="hidden" id="todoFormId">
         <div class="modal-grid">
           <label>Datum
-            <input id="todoFormDate" type="date">
+            <span class="date-input-with-clear">
+              <input id="todoFormDate" type="date">
+              <button class="date-clear-button" id="clearTodoFormDate" type="button" title="Odstrani datum" aria-label="Odstrani datum">&times;</button>
+            </span>
+          </label>
+          <label>Ura od
+            <input id="todoFormStart" type="time">
+          </label>
+          <label>Ura do
+            <input id="todoFormEnd" type="time">
           </label>
           <label>Stranka
             <input id="todoFormClient" list="clientList" placeholder="Alias ali naziv stranke">
@@ -2141,6 +2271,14 @@
         <h3 id="attachmentPreviewTitle">Priloga</h3>
         <button class="icon-btn" type="submit" title="Zapri" aria-label="Zapri predogled">&times;</button>
       </div>
+      <div class="attachment-preview-toolbar">
+        <label class="zoom-control">Pove&#269;ava
+          <input id="attachmentPreviewZoom" type="range" min="10" max="300" step="10" value="100">
+          <span class="zoom-value" id="attachmentPreviewZoomValue">100 %</span>
+        </label>
+        <button class="secondary" id="attachmentPreviewActualSize" type="button">100 %</button>
+        <button class="primary" id="attachmentPreviewEdit" type="button">Uredi</button>
+      </div>
       <div class="attachment-preview-body">
         <img id="attachmentPreviewImage" alt="Predogled priloge">
       </div>
@@ -2161,6 +2299,10 @@
           <input id="photoEditorSize" type="range" min="2" max="30" value="8">
         </label>
         <button class="secondary" id="photoEditorUndo" type="button">Razveljavi</button>
+        <label class="zoom-control">Pove&#269;ava
+          <input id="photoEditorZoom" type="range" min="10" max="300" step="10" value="100">
+          <span class="zoom-value" id="photoEditorZoomValue">100 %</span>
+        </label>
         <button class="secondary" id="photoEditorClear" type="button">Po&#269;isti</button>
       </div>
       <div class="photo-editor-canvas-shell">
@@ -2259,6 +2401,7 @@
     const automaticLoginRetryDelayMs = 60_000;
     const loggedInHistoryStateKey = "indusUreLoggedIn";
     const workContextKey = "indus-ure-work-context";
+    const todoSortModeKey = "indus-ure-todo-sort-mode";
     const statusLabels = {
       billed: "Ze obracunano",
       warranty: "Garancija",
@@ -2317,6 +2460,7 @@
       todoDialogPhotos: [],
       photoEditor: null,
       reportClient: "",
+      attachmentPreview: null,
       reportClientId: "",
       settings: { billing: { hourlyRate: 15, kmRate: 0.22, commuteKmPerDay: 28 } },
       billingLocks: [],
@@ -2325,6 +2469,7 @@
       workerBilling: [],
       workContext: "",
       googleSyncing: false,
+      todoSortMode: localStorage.getItem(todoSortModeKey) === "date" ? "date" : "manual",
       sharedDataRefreshing: false,
       todoEditLock: null,
       todoLockHeartbeat: null,
@@ -2475,7 +2620,7 @@
       const stored = localStorage.getItem(workContextKey) || "";
       state.workContext = state.user.role === "boss" && allowed.has(stored) ? stored : contexts[0].value;
       select.value = state.workContext;
-      $("workContextControl").classList.toggle("hidden", state.user.role !== "boss");
+      $("workContextControl").classList.toggle("hidden", contexts.length <= 1);
     }
 
     function isAdminView() {
@@ -2895,6 +3040,18 @@
         alert("Izbrana stranka nima veljavne davcne stevilke v Google Sheets bazi.");
         return false;
       }
+      if (Boolean(todo.start) !== Boolean(todo.end)) {
+        alert("Vnesi obe uri: od in do.");
+        return false;
+      }
+      if ((todo.start || todo.end) && !todo.date) {
+        alert("Za opravilo z uro vnesi tudi datum.");
+        return false;
+      }
+      if (todo.start && todo.end <= todo.start) {
+        alert("Ura do mora biti kasneje kot ura od.");
+        return false;
+      }
       return true;
     }
 
@@ -2939,6 +3096,27 @@
       const orderDifference = Number(a.order || 0) - Number(b.order || 0);
       if (orderDifference) return orderDifference;
       return String(a.date || "9999-12-31").localeCompare(String(b.date || "9999-12-31"));
+    }
+
+    function todoDateSort(a, b) {
+      const dateDifference = String(a.date).localeCompare(String(b.date));
+      if (dateDifference) return dateDifference;
+      const startDifference = String(a.start || "00:00").localeCompare(String(b.start || "00:00"));
+      if (startDifference) return startDifference;
+      const endDifference = String(a.end || "00:00").localeCompare(String(b.end || "00:00"));
+      return endDifference || todoSort(a, b);
+    }
+
+    function sortedTodosForMode(todos = contextTodos()) {
+      const list = [...todos];
+      if (state.todoSortMode === "date") return list.filter((todo) => todo.date).sort(todoDateSort);
+      return list.sort(todoSort);
+    }
+
+    function todoDateTimeLabel(todo) {
+      if (!todo.date) return "";
+      const label = formatDate(todo.date);
+      return todo.start && todo.end ? `${label}, ${todo.start}-${todo.end}` : label;
     }
 
     function render() {
@@ -3005,7 +3183,7 @@
             const item = document.createElement("button");
             item.type = "button";
             item.className = `day-todo todo-status-color ${todoStatusClass(todo.status)} ${todo.done ? "done" : ""}`;
-            item.innerHTML = `${escapeHtml(todo.title)}${todo.client ? `<br><small>${escapeHtml(todo.client)}</small>` : ""}<br><small>${todoStatus(todo.status).label}</small>`;
+            item.innerHTML = `${todo.start && todo.end ? `<small>${escapeHtml(todo.start)}&ndash;${escapeHtml(todo.end)}</small><br>` : ""}${escapeHtml(todo.title)}${todo.client ? `<br><small>${escapeHtml(todo.client)}</small>` : ""}<br><small>${todoStatus(todo.status).label}</small>`;
             item.addEventListener("click", () => openTodoDialog(todo));
             day.appendChild(item);
           });
@@ -3058,23 +3236,24 @@
     }
 
     function todoClients() {
-      const names = new Set();
-      contextEntries().forEach((entry) => {
-        if (!["errand", "vacation"].includes(entry.status) && entry.client) names.add(entry.client);
+      const names = [];
+      const seen = new Set();
+      sortedTodosForMode().forEach((todo) => {
+        if (!todo.client || seen.has(todo.client)) return;
+        seen.add(todo.client);
+        names.push(todo.client);
       });
-      contextTodos().forEach((todo) => {
-        if (todo.client) names.add(todo.client);
-      });
-      return [...names].sort((a, b) => a.localeCompare(b, "sl"));
+      return names;
     }
 
     function renderClientTodoList() {
       const list = $("clientTodoList");
       list.innerHTML = "";
+      const modeTodos = sortedTodosForMode();
       const all = document.createElement("button");
       all.type = "button";
       all.className = `client-card ${state.selectedClient ? "" : "active"}`;
-      all.innerHTML = `<strong>Vse stranke</strong><span>${contextTodos().filter((todo) => !todo.done).length} odprtih opravil</span>`;
+      all.innerHTML = `<strong>Vse stranke</strong><span>${modeTodos.filter((todo) => !todo.done).length} odprtih opravil</span>`;
       all.addEventListener("click", () => {
         state.selectedClient = "";
         renderTodos();
@@ -3082,7 +3261,7 @@
       list.appendChild(all);
 
       todoClients().forEach((client) => {
-        const clientTodos = contextTodos().filter((todo) => todo.client === client);
+        const clientTodos = modeTodos.filter((todo) => todo.client === client);
         const open = clientTodos.filter((todo) => !todo.done).length;
         const card = document.createElement("button");
         card.type = "button";
@@ -3155,9 +3334,8 @@
       title.textContent = state.selectedClient ? `Opravila: ${state.selectedClient}` : "Vsa opravila";
       items.innerHTML = "";
 
-      const todos = contextTodos()
-        .filter((todo) => !state.selectedClient || todo.client === state.selectedClient)
-        .sort(todoSort);
+      const todos = sortedTodosForMode(contextTodos()
+        .filter((todo) => !state.selectedClient || todo.client === state.selectedClient));
 
       if (todos.length === 0) {
         items.innerHTML = `<p class="todo-meta">Ni opravil za ta izbor.</p>`;
@@ -3166,7 +3344,7 @@
 
       todos.forEach((todo) => {
         const item = document.createElement("div");
-        const reorderable = !todo.done;
+        const reorderable = state.todoSortMode === "manual" && !todo.done;
         item.dataset.todoId = todo.id;
         item.className = `todo-item ${todo.done ? "done" : ""}`;
         item.innerHTML = `
@@ -3178,12 +3356,11 @@
             <div class="todo-title">${linkifyText(todo.title)}</div>
             <div class="todo-primary-meta">
               <span class="todo-chip todo-status-color ${todoStatusClass(todo.status)}">${todoStatus(todo.status).label}</span>
-              <span class="todo-chip todo-date-chip ${todo.date ? "" : "is-empty"}" ${todo.date ? "" : 'aria-hidden="true"'}>${todo.date ? formatDate(todo.date) : "&nbsp;"}</span>
+              <span class="todo-chip todo-date-chip ${todo.date ? "" : "is-empty"}" ${todo.date ? "" : 'aria-hidden="true"'}>${todo.date ? todoDateTimeLabel(todo) : "&nbsp;"}</span>
               <span class="todo-chip todo-assignees-chip">Za: ${escapeHtml(todoAssigneeNames(todo))}</span>
             </div>
-            ${todo.client || (todo.photos || []).length ? `<div class="todo-secondary-meta">
-              ${todo.client ? `<span class="todo-chip">${escapeHtml(todo.client)}</span>` : ""}
-              ${(todo.photos || []).length ? `<span class="todo-chip">${(todo.photos || []).length} prilog</span>` : ""}
+            ${todo.client ? `<div class="todo-secondary-meta">
+              <span class="todo-chip">${escapeHtml(todo.client)}</span>
             </div>` : ""}
             <div class="todo-compact-actions">
             ${todo.notes ? `<details class="todo-description-details">
@@ -3276,7 +3453,25 @@
       return String(photo?.data || "").startsWith("data:application/pdf;base64,");
     }
 
-    function openAttachmentPreview(photo) {
+    function setAttachmentPreviewZoom(value) {
+      const image = $("attachmentPreviewImage");
+      const zoom = Math.max(10, Math.min(300, Number(value) || 100));
+      $("attachmentPreviewZoom").value = String(Math.round(zoom / 10) * 10);
+      $("attachmentPreviewZoomValue").textContent = `${Math.round(zoom)} %`;
+      if (image.naturalWidth) image.style.width = `${Math.round(image.naturalWidth * zoom / 100)}px`;
+    }
+
+    function fitAttachmentPreview() {
+      const image = $("attachmentPreviewImage");
+      const body = image.closest(".attachment-preview-body");
+      if (!image.naturalWidth || !image.naturalHeight || !body) return;
+      const widthRatio = Math.max(0.1, (body.clientWidth - 20) / image.naturalWidth);
+      const heightRatio = Math.max(0.1, (window.innerHeight - 190) / image.naturalHeight);
+      const zoom = Math.min(100, Math.floor(Math.min(widthRatio, heightRatio) * 100 / 10) * 10);
+      setAttachmentPreviewZoom(Math.max(10, zoom));
+    }
+
+    function openAttachmentPreview(photo, context = {}) {
       if (isPdfAttachment(photo)) {
         const link = document.createElement("a");
         link.href = photo.data;
@@ -3287,14 +3482,17 @@
         link.remove();
         return;
       }
+      state.attachmentPreview = { photo, todoId: context.todoId || "" };
       const name = photo.name || "Fotografija";
       $("attachmentPreviewTitle").textContent = name;
       const image = $("attachmentPreviewImage");
-      image.src = photo.data;
       image.alt = `Predogled: ${name}`;
       const dialog = $("attachmentPreviewDialog");
       if (!dialog.open) dialog.showModal();
 
+      image.onload = () => requestAnimationFrame(fitAttachmentPreview);
+      image.src = photo.data;
+      if (image.complete) requestAnimationFrame(fitAttachmentPreview);
     }
     function drawPhotoEditorStroke(context, stroke) {
       const points = stroke?.points || [];
@@ -3339,6 +3537,24 @@
       };
     }
 
+    function setPhotoEditorZoom(value) {
+      const canvas = $("photoEditorCanvas");
+      const zoom = Math.max(10, Math.min(300, Number(value) || 100));
+      $("photoEditorZoom").value = String(Math.round(zoom / 10) * 10);
+      $("photoEditorZoomValue").textContent = `${Math.round(zoom)} %`;
+      if (canvas.width) canvas.style.width = `${Math.round(canvas.width * zoom / 100)}px`;
+    }
+
+    function fitPhotoEditorZoom() {
+      const canvas = $("photoEditorCanvas");
+      const shell = canvas.closest(".photo-editor-canvas-shell");
+      if (!canvas.width || !canvas.height || !shell) return;
+      const widthRatio = Math.max(0.1, (shell.clientWidth - 20) / canvas.width);
+      const heightRatio = Math.max(0.1, (window.innerHeight - 230) / canvas.height);
+      const zoom = Math.min(100, Math.floor(Math.min(widthRatio, heightRatio) * 100 / 10) * 10);
+      setPhotoEditorZoom(Math.max(10, zoom));
+    }
+
     function openPhotoEditor(photo) {
       if (!photo || isPdfAttachment(photo)) return;
       const image = new Image();
@@ -3350,6 +3566,7 @@
         $("photoEditorTitle").textContent = `Uredi: ${photo.name || "Fotografija"}`;
         redrawPhotoEditor();
         $("photoEditorDialog").showModal();
+        requestAnimationFrame(fitPhotoEditorZoom);
       };
       image.onerror = () => alert("Slike ni bilo mogoce odpreti v urejevalniku.");
       image.src = photo.data;
@@ -3412,7 +3629,10 @@
       const list = $("todoFormPhotoList");
       list.innerHTML = state.todoDialogPhotos.map((photo) => `
         <div class="todo-form-photo-row">
-          <button class="todo-form-attachment-preview" type="button" data-photo-id="${escapeHtml(photo.id)}"><span class="todo-form-file-kind">${isPdfAttachment(photo) ? "PDF" : "SLIKA"}</span>${escapeHtml(photo.name || "Priloga")}</button>
+          <button class="todo-form-attachment-preview" type="button" data-photo-id="${escapeHtml(photo.id)}">
+            <span class="todo-form-attachment-thumb">${isPdfAttachment(photo) ? "PDF" : `<img src="${escapeHtml(photo.data)}" alt="">`}</span>
+            <span>${escapeHtml(photo.name || "Priloga")}</span>
+          </button>
           <div class="todo-form-photo-actions">
             ${isPdfAttachment(photo) ? "" : `<button class="secondary edit-todo-form-photo" type="button" data-photo-id="${escapeHtml(photo.id)}">Uredi</button>`}
             <button class="danger remove-todo-form-photo" type="button" data-photo-id="${escapeHtml(photo.id)}">Odstrani</button>
@@ -3452,6 +3672,8 @@
       const client = findClient(todo.clientId || todo.client);
       $("todoFormTitle").textContent = editing ? "Uredi opravilo" : "Novo opravilo";
       $("todoFormId").value = todo.id || "";
+      $("todoFormStart").value = todo.start || "";
+      $("todoFormEnd").value = todo.end || "";
       $("todoFormDate").value = todo.date || "";
       $("todoFormClient").value = client?.search || todo.client || $("reportClient").value || "";
       $("todoFormTask").value = todo.title || "";
@@ -3481,6 +3703,8 @@
       const todo = {
         ...(existing || {}),
         id: id || undefined,
+        start: $("todoFormStart").value,
+        end: $("todoFormEnd").value,
         date: $("todoFormDate").value,
         client: client?.name || normalizeClientName($("todoFormClient").value),
         clientId: client?.clientId || client?.id || "",
@@ -4294,6 +4518,12 @@
       if (event.key === "Escape") closeToolsMenu();
     });
     $("workContextSelect").addEventListener("change", (event) => setWorkContext(event.target.value));
+    $("todoSortMode").value = state.todoSortMode;
+    $("todoSortMode").addEventListener("change", (event) => {
+      state.todoSortMode = event.target.value === "date" ? "date" : "manual";
+      localStorage.setItem(todoSortModeKey, state.todoSortMode);
+      renderTodos();
+    });
     $("closeAccount").addEventListener("click", () => $("accountDialog").close());
     $("saveProfile").addEventListener("click", async () => {
       try {
@@ -4370,6 +4600,12 @@
     $("newReportTodo").addEventListener("click", () => openTodoDialog());
     $("closeTodoDialog").addEventListener("click", () => $("todoDialog").close());
     $("cancelTodoDialog").addEventListener("click", () => $("todoDialog").close());
+    $("clearTodoFormDate").addEventListener("click", () => {
+      $("todoFormDate").value = "";
+      $("todoFormStart").value = "";
+      $("todoFormEnd").value = "";
+      $("todoFormDate").focus();
+    });
     $("todoFormStatus").addEventListener("change", updateTodoFormStatus);
     $("todoForm").addEventListener("submit", (event) => {
       event.preventDefault();
@@ -4440,7 +4676,7 @@
         const item = preview.closest(".todo-item");
         const todo = state.todos.find((candidate) => candidate.id === item?.dataset.todoId);
         const photo = todo?.photos?.find((candidate) => candidate.id === preview.dataset.photoId);
-        if (photo) openAttachmentPreview(photo);
+        if (photo) openAttachmentPreview(photo, { todoId: todo.id });
         return;
       }
       const button = event.target.closest(".delete-todo");
@@ -4529,6 +4765,7 @@
       state.photoEditor?.strokes.pop();
       redrawPhotoEditor();
     });
+    $("photoEditorZoom").addEventListener("input", (event) => setPhotoEditorZoom(event.target.value));
     $("photoEditorClear").addEventListener("click", () => {
       if (!state.photoEditor) return;
       state.photoEditor.activeStroke = null;
@@ -4547,13 +4784,38 @@
       const canvas = $("photoEditorCanvas");
       canvas.width = 1;
       canvas.height = 1;
+      canvas.style.width = "";
+      $("photoEditorZoomValue").textContent = "100 %";
     });
     $("photoEditorDialog").addEventListener("click", (event) => {
       if (event.target === event.currentTarget) event.currentTarget.close();
     });
 
+    $("attachmentPreviewZoom").addEventListener("input", (event) => setAttachmentPreviewZoom(event.target.value));
+    $("attachmentPreviewActualSize").addEventListener("click", () => setAttachmentPreviewZoom(100));
+    $("attachmentPreviewEdit").addEventListener("click", async () => {
+      const preview = state.attachmentPreview;
+      if (!preview?.photo) return;
+      try {
+        $("attachmentPreviewDialog").close();
+        if (!$("todoDialog").open) {
+          const todo = state.todos.find((item) => item.id === preview.todoId);
+          if (!todo) return;
+          await openTodoDialog(todo);
+        }
+        if (!$("todoDialog").open) return;
+        const photo = state.todoDialogPhotos.find((item) => item.id === preview.photo.id);
+        if (photo) openPhotoEditor(photo);
+      } catch (error) {
+        alert(error.message);
+      }
+    });
+
     $("attachmentPreviewDialog").addEventListener("close", () => {
-      $("attachmentPreviewImage").removeAttribute("src");
+      const image = $("attachmentPreviewImage");
+      image.removeAttribute("src");
+      image.style.width = "";
+      state.attachmentPreview = null;
     });
     $("attachmentPreviewDialog").addEventListener("click", (event) => {
       if (event.target === event.currentTarget) event.currentTarget.close();

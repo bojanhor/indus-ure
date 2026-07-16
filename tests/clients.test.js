@@ -105,13 +105,13 @@ test("osnovni pogled priloge samo prikazuje, dodajanje pa ostane v obrazcu", () 
   assert.match(html, /file\.size > 1_500_000/);
   assert.match(html, /todoAttachmentsDataLength\(state\.todoDialogPhotos\) \+ attachment\.data\.length > 4_800_000/);
   assert.match(html, /class="todo-pdf-preview"[^>]*target="_blank"[^>]*rel="noopener noreferrer"/);
-  assert.match(html, /isPdfAttachment\(photo\) \? "PDF" : "SLIKA"/);
+  assert.match(html, /class="todo-form-attachment-thumb"[\s\S]*?isPdfAttachment\(photo\) \? "PDF" : `<img/);
   assert.match(html, /<dialog id="attachmentPreviewDialog">[\s\S]*?id="attachmentPreviewImage"/);
   assert.match(html, /class="todo-image-preview"[^>]*data-photo-id=/);
   assert.match(html, /class="todo-form-attachment-preview"[^>]*data-photo-id=/);
-  assert.match(html, /function openAttachmentPreview\(photo\)/);
+  assert.match(html, /function openAttachmentPreview\(photo, context = \{\}\)/);
   assert.match(html, /event\.target\.closest\("\.todo-image-preview"\)/);
-  assert.match(html, /\$\("attachmentPreviewImage"\)\.removeAttribute\("src"\)/);
+  assert.match(html, /const image = \$\("attachmentPreviewImage"\);[\s\S]*?image\.removeAttribute\("src"\)/);
   assert.doesNotMatch(html, /class="hidden-file todo-photo-input"/);
   assert.doesNotMatch(html, />Fotografije<\/button>/);
   assert.doesNotMatch(html, />Dodaj foto<input/);
@@ -178,7 +178,7 @@ test("mobilna kartica zdruzi kontrole v dve kompaktni vrstici", () => {
 test("kartica opravila poravna status datum in udelezence v stalne stolpce", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
   const card = html.match(/item\.innerHTML = `([\s\S]*?)`;\s*const openTodoEditor/)?.[1] || "";
-  assert.match(html, /\.todo-primary-meta \{[\s\S]*?display: grid;[\s\S]*?grid-template-columns: 150px 110px minmax\(180px, 1fr\);/);
+  assert.match(html, /\.todo-primary-meta \{[\s\S]*?display: grid;[\s\S]*?grid-template-columns: 150px 170px minmax\(180px, 1fr\);/);
   assert.match(card, /todo-status-color[\s\S]*?todo-date-chip[\s\S]*?Za:/);
   assert.match(card, /todo-date-chip \$\{todo\.date \? "" : "is-empty"\}/);
   assert.match(html, /\.todo-date-chip\.is-empty \{\s*visibility: hidden;/);
@@ -447,4 +447,18 @@ test("skupni obrazec opravila uporablja strezniski zaklep", () => {
   assert.match(server, /sendJson\(res, 409, \{ error: `Opravilo trenutno ureja/);
   assert.match(server, /locked: Boolean\(activeTodoEditLock\(item\.id\)\)/);
   assert.match(server, /releaseTodoAssignmentEditLock\(db, previousTodo, user, editLockToken\)/);
+});
+
+test("opravila imajo rocno in datumsko razvrscanje ter neobvezni uri", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  assert.match(html, /id="todoSortMode"[\s\S]*?value="manual">RO&#268;NO[\s\S]*?value="date">DATUMSKO/);
+  assert.match(html, /if \(state\.todoSortMode === "date"\) return list\.filter\(\(todo\) => todo\.date\)\.sort\(todoDateSort\)/);
+  assert.match(html, /const reorderable = state\.todoSortMode === "manual" && !todo\.done/);
+  assert.match(html, /id="todoFormStart" type="time"/);
+  assert.match(html, /id="todoFormEnd" type="time"/);
+  assert.match(html, /start: \$\("todoFormStart"\)\.value/);
+  assert.match(html, /end: \$\("todoFormEnd"\)\.value/);
+  assert.match(html, /Za opravilo z uro vnesi tudi datum/);
+  assert.match(html, /\$\("todoFormStart"\)\.value = ""/);
+  assert.match(html, /localStorage\.setItem\(todoSortModeKey, state\.todoSortMode\)/);
 });

@@ -469,6 +469,12 @@ function normalizeDb(db = {}) {
       next.order = index + 1;
       changed = true;
     }
+    for (const field of ["start", "end"]) {
+      if (typeof next[field] !== "string") {
+        next[field] = "";
+        changed = true;
+      }
+    }
     if (!next.syncUser) {
       next.syncUser = next.createdBy || "ibro";
       changed = true;
@@ -1084,6 +1090,8 @@ function cleanTodo(input) {
   return {
     title: String(input.title || "").trim(),
     date: String(input.date || ""),
+    start: String(input.start || "").trim(),
+    end: String(input.end || "").trim(),
     client: String(input.client || "").trim(),
     clientId: String(input.clientId || "").trim(),
     notes: String(input.notes || "").trim(),
@@ -1151,6 +1159,10 @@ function validateTodo(todo) {
   if (!todo.title) return "Manjka opis opravila.";
   if (todo.client && !isUsableTaxId(todo.clientId)) return "Stranka nima veljavne davcne stevilke.";
   if (todo.date && !/^\d{4}-\d{2}-\d{2}$/.test(todo.date)) return "Datum opravila ni pravilen.";
+  if (Boolean(todo.start) !== Boolean(todo.end)) return "Vnesi obe uri: od in do.";
+  if ((todo.start || todo.end) && !todo.date) return "Za opravilo z uro vnesi tudi datum.";
+  if (todo.start && (!/^\d{2}:\d{2}$/.test(todo.start) || !/^\d{2}:\d{2}$/.test(todo.end))) return "Cas opravila ni pravilen.";
+  if (todo.start && todo.end <= todo.start) return "Ura do mora biti kasneje kot ura od.";
   if ((todo.photos || []).some((photo) => !validTodoAttachmentDataUrl(photo.data))) return "Priloga ni veljavna slika ali PDF.";
   if ((todo.photos || []).reduce((total, photo) => total + photo.data.length, 0) > MAX_TODO_ATTACHMENTS_DATA_LENGTH) return "Priloge so skupaj prevelike.";
   return "";
@@ -1247,16 +1259,13 @@ function buildCalendarIcs(db) {
       todo.notes ? `Opombe: ${todo.notes}` : "",
       todo.createdByName ? `Dodal: ${todo.createdByName}` : ""
     ].filter(Boolean).join("\n");
-    lines.push(
-      "BEGIN:VEVENT",
-      `UID:todo-${todo.id}@indus-ure`,
-      `DTSTAMP:${stamp}`,
-      `DTSTART;VALUE=DATE:${icsDate(todo.date)}`,
-      `DTEND;VALUE=DATE:${addDays(todo.date, 1)}`,
-      `SUMMARY:${icsEscape(`TODO: ${todo.title}`)}`,
-      `DESCRIPTION:${icsEscape(description)}`,
-      "END:VEVENT"
-    );
+    lines.push("BEGIN:VEVENT", `UID:todo-${todo.id}@indus-ure`, `DTSTAMP:${stamp}`);
+    if (todo.start && todo.end) {
+      lines.push(`DTSTART;TZID=Europe/Ljubljana:${icsDateTime(todo.date, todo.start)}`, `DTEND;TZID=Europe/Ljubljana:${icsDateTime(todo.date, todo.end)}`);
+    } else {
+      lines.push(`DTSTART;VALUE=DATE:${icsDate(todo.date)}`, `DTEND;VALUE=DATE:${addDays(todo.date, 1)}`);
+    }
+    lines.push(`SUMMARY:${icsEscape(`TODO: ${todo.title}`)}`, `DESCRIPTION:${icsEscape(description)}`, "END:VEVENT");
   }
 
   lines.push("END:VCALENDAR");
@@ -1384,7 +1393,7 @@ function entryToGoogleEvent(entry) {
 
 function todoToGoogleEvent(todo) {
   const status = todoStatusDefinition(todo.status);
-  return {
+  const event = {
     summary: `TODO: ${todo.title}`,
     description: googleEventDescription({
       Vrsta: "opravilo",
@@ -1392,11 +1401,17 @@ function todoToGoogleEvent(todo) {
       Davcna: todo.clientId || "",
       Status: status.label
     }, todo.notes),
-    start: { date: todo.date },
-    end: { date: addDaysDashed(todo.date, 1) },
     colorId: status.googleColorId,
     extendedProperties: { private: indusGooglePrivateProperties(todo, "todo") }
   };
+  if (todo.start && todo.end) {
+    return {
+      ...event,
+      start: { dateTime: `${todo.date}T${todo.start}:00`, timeZone: "Europe/Ljubljana" },
+      end: { dateTime: `${todo.date}T${todo.end}:00`, timeZone: "Europe/Ljubljana" }
+    };
+  }
+  return { ...event, start: { date: todo.date }, end: { date: addDaysDashed(todo.date, 1) } };
 }
 
 function addDaysDashed(date, days) {
@@ -1517,7 +1532,16 @@ function entryFromGoogleEvent(event, user, db = {}, existing = null) {
 }
 
 function todoFromGoogleEvent(event, user, db = {}, existing = null) {
-  if (!event.start?.date) return null;
+  const allDay = Boolean(event.start?.date);
+  const startDateTime = event.start?.dateTime ? new Date(event.start.dateTime) : null;
+  const endDateTime = event.end?.dateTime ? new Date(event.end.dateTime) : null;
+  if (!allDay && (!startDateTime || !endDateTime)) return null;
+  const date = allDay ? event.start.date : [
+    startDateTime.getFullYear(),
+    String(startDateTime.getMonth() + 1).padStart(2, "0"),
+    String(startDateTime.getDate()).padStart(2, "0")
+  ].join("-");
+  const time = (value) => `${String(value.getHours()).padStart(2, "0")}:${String(value.getMinutes()).padStart(2, "0")}`;
   const parsed = parseGoogleEventDescription(event.description);
   const clientRef = resolveGoogleClient(db, parsed, event.summary, existing || {});
   const now = new Date().toISOString();
@@ -1525,7 +1549,9 @@ function todoFromGoogleEvent(event, user, db = {}, existing = null) {
   return {
     id: existing?.id || crypto.randomUUID(),
     title: String(event.summary || "Google opravilo").replace(/^TODO:\s*/i, ""),
-    date: event.start.date,
+    date,
+    start: allDay ? "" : time(startDateTime),
+    end: allDay ? "" : time(endDateTime),
     client: clientRef.client,
     clientId: clientRef.clientId,
     notes: parsed.notes,
@@ -3021,6 +3047,7 @@ module.exports = {
   todoFromGoogleEvent,
   todoToGoogleEvent,
   validTodoAttachmentDataUrl,
+  validateTodo,
   visibleDebtsForUser,
   visibleEntriesForUser,
   visibleTodosForUser
