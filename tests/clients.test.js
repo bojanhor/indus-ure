@@ -223,7 +223,10 @@ test("razvrscanje opravil deluje z rocajem, misjo in dotikom", () => {
   assert.match(html, /beginTodoPointerDrag\(event, item, todo\.id\)/);
   assert.match(html, /document\.elementFromPoint\(clientX, clientY\)/);
   assert.match(html, /function todoPointerDragScrollVelocity\(clientY\)/);
-  assert.match(html, /window\.scrollBy\(0, velocity\)/);
+  assert.match(html, /Math\.min\(180, Math\.max\(120, window\.innerHeight \* 0\.18\)\)/);
+  assert.match(html, /28 \+ \(140 - 28\) \* proximity \*\* 2/);
+  assert.match(html, /timestamp - todoPointerDrag\.autoScrollAt/);
+  assert.match(html, /window\.scrollBy\(0, velocity \* elapsed \/ 1000\)/);
   assert.match(html, /requestAnimationFrame\(tickTodoPointerDragAutoScroll\)/);
   assert.match(html, /function todosCanReorderTogether\(sourceId, targetId\)/);
   assert.match(html, /async function reorderTodos\(sourceId, targetId\)/);

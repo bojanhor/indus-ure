@@ -6580,19 +6580,24 @@
     }
 
     function todoPointerDragScrollVelocity(clientY) {
-      const edge = 88;
-      if (clientY < edge) return -Math.ceil(((edge - clientY) / edge) * 22);
-      if (clientY > window.innerHeight - edge) return Math.ceil(((clientY - (window.innerHeight - edge)) / edge) * 22);
-      return 0;
+      const edge = Math.min(180, Math.max(120, window.innerHeight * 0.18));
+      const topDistance = Math.max(0, edge - clientY);
+      const bottomDistance = Math.max(0, clientY - (window.innerHeight - edge));
+      const direction = topDistance ? -1 : bottomDistance ? 1 : 0;
+      const proximity = Math.min(1, Math.max(topDistance, bottomDistance) / edge);
+      if (!direction) return 0;
+      return direction * (28 + (140 - 28) * proximity ** 2);
     }
 
-    function tickTodoPointerDragAutoScroll() {
+    function tickTodoPointerDragAutoScroll(timestamp) {
       if (!todoPointerDrag) return;
       const velocity = todoPointerDragScrollVelocity(todoPointerDrag.clientY);
       if (velocity) {
-        window.scrollBy(0, velocity);
+        const elapsed = Math.min(50, Math.max(0, timestamp - todoPointerDrag.autoScrollAt));
+        window.scrollBy(0, velocity * elapsed / 1000);
         updateTodoPointerDragTarget(todoPointerDrag.clientX, todoPointerDrag.clientY);
       }
+      todoPointerDrag.autoScrollAt = timestamp;
       todoPointerDrag.autoScrollFrame = requestAnimationFrame(tickTodoPointerDragAutoScroll);
     }
 
@@ -6605,7 +6610,8 @@
         handle: event.currentTarget,
         clientX: event.clientX,
         clientY: event.clientY,
-        autoScrollFrame: 0
+        autoScrollFrame: 0,
+        autoScrollAt: performance.now()
       };
       event.currentTarget.setPointerCapture?.(event.pointerId);
       item.classList.add("dragging");
