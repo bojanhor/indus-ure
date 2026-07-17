@@ -213,7 +213,8 @@ test("urejanje opravila uporablja svincnik in klik na podatke kartice", () => {
   assert.doesNotMatch(card, /<button class="primary edit-todo"[^>]*>Uredi opravilo<\/button>/);
   assert.doesNotMatch(card, /class="todo-status todo-status-color|class="todo-date"|edit-todo-assignees/);
   assert.match(html, /const todoSummary = item\.querySelector\("\.todo-summary"\);[\s\S]*?todoSummary\.addEventListener\("click"/);
-  assert.match(html, /if \(event\.target\.closest\("a, summary, button, \.todo-attachments-details"\)\) return;/);
+  assert.match(html, /if \(event\.target\.closest\("a, summary, button, \.todo-description-details"\)\) return;/);
+  assert.match(html, /item\.querySelectorAll\("\.todo-description-details"\)\.forEach\(\(details\) => \{/);
 });
 
 test("razvrscanje opravil deluje z rocajem, misjo in dotikom", () => {
@@ -221,6 +222,10 @@ test("razvrscanje opravil deluje z rocajem, misjo in dotikom", () => {
   const server = fs.readFileSync(path.join(__dirname, "..", "outputs", "server.js"), "utf8");
   assert.match(html, /dragHandle\.addEventListener\("pointerdown"/);
   assert.match(html, /beginTodoPointerDrag\(event, item, todo\.id\)/);
+  assert.match(html, /const TODO_TOUCH_DRAG_HOLD_MS = 280/);
+  assert.match(html, /window\.setTimeout\(\(\) => activateTodoPointerDrag\(\), TODO_TOUCH_DRAG_HOLD_MS\)/);
+  assert.match(html, /Math\.hypot\(event\.clientX - drag\.startX, event\.clientY - drag\.startY\)/);
+  assert.match(html, /document\.addEventListener\("pointermove", updateTodoPointerDrag, \{ passive: false \}\)/);
   assert.match(html, /document\.elementFromPoint\(clientX, clientY\)/);
   assert.match(html, /function todoPointerDragScrollVelocity\(clientY\)/);
   assert.match(html, /Math\.min\(180, Math\.max\(120, window\.innerHeight \* 0\.18\)\)/);

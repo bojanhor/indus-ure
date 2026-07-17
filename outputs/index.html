@@ -948,6 +948,13 @@
       font-weight: 900;
       touch-action: none;
       user-select: none;
+      -webkit-touch-callout: none;
+    }
+
+    .drag-handle.drag-armed {
+      background: #dcebe5;
+      color: var(--accent);
+      cursor: grabbing;
     }
 
     .drag-handle:disabled {
@@ -5406,7 +5413,7 @@
         item.className = `todo-item ${todo.done ? "done" : ""} ${todo.urgent ? "urgent" : ""}`;
         item.innerHTML = `
           <div class="todo-control-stack">
-            <button class="drag-handle" type="button" ${reorderable ? "" : "disabled"} title="Povleci za vrstni red" aria-label="Povleci za vrstni red">::</button>
+            <button class="drag-handle" type="button" ${reorderable ? "" : "disabled"} title="Povleci za vrstni red (na telefonu pridr&#382;i)" aria-label="Povleci za vrstni red (na telefonu pridr&#382;i)">::</button>
             <div class="todo-tools">
               <button class="todo-edit-icon edit-todo" type="button" title="Uredi opravilo" aria-label="Uredi opravilo">
                 <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -5458,21 +5465,23 @@
         item.querySelector(".edit-todo").addEventListener("click", openTodoEditor);
         const todoSummary = item.querySelector(".todo-summary");
         todoSummary.addEventListener("click", (event) => {
-          if (event.target.closest("a, summary, button, .todo-attachments-details")) return;
+          if (event.target.closest("a, summary, button, .todo-description-details")) return;
           openTodoEditor(event);
         });
         todoSummary.addEventListener("keydown", (event) => {
-          if (!["Enter", " "].includes(event.key) || event.target.closest("a, summary, button, .todo-attachments-details")) return;
+          if (!["Enter", " "].includes(event.key) || event.target.closest("a, summary, button, .todo-description-details")) return;
           openTodoEditor(event);
+        });
+        item.querySelectorAll(".todo-description-details").forEach((details) => {
+          details.addEventListener("click", (event) => event.stopPropagation());
+          details.addEventListener("keydown", (event) => event.stopPropagation());
         });
         const dragHandle = item.querySelector(".drag-handle");
         if (reorderable) {
           dragHandle.addEventListener("pointerdown", (event) => {
             beginTodoPointerDrag(event, item, todo.id);
           });
-          dragHandle.addEventListener("pointermove", updateTodoPointerDrag);
-          dragHandle.addEventListener("pointerup", finishTodoPointerDrag);
-          dragHandle.addEventListener("pointercancel", cancelTodoPointerDrag);
+
         }
         item.querySelectorAll(".remove-photo").forEach((button) => {
           button.addEventListener("click", async () => {
@@ -6560,6 +6569,8 @@
       return Boolean(source && target && !source.done && !target.done && !source.urgent && !target.urgent);
     }
 
+    const TODO_TOUCH_DRAG_HOLD_MS = 280;
+    const TODO_TOUCH_DRAG_MOVE_TOLERANCE = 12;
     let todoPointerDrag = null;
 
     function clearTodoDragVisuals() {
@@ -6601,47 +6612,86 @@
       todoPointerDrag.autoScrollFrame = requestAnimationFrame(tickTodoPointerDragAutoScroll);
     }
 
+    function clearTodoPointerDrag() {
+      const drag = todoPointerDrag;
+      if (!drag) return null;
+      if (drag.holdTimer) clearTimeout(drag.holdTimer);
+      if (drag.autoScrollFrame) cancelAnimationFrame(drag.autoScrollFrame);
+      if (drag.handle.hasPointerCapture?.(drag.pointerId)) drag.handle.releasePointerCapture(drag.pointerId);
+      drag.handle.classList.remove("drag-armed");
+      todoPointerDrag = null;
+      clearTodoDragVisuals();
+      return drag;
+    }
+
+    function activateTodoPointerDrag() {
+      const drag = todoPointerDrag;
+      if (!drag || drag.active) return;
+      drag.holdTimer = 0;
+      drag.active = true;
+      drag.handle.classList.remove("drag-armed");
+      drag.item.classList.add("dragging");
+      updateTodoPointerDragTarget(drag.clientX, drag.clientY);
+      drag.autoScrollAt = performance.now();
+      drag.autoScrollFrame = requestAnimationFrame(tickTodoPointerDragAutoScroll);
+      if (drag.pointerType === "touch") navigator.vibrate?.(12);
+    }
+
     function beginTodoPointerDrag(event, item, todoId) {
+      if (event.pointerType === "mouse" && event.button !== 0) return;
       event.preventDefault();
+      clearTodoPointerDrag();
+      const isTouch = event.pointerType === "touch";
       todoPointerDrag = {
         pointerId: event.pointerId,
         sourceId: todoId,
         targetId: todoId,
         handle: event.currentTarget,
+        item,
+        pointerType: event.pointerType,
+        active: false,
+        startX: event.clientX,
+        startY: event.clientY,
         clientX: event.clientX,
         clientY: event.clientY,
         autoScrollFrame: 0,
-        autoScrollAt: performance.now()
+        autoScrollAt: performance.now(),
+        holdTimer: 0
       };
       event.currentTarget.setPointerCapture?.(event.pointerId);
-      item.classList.add("dragging");
-      todoPointerDrag.autoScrollFrame = requestAnimationFrame(tickTodoPointerDragAutoScroll);
+      if (isTouch) {
+        event.currentTarget.classList.add("drag-armed");
+        todoPointerDrag.holdTimer = window.setTimeout(() => activateTodoPointerDrag(), TODO_TOUCH_DRAG_HOLD_MS);
+        return;
+      }
+      activateTodoPointerDrag();
     }
 
     function updateTodoPointerDrag(event) {
-      if (!todoPointerDrag || todoPointerDrag.pointerId !== event.pointerId) return;
+      const drag = todoPointerDrag;
+      if (!drag || drag.pointerId !== event.pointerId) return;
+      if (!drag.active) {
+        const moved = Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY);
+        if (moved > TODO_TOUCH_DRAG_MOVE_TOLERANCE) cancelTodoPointerDrag(event);
+        return;
+      }
       event.preventDefault();
-      todoPointerDrag.clientX = event.clientX;
-      todoPointerDrag.clientY = event.clientY;
+      drag.clientX = event.clientX;
+      drag.clientY = event.clientY;
       updateTodoPointerDragTarget(event.clientX, event.clientY);
     }
 
     function finishTodoPointerDrag(event) {
       if (!todoPointerDrag || todoPointerDrag.pointerId !== event.pointerId) return;
       event.preventDefault();
-      const { sourceId, targetId, handle, autoScrollFrame } = todoPointerDrag;
-      if (autoScrollFrame) cancelAnimationFrame(autoScrollFrame);
-      if (handle.hasPointerCapture?.(event.pointerId)) handle.releasePointerCapture(event.pointerId);
-      todoPointerDrag = null;
-      clearTodoDragVisuals();
+      const { sourceId, targetId, active } = clearTodoPointerDrag();
+      if (!active) return;
       reorderTodos(sourceId, targetId);
     }
 
     function cancelTodoPointerDrag(event) {
       if (!todoPointerDrag || todoPointerDrag.pointerId !== event.pointerId) return;
-      if (todoPointerDrag.autoScrollFrame) cancelAnimationFrame(todoPointerDrag.autoScrollFrame);
-      todoPointerDrag = null;
-      clearTodoDragVisuals();
+      clearTodoPointerDrag();
     }
     async function reorderTodos(sourceId, targetId) {
       if (!sourceId || !targetId || sourceId === targetId) return;
@@ -7582,6 +7632,9 @@
     $("dayTimelineScroll").addEventListener("pointermove", updateDayTimelineViewportPointer);
     $("dayTimelineScroll").addEventListener("pointerup", finishDayTimelineViewportPointer);
     $("dayTimelineScroll").addEventListener("pointercancel", finishDayTimelineViewportPointer);
+    document.addEventListener("pointermove", updateTodoPointerDrag, { passive: false });
+    document.addEventListener("pointerup", finishTodoPointerDrag, { passive: false });
+    document.addEventListener("pointercancel", cancelTodoPointerDrag, { passive: false });
     document.addEventListener("pointermove", updateDayTimelineEventPointer, { passive: false });
     document.addEventListener("pointerup", (event) => {
       finishDayTimelineEventPointer(event).catch((error) => alert(error.message));
