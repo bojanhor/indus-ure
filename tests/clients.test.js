@@ -222,7 +222,7 @@ test("razvrscanje opravil deluje z rocajem, misjo in dotikom", () => {
   const server = fs.readFileSync(path.join(__dirname, "..", "outputs", "server.js"), "utf8");
   assert.match(html, /dragHandle\.addEventListener\("pointerdown"/);
   assert.match(html, /beginTodoPointerDrag\(event, item, todo\.id\)/);
-  assert.match(html, /const TODO_TOUCH_DRAG_HOLD_MS = 280/);
+  assert.match(html, /const TODO_TOUCH_DRAG_HOLD_MS = 180/);
   assert.match(html, /window\.setTimeout\(\(\) => activateTodoPointerDrag\(\), TODO_TOUCH_DRAG_HOLD_MS\)/);
   assert.match(html, /dragHandle\.addEventListener\("pointermove", updateTodoPointerDrag, dragPointerOptions\)/);
   assert.match(html, /dragHandle\.addEventListener\("pointerup", finishTodoPointerDrag, dragPointerOptions\)/);
@@ -231,6 +231,8 @@ test("razvrscanje opravil deluje z rocajem, misjo in dotikom", () => {
   assert.doesNotMatch(html, /TODO_TOUCH_DRAG_MOVE_TOLERANCE/);
   assert.match(html, /document\.addEventListener\("pointermove", updateTodoPointerDrag, \{ passive: false \}\)/);
   assert.match(html, /document\.elementFromPoint\(clientX, clientY\)/);
+  assert.match(html, /targetPlacement = clientY < targetRect\.top \+ targetRect\.height \/ 2 \? "before" : "after"/);
+  assert.match(html, /drag-target-\$\{targetPlacement\}/);
   assert.match(html, /function todoPointerDragScrollVelocity\(clientY\)/);
   assert.match(html, /Math\.min\(180, Math\.max\(120, window\.innerHeight \* 0\.18\)\)/);
   assert.match(html, /28 \+ \(140 - 28\) \* proximity \*\* 2/);
@@ -238,10 +240,13 @@ test("razvrscanje opravil deluje z rocajem, misjo in dotikom", () => {
   assert.match(html, /window\.scrollBy\(0, velocity \* elapsed \/ 1000\)/);
   assert.match(html, /requestAnimationFrame\(tickTodoPointerDragAutoScroll\)/);
   assert.match(html, /function todosCanReorderTogether\(sourceId, targetId\)/);
-  assert.match(html, /async function reorderTodos\(sourceId, targetId\)/);
+  assert.match(html, /async function reorderTodos\(sourceId, targetId, targetPlacement = "before"\)/);
   assert.match(html, /const orderDifference = Number\(a\.order \|\| 0\) - Number\(b\.order \|\| 0\)/);
-  assert.match(html, /const ordered = contextTodos\(\)\.filter\(\(todo\) => !todo\.done && !todo\.urgent\)\.sort\(todoSort\)/);
+  assert.match(html, /\.filter\(\(todo\) => !todo\.done && !todo\.urgent && todo\.status !== "meal"\)/);
   assert.match(server, /order: isOpenedTodo \? todo\.order : existing\.order/);
+  assert.match(server, /url\.pathname === "\/api\/todos\/reorder" && req\.method === "POST"/);
+  assert.match(server, /await writeDbAsync\(db\);\s*sendJson\(res, 200, \{ todos: visibleTodosForUser\(db, user\) \}\)/);
+  assert.match(html, /api\("\/api\/todos\/reorder", \{[\s\S]*?todoIds: ordered\.map/);
   assert.doesNotMatch(html, /todoReorderGroup|todoNativeDragSourceId|addEventListener\("dragstart"|draggable="\$\{reorderable/);
 });
 
@@ -686,11 +691,19 @@ test("klik na datum odpre dnevno casovnico z gestami in urejanjem casa", () => {
   assert.match(html, /function dayTimelineLayouts\(todos\)/);
   assert.match(html, /data-mode = "resize-start"|dataset\.mode = "resize-start"/);
   assert.match(html, /dataset\.mode = "resize-end"/);
+  assert.match(html, /\.day-resize-handle \{[\s\S]*?left: 30%;[\s\S]*?right: 30%;/);
+  assert.match(html, /event\.addEventListener\("pointermove", updateDayTimelineEventPointer, dayEventPointerOptions\)/);
+  assert.match(html, /event\.addEventListener\("lostpointercapture", \(pointerEvent\) =>/);
+  assert.match(html, /interaction\.holdTimer = setTimeout\([\s\S]*?\}, 220\)/);
+  assert.match(html, /interaction\.startY = event\.clientY;/);
   assert.match(html, /function updateDayTimelineEventPointer\(event\)/);
   assert.match(html, /const delta = Math\.round\(rawDelta \/ 15\) \* 15;/);
   assert.match(html, /setDayTimelineZoom\(state\.dayTimelineMinuteHeight \* ratio/);
   assert.match(html, /Ctrl \+ kole&#353;&#269;ek/);
-  assert.match(html, /await saveTodoToServer\(\{[\s\S]*?start: dayTimelineTime\(interaction\.startMinute\),[\s\S]*?end: dayTimelineTime\(interaction\.endMinute\)/);
+  assert.match(html, /await saveTodoTimeToServer\([\s\S]*?dayTimelineTime\(interaction\.startMinute\),[\s\S]*?dayTimelineTime\(interaction\.endMinute\)/);
+  assert.match(html, /api\(`\/api\/todos\/\$\{encodeURIComponent\(todo\.id\)\}\/time`,/);
+  assert.match(html, /document\.body\.classList\.toggle\("admin-view", admin\)/);
+  assert.match(html, /body\.admin-view,[\s\S]*?background: #eaf6fb/);
   assert.match(html, /id="prevDayTimeline"/);
   assert.match(html, /id="nextDayTimeline"/);
   assert.match(html, /function navigateDayTimeline\(dayOffset\)/);
@@ -709,7 +722,7 @@ test("vlecenje dogodka na dotik zahteva kratek pridrzan dotik", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
   assert.match(html, /const touchHoldRequired = event\.pointerType === "touch" && mode === "move"/);
   assert.match(html, /touchReady: !touchHoldRequired/);
-  assert.match(html, /setTimeout\(\(\) => \{[\s\S]*?interaction\.touchReady = true;[\s\S]*?\}, 350\)/);
+  assert.match(html, /setTimeout\(\(\) => \{[\s\S]*?interaction\.touchReady = true;[\s\S]*?\}, 220\)/);
 });
 
 test("stranko iz zavihka Stranke sef odpre v obrazcu za urejanje", () => {
@@ -752,6 +765,8 @@ test("offline vrsta opravil ostane na napravi in preprecuje tihi prepis", () => 
   assert.match(html, /window\.addEventListener\("online", \(\) => flushOfflineTodoQueue/);
   assert.match(server, /baseUpdatedAt && baseUpdatedAt !== String\(previousTodo\.updatedAt \|\| ""\) && !ownsEditLock/);
   assert.match(server, /function ownsTodoAssignmentEditLock\(db, todo, user, lockToken/);
+  assert.match(server, /const todoTimeMatch = url\.pathname\.match/);
+  assert.match(server, /releaseTodoAssignmentEditLock\(db, previousTodo, user, editLockToken\)/);
 });
 test("klik na prazno dnevno casovnico pripravi enourno opravilo", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");

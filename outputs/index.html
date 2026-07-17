@@ -32,6 +32,12 @@
       -webkit-text-size-adjust: 100%;
     }
 
+    body.admin-view,
+    body.admin-view .main { background: #eaf6fb; }
+    body.admin-view .topbar,
+    body.admin-view .panel { border-color: #b8dbe7; }
+    body.admin-view .topbar { background: #f7fcff; }
+
     button, input, select, textarea {
       font: inherit;
       font-size: 16px;
@@ -898,6 +904,9 @@
       outline: 2px solid var(--accent);
       outline-offset: 2px;
     }
+
+    .todo-item.drag-target-before { box-shadow: 0 -4px 0 var(--accent); }
+    .todo-item.drag-target-after { box-shadow: 0 4px 0 var(--accent); }
 
     .drag-handle {
       min-width: 42px;
@@ -1831,13 +1840,14 @@
     }
 
     .day-timeline-event.is-moving { opacity: 0.88; cursor: grabbing; z-index: 8; }
+    .day-timeline-event.is-drag-ready { outline: 2px dashed var(--accent); outline-offset: 2px; }
     .day-hours-warning { display: inline-grid; place-items: center; width: 18px; height: 18px; margin-left: 5px; border-radius: 50%; background: #c93131; color: #fff; font-weight: 900; line-height: 1; }
     .day-timeline-event-title { display: block; font-size: 13px; line-height: 1.2; overflow-wrap: anywhere; }
     .day-timeline-event-meta { display: block; margin-top: 2px; font-size: 11px; line-height: 1.15; opacity: 0.86; }
     .day-resize-handle {
       position: absolute;
-      left: 0;
-      right: 0;
+      left: 30%;
+      right: 30%;
       height: 12px;
       z-index: 2;
       cursor: ns-resize;
@@ -1848,8 +1858,8 @@
     .day-resize-handle::after {
       content: "";
       position: absolute;
-      left: 35%;
-      right: 35%;
+      left: 0;
+      right: 0;
       top: 5px;
       height: 2px;
       border-radius: 2px;
@@ -3566,7 +3576,8 @@
         const ops = (await offlineTodoOps()).filter((item) => item.userId === state.user.id && !item.conflict).sort((a, b) => a.id - b.id);
         for (const op of ops) {
           try {
-            if (op.kind === "create") await api("/api/todos", { method: "POST", body: JSON.stringify(op.todo) });
+            if (op.kind === "reorder") await api("/api/todos/reorder", { method: "POST", body: JSON.stringify({ todoIds: op.todoIds || [] }) });
+            else if (op.kind === "create") await api("/api/todos", { method: "POST", body: JSON.stringify(op.todo) });
             else {
               const lock = await api(todoLockUrl(op.todoId), { method: "POST", body: JSON.stringify({}) });
               try {
@@ -3820,6 +3831,7 @@
     function applyWorkContextUi() {
       const admin = isAdminView();
       const worker = activeWorker();
+      document.body.classList.toggle("admin-view", admin);
       $("userRole").textContent = admin ? "Sef - administracija" : `${worker?.name || "Delavec"} - delavec`;
       document.querySelectorAll(".admin-only").forEach((element) => element.classList.toggle("hidden", !admin));
       document.querySelectorAll(".worker-only").forEach((element) => element.classList.toggle("hidden", admin));
@@ -4082,6 +4094,35 @@
           else state.todos.unshift(localTodo);
           refreshClientList();
           render();
+        }
+        return { todos: state.todos, queued: true };
+      } finally {
+        finishTodoMutation();
+      }
+    }
+    async function saveTodoTimeToServer(todo, start, end) {
+      const editLockToken = state.todoEditLock?.todoId === todo.id ? state.todoEditLock.token : "";
+      if (!editLockToken) throw new Error("Opravila pred premikom ni bilo mogoce zakleniti.");
+      const todoRevision = beginTodoMutation();
+      try {
+        await pauseTodoLockHeartbeat();
+        const data = await api(`/api/todos/${encodeURIComponent(todo.id)}/time`, {
+          method: "POST",
+          body: JSON.stringify({ start, end, editLockToken })
+        });
+        if (isCurrentTodoRevision(todoRevision)) {
+          state.todos = data.todos;
+          refreshClientList();
+        }
+        return data;
+      } catch (error) {
+        if (!isNetworkError(error)) throw error;
+        const localTodo = { ...todo, start, end, offlinePending: true };
+        await queueOfflineTodo({ kind: "update", todoId: localTodo.id, todo: localTodo, baseUpdatedAt: todo.updatedAt || "" });
+        if (isCurrentTodoRevision(todoRevision)) {
+          const index = state.todos.findIndex((item) => item.id === todo.id);
+          if (index >= 0) state.todos[index] = localTodo;
+          refreshClientList();
         }
         return { todos: state.todos, queued: true };
       } finally {
@@ -4776,7 +4817,18 @@
         endHandle.className = "day-resize-handle end";
         endHandle.dataset.mode = "resize-end";
         event.append(startHandle, title, meta, endHandle);
-        event.addEventListener("pointerdown", (pointerEvent) => beginDayTimelineEventPointer(pointerEvent, todo));
+        const dayEventPointerOptions = { passive: false };
+        event.addEventListener("pointerdown", (pointerEvent) => beginDayTimelineEventPointer(pointerEvent, todo), dayEventPointerOptions);
+        event.addEventListener("pointermove", updateDayTimelineEventPointer, dayEventPointerOptions);
+        event.addEventListener("pointerup", (pointerEvent) => {
+          finishDayTimelineEventPointer(pointerEvent).catch((error) => alert(error.message));
+        }, dayEventPointerOptions);
+        event.addEventListener("pointercancel", (pointerEvent) => {
+          finishDayTimelineEventPointer(pointerEvent, true).catch(() => {});
+        }, dayEventPointerOptions);
+        event.addEventListener("lostpointercapture", (pointerEvent) => {
+          finishDayTimelineEventPointer(pointerEvent, true).catch(() => {});
+        });
         event.addEventListener("keydown", (keyEvent) => {
           if (keyEvent.key !== "Enter" && keyEvent.key !== " ") return;
           keyEvent.preventDefault();
@@ -4863,7 +4915,11 @@
       if (startMinute === null || endMinute === null) return;
       event.preventDefault();
       event.stopPropagation();
-      eventElement.setPointerCapture?.(event.pointerId);
+      try {
+        eventElement.setPointerCapture?.(event.pointerId);
+      } catch {
+        // Firefox na telefonu lahko zajem kazalca zavrne; lokalni poslusalci na dogodku ostanejo varna rezerva.
+      }
       state.dayTimelineInteraction = {
         pointerId: event.pointerId,
         todoId: todo.id,
@@ -4883,8 +4939,11 @@
       if (touchHoldRequired) {
         const interaction = state.dayTimelineInteraction;
         interaction.holdTimer = setTimeout(() => {
-          if (state.dayTimelineInteraction === interaction) interaction.touchReady = true;
-        }, 350);
+          if (state.dayTimelineInteraction !== interaction) return;
+          interaction.touchReady = true;
+          interaction.element.classList.add("is-drag-ready");
+          navigator.vibrate?.(10);
+        }, 220);
       }
 
     }
@@ -4894,14 +4953,15 @@
       const rawDelta = (event.clientY - interaction.startY) / state.dayTimelineMinuteHeight;
       const delta = Math.round(rawDelta / 15) * 15;
       if (!interaction.touchReady) {
-        if (Math.abs(event.clientY - interaction.startY) > 12) {
-          clearTimeout(interaction.holdTimer);
-          state.dayTimelineInteraction = null;
-        }
+        event.preventDefault();
+        event.stopPropagation();
+        // Kratek naravni premik prsta ne preklice vlecenja; po signalu nadaljuj z iste lege.
+        interaction.startY = event.clientY;
         return;
       }
       if (!interaction.moved && Math.abs(event.clientY - interaction.startY) < 4) return;
       event.preventDefault();
+      event.stopPropagation();
       if (!interaction.moved) {
         interaction.moved = true;
         interaction.element.classList.add("is-moving");
@@ -4932,8 +4992,9 @@
     async function finishDayTimelineEventPointer(event, cancelled = false) {
       const interaction = state.dayTimelineInteraction;
       if (!interaction || interaction.pointerId !== event.pointerId) return;
+      event.stopPropagation();
       state.dayTimelineInteraction = null;
-      interaction.element.classList.remove("is-moving");
+      interaction.element.classList.remove("is-moving", "is-drag-ready");
       clearTimeout(interaction.holdTimer);
       if (cancelled) { renderDayTimeline(); return; }
       const todo = state.todos.find((item) => item.id === interaction.todoId);
@@ -4945,11 +5006,11 @@
       const locked = await interaction.lockPromise;
       if (!locked) { renderDayTimeline(); return; }
       try {
-        await saveTodoToServer({
-          ...todo,
-          start: dayTimelineTime(interaction.startMinute),
-          end: dayTimelineTime(interaction.endMinute)
-        });
+        await saveTodoTimeToServer(
+          todo,
+          dayTimelineTime(interaction.startMinute),
+          dayTimelineTime(interaction.endMinute)
+        );
         resolveDayTimelineHoursWarning(todo);
         clearTodoEditLockState();
         renderDayTimeline();
@@ -6710,27 +6771,40 @@
       const todos = contextTodos();
       const source = todos.find((todo) => todo.id === sourceId);
       const target = todos.find((todo) => todo.id === targetId);
-      return Boolean(source && target && !source.done && !target.done && !source.urgent && !target.urgent);
+      return Boolean(source && target && !source.done && !target.done && !source.urgent && !target.urgent && source.status !== "meal" && target.status !== "meal");
     }
 
-    const TODO_TOUCH_DRAG_HOLD_MS = 280;
+    const TODO_TOUCH_DRAG_HOLD_MS = 180;
     let todoPointerDrag = null;
 
     function clearTodoDragVisuals() {
       document.querySelectorAll(".todo-item.dragging, .todo-item.drag-target").forEach((item) => {
-        item.classList.remove("dragging", "drag-target");
+        item.classList.remove("dragging", "drag-target", "drag-target-before", "drag-target-after");
       });
     }
 
     function updateTodoPointerDragTarget(clientX, clientY) {
-      if (!todoPointerDrag) return;
+      const drag = todoPointerDrag;
+      if (!drag) return;
       const target = document.elementFromPoint(clientX, clientY)?.closest(".todo-item");
-      document.querySelectorAll(".todo-item.drag-target").forEach((item) => item.classList.remove("drag-target"));
-      todoPointerDrag.targetId = todoPointerDrag.sourceId;
-      if (target && todosCanReorderTogether(todoPointerDrag.sourceId, target.dataset.todoId)) {
-        todoPointerDrag.targetId = target.dataset.todoId;
-        target.classList.add("drag-target");
+      let targetElement = null;
+      let targetId = drag.sourceId;
+      let targetPlacement = "before";
+      if (target && target.dataset.todoId !== drag.sourceId && todosCanReorderTogether(drag.sourceId, target.dataset.todoId)) {
+        const targetRect = target.getBoundingClientRect();
+        targetPlacement = clientY < targetRect.top + targetRect.height / 2 ? "before" : "after";
+        targetId = target.dataset.todoId;
+        targetElement = target;
       }
+      if (drag.targetElement === targetElement && drag.targetPlacement === targetPlacement) {
+        drag.targetId = targetId;
+        return;
+      }
+      drag.targetElement?.classList.remove("drag-target", "drag-target-before", "drag-target-after");
+      drag.targetElement = targetElement;
+      drag.targetId = targetId;
+      drag.targetPlacement = targetPlacement;
+      if (targetElement) targetElement.classList.add("drag-target", `drag-target-${targetPlacement}`);
     }
 
     function todoPointerDragScrollVelocity(clientY) {
@@ -6789,6 +6863,8 @@
         pointerId: event.pointerId,
         sourceId: todoId,
         targetId: todoId,
+        targetPlacement: "before",
+        targetElement: null,
         handle: event.currentTarget,
         item,
         pointerType: event.pointerType,
@@ -6833,36 +6909,69 @@
     function finishTodoPointerDrag(event) {
       if (!todoPointerDrag || todoPointerDrag.pointerId !== event.pointerId) return;
       event.preventDefault();
-      const { sourceId, targetId, active } = clearTodoPointerDrag();
+      const { sourceId, targetId, targetPlacement, active } = clearTodoPointerDrag();
       if (!active) return;
-      reorderTodos(sourceId, targetId);
+      reorderTodos(sourceId, targetId, targetPlacement).catch((error) => alert(error.message));
     }
-
     function cancelTodoPointerDrag(event) {
       if (!todoPointerDrag || todoPointerDrag.pointerId !== event.pointerId) return;
       clearTodoPointerDrag();
     }
-    async function reorderTodos(sourceId, targetId) {
+    async function reorderTodos(sourceId, targetId, targetPlacement = "before") {
       if (!sourceId || !targetId || sourceId === targetId) return;
       const source = contextTodos().find((todo) => todo.id === sourceId);
       if (!source || !todosCanReorderTogether(sourceId, targetId)) return;
-      const ordered = contextTodos().filter((todo) => !todo.done && !todo.urgent).sort(todoSort);
+      const ordered = contextTodos()
+        .filter((todo) => !todo.done && !todo.urgent && todo.status !== "meal")
+        .sort(todoSort);
       const from = ordered.findIndex((todo) => todo.id === sourceId);
-      const to = ordered.findIndex((todo) => todo.id === targetId);
-      if (from < 0 || to < 0) return;
+      const targetIndex = ordered.findIndex((todo) => todo.id === targetId);
+      if (from < 0 || targetIndex < 0) return;
       const [moved] = ordered.splice(from, 1);
-      ordered.splice(to, 0, moved);
+      const insertionTarget = ordered.findIndex((todo) => todo.id === targetId);
+      const insertAt = insertionTarget + (targetPlacement === "after" ? 1 : 0);
+      ordered.splice(insertAt, 0, moved);
+      const ordersById = new Map(ordered.map((todo, index) => [todo.id, index + 1]));
+      const previousTodos = state.todos.slice();
+      const todoRevision = beginTodoMutation();
+      state.todos = state.todos.map((todo) => ordersById.has(todo.id)
+        ? { ...todo, order: ordersById.get(todo.id) }
+        : todo);
+      refreshClientList();
+      render();
       try {
-        for (let index = 0; index < ordered.length; index++) {
-          const order = index + 1;
-          if (Number(ordered[index].order || 0) === order) continue;
-          await saveTodoToServer({ ...ordered[index], order });
+        const editLockTokens = state.todoEditLock ? { [state.todoEditLock.todoId]: state.todoEditLock.token } : {};
+        const data = await api("/api/todos/reorder", {
+          method: "POST",
+          body: JSON.stringify({ todoIds: ordered.map((todo) => todo.id), editLockTokens })
+        });
+        if (isCurrentTodoRevision(todoRevision)) {
+          state.todos = data.todos;
+          refreshClientList();
+          render();
         }
       } catch (error) {
-        alert(error.message);
+        if (isNetworkError(error)) {
+          const pendingIds = new Set(ordersById.keys());
+          state.todos = state.todos.map((todo) => pendingIds.has(todo.id) ? { ...todo, offlinePending: true } : todo);
+          await queueOfflineTodo({
+            kind: "reorder",
+            todoId: `reorder:${activeWorkerId()}`,
+            todoIds: ordered.map((todo) => todo.id)
+          });
+          await updateOfflineSyncNotice();
+          return;
+        }
+        if (isCurrentTodoRevision(todoRevision)) {
+          state.todos = previousTodos;
+          refreshClientList();
+          render();
+        }
+        throw error;
+      } finally {
+        finishTodoMutation();
       }
     }
-
     function normalizeText(value) {
       return String(value || "")
         .toLowerCase()

@@ -3017,6 +3017,48 @@ async function handleApi(req, res) {
       return;
     }
 
+    if (url.pathname === "/api/todos/reorder" && req.method === "POST") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      const body = await readBody(req);
+      const todoIds = [...new Set((Array.isArray(body.todoIds) ? body.todoIds : [])
+        .map((id) => String(id || "").trim())
+        .filter(Boolean))];
+      if (todoIds.length < 2 || todoIds.length > 500) {
+        sendJson(res, 400, { error: "Za razvrscanje posreduj vsaj dve opravili." });
+        return;
+      }
+      const db = await readDbAsync();
+      const byId = new Map((db.todos || []).map((todo) => [todo.id, todo]));
+      const todos = todoIds.map((id) => byId.get(id));
+      const editLockTokens = body.editLockTokens && typeof body.editLockTokens === "object" ? body.editLockTokens : {};
+      for (const todo of todos) {
+        if (!todo || !canManageTodo(user, todo)) {
+          sendJson(res, 403, { error: "Tega vrstnega reda ne smes spreminjati." });
+          return;
+        }
+        if (todo.done || todo.urgent || todo.status === "meal") {
+          sendJson(res, 400, { error: "Izbranega opravila ni mogoce rocno razvrscati." });
+          return;
+        }
+        const editLock = todoAssignmentEditLockConflict(db, todo, user, String(editLockTokens[todo.id] || ""));
+        if (editLock) {
+          sendJson(res, 409, { error: `Opravilo trenutno ureja ${editLock.lockedByName || editLock.lockedById}.`, lock: editLock });
+          return;
+        }
+      }
+      const now = new Date().toISOString();
+      todos.forEach((todo, index) => {
+        todo.order = index + 1;
+        todo.updatedBy = user.id;
+        todo.updatedByName = user.name;
+        todo.updatedAt = now;
+        todo.history = [...(todo.history || []), audit(user, "spremenjen vrstni red")];
+      });
+      await writeDbAsync(db);
+      sendJson(res, 200, { todos: visibleTodosForUser(db, user) });
+      return;
+    }
     if (url.pathname === "/api/clients" && req.method === "GET") {
       const user = await requireUser(req, res);
       if (!user) return;
@@ -3482,6 +3524,56 @@ async function handleApi(req, res) {
       return;
     }
 
+    const todoTimeMatch = url.pathname.match(/^\/api\/todos\/([^/]+)\/time$/);
+    if (todoTimeMatch && req.method === "POST") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      const id = decodeURIComponent(todoTimeMatch[1]);
+      const body = await readBody(req);
+      const editLockToken = String(body.editLockToken || "");
+      const db = await readDbAsync();
+      const previousTodo = db.todos.find((item) => item.id === id);
+      if (!canManageTodo(user, previousTodo)) {
+        sendJson(res, 403, { error: "Tega opravila ne mores spreminjati." });
+        return;
+      }
+      const editLock = todoAssignmentEditLockConflict(db, previousTodo, user, editLockToken);
+      if (editLock || !ownsTodoAssignmentEditLock(db, previousTodo, user, editLockToken)) {
+        const activeLock = activeTodoEditLock(previousTodo.id);
+        const lock = editLock || (activeLock ? publicTodoEditLock(activeLock) : null);
+        sendJson(res, 409, { error: lock ? `Opravilo trenutno ureja ${lock.lockedByName || lock.lockedById}.` : "Opravilo pred premikom ni zaklenjeno.", lock });
+        return;
+      }
+      const start = roundTimeToQuarterHour(body.start);
+      const end = roundTimeToQuarterHour(body.end);
+      const validation = validateTodo({ ...previousTodo, start, end });
+      if (validation) {
+        sendJson(res, 400, { error: validation });
+        return;
+      }
+      const assignmentItems = todoAssignmentItems(db, previousTodo);
+      const payrollLock = payrollLockForTodos(db, assignmentItems);
+      if (payrollLock) {
+        sendJson(res, 403, { error: `Opravilo je del potrjenega obracuna za ${db.users?.[payrollLock.workerId]?.name || payrollLock.workerId} (${payrollLock.month}). Sef ga mora najprej ponovno odpreti.` });
+        return;
+      }
+      const now = new Date().toISOString();
+      const assignmentIds = new Set(assignmentItems.map((item) => item.id));
+      db.todos = db.todos.map((item) => assignmentIds.has(item.id) ? {
+        ...item,
+        start,
+        end,
+        updatedBy: user.id,
+        updatedByName: user.name,
+        updatedAt: now,
+        history: [...(item.history || []), audit(user, "prestavljen v casovnici")]
+      } : item);
+      await writeDbAsync(db);
+      releaseTodoAssignmentEditLock(db, previousTodo, user, editLockToken);
+      setTimeout(queueBackgroundGoogleSync, 0);
+      sendJson(res, 200, { todos: visibleTodosForUser(db, user) });
+      return;
+    }
     const todoMatch = url.pathname.match(/^\/api\/todos\/([^/]+)$/);
     if (todoMatch && req.method === "PUT") {
       const user = await requireUser(req, res);
