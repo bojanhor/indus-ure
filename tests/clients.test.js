@@ -680,6 +680,7 @@ test("ozki koledar ob naslovu dogodka ohrani tudi stranko", () => {
   assert.match(html, /<small class="day-todo-client">\$\{escapeHtml\(todo\.client\)\}<\/small>/);
   assert.match(html, /\.day-todo small:not\(\.day-todo-client\) \{ display: none; \}/);
   assert.match(html, /\.day-todo \.day-todo-client \{ display: block; font-size: 9px;/);
+  assert.match(html, /\.day-todo-client \{[\s\S]*?overflow-wrap: anywhere;[\s\S]*?white-space: normal;/);
 });
 
 test("vlecenje dogodka na dotik zahteva kratek pridrzan dotik", () => {
