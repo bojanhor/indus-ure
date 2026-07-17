@@ -1945,6 +1945,10 @@
 
     .modal-head-actions { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
 
+    .day-timeline-title-nav { display: flex; align-items: center; min-width: 0; gap: 8px; }
+    .day-timeline-title-nav h3 { min-width: 0; }
+    .day-timeline-date-nav { flex: 0 0 auto; font-size: 26px; line-height: 1; }
+
     .modal-body {
       padding: 18px 20px 20px;
       display: grid;
@@ -2938,7 +2942,11 @@
   <dialog id="dayTimelineDialog">
     <form method="dialog">
       <div class="modal-head">
-        <h3 id="dayTimelineTitle">Dnevni pregled</h3>
+        <div class="day-timeline-title-nav">
+          <button class="icon-btn day-timeline-date-nav" id="prevDayTimeline" type="button" title="Prejšnji dan" aria-label="Prejšnji dan">&lsaquo;</button>
+          <h3 id="dayTimelineTitle">Dnevni pregled</h3>
+          <button class="icon-btn day-timeline-date-nav" id="nextDayTimeline" type="button" title="Naslednji dan" aria-label="Naslednji dan">&rsaquo;</button>
+        </div>
         <div class="modal-head-actions">
           <button class="icon-btn" id="closeDayTimeline" type="submit" title="Prekliči spremembe" aria-label="Prekliči spremembe in zapri dnevni pregled">&times;</button>
         </div>
@@ -3371,6 +3379,8 @@
       view: "todos",
       entries: [],
       todos: [],
+      todoRevision: 0,
+      todoMutationPending: 0,
       debts: [],
       clients: [],
       selectedClient: "",
@@ -3420,6 +3430,24 @@
     };
 
     const $ = (id) => document.getElementById(id);
+
+    function beginTodoMutation() {
+      state.todoRevision += 1;
+      state.todoMutationPending += 1;
+      return state.todoRevision;
+    }
+
+    function finishTodoMutation() {
+      state.todoMutationPending = Math.max(0, state.todoMutationPending - 1);
+    }
+
+    function isCurrentTodoRevision(revision) {
+      return revision === state.todoRevision;
+    }
+
+    function canApplyTodoSnapshot(revision, wasStableAtStart) {
+      return wasStableAtStart && state.todoMutationPending === 0 && isCurrentTodoRevision(revision);
+    }
 
     function todoSortStorageKey() {
       const userId = state.user?.id || "anonymous";
@@ -3847,7 +3875,10 @@
     }
 
     async function loadTodos() {
+      const todoRevision = state.todoRevision;
+      const todoSnapshotWasStable = state.todoMutationPending === 0;
       const data = await api("/api/todos");
+      if (!canApplyTodoSnapshot(todoRevision, todoSnapshotWasStable)) return;
       state.todos = data.todos;
       refreshClientList();
       render();
@@ -3855,6 +3886,8 @@
     }
 
     async function loadAll() {
+      const todoRevision = state.todoRevision;
+      const todoSnapshotWasStable = state.todoMutationPending === 0;
       const workerBillingRequest = state.user?.role === "boss"
         ? api("/api/workers/billing")
         : Promise.resolve({ workers: [] });
@@ -3868,7 +3901,7 @@
         api("/api/payrolls")
       ]);
       state.entries = entries.entries;
-      state.todos = todos.todos;
+      if (canApplyTodoSnapshot(todoRevision, todoSnapshotWasStable)) state.todos = todos.todos;
       state.debts = debts.debts;
       state.clients = clients.clients;
       state.settings = settings.settings || state.settings;
@@ -4023,6 +4056,7 @@
     }
 
     async function saveTodoToServer(todo) {
+      const todoRevision = beginTodoMutation();
       if (todo.id && state.todoEditLock?.todoId === todo.id) await pauseTodoLockHeartbeat();
       const method = todo.id ? "PUT" : "POST";
       const path = todo.id ? `/api/todos/${todo.id}` : "/api/todos";
@@ -4032,24 +4066,30 @@
       const payload = editLockToken ? { ...todo, editLockToken } : todo;
       try {
         const data = await api(path, { method, body: JSON.stringify({ ...payload, baseUpdatedAt: todo.updatedAt || "" }) });
-        state.todos = data.todos;
-        refreshClientList();
-        render();
+        if (isCurrentTodoRevision(todoRevision)) {
+          state.todos = data.todos;
+          refreshClientList();
+          render();
+        }
         return data;
       } catch (error) {
         if (!isNetworkError(error)) throw error;
         const localTodo = todo.id ? { ...todo, offlinePending: true } : { ...todo, id: "offline-" + crypto.randomUUID(), offlinePending: true };
         await queueOfflineTodo({ kind: todo.id ? "update" : "create", todoId: localTodo.id, todo: { ...todo }, baseUpdatedAt: todo.updatedAt || "" });
-        const index = state.todos.findIndex((item) => item.id === todo.id);
-        if (index >= 0) state.todos[index] = localTodo;
-        else state.todos.unshift(localTodo);
-        refreshClientList();
-        render();
+        if (isCurrentTodoRevision(todoRevision)) {
+          const index = state.todos.findIndex((item) => item.id === todo.id);
+          if (index >= 0) state.todos[index] = localTodo;
+          else state.todos.unshift(localTodo);
+          refreshClientList();
+          render();
+        }
         return { todos: state.todos, queued: true };
+      } finally {
+        finishTodoMutation();
       }
     }
-
     async function deleteTodoFromServer(id) {
+      const todoRevision = beginTodoMutation();
       if (state.todoEditLock?.todoId === id) await pauseTodoLockHeartbeat();
       const editLockToken = state.todoEditLock?.todoId === id
         ? state.todoEditLock.token
@@ -4063,9 +4103,11 @@
           method: "DELETE",
           body: JSON.stringify({ editLockToken, baseUpdatedAt: previousTodos.find((todo) => todo.id === id)?.updatedAt || "" })
         });
-        state.todos = data.todos;
-        refreshClientList();
-        render();
+        if (isCurrentTodoRevision(todoRevision)) {
+          state.todos = data.todos;
+          refreshClientList();
+          render();
+        }
         syncGoogle(false);
       } catch (error) {
         if (isNetworkError(error)) {
@@ -4079,13 +4121,16 @@
           await updateOfflineSyncNotice();
           return { todos: state.todos, queued: true };
         }
-        state.todos = previousTodos;
-        refreshClientList();
-        render();
+        if (isCurrentTodoRevision(todoRevision)) {
+          state.todos = previousTodos;
+          refreshClientList();
+          render();
+        }
         throw error;
+      } finally {
+        finishTodoMutation();
       }
     }
-
     async function saveProfileToServer(profile) {
       const data = await api("/api/profile", { method: "PUT", body: JSON.stringify(profile) });
       state.user = data.user;
@@ -4376,6 +4421,13 @@
     function completedTodoGroupCount(todos, todo) {
       const key = todo.clientId || normalizeText(todo.client) || "__brez_stranke__";
       return todos.filter((item) => (item.clientId || normalizeText(item.client) || "__brez_stranke__") === key).length;
+    }
+
+    function completedTodoGroupHours(todos, todo) {
+      const key = todo.clientId || normalizeText(todo.client) || "__brez_stranke__";
+      return todos
+        .filter((item) => (item.clientId || normalizeText(item.client) || "__brez_stranke__") === key)
+        .reduce((total, item) => total + duration(item), 0);
     }
 
     function todoDateTimeLabel(todo) {
@@ -4792,6 +4844,13 @@
         renderDayTimeline();
         scroll.scrollTop = 5 * 60 * state.dayTimelineMinuteHeight;
       });
+    }
+
+    function navigateDayTimeline(dayOffset) {
+      const date = parseDate(state.dayTimelineDate);
+      if (!date) return;
+      date.setDate(date.getDate() + dayOffset);
+      openDayTimeline(dateKey(date));
     }
 
     function beginDayTimelineEventPointer(event, todo) {
@@ -5482,7 +5541,8 @@
           completedGroupKey = groupKey;
           const group = document.createElement("div");
           group.className = "todo-client-group-title";
-          group.innerHTML = `<span>${escapeHtml(todo.client || "Brez stranke")}</span><span>${completedTodoGroupCount(todos, todo)} opravil</span>`;
+          const groupHours = completedTodoGroupHours(todos, todo);
+          group.innerHTML = `<span>${escapeHtml(todo.client || "Brez stranke")}</span><span>${completedTodoGroupCount(todos, todo)} opravil · ${groupHours.toLocaleString("sl-SI", { maximumFractionDigits: 2 })} h</span>`;
           items.appendChild(group);
         }
         const item = document.createElement("div");
@@ -6397,6 +6457,9 @@
       state.todoHoursCompletionSourceId = sourceId || "";
       $("projectCompletionTask").textContent = source?.title || "Brez imena opravila";
       $("projectCompletionClient").textContent = source?.client || "Brez stranke";
+      $("rescheduleProject").textContent = source?.date
+        ? "Ne, prestavi opravilo na drug dan"
+        : "Obdrži opravilo";
       $("projectCompletionDialog").showModal();
     }
     async function handleHoursProjectCompletion(deleteProject) {
@@ -7096,6 +7159,8 @@
 
     async function syncGoogle(showSuccess = true) {
       if (state.googleSyncing) return;
+      const todoRevision = state.todoRevision;
+      const todoSnapshotWasStable = state.todoMutationPending === 0;
       state.googleSyncing = true;
       try {
         const status = await api("/api/google/status");
@@ -7111,7 +7176,7 @@
         }
         const data = await api("/api/google/sync", { method: "POST", body: JSON.stringify({}) });
         state.entries = data.entries || state.entries;
-        state.todos = data.todos || state.todos;
+        if (canApplyTodoSnapshot(todoRevision, todoSnapshotWasStable)) state.todos = data.todos || state.todos;
         refreshClientList();
         render();
         if (showSuccess) alert("Google koledar posodobljen. Posodobljeno: " + (data.pushed || 0) + ", odstranjeno: " + (data.removed || 0) + ".");
@@ -7709,6 +7774,8 @@
     $("dayTimelineZoomOut").addEventListener("click", () => setDayTimelineZoom(state.dayTimelineMinuteHeight / 1.25));
     $("dayTimelineZoomIn").addEventListener("click", () => setDayTimelineZoom(state.dayTimelineMinuteHeight * 1.25));
     $("dayTimelineFit").addEventListener("click", fitDayTimeline);
+    $("prevDayTimeline").addEventListener("click", () => navigateDayTimeline(-1));
+    $("nextDayTimeline").addEventListener("click", () => navigateDayTimeline(1));
     $("dayTimelineScroll").addEventListener("wheel", (event) => {
       if (!event.ctrlKey && !event.metaKey) return;
       event.preventDefault();

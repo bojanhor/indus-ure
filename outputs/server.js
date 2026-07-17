@@ -1057,7 +1057,7 @@ function activeTodoEditLock(todoId, now = Date.now()) {
 function acquireTodoEditLock(todoId, user, lockToken = "", now = Date.now()) {
   const id = String(todoId || "");
   const active = activeTodoEditLock(id, now);
-  if (active && active.userId !== user.id) {
+  if (active && (active.userId !== user.id || active.token !== String(lockToken || ""))) {
     return { ok: false, lock: publicTodoEditLock(active) };
   }
   const lock = {
@@ -1074,8 +1074,17 @@ function acquireTodoEditLock(todoId, user, lockToken = "", now = Date.now()) {
 function todoEditLockConflict(todoId, user, lockToken = "", now = Date.now()) {
   const active = activeTodoEditLock(todoId, now);
   if (!active) return null;
-  if (active.userId === user.id) return null;
+  if (active.userId === user.id && active.token === String(lockToken || "")) return null;
   return publicTodoEditLock(active);
+}
+
+function ownsTodoAssignmentEditLock(db, todo, user, lockToken = "", now = Date.now()) {
+  const token = String(lockToken || "");
+  const items = todoAssignmentItems(db, todo);
+  return Boolean(token && items.length && items.every((item) => {
+    const lock = activeTodoEditLock(item.id, now);
+    return lock?.userId === user.id && lock.token === token;
+  }));
 }
 
 function releaseTodoEditLock(todoId, user, lockToken = "", now = Date.now()) {
@@ -3503,21 +3512,22 @@ async function handleApi(req, res) {
         sendJson(res, 403, { error: "Tega opravila ne mores spreminjati." });
         return;
       }
+      const previousTodo = db.todos[index];
+      const editLock = todoAssignmentEditLockConflict(db, previousTodo, user, editLockToken);
+      if (editLock) {
+        sendJson(res, 409, { error: `Opravilo trenutno ureja ${editLock.lockedByName || editLock.lockedById}.`, lock: editLock });
+        return;
+      }
       const baseUpdatedAt = String(body.baseUpdatedAt || "");
-      if (baseUpdatedAt && baseUpdatedAt !== String(db.todos[index].updatedAt || "")) {
+      const ownsEditLock = ownsTodoAssignmentEditLock(db, previousTodo, user, editLockToken);
+      if (baseUpdatedAt && baseUpdatedAt !== String(previousTodo.updatedAt || "") && !ownsEditLock) {
         sendJson(res, 409, { error: "Opravilo je bilo medtem spremenjeno na drugi napravi." });
         return;
       }
-      const previousTodo = db.todos[index];
       const assignmentItems = todoAssignmentItems(db, previousTodo);
       const payrollLock = payrollLockForTodos(db, assignmentItems);
       if (payrollLock) {
         sendJson(res, 403, { error: `Opravilo je del potrjenega obracuna za ${db.users?.[payrollLock.workerId]?.name || payrollLock.workerId} (${payrollLock.month}). Sef ga mora najprej ponovno odpreti.` });
-        return;
-      }
-      const editLock = todoAssignmentEditLockConflict(db, previousTodo, user, editLockToken);
-      if (editLock) {
-        sendJson(res, 409, { error: `Opravilo trenutno ureja ${editLock.lockedByName || editLock.lockedById}.`, lock: editLock });
         return;
       }
       const currentAssigneeIds = todoAssignmentAssigneeIds(db, previousTodo);
@@ -3633,11 +3643,6 @@ async function handleApi(req, res) {
       const editLockToken = String(body.editLockToken || "");
       const db = await readDbAsync();
       const todo = db.todos.find((item) => item.id === id);
-      const baseUpdatedAt = String(body.baseUpdatedAt || "");
-      if (todo && baseUpdatedAt && baseUpdatedAt !== String(todo.updatedAt || "")) {
-        sendJson(res, 409, { error: "Opravilo je bilo medtem spremenjeno na drugi napravi." });
-        return;
-      }
       if (!canManageTodo(user, todo)) {
         sendJson(res, 403, { error: "Tega opravila ne mores izbrisati." });
         return;
@@ -3645,6 +3650,12 @@ async function handleApi(req, res) {
       const editLock = todoAssignmentEditLockConflict(db, todo, user, editLockToken);
       if (editLock) {
         sendJson(res, 409, { error: `Opravilo trenutno ureja ${editLock.lockedByName || editLock.lockedById}.`, lock: editLock });
+        return;
+      }
+      const baseUpdatedAt = String(body.baseUpdatedAt || "");
+      const ownsEditLock = ownsTodoAssignmentEditLock(db, todo, user, editLockToken);
+      if (baseUpdatedAt && baseUpdatedAt !== String(todo.updatedAt || "") && !ownsEditLock) {
+        sendJson(res, 409, { error: "Opravilo je bilo medtem spremenjeno na drugi napravi." });
         return;
       }
       const assignmentItems = todoAssignmentItems(db, todo);
@@ -3830,6 +3841,7 @@ module.exports = {
   activeTodoEditLock,
   todoAssignmentAssigneeIds,
   todoAssignmentEditLockConflict,
+  ownsTodoAssignmentEditLock,
   todoAssignmentItems,
   releaseTodoAssignmentEditLock,
   deleteOwnedGoogleEvent,

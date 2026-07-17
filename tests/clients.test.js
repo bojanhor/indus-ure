@@ -562,6 +562,9 @@ test("skupni podatki se osvezujejo samodejno in ne prek rocnega gumba", () => {
   assert.match(html, /document\.querySelector\("dialog\[open\]"\)/);
   assert.match(html, /active\?\.matches\('input, textarea, select/);
   assert.match(html, /await loadAll\(\)/);
+  assert.match(html, /todoMutationPending: 0/);
+  assert.match(html, /function canApplyTodoSnapshot\(revision, wasStableAtStart\)/);
+  assert.match(html, /if \(!canApplyTodoSnapshot\(todoRevision, todoSnapshotWasStable\)\) return;/);
 });
 
 test("skupni obrazec opravila uporablja strezniski zaklep", () => {
@@ -688,6 +691,10 @@ test("klik na datum odpre dnevno casovnico z gestami in urejanjem casa", () => {
   assert.match(html, /setDayTimelineZoom\(state\.dayTimelineMinuteHeight \* ratio/);
   assert.match(html, /Ctrl \+ kole&#353;&#269;ek/);
   assert.match(html, /await saveTodoToServer\(\{[\s\S]*?start: dayTimelineTime\(interaction\.startMinute\),[\s\S]*?end: dayTimelineTime\(interaction\.endMinute\)/);
+  assert.match(html, /id="prevDayTimeline"/);
+  assert.match(html, /id="nextDayTimeline"/);
+  assert.match(html, /function navigateDayTimeline\(dayOffset\)/);
+  assert.match(html, /\$\("prevDayTimeline"\)\.addEventListener\("click", \(\) => navigateDayTimeline\(-1\)\)/);
 });
 
 test("ozki koledar ob naslovu dogodka ohrani tudi stranko", () => {
@@ -733,6 +740,8 @@ test("dnevna casovnica zdruzi neprekinjene delovne bloke", () => {
   assert.match(html, /function dayWorkBlocks\(todos\)/);
   assert.match(html, /interval\.start <= previous\.end/);
   assert.match(html, /className = "day-work-blocks"/);
+  assert.match(html, /function completedTodoGroupHours\(todos, todo\)/);
+  assert.match(html, /opravil · \$\{groupHours\.toLocaleString\("sl-SI", \{ maximumFractionDigits: 2 \}\)\} h/);
   assert.match(html, /\(duration \/ 60\)\.toLocaleString\("sl-SI"/);
 });
 test("offline vrsta opravil ostane na napravi in preprecuje tihi prepis", () => {
@@ -741,7 +750,8 @@ test("offline vrsta opravil ostane na napravi in preprecuje tihi prepis", () => 
   assert.match(html, /indexedDB\.open\(offlineTodoDbName, 1\)/);
   assert.match(html, /function flushOfflineTodoQueue\(\)/);
   assert.match(html, /window\.addEventListener\("online", \(\) => flushOfflineTodoQueue/);
-  assert.match(server, /baseUpdatedAt && baseUpdatedAt !== String\(db\.todos\[index\]\.updatedAt \|\| ""\)/);
+  assert.match(server, /baseUpdatedAt && baseUpdatedAt !== String\(previousTodo\.updatedAt \|\| ""\) && !ownsEditLock/);
+  assert.match(server, /function ownsTodoAssignmentEditLock\(db, todo, user, lockToken/);
 });
 test("klik na prazno dnevno casovnico pripravi enourno opravilo", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
@@ -773,6 +783,7 @@ test("po vpisu ur uporabnik potrdi zakljucek projekta", () => {
   assert.match(html, /Ali je projekt v celoti zaklju&#269;en \(tudi najmanj&#353;e podrobnosti\)\?/);
   assert.match(html, /id="deleteCompletedProject">Da, izbri&#353;i opravilo/);
   assert.match(html, /id="rescheduleProject">Ne, prestavi opravilo na drug dan/);
+  assert.match(html, /\$\("rescheduleProject"\)\.textContent = source\?\.date[\s\S]*?: "Obdrži opravilo"/);
   assert.match(html, /if \(state\.todoHoursSourceId\) state\.todoHoursSavedSourceId = state\.todoHoursSourceId/);
   assert.match(html, /async function handleHoursProjectCompletion\(deleteProject\)/);
   assert.match(html, /await deleteTodoFromServer\(sourceId\)/);

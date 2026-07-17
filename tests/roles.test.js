@@ -26,6 +26,7 @@ const {
   releaseTodoAssignmentEditLock,
   todoAssignmentAssigneeIds,
   todoAssignmentEditLockConflict,
+  ownsTodoAssignmentEditLock,
   todoAssignmentItems,
   revokeSession,
   sessionForToken,
@@ -290,8 +291,10 @@ test("isto opravilo lahko istocasno ureja samo en uporabnik ali zavihek", () => 
   const otherUser = acquireTodoEditLock(todoId, ibro, "", startedAt + 2);
   assert.equal(otherUser.ok, false);
   assert.equal(otherUser.lock.lockedByName, "Bojan");
-  assert.equal(acquireTodoEditLock(todoId, bojan, "", startedAt + 3).ok, true);
+  assert.equal(acquireTodoEditLock(todoId, bojan, "", startedAt + 3).ok, false);
+  assert.equal(acquireTodoEditLock(todoId, bojan, first.token, startedAt + 3).ok, true);
   assert.equal(todoEditLockConflict(todoId, bojan, first.token, startedAt + 4), null);
+  assert.equal(todoEditLockConflict(todoId, bojan, "", startedAt + 4)?.lockedById, "bojan");
   assert.equal(todoEditLockConflict(todoId, ibro, "", startedAt + 4)?.lockedById, "bojan");
   assert.equal(releaseTodoEditLock(todoId, ibro, "", startedAt + 5), false);
   assert.equal(releaseTodoEditLock(todoId, bojan, first.token, startedAt + 5), true);
@@ -320,6 +323,8 @@ test("zaklep skupnega opravila velja za vse dodeljene delavce", () => {
   assert.equal(activeTodoEditLock("group-ibro", startedAt + 1)?.token, lock.token);
   assert.equal(activeTodoEditLock("group-bojan", startedAt + 1)?.token, lock.token);
   assert.equal(todoAssignmentEditLockConflict(groupDb, groupDb.todos[1], bojan, "", startedAt + 2)?.lockedById, "ibro");
+  assert.equal(ownsTodoAssignmentEditLock(groupDb, groupDb.todos[0], ibro, lock.token, startedAt + 2), true);
+  assert.equal(ownsTodoAssignmentEditLock(groupDb, groupDb.todos[0], ibro, "wrong-token", startedAt + 2), false);
   assert.equal(releaseTodoAssignmentEditLock(groupDb, groupDb.todos[0], ibro, lock.token, startedAt + 3), true);
   assert.equal(activeTodoEditLock("group-ibro", startedAt + 4), null);
   assert.equal(activeTodoEditLock("group-bojan", startedAt + 4), null);
