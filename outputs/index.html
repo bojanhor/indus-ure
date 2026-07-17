@@ -900,18 +900,19 @@
     }
 
     .drag-handle {
-      min-width: 34px;
-      min-height: 34px;
+      min-width: 42px;
+      min-height: 42px;
       border-radius: 8px;
       background: #edf2ee;
       color: var(--muted);
       cursor: grab;
       font-weight: 900;
-      touch-action: none;
+      touch-action: none !important;
       user-select: none;
+      -webkit-user-select: none;
       -webkit-touch-callout: none;
+      -webkit-user-drag: none;
     }
-
     .drag-handle.drag-armed {
       background: #dcebe5;
       color: var(--accent);
@@ -5552,10 +5553,16 @@
         todoExpandedDetails?.addEventListener("keydown", (event) => event.stopPropagation());
         const dragHandle = item.querySelector(".drag-handle");
         if (reorderable) {
+          const dragPointerOptions = { passive: false };
           dragHandle.addEventListener("pointerdown", (event) => {
             beginTodoPointerDrag(event, item, todo.id);
-          });
-
+          }, dragPointerOptions);
+          // Firefox for Android lahko zajeti dotik preskoci na documentu, zato je rocaj sam tudi poslusalec.
+          dragHandle.addEventListener("pointermove", updateTodoPointerDrag, dragPointerOptions);
+          dragHandle.addEventListener("pointerup", finishTodoPointerDrag, dragPointerOptions);
+          dragHandle.addEventListener("pointercancel", cancelTodoPointerDrag, dragPointerOptions);
+          dragHandle.addEventListener("lostpointercapture", cancelTodoPointerDrag);
+          dragHandle.addEventListener("contextmenu", (event) => event.preventDefault());
         }
         item.querySelectorAll(".remove-photo").forEach((button) => {
           button.addEventListener("click", async () => {
@@ -6644,7 +6651,6 @@
     }
 
     const TODO_TOUCH_DRAG_HOLD_MS = 280;
-    const TODO_TOUCH_DRAG_MOVE_TOLERANCE = 12;
     let todoPointerDrag = null;
 
     function clearTodoDragVisuals() {
@@ -6691,13 +6697,13 @@
       if (!drag) return null;
       if (drag.holdTimer) clearTimeout(drag.holdTimer);
       if (drag.autoScrollFrame) cancelAnimationFrame(drag.autoScrollFrame);
+      // Najprej pobrisi stanje, ker releasePointerCapture lahko sprozi lostpointercapture.
+      todoPointerDrag = null;
       if (drag.handle.hasPointerCapture?.(drag.pointerId)) drag.handle.releasePointerCapture(drag.pointerId);
       drag.handle.classList.remove("drag-armed");
-      todoPointerDrag = null;
       clearTodoDragVisuals();
       return drag;
     }
-
     function activateTodoPointerDrag() {
       const drag = todoPointerDrag;
       if (!drag || drag.active) return;
@@ -6732,7 +6738,11 @@
         autoScrollAt: performance.now(),
         holdTimer: 0
       };
-      event.currentTarget.setPointerCapture?.(event.pointerId);
+      try {
+        event.currentTarget.setPointerCapture?.(event.pointerId);
+      } catch {
+        // Lokalni poslusalci na rocaju spodaj ostanejo varna rezerva za mobilne brskalnike.
+      }
       if (isTouch) {
         event.currentTarget.classList.add("drag-armed");
         todoPointerDrag.holdTimer = window.setTimeout(() => activateTodoPointerDrag(), TODO_TOUCH_DRAG_HOLD_MS);
@@ -6745,8 +6755,11 @@
       const drag = todoPointerDrag;
       if (!drag || drag.pointerId !== event.pointerId) return;
       if (!drag.active) {
-        const moved = Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY);
-        if (moved > TODO_TOUCH_DRAG_MOVE_TOLERANCE) cancelTodoPointerDrag(event);
+        event.preventDefault();
+        // Premik prsta pred iztekom pridrzenega dotika ne sme preklicati vlecenja.
+        // Telefon pri naravnem dotiku skoraj vedno zazna nekaj pikslov premika.
+        drag.clientX = event.clientX;
+        drag.clientY = event.clientY;
         return;
       }
       event.preventDefault();
@@ -6754,7 +6767,6 @@
       drag.clientY = event.clientY;
       updateTodoPointerDragTarget(event.clientX, event.clientY);
     }
-
     function finishTodoPointerDrag(event) {
       if (!todoPointerDrag || todoPointerDrag.pointerId !== event.pointerId) return;
       event.preventDefault();

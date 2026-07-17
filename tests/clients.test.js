@@ -224,7 +224,11 @@ test("razvrscanje opravil deluje z rocajem, misjo in dotikom", () => {
   assert.match(html, /beginTodoPointerDrag\(event, item, todo\.id\)/);
   assert.match(html, /const TODO_TOUCH_DRAG_HOLD_MS = 280/);
   assert.match(html, /window\.setTimeout\(\(\) => activateTodoPointerDrag\(\), TODO_TOUCH_DRAG_HOLD_MS\)/);
-  assert.match(html, /Math\.hypot\(event\.clientX - drag\.startX, event\.clientY - drag\.startY\)/);
+  assert.match(html, /dragHandle\.addEventListener\("pointermove", updateTodoPointerDrag, dragPointerOptions\)/);
+  assert.match(html, /dragHandle\.addEventListener\("pointerup", finishTodoPointerDrag, dragPointerOptions\)/);
+  assert.match(html, /dragHandle\.addEventListener\("lostpointercapture", cancelTodoPointerDrag\)/);
+  assert.match(html, /if \(!drag\.active\) \{\s*event\.preventDefault\(\);[\s\S]*?drag\.clientX = event\.clientX;/);
+  assert.doesNotMatch(html, /TODO_TOUCH_DRAG_MOVE_TOLERANCE/);
   assert.match(html, /document\.addEventListener\("pointermove", updateTodoPointerDrag, \{ passive: false \}\)/);
   assert.match(html, /document\.elementFromPoint\(clientX, clientY\)/);
   assert.match(html, /function todoPointerDragScrollVelocity\(clientY\)/);
