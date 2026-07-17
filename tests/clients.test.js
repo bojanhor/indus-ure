@@ -452,6 +452,17 @@ test("tipka nazaj med prijavo ne odpre stare Google prijave", () => {
   assert.match(html, /event\.state\?\.\[loggedInHistoryStateKey\] !== "base"/);
 });
 
+test("tipka nazaj zapre odprt modal enako kot kriz", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+
+  assert.match(html, /const modalHistoryStateKey = "indusUreModal"/);
+  assert.match(html, /function registerOpenModalHistory\(dialog\)/);
+  assert.match(html, /HTMLDialogElement\.prototype\.showModal = function/);
+  assert.match(html, /function closeOpenModalFromBack\(event\)/);
+  assert.match(html, /modalHistoryClosingFromBack = true;\s*dialog\.close\(\);/);
+  assert.match(html, /initializeModalBackNavigation\(\);\s*window\.addEventListener\("popstate"/);
+  assert.match(html, /if \(closeOpenModalFromBack\(event\)\) return;/);
+});
 test("mobilni preklopnik je na vrhu in ne prekriva konca strani", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
 

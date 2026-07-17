@@ -3303,6 +3303,7 @@
     const automaticLoginAttemptKey = "indus-ure-auto-login-at";
     const automaticLoginRetryDelayMs = 60_000;
     const loggedInHistoryStateKey = "indusUreLoggedIn";
+    const modalHistoryStateKey = "indusUreModal";
     const workContextKey = "indus-ure-work-context";
     const todoSortModeKey = "indus-ure-todo-sort-mode";
     const billingWorkerKey = "indus-ure-billing-worker";
@@ -3609,6 +3610,63 @@
       if (history.state?.[loggedInHistoryStateKey] === "active") return;
       history.replaceState(loggedInHistoryState("base"), "", location.href);
       history.pushState(loggedInHistoryState("active"), "", location.href);
+    }
+
+    let modalHistorySequence = 0;
+    let modalHistoryClosingFromBack = false;
+    let modalHistoryIgnoreNextPopstate = false;
+    const modalHistoryTokens = new WeakMap();
+
+    function modalHistoryState(dialogId, token) {
+      const current = history.state && typeof history.state === "object" ? history.state : {};
+      return { ...current, [modalHistoryStateKey]: { dialogId, token } };
+    }
+
+    function registerOpenModalHistory(dialog) {
+      if (!dialog?.open || modalHistoryTokens.has(dialog) || !state.token || !state.user) return;
+      const token = `${dialog.id || "modal"}-${Date.now()}-${++modalHistorySequence}`;
+      try {
+        modalHistoryTokens.set(dialog, token);
+        history.pushState(modalHistoryState(dialog.id, token), "", location.href);
+      } catch {
+        modalHistoryTokens.delete(dialog);
+      }
+    }
+
+    function unregisterClosedModalHistory(dialog) {
+      const token = modalHistoryTokens.get(dialog);
+      if (!token) return;
+      modalHistoryTokens.delete(dialog);
+      if (modalHistoryClosingFromBack) return;
+      if (history.state?.[modalHistoryStateKey]?.token !== token) return;
+      modalHistoryIgnoreNextPopstate = true;
+      history.back();
+    }
+
+    function closeOpenModalFromBack(event) {
+      if (modalHistoryIgnoreNextPopstate) {
+        modalHistoryIgnoreNextPopstate = false;
+        return true;
+      }
+      const dialog = [...document.querySelectorAll("dialog[open]")].at(-1);
+      const token = dialog ? modalHistoryTokens.get(dialog) : "";
+      if (!token || event.state?.[modalHistoryStateKey]?.token === token) return false;
+      modalHistoryClosingFromBack = true;
+      dialog.close();
+      modalHistoryClosingFromBack = false;
+      return true;
+    }
+
+    function initializeModalBackNavigation() {
+      const nativeShowModal = HTMLDialogElement.prototype.showModal;
+      HTMLDialogElement.prototype.showModal = function (...args) {
+        const result = nativeShowModal.apply(this, args);
+        registerOpenModalHistory(this);
+        return result;
+      };
+      document.querySelectorAll("dialog").forEach((dialog) => {
+        dialog.addEventListener("close", () => unregisterClosedModalHistory(dialog));
+      });
     }
 
     function showApp() {
@@ -8071,7 +8129,9 @@
     window.addEventListener("offline", () => updateOfflineSyncNotice().catch(() => {}));
     window.addEventListener("pagehide", releaseTodoEditLockOnPageHide);
 
+    initializeModalBackNavigation();
     window.addEventListener("popstate", (event) => {
+      if (closeOpenModalFromBack(event)) return;
       if (!state.token || !state.user) return;
       if (event.state?.[loggedInHistoryStateKey] !== "base") return;
       history.pushState(loggedInHistoryState("active"), "", location.href);
