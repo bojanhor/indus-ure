@@ -258,7 +258,7 @@ test("novo opravilo je mogoce dodeliti sebi in vec drugim delavcem", () => {
   const server = fs.readFileSync(path.join(__dirname, "..", "outputs", "server.js"), "utf8");
   assert.match(html, /id="todoFormAssignees"/);
   assert.match(html, /<input type="checkbox" value="\$\{escapeHtml\(user\.id\)\}"/);
-  assert.match(html, /const selectedAssignees = editing \? todoAssigneeIds\(todo\) : \[activeWorkerId\(\)\]/);
+  assert.match(html, /const selectedAssignees = editing \? todoAssigneeIds\(todo\) : \(todo\._duplicateAssigneeIds\?\.length \? todo\._duplicateAssigneeIds : \[activeWorkerId\(\)\]\)/);
   assert.match(html, /renderTodoFormAssignees\(selectedAssignees,/);
   assert.match(html, /const assigneeIds = selectedTodoFormAssignees\(\)/);
   assert.match(html, /Za: \$\{escapeHtml\(todoAssigneeNames\(todo\)\)\}/);
@@ -356,6 +356,7 @@ test("obracun ur podpira delavski in sefovski pogled", () => {
   assert.match(html, /const payrollPaidTodoStatuses = new Set\(\["execution", "meal"\]\)/);
   assert.match(html, /payrollPaidTodoStatuses\.has\(todo\.status\)/);
   assert.match(html, /function billingDisplayActivities\(workerId, month, billedLines\)/);
+  assert.match(html, /const liveByTodoId = new Map\(billingLiveLines\(workerId, month\)\.map\(\(line\) => \[String\(line\.todoId \|\| ""\), line\]\)\)/);
   assert.match(html, /workAmount: billed \? Number\(billed\.workAmount \|\| 0\) : 0,/);
   assert.match(html, /const day = billingLineTotals\(payableRows\)/);
   assert.match(html, /class="billing-gap billing-open-day"/);
@@ -466,6 +467,12 @@ test("pogled opravil uporablja samo gumb in skupni obrazec ima Preklici", () => 
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
   assert.match(html, /class="todo-actions-bar">\s*<button class="primary" id="newTodoButton"[^>]*>Dodaj opravilo<\/button>/);
   assert.match(html, /id="cancelTodoDialog">Prekli&#269;i<\/button>/);
+  assert.match(html, /id="duplicateTodoFromDialog">Podvoji<\/button>/);
+  assert.match(html, /async function duplicateTodoFromCurrent\(\)/);
+  assert.match(html, /_duplicateAssigneeIds: todoAssigneeIds\(source\)/);
+  assert.match(html, /status: source\.status === "execution" \? "open" : source\.status/);
+  assert.match(html, /photos: \(source\.photos \|\| \[\]\)\.map\(\(photo\) => \(\{ \.\.\.photo, id: "" \}\)\)/);
+  assert.match(html, /duplicateTodoFromDialog"\)\.addEventListener\("click", \(\) => duplicateTodoFromCurrent\(\)/);
   assert.match(html, /\$\("cancelTodoDialog"\)\.addEventListener\("click", \(\) => \$\("todoDialog"\)\.close\(\)\)/);
   assert.doesNotMatch(html, /id="todoCreatePanel"|id="savePageTodo"|class="todo-create"/);
   assert.doesNotMatch(html, /todoFromPage|async function addTodo/);
@@ -565,7 +572,8 @@ test("opravila imajo rocno in datumsko razvrscanje ter neobvezni uri", () => {
   assert.match(html, /function todoNeedsOrdering\(todo\)/);
   assert.match(html, /orderStatuses = new Set\(\["order", "order_car", "order_warehouse", "add_to_car"\]\)/);
   assert.match(html, /naro\u010di\(\?=\$\|\[\^\\p\{L\}\\p\{N\}_\]\)/);
-  assert.match(html, /state\.todoSortMode === "order"\) return list\.filter\(\(todo\) => todoNeedsOrdering\(todo\)\)\.sort\(todoSort\)/);
+  assert.match(html, /function todoOrderingSort\(a, b\)[\s\S]*?b\.status === "in_progress"/);
+  assert.match(html, /state\.todoSortMode === "order"\) return list\.filter\(\(todo\) => todoNeedsOrdering\(todo\)\)\.sort\(todoOrderingSort\)/);
   assert.match(html, /state\.todoSortMode === "open"[\s\S]*?todo\.status === "open"/);
   assert.match(html, /state\.todoSortMode === "in_progress"[\s\S]*?todo\.status === "in_progress"/);
   assert.match(html, /state\.todoSortMode === "manual"[\s\S]*?todo\.status !== "meal"/);
@@ -579,6 +587,9 @@ test("opravila imajo rocno in datumsko razvrscanje ter neobvezni uri", () => {
   assert.match(html, /\$\("todoFormStart"\)\.value = ""/);
   assert.match(html, /localStorage\.setItem\(todoSortStorageKey\(\), state\.todoSortMode\)/);
   assert.match(html, /return \(orders\.length \? Math\.min\(\.\.\.orders\) : 0\) - 1/);
+  assert.match(html, /const projectHoursSourceStatuses = new Set\(\["open", "in_progress"\]\)/);
+  assert.match(html, /!projectHoursSourceStatuses\.has\(todoStatus\(todo\.status\)\.id\)/);
+  assert.match(html, /!projectHoursSourceStatuses\.has\(todoStatus\(source\.status\)\.id\).*?Ure lahko pišeš samo na opravilo/);
   assert.doesNotMatch(html, /id: "billing", label: "Obra/);
 });
 

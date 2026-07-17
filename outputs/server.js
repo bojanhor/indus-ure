@@ -50,6 +50,7 @@ const TODO_STATUS_DEFINITIONS = Object.freeze({
   order_car: { label: "Naroči Avto", googleColorId: "11" },
   order_warehouse: { label: "Naroči Sklad.", googleColorId: "11" },
   add_to_car: { label: "Dodaj v avto", googleColorId: "4" },
+  ordered: { label: "Naro\u010deno", googleColorId: "7" },
   return_and_bill: { label: "Vrne naj/Poračunaj", googleColorId: "6" },
   return: { label: "!!Vrni", googleColorId: "3" },
   meal: { label: "Malica", googleColorId: "5" },

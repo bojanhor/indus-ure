@@ -219,6 +219,7 @@ test("statusi opravil uporabljajo dogovorjene Google barve", () => {
     order_car: ["Naro\u010di Avto", "11"],
     order_warehouse: ["Naro\u010di Sklad.", "11"],
     add_to_car: ["Dodaj v avto", "4"],
+    ordered: ["Naro\u010deno", "7"],
     return_and_bill: ["Vrne naj/Pora\u010dunaj", "6"],
     return: ["!!Vrni", "3"],
     meal: ["Malica", "5"],

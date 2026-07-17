@@ -1013,6 +1013,7 @@
     .todo-status-order_car,
     .todo-status-order_warehouse { --todo-bg: #dc2127; --todo-fg: #fff; }
     .todo-status-add_to_car { --todo-bg: #ff887c; --todo-fg: #202124; --todo-border: #d95f54; }
+    .todo-status-ordered { --todo-bg: #46d6db; --todo-fg: #202124; --todo-border: #249ca2; }
     .todo-status-return_and_bill { --todo-bg: #ffb878; --todo-fg: #202124; --todo-border: #d8883f; }
     .todo-status-return { --todo-bg: #dbadff; --todo-fg: #202124; --todo-border: #8e5bb7; }
     .todo-status-meal,
@@ -2899,6 +2900,7 @@
         <div class="audit-box hidden" id="todoFormAudit"></div>
         <div class="actions">
           <button type="button" class="danger" id="deleteTodoFromDialog">Izbri&#353;i opravilo</button>
+          <button type="button" class="secondary hidden" id="duplicateTodoFromDialog">Podvoji</button>
           <button type="button" class="secondary hidden" id="writeHoursFromTodo">Pi&#353;i ure na ta projekt</button>
           <button type="button" class="secondary" id="cancelTodoDialog">Prekli&#269;i</button>
           <button type="submit" class="primary" id="saveTodoDialog">Shrani</button>
@@ -3139,6 +3141,7 @@
     const billingWorkerKey = "indus-ure-billing-worker";
     const todoSortModes = ["manual", "client", "date", "order", "completed", "open", "in_progress"];
     const payrollPaidTodoStatuses = new Set(["execution", "meal"]);
+    const projectHoursSourceStatuses = new Set(["open", "in_progress"]);
     const statusLabels = {
       billed: "Ze obracunano",
       warranty: "Garancija",
@@ -3152,6 +3155,7 @@
       { id: "order_car", label: "Naro\u010di Avto" },
       { id: "order_warehouse", label: "Naro\u010di Sklad." },
       { id: "add_to_car", label: "Dodaj v avto" },
+      { id: "ordered", label: "Naro\u010deno" },
       { id: "return_and_bill", label: "Vrne naj/Pora\u010dunaj" },
       { id: "in_progress", label: "V teku" },
       { id: "execution", label: "Zaklju\u010deno" },
@@ -4100,10 +4104,15 @@
       return orderTextMarker.test(`${todo.notes || ""}\n${todo.material || ""}`);
     }
 
+    function todoOrderingSort(a, b) {
+      const activeDifference = Number(b.status === "in_progress") - Number(a.status === "in_progress");
+      return activeDifference || todoSort(a, b);
+    }
+
     function sortedTodosForMode(todos = contextTodos()) {
       let list = [...todos];
       if (state.todoSortMode === "date") return list.filter((todo) => todo.date).sort(todoDateSort);
-      if (state.todoSortMode === "order") return list.filter((todo) => todoNeedsOrdering(todo)).sort(todoSort);
+      if (state.todoSortMode === "order") return list.filter((todo) => todoNeedsOrdering(todo)).sort(todoOrderingSort);
       if (state.todoSortMode === "open") return list.filter((todo) => todo.status === "open").sort(todoSort);
       if (state.todoSortMode === "in_progress") return list.filter((todo) => todo.status === "in_progress").sort(todoSort);
       if (state.todoSortMode === "manual") return list.filter((todo) => todo.status !== "meal").sort(todoSort);
@@ -4817,13 +4826,14 @@
 
     function billingDisplayActivities(workerId, month, billedLines) {
       const billedByTodoId = new Map((billedLines || []).map((line) => [String(line.todoId || ""), line]));
+      const liveByTodoId = new Map(billingLiveLines(workerId, month).map((line) => [String(line.todoId || ""), line]));
       const activities = state.todos
         .filter((todo) => (todo.syncUser || todo.createdBy) === workerId && String(todo.date || "").startsWith(month))
         .map((todo) => {
           const start = dayTimelineMinutes(todo.start);
           const end = dayTimelineMinutes(todo.end);
           if (start === null || end === null || end <= start) return null;
-          const billed = billedByTodoId.get(String(todo.id || ""));
+          const billed = billedByTodoId.get(String(todo.id || "")) || liveByTodoId.get(String(todo.id || ""));
           return {
             todoId: todo.id,
             date: todo.date,
@@ -5867,7 +5877,7 @@
       renderTodoStatusChoices(todo.status || "open");
       $("todoFormUrgent").checked = Boolean(todo.urgent);
       updateTodoFormStatus();
-      const selectedAssignees = editing ? todoAssigneeIds(todo) : [activeWorkerId()];
+      const selectedAssignees = editing ? todoAssigneeIds(todo) : (todo._duplicateAssigneeIds?.length ? todo._duplicateAssigneeIds : [activeWorkerId()]);
       renderTodoFormAssignees(selectedAssignees, state.todoHoursSourceId ? selectedAssignees : null);
       state.todoDialogPhotos = (todo.photos || []).map((photo) => ({ ...photo }));
       renderTodoFormPhotos();
@@ -5876,7 +5886,8 @@
       $("todoFormClientKm").value = Number(todo.clientKm || 0);
       $("todoFormClientVehicle").value = todo.clientVehicle === "van" ? "van" : "personal";
       $("deleteTodoFromDialog").classList.toggle("hidden", !editing);
-      $("writeHoursFromTodo").classList.toggle("hidden", !editing || Boolean(state.todoHoursSourceId) || todoStatus(todo.status).id === "execution");
+      $("duplicateTodoFromDialog").classList.toggle("hidden", !editing || Boolean(state.todoHoursSourceId));
+      $("writeHoursFromTodo").classList.toggle("hidden", !editing || Boolean(state.todoHoursSourceId) || !projectHoursSourceStatuses.has(todoStatus(todo.status).id));
       renderTodoFormAudit(todo);
       ["todoFormPhotoInput", "todoFormCameraInput", "todoFormPdfInput"].forEach((id) => { $(id).value = ""; });
       $("todoDialog").showModal();
@@ -5966,6 +5977,7 @@
       const sourceId = $("todoFormId").value;
       const source = state.todos.find((todo) => todo.id === sourceId);
       if (!source) return;
+      if (!projectHoursSourceStatuses.has(todoStatus(source.status).id)) throw new Error("Ure lahko pišeš samo na opravilo Čaka ali V teku.");
       state.todoHoursSourceOriginal = {
         status: source.status,
         done: Boolean(source.done)
@@ -5998,6 +6010,32 @@
         urgent: false,
         photos: []
       });
+    }
+
+    async function duplicateTodoFromCurrent() {
+      const sourceId = $("todoFormId").value;
+      const source = state.todos.find((todo) => todo.id === sourceId);
+      if (!source) return;
+      const duplicate = {
+        _duplicateAssigneeIds: todoAssigneeIds(source),
+        client: source.client,
+        clientId: source.clientId,
+        title: source.title,
+        notes: source.notes,
+        material: source.material,
+        date: source.date,
+        start: source.start,
+        end: source.end,
+        status: source.status === "execution" ? "open" : source.status,
+        urgent: source.status === "execution" ? false : Boolean(source.urgent),
+        clientKm: 0,
+        clientVehicle: "personal",
+        photos: (source.photos || []).map((photo) => ({ ...photo, id: "" }))
+      };
+      await releaseTodoEditLockForDialog();
+      $("todoDialog").close();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      await openTodoDialog(duplicate);
     }
 
     function openProjectCompletionDialog(sourceId) {
@@ -7059,6 +7097,7 @@
       saveTodoFromDialog().catch((error) => alert(error.message));
     });
     $("deleteTodoFromDialog").addEventListener("click", () => deleteTodoFromDialog().catch((error) => alert(error.message)));
+    $("duplicateTodoFromDialog").addEventListener("click", () => duplicateTodoFromCurrent().catch((error) => alert(error.message)));
     $("writeHoursFromTodo").addEventListener("click", () => openHoursTodoFromCurrent().catch((error) => alert(error.message)));
     $("deleteCompletedProject").addEventListener("click", () => handleHoursProjectCompletion(true).catch((error) => alert(error.message)));
     $("rescheduleProject").addEventListener("click", () => handleHoursProjectCompletion(false).catch((error) => alert(error.message)));
