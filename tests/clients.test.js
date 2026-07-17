@@ -181,6 +181,9 @@ test("slikovne priloge je mogoce risarsko urediti tudi pri spremembi opravila", 
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
   assert.match(html, /<dialog id="photoEditorDialog">[\s\S]*?id="photoEditorColor"[\s\S]*?id="photoEditorSize"[^>]*min="1"[^>]*value="1"[\s\S]*?id="photoEditorCanvas"/);
   assert.match(html, /id="photoEditorText"[\s\S]*?id="photoEditorAddText"[\s\S]*?id="photoEditorTextSize"[\s\S]*?id="photoEditorTextRotation"/);
+  assert.match(html, /id="photoEditorPan"/);
+  assert.match(html, /function queuePhotoEditorPinch\(metrics\)/);
+  assert.match(html, /size: Number\(\$\("photoEditorSize"\)\.value\),/);
   assert.match(html, /isPdfAttachment\(photo\) \? "" : `<button class="secondary edit-todo-form-photo"/);
   assert.match(html, /function openPhotoEditor\(photo\)/);
   assert.match(html, /function drawPhotoEditorText\(context, text, selected = false\)/);
@@ -282,6 +285,8 @@ test("sef ureja postavke in kilometrino samo v obrazcu opravila", () => {
   assert.match(html, /id="todoFormBillingKm"/);
   assert.match(html, /id="todoFormClientKm"/);
   assert.match(html, /id="todoFormClientVehicle"/);
+  assert.match(html, /const showClientMileage = !meal && \(isAdminView\(\) \|\| Boolean\(state\.todoHoursSourceId\) \|\| state\.todoStandaloneHours\)/);
+  assert.match(html, /clientKm: 0,[\s\S]*?clientVehicle: "personal"/);
   assert.match(html, /<option value="personal">Osebni<\/option>/);
   assert.match(html, /<option value="van">Kombi<\/option>/);
   assert.doesNotMatch(html, /class="todo-billing"/);
@@ -348,8 +353,13 @@ test("obracun ur podpira delavski in sefovski pogled", () => {
   assert.match(html, /id="billingConfirm"/);
   assert.match(html, /id="billingMarkPaid"/);
   assert.match(html, /function billingLiveLines\(workerId, month\)/);
+  assert.match(html, /const payrollPaidTodoStatuses = new Set\(\["execution", "meal"\]\)/);
+  assert.match(html, /payrollPaidTodoStatuses\.has\(todo\.status\)/);
   assert.match(html, /function billingDisplayActivities\(workerId, month, billedLines\)/);
-  assert.match(html, /class="billing-gap"/);
+  assert.match(html, /workAmount: billed \? Number\(billed\.workAmount \|\| 0\) : 0,/);
+  assert.match(html, /const day = billingLineTotals\(payableRows\)/);
+  assert.match(html, /class="billing-gap billing-open-day"/);
+  assert.match(html, /function openBillingDayTimeline\(workerId, date\)[\s\S]*?openDayTimeline\(date\)/);
   assert.match(html, /class="billing-task-row \$\{todoExists \? "billing-open-task"/);
   assert.match(html, /openTodoDialog\(todo\)\.catch/);
   assert.match(html, /function changePayroll\(action\)/);

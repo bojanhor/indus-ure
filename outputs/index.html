@@ -650,6 +650,9 @@
     .billing-status-chip { display: inline-flex; margin-top: 4px; font-size: 10px; line-height: 1.15; white-space: normal; }
     .billing-gap { display: flex; align-items: center; gap: 8px; padding: 7px 12px; border-top: 1px dashed var(--line); color: var(--muted); font-size: 12px; font-weight: 800; background: #fbfcfa; }
     .billing-gap::before, .billing-gap::after { content: ""; height: 1px; flex: 1; background: var(--line); }
+    button.billing-gap { width: 100%; border-right: 0; border-bottom: 0; border-left: 0; cursor: pointer; text-align: left; font: inherit; }
+    button.billing-gap:hover, button.billing-gap:focus-visible { color: var(--accent-dark); background: #eef8f1; }
+    .billing-gap-open-day { white-space: nowrap; color: var(--accent-dark); }
     .billing-task-hours, .billing-task-pay { text-align: right; font-weight: 800; }
     .billing-line-edit { display: flex; gap: 6px; align-items: center; justify-content: end; grid-column: 2 / -1; }
     .billing-line-edit label { display: grid; gap: 2px; color: var(--muted); font-size: 11px; font-weight: 800; }
@@ -2058,6 +2061,14 @@
       cursor: move;
     }
 
+    .photo-editor-canvas-shell.is-pan-mode #photoEditorCanvas {
+      cursor: grab;
+    }
+
+    .photo-editor-canvas-shell.is-panning #photoEditorCanvas {
+      cursor: grabbing;
+    }
+
     .gesture-zoom-controls {
       display: flex;
       align-items: center;
@@ -2105,7 +2116,7 @@
       display: block;
       max-width: none;
       height: auto;
-      margin: auto;
+      margin: 0;
       background: #fff;
       cursor: crosshair;
       touch-action: none;
@@ -2999,6 +3010,7 @@
           <input id="photoEditorSize" type="range" min="1" max="30" value="1">
         </label>
         <button class="secondary" id="photoEditorDraw" type="button">&#268;rta</button>
+        <button class="secondary" id="photoEditorPan" type="button">Premakni</button>
         <label class="photo-editor-text-entry">Besedilo
           <input id="photoEditorText" type="text" maxlength="160" placeholder="Vpi&#353;i oznako za sliko">
         </label>
@@ -3126,6 +3138,7 @@
     const todoSortModeKey = "indus-ure-todo-sort-mode";
     const billingWorkerKey = "indus-ure-billing-worker";
     const todoSortModes = ["manual", "client", "date", "order", "completed", "open", "in_progress"];
+    const payrollPaidTodoStatuses = new Set(["execution", "meal"]);
     const statusLabels = {
       billed: "Ze obracunano",
       warranty: "Garancija",
@@ -4773,7 +4786,7 @@
     function billingLiveLines(workerId, month) {
       const kmRate = Number(state.settings.billing?.kmRate || 0);
       return state.todos
-        .filter((todo) => (todo.syncUser || todo.createdBy) === workerId && todo.status === "execution" && String(todo.date || "").startsWith(month))
+        .filter((todo) => (todo.syncUser || todo.createdBy) === workerId && payrollPaidTodoStatuses.has(todo.status) && String(todo.date || "").startsWith(month))
         .map((todo) => {
           const hours = duration(todo);
           const hourlyRate = todoHourlyRate(todo);
@@ -4821,6 +4834,9 @@
             status: todo.status,
             minutes: billed ? Number(billed.minutes || 0) : 0,
             hours: billed ? Number(billed.hours || 0) : duration(todo),
+            workAmount: billed ? Number(billed.workAmount || 0) : 0,
+            km: billed ? Number(billed.km || 0) : 0,
+            kmAmount: billed ? Number(billed.kmAmount || 0) : 0,
             totalAmount: billed ? Number(billed.totalAmount || 0) : 0,
             payable: Boolean(billed)
           };
@@ -4851,6 +4867,11 @@
       const hours = Math.floor(minutes / 60);
       const remaining = minutes % 60;
       return remaining ? `${hours} h ${remaining} min` : `${hours} h`;
+    }
+    function openBillingDayTimeline(workerId, date) {
+      if (!date) return;
+      if (isAdminView() && workerId && workerId !== activeWorkerId()) setWorkContext(`worker:${workerId}`);
+      openDayTimeline(date);
     }
     function billingLineTotals(lines) {
       const minutes = lines.reduce((total, line) => total + Number(line.minutes || 0), 0);
@@ -4937,7 +4958,7 @@
           const gap = previous ? billingGapMinutes(previous, row) : 0;
           const todoExists = Boolean(state.todos.some((todo) => todo.id === row.todoId));
           const status = todoStatus(row.status || "open");
-          return `${gap ? `<div class="billing-gap" aria-label="Premor med vnosi">Premor med vnosi: ${escapeHtml(billingGapLabel(gap))}</div>` : ""}
+          return `${gap ? `<button class="billing-gap billing-open-day" type="button" data-date="${escapeHtml(date)}" data-worker-id="${escapeHtml(workerId)}" aria-label="Odpri dnevni pregled za ${escapeHtml(formatDate(date))}"><span>Premor med vnosi: ${escapeHtml(billingGapLabel(gap))}</span><span class="billing-gap-open-day">Odpri dnevni pregled &#8250;</span></button>` : ""}
             <div class="billing-task-row ${todoExists ? "billing-open-task" : ""}" data-todo-id="${escapeHtml(row.todoId)}" ${todoExists ? 'role="button" tabindex="0" aria-label="Odpri opravilo"' : ""}>
               <small>${escapeHtml(row.start)}-${escapeHtml(row.end)}<br><span class="todo-chip todo-status-chip todo-status-color ${todoStatusClass(status.id)} billing-status-chip">${escapeHtml(status.label)}</span></small>
               <span><strong>${linkifyText(row.title)}</strong>${row.client ? `<br><small>${escapeHtml(row.client)}</small>` : ""}</span>
@@ -4968,6 +4989,9 @@
             open(event);
           }
         });
+      });
+      list.querySelectorAll(".billing-open-day").forEach((button) => {
+        button.addEventListener("click", () => openBillingDayTimeline(button.dataset.workerId, button.dataset.date));
       });
       list.querySelectorAll(".save-billing-line").forEach((button) => button.addEventListener("click", async () => {
         const row = button.closest(".billing-task-row");
@@ -5481,8 +5505,10 @@
       const text = selectedPhotoEditorText();
       $("photoEditorTextTools").hidden = !text;
       const shell = $("photoEditorCanvas").closest(".photo-editor-canvas-shell");
-      shell.classList.toggle("is-text-editing", Boolean(text));
+      shell.classList.toggle("is-text-editing", Boolean(text) && editor.mode === "text");
+      shell.classList.toggle("is-pan-mode", editor.mode === "pan");
       $("photoEditorDraw").classList.toggle("is-active", editor.mode === "draw");
+      $("photoEditorPan").classList.toggle("is-active", editor.mode === "pan");
       if (text) {
         $("photoEditorText").value = text.text;
         $("photoEditorTextSize").value = Math.round(Math.max(12, Math.min(160, text.size)));
@@ -5546,6 +5572,29 @@
       if (canvas.width && shell) setZoomedElementWidth(shell, canvas, canvas.width * zoom / 100, anchor);
     }
 
+    function queuePhotoEditorPinch(metrics) {
+      const editor = state.photoEditor;
+      if (!editor || !metrics) return;
+      editor.pendingPinch = metrics;
+      if (editor.pinchFrame) return;
+      editor.pinchFrame = requestAnimationFrame(() => {
+        editor.pinchFrame = 0;
+        const next = editor.pendingPinch;
+        editor.pendingPinch = null;
+        if (!next || editor.pointers.size < 2) return;
+        if (!editor.pinch) {
+          editor.pinch = { lastDistance: next.distance, lastCenter: next.center };
+          return;
+        }
+        const ratio = Math.max(0.65, Math.min(1.55, next.distance / Math.max(1, editor.pinch.lastDistance)));
+        const shell = $("photoEditorCanvas").closest(".photo-editor-canvas-shell");
+        setPhotoEditorZoom(editor.zoom * ratio, next.center);
+        shell.scrollLeft -= next.center.x - editor.pinch.lastCenter.x;
+        shell.scrollTop -= next.center.y - editor.pinch.lastCenter.y;
+        editor.pinch = { lastDistance: next.distance, lastCenter: next.center };
+      });
+    }
+
     function fitPhotoEditorZoom() {
       const canvas = $("photoEditorCanvas");
       const shell = canvas.closest(".photo-editor-canvas-shell");
@@ -5579,6 +5628,9 @@
           zoom: 100,
           pointers: new Map(),
           pinch: null,
+          pinchFrame: 0,
+          pendingPinch: null,
+          pan: null,
           gestureUsed: false
         };
         $("photoEditorText").value = "";
@@ -5777,7 +5829,8 @@
       ["todoFormClientField", "todoFormAssigneeField", "todoFormAttachments"].forEach((id) => $(id).classList.toggle("hidden", meal));
       ["todoFormTask", "todoFormNotes", "todoFormMaterial"].forEach((id) => $(id).closest("label").classList.toggle("hidden", meal));
       const showBilling = isAdminView() && completed;
-      $("todoFormClientBilling").classList.toggle("hidden", !isAdminView() || meal);
+      const showClientMileage = !meal && (isAdminView() || Boolean(state.todoHoursSourceId) || state.todoStandaloneHours);
+      $("todoFormClientBilling").classList.toggle("hidden", !showClientMileage);
       $("todoFormBilling").classList.toggle("hidden", !showBilling || meal);
       $("todoFormUrgentField").classList.toggle("hidden", completed || meal);
       if (completed) $("todoFormUrgent").checked = false;
@@ -5932,7 +5985,9 @@
         urgent: false,
         photos: (source.photos || []).map((photo) => ({ ...photo })),
         billingHourlyRate: workerDefaultHourlyRate(activeWorkerId()),
-        billingKm: 0
+        billingKm: 0,
+        clientKm: 0,
+        clientVehicle: "personal"
       });
     }
     async function openStandaloneHoursDialog() {
@@ -7241,11 +7296,14 @@
       if (!editor) return;
       event.preventDefault();
       const canvas = event.currentTarget;
+      const shell = canvas.closest(".photo-editor-canvas-shell");
       canvas.setPointerCapture(event.pointerId);
       editor.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
       if (editor.pointers.size >= 2) {
         editor.activeStroke = null;
         editor.textInteraction = null;
+        editor.pan = null;
+        shell.classList.remove("is-panning");
         editor.gestureUsed = true;
         redrawPhotoEditor();
         const metrics = pointerGestureMetrics(editor.pointers);
@@ -7253,6 +7311,11 @@
         return;
       }
       if (editor.gestureUsed) return;
+      if (editor.mode === "pan") {
+        editor.pan = { pointerId: event.pointerId, lastX: event.clientX, lastY: event.clientY };
+        shell.classList.add("is-panning");
+        return;
+      }
       const point = photoEditorPoint(event);
       const hit = photoEditorTextHitTest(point);
       if (hit) {
@@ -7275,11 +7338,10 @@
         return;
       }
       setPhotoEditorTextSelection();
-      const rect = canvas.getBoundingClientRect();
       editor.activeStroke = {
         pointerId: event.pointerId,
         color: $("photoEditorColor").value,
-        size: Number($("photoEditorSize").value) * canvas.width / Math.max(1, rect.width),
+        size: Number($("photoEditorSize").value),
         points: [point]
       };
       drawPhotoEditorStroke(canvas.getContext("2d"), editor.activeStroke);
@@ -7290,18 +7352,16 @@
       event.preventDefault();
       editor.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
       if (editor.pointers.size >= 2) {
-        const metrics = pointerGestureMetrics(editor.pointers);
-        if (!metrics) return;
-        if (!editor.pinch) {
-          editor.pinch = { lastDistance: metrics.distance, lastCenter: metrics.center };
-          return;
-        }
+        queuePhotoEditorPinch(pointerGestureMetrics(editor.pointers));
+        return;
+      }
+      const pan = editor.pan;
+      if (pan?.pointerId === event.pointerId) {
         const shell = $("photoEditorCanvas").closest(".photo-editor-canvas-shell");
-        const ratio = metrics.distance / Math.max(1, editor.pinch.lastDistance);
-        setPhotoEditorZoom(editor.zoom * ratio, editor.pinch.lastCenter);
-        shell.scrollLeft -= metrics.center.x - editor.pinch.lastCenter.x;
-        shell.scrollTop -= metrics.center.y - editor.pinch.lastCenter.y;
-        editor.pinch = { lastDistance: metrics.distance, lastCenter: metrics.center };
+        shell.scrollLeft -= event.clientX - pan.lastX;
+        shell.scrollTop -= event.clientY - pan.lastY;
+        pan.lastX = event.clientX;
+        pan.lastY = event.clientY;
         return;
       }
       const interaction = editor.textInteraction;
@@ -7329,6 +7389,14 @@
     function finishPhotoEditorPointer(event, cancelled = false) {
       const editor = state.photoEditor;
       if (!editor) return;
+      if (editor.pinchFrame) cancelAnimationFrame(editor.pinchFrame);
+      editor.pinchFrame = 0;
+      editor.pendingPinch = null;
+      const shell = $("photoEditorCanvas").closest(".photo-editor-canvas-shell");
+      if (editor.pan?.pointerId === event.pointerId) {
+        editor.pan = null;
+        shell.classList.remove("is-panning");
+      }
       const interaction = editor.textInteraction;
       if (interaction?.pointerId === event.pointerId) {
         const text = selectedPhotoEditorText();
@@ -7345,16 +7413,31 @@
       }
       editor.pointers.delete(event.pointerId);
       editor.pinch = null;
-      if (!editor.pointers.size) editor.gestureUsed = false;
+      if (!editor.pointers.size) {
+        editor.gestureUsed = false;
+        shell.classList.remove("is-panning");
+      }
     }
     $("photoEditorCanvas").addEventListener("pointerup", (event) => {
       event.preventDefault();
       finishPhotoEditorPointer(event);
     });
     $("photoEditorCanvas").addEventListener("pointercancel", (event) => finishPhotoEditorPointer(event, true));
+    $("photoEditorCanvas").closest(".photo-editor-canvas-shell").addEventListener("wheel", (event) => {
+      const editor = state.photoEditor;
+      if (!editor || !event.ctrlKey) return;
+      event.preventDefault();
+      setPhotoEditorZoom(editor.zoom * Math.exp(-event.deltaY * 0.002), { x: event.clientX, y: event.clientY });
+    }, { passive: false });
     $("photoEditorDraw").addEventListener("click", () => {
       if (!state.photoEditor) return;
       state.photoEditor.mode = "draw";
+      setPhotoEditorTextSelection();
+      redrawPhotoEditor();
+    });
+    $("photoEditorPan").addEventListener("click", () => {
+      if (!state.photoEditor) return;
+      state.photoEditor.mode = "pan";
       setPhotoEditorTextSelection();
       redrawPhotoEditor();
     });
@@ -7429,7 +7512,7 @@
       shell.scrollTop = 0;
       $("photoEditorZoomValue").textContent = "100 %";
       $("photoEditorTextTools").hidden = true;
-      shell.classList.remove("is-text-editing");
+      shell.classList.remove("is-text-editing", "is-pan-mode", "is-panning");
     });
     $("photoEditorDialog").addEventListener("click", (event) => {
       if (event.target === event.currentTarget) event.currentTarget.close();

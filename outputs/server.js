@@ -1070,13 +1070,14 @@ function nonnegativeNumber(value, fallback = null, maximum = Number.MAX_SAFE_INT
 }
 
 const PAYROLL_STATUSES = new Set(["draft", "confirmed", "paid"]);
+const PAYROLL_PAID_TODO_STATUSES = new Set(["execution", "meal"]);
 
 function isPayrollMonth(value) {
   const match = /^(\d{4})-(\d{2})$/.exec(String(value || ""));
   return Boolean(match && Number(match[2]) >= 1 && Number(match[2]) <= 12);
 }
 function payrollMinutesForTodo(todo) {
-  if (!todo || todo.status !== "execution" || !/^\d{4}-\d{2}-\d{2}$/.test(String(todo.date || ""))) return null;
+  if (!todo || !PAYROLL_PAID_TODO_STATUSES.has(todo.status) || !/^\d{4}-\d{2}-\d{2}$/.test(String(todo.date || ""))) return null;
   const start = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(String(todo.start || ""));
   const end = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(String(todo.end || ""));
   if (!start || !end) return null;
@@ -1223,14 +1224,15 @@ function todoForUserRole(user, db, previous, todo) {
   const previousClientKm = nonnegativeNumber(previous?.clientKm, 0, 1_000_000);
   const previousClientVehicle = todoVehicle(previous?.clientVehicle);
   const isCompleted = todo.status === "execution";
+  const canSetClientMileage = isCompleted;
   const defaultRate = defaultHourlyRateForUser(db, todo.syncUser || previous?.syncUser || user.id);
   if (user.role !== "boss") {
     return {
       ...todo,
       billingHourlyRate: isCompleted ? previousRate ?? defaultRate : previousRate,
       billingKm: previousKm,
-      clientKm: previousClientKm,
-      clientVehicle: previousClientVehicle
+      clientKm: canSetClientMileage ? nonnegativeNumber(todo.clientKm, previousClientKm, 1_000_000) : previousClientKm,
+      clientVehicle: canSetClientMileage ? todoVehicle(todo.clientVehicle) : previousClientVehicle
     };
   }
   return {
