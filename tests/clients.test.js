@@ -373,6 +373,10 @@ test("obracun ur podpira delavski in sefovski pogled", () => {
   assert.match(html, /class="billing-gap billing-open-day"/);
   assert.match(html, /function openBillingDayTimeline\(workerId, date\)[\s\S]*?openDayTimeline\(date\)/);
   assert.match(html, /class="billing-task-row \$\{todoExists \? "billing-open-task"/);
+  assert.match(html, /class="billing-task-time"/);
+  assert.match(html, /class="billing-task-info"/);
+  assert.match(html, /grid-template-areas: "time hours" "info pay"/);
+  assert.match(html, /\.billing-period \{ display: grid; grid-template-columns: 40px minmax\(0, 1fr\) 40px; width: 100%; \}/);
   assert.match(html, /openTodoDialog\(todo\)\.catch/);
   assert.match(html, /function changePayroll\(action\)/);
   assert.match(html, /api\("\/api\/payrolls"\)/);

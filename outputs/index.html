@@ -650,10 +650,12 @@
     .billing-day-summary-pay { color: var(--accent-dark) !important; font-weight: 900; }
     .billing-task-row { display: grid; grid-template-columns: 92px minmax(0, 1fr) 64px 92px; gap: 10px; align-items: center; padding: 10px 12px; border-top: 1px solid var(--line); }
     .billing-task-row small { color: var(--muted); }
+    .billing-task-time,
+    .billing-task-info { min-width: 0; }
     .billing-open-task { cursor: pointer; }
     .billing-open-task:hover { background: #f4f8f5; }
     .billing-open-task:focus-visible { position: relative; z-index: 1; outline: 2px solid var(--accent); outline-offset: -2px; }
-    .billing-status-chip { display: inline-flex; margin-top: 4px; font-size: 10px; line-height: 1.15; white-space: normal; }
+    .billing-status-chip { display: inline-flex; margin-top: 5px; font-size: 10px; line-height: 1.15; white-space: normal; }
     .billing-gap { display: flex; align-items: center; gap: 8px; padding: 7px 12px; border-top: 1px dashed var(--line); color: var(--muted); font-size: 12px; font-weight: 800; background: #fbfcfa; }
     .billing-gap::before, .billing-gap::after { content: ""; height: 1px; flex: 1; background: var(--line); }
     button.billing-gap { width: 100%; border-right: 0; border-bottom: 0; border-left: 0; cursor: pointer; text-align: left; font: inherit; }
@@ -2634,13 +2636,29 @@
       .day-time-label { left: 2px; width: 42px; }
       .day-timeline-events { left: 56px; right: 70px; }
       .day-work-blocks { width: 58px; right: 3px; }
-      .billing-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      .billing-controls { align-items: stretch; }
+      .billing-screen { gap: 10px; }
+      .billing-title-row { align-items: flex-start; }
+      .billing-title-row strong { font-size: 18px; }
+      .billing-state { flex: 0 0 auto; }
+      .billing-controls { display: grid; grid-template-columns: minmax(0, 1fr); align-items: stretch; }
       .billing-worker-control, .billing-worker-control select { width: 100%; min-width: 0; }
-      .billing-day summary { grid-template-columns: minmax(0, 1fr) auto; }
-      .billing-day-summary-pay { grid-column: 2; }
-      .billing-task-row { grid-template-columns: 72px minmax(0, 1fr) auto; gap: 7px; }
-      .billing-task-pay { grid-column: 3; }
+      .billing-period { display: grid; grid-template-columns: 40px minmax(0, 1fr) 40px; width: 100%; }
+      .billing-period label, .billing-period input { width: 100%; min-width: 0; }
+      .billing-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+      .billing-summary-card { padding: 11px; }
+      .billing-summary-card strong { font-size: clamp(17px, 5vw, 22px); overflow-wrap: anywhere; }
+      .billing-day summary { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "date hours" "date pay"; row-gap: 4px; }
+      .billing-day summary > strong { grid-area: date; align-self: center; }
+      .billing-day summary > span:not(.billing-day-summary-pay) { grid-area: hours; }
+      .billing-day-summary-pay { grid-area: pay; }
+      .billing-task-row { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "time hours" "info pay"; gap: 4px 8px; align-items: start; }
+      .billing-task-time { grid-area: time; }
+      .billing-task-info { grid-area: info; }
+      .billing-task-hours { grid-area: hours; align-self: center; }
+      .billing-task-pay { grid-area: pay; align-self: start; }
+      .billing-gap { flex-wrap: wrap; gap: 4px 8px; }
+      .billing-gap::before, .billing-gap::after { display: none; }
+      .billing-gap-open-day { margin-left: auto; }
       .billing-line-edit { grid-column: 1 / -1; justify-content: stretch; }
       .billing-line-edit label { flex: 1; }
       .billing-line-edit input { width: 100%; }
@@ -5112,8 +5130,8 @@
           const status = todoStatus(row.status || "open");
           return `${gap ? `<button class="billing-gap billing-open-day" type="button" data-date="${escapeHtml(date)}" data-worker-id="${escapeHtml(workerId)}" aria-label="Odpri dnevni pregled za ${escapeHtml(formatDate(date))}"><span>Premor med vnosi: ${escapeHtml(billingGapLabel(gap))}</span><span class="billing-gap-open-day">Odpri dnevni pregled &#8250;</span></button>` : ""}
             <div class="billing-task-row ${todoExists ? "billing-open-task" : ""}" data-todo-id="${escapeHtml(row.todoId)}" ${todoExists ? 'role="button" tabindex="0" aria-label="Odpri opravilo"' : ""}>
-              <small>${escapeHtml(row.start)}-${escapeHtml(row.end)}<br><span class="todo-chip todo-status-chip todo-status-color ${todoStatusClass(status.id)} billing-status-chip">${escapeHtml(status.label)}</span></small>
-              <span><strong>${linkifyText(row.title)}</strong>${row.client ? `<br><small>${escapeHtml(row.client)}</small>` : ""}</span>
+              <small class="billing-task-time">${escapeHtml(row.start)}-${escapeHtml(row.end)}</small>
+              <span class="billing-task-info"><strong>${linkifyText(row.title)}</strong>${row.client ? `<br><small>${escapeHtml(row.client)}</small>` : ""}<br><span class="todo-chip todo-status-chip todo-status-color ${todoStatusClass(status.id)} billing-status-chip">${escapeHtml(status.label)}</span></span>
               <span class="billing-task-hours">${Number(row.hours).toLocaleString("sl-SI", { maximumFractionDigits: 2 })} h</span>
               <span class="billing-task-pay">${row.payable ? `${money(row.totalAmount)} EUR` : ""}</span>
               ${editable && row.payable ? `<div class="billing-line-edit">
