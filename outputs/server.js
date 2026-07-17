@@ -1312,7 +1312,7 @@ function todoForUserRole(user, db, previous, todo) {
     return {
       ...todo,
       billingHourlyRate: isCompleted ? previousRate ?? defaultRate : previousRate,
-      billingKm: previousKm,
+      billingKm: isCompleted ? nonnegativeNumber(todo.billingKm, previousKm, 1_000_000) : previousKm,
       clientKm: canSetClientMileage ? nonnegativeNumber(todo.clientKm, previousClientKm, 1_000_000) : previousClientKm,
       clientVehicle: canSetClientMileage ? todoVehicle(todo.clientVehicle) : previousClientVehicle
     };

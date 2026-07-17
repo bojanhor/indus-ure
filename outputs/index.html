@@ -650,10 +650,10 @@
     .billing-note-panel textarea { width: 100%; resize: vertical; }
     .billing-note-panel p { margin: 0; white-space: pre-wrap; }
     .billing-day-list { display: grid; gap: 9px; }
-    .billing-day { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: #fff; }
-    .billing-day summary { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 10px; align-items: center; padding: 12px; cursor: pointer; font-weight: 800; }
-    .billing-day summary span { color: var(--muted); font-size: 13px; }
-    .billing-day-summary-pay { color: var(--accent-dark) !important; font-weight: 900; }
+    .billing-day { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; gap: 10px; align-items: center; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--ink); text-align: left; font-weight: 800; }
+    .billing-day:hover, .billing-day:focus-visible { background: #f4f8f5; }
+    .billing-day-hours { color: var(--muted); font-size: 13px; white-space: nowrap; }
+    .billing-day-work, .billing-day-km { color: var(--accent-dark); font-size: 13px; font-weight: 900; white-space: nowrap; }
     .billing-task-row { display: grid; grid-template-columns: 92px minmax(0, 1fr) 64px 92px; gap: 10px; align-items: center; padding: 10px 12px; border-top: 1px solid var(--line); }
     .billing-task-row small { color: var(--muted); }
     .billing-task-time,
@@ -2671,10 +2671,11 @@
       .billing-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
       .billing-summary-card { padding: 11px; }
       .billing-summary-card strong { font-size: clamp(17px, 5vw, 22px); overflow-wrap: anywhere; }
-      .billing-day summary { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "date hours" "date pay"; row-gap: 4px; }
-      .billing-day summary > strong { grid-area: date; align-self: center; }
-      .billing-day summary > span:not(.billing-day-summary-pay) { grid-area: hours; }
-      .billing-day-summary-pay { grid-area: pay; }
+      .billing-day { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "date hours" "work km"; row-gap: 5px; }
+      .billing-day > strong { grid-area: date; align-self: center; }
+      .billing-day-hours { grid-area: hours; }
+      .billing-day-work { grid-area: work; }
+      .billing-day-km { grid-area: km; }
       .billing-task-row { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "time hours" "info pay"; gap: 4px 8px; align-items: start; }
       .billing-task-time { grid-area: time; }
       .billing-task-info { grid-area: info; }
@@ -3045,9 +3046,9 @@
             </label>
           </div>
         </div>
-        <div class="todo-form-billing admin-entry-field" id="todoFormBilling">
+        <div class="todo-form-billing" id="todoFormBilling">
           <div class="modal-grid">
-            <label>Urna postavka za delavca (EUR/h)
+            <label class="admin-entry-field" id="todoFormHourlyRateField">Urna postavka za delavca (EUR/h)
               <input id="todoFormHourlyRate" type="number" min="0" max="10000" step="0.01">
             </label>
             <label>Kilometrina za delavca (km)
@@ -5173,48 +5174,15 @@
     }
 
     function billingDisplayActivities(workerId, month, billedLines) {
-      const billedByTodoId = new Map((billedLines || []).map((line) => [String(line.todoId || ""), line]));
-      const liveByTodoId = new Map(billingLiveLines(workerId, month).map((line) => [String(line.todoId || ""), line]));
-      const activities = state.todos
-        .filter((todo) => (todo.syncUser || todo.createdBy) === workerId && String(todo.date || "").startsWith(month))
-        .map((todo) => {
-          const start = dayTimelineMinutes(todo.start);
-          const end = dayTimelineMinutes(todo.end);
-          if (start === null || end === null || end <= start) return null;
-          const billed = billedByTodoId.get(String(todo.id || "")) || liveByTodoId.get(String(todo.id || ""));
-          return {
-            todoId: todo.id,
-            date: todo.date,
-            start: todo.start,
-            end: todo.end,
-            title: todo.title,
-            client: todo.client,
-            status: todo.status,
-            minutes: billed ? Number(billed.minutes || 0) : 0,
-            hours: billed ? Number(billed.hours || 0) : duration(todo),
-            workAmount: billed ? Number(billed.workAmount || 0) : 0,
-            km: billed ? Number(billed.km || 0) : 0,
-            kmAmount: billed ? Number(billed.kmAmount || 0) : 0,
-            totalAmount: billed ? Number(billed.totalAmount || 0) : 0,
-            payable: Boolean(billed)
-          };
-        })
-        .filter(Boolean);
-      const presentIds = new Set(activities.map((item) => String(item.todoId || "")));
-      (billedLines || []).forEach((line) => {
-        if (presentIds.has(String(line.todoId || ""))) return;
-        activities.push({
-          ...line,
-          status: "execution",
-          payable: true
-        });
-      });
-      return activities.sort((a, b) => String(a.date).localeCompare(String(b.date))
-        || String(a.start).localeCompare(String(b.start))
-        || String(a.end).localeCompare(String(b.end))
-        || String(a.title).localeCompare(String(b.title), "sl"));
+      return (billedLines || [])
+        .filter((line) => String(line.date || "").startsWith(month))
+        .filter((line) => /^\d{2}:\d{2}$/.test(String(line.start || "")) && /^\d{2}:\d{2}$/.test(String(line.end || "")))
+        .filter((line) => Number(line.minutes || 0) > 0)
+        .map((line) => ({ ...line, payable: true }))
+        .sort((a, b) => String(a.date).localeCompare(String(b.date))
+          || String(a.start).localeCompare(String(b.start))
+          || String(a.end).localeCompare(String(b.end)));
     }
-
     function billingGapMinutes(previous, next) {
       return Math.max(0, minutes(next.start) - minutes(previous.end));
     }
@@ -5295,11 +5263,10 @@
       $("billingMarkPaid").classList.toggle("hidden", payroll?.status !== "confirmed");
       $("billingReopen").classList.toggle("hidden", !payroll || payroll.status === "draft");
       $("billingDeleteDraft").classList.toggle("hidden", !draft);
-      const editable = admin && (!payroll || payroll.status === "draft");
       const list = $("billingDayList");
       const activities = billingDisplayActivities(workerId, month, lines);
       if (!activities.length) {
-        list.innerHTML = `<div class="billing-empty">V tem obdobju ni vnosov z urami.</div>`;
+        list.innerHTML = `<div class="billing-empty">V tem obdobju ni zakljucenih ur ali malic.</div>`;
         return;
       }
       const days = new Map();
@@ -5309,67 +5276,18 @@
         days.set(activity.date, rows);
       });
       list.innerHTML = [...days.entries()].map(([date, rows]) => {
-        const payableRows = rows.filter((row) => row.payable);
-        const day = billingLineTotals(payableRows);
-        const entries = rows.map((row, index) => {
-          const previous = rows[index - 1];
-          const gap = previous ? billingGapMinutes(previous, row) : 0;
-          const todoExists = Boolean(state.todos.some((todo) => todo.id === row.todoId));
-          const status = todoStatus(row.status || "open");
-          return `${gap ? `<button class="billing-gap billing-open-day" type="button" data-date="${escapeHtml(date)}" data-worker-id="${escapeHtml(workerId)}" aria-label="Odpri dnevni pregled za ${escapeHtml(formatDate(date))}"><span>Premor med vnosi: ${escapeHtml(billingGapLabel(gap))}</span><span class="billing-gap-open-day">Odpri dnevni pregled &#8250;</span></button>` : ""}
-            <div class="billing-task-row ${todoExists ? "billing-open-task" : ""}" data-todo-id="${escapeHtml(row.todoId)}" ${todoExists ? 'role="button" tabindex="0" aria-label="Odpri opravilo"' : ""}>
-              <small class="billing-task-time">${escapeHtml(row.start)}-${escapeHtml(row.end)}</small>
-              <span class="billing-task-info"><strong>${linkifyText(row.title)}</strong>${row.client ? `<br><small>${escapeHtml(row.client)}</small>` : ""}<br><span class="todo-chip todo-status-chip todo-status-color ${todoStatusClass(status.id)} billing-status-chip">${escapeHtml(status.label)}</span></span>
-              <span class="billing-task-hours">${Number(row.hours).toLocaleString("sl-SI", { maximumFractionDigits: 2 })} h</span>
-              <span class="billing-task-pay">${row.payable ? `${money(row.totalAmount)} EUR` : ""}</span>
-              ${editable && row.payable ? `<div class="billing-line-edit">
-                <label>EUR/h<input class="billing-line-rate" type="number" min="0" max="10000" step="0.01" value="${Number(row.hourlyRate)}"></label>
-                <label>km<input class="billing-line-km" type="number" min="0" max="1000000" step="0.1" value="${Number(row.km)}"></label>
-                <button class="secondary save-billing-line" type="button">Shrani</button>
-              </div>` : ""}
-            </div>`;
-        }).join("");
-        return `<details class="billing-day" open>
-          <summary><strong>${escapeHtml(formatDate(date))}</strong><span>${day.hours.toLocaleString("sl-SI", { maximumFractionDigits: 2 })} h</span><span class="billing-day-summary-pay">${money(day.totalAmount)} EUR</span></summary>
-          ${entries}
-        </details>`;
+        const day = billingLineTotals(rows);
+        return `<button class="billing-day billing-open-day" type="button" data-date="${escapeHtml(date)}" data-worker-id="${escapeHtml(workerId)}" aria-label="Odpri dnevni pregled za ${escapeHtml(formatDate(date))}">
+          <strong>${escapeHtml(formatDate(date))}</strong>
+          <span class="billing-day-hours">${day.hours.toLocaleString("sl-SI", { maximumFractionDigits: 2 })} h</span>
+          <span class="billing-day-work">Delo: ${money(day.workAmount)} EUR</span>
+          <span class="billing-day-km">Kilometrina: ${money(day.kmAmount)} EUR</span>
+        </button>`;
       }).join("");
-      list.querySelectorAll(".billing-open-task").forEach((row) => {
-        const open = (event) => {
-          if (event.target.closest("a, input, select, button, label")) return;
-          const todo = state.todos.find((item) => item.id === row.dataset.todoId);
-          if (todo) openTodoDialog(todo).catch((error) => alert(error.message));
-        };
-        row.addEventListener("click", open);
-        row.addEventListener("keydown", (event) => {
-          if (["Enter", " "].includes(event.key)) {
-            event.preventDefault();
-            open(event);
-          }
-        });
-      });
       list.querySelectorAll(".billing-open-day").forEach((button) => {
         button.addEventListener("click", () => openBillingDayTimeline(button.dataset.workerId, button.dataset.date));
       });
-      list.querySelectorAll(".save-billing-line").forEach((button) => button.addEventListener("click", async () => {
-        const row = button.closest(".billing-task-row");
-        const todo = state.todos.find((item) => item.id === row.dataset.todoId);
-        const hourlyRate = parseBillingNumber(row.querySelector(".billing-line-rate").value, 10_000);
-        const billingKm = parseBillingNumber(row.querySelector(".billing-line-km").value, 1_000_000);
-        if (!todo || hourlyRate === null || billingKm === null) {
-          alert("Vnesi veljavno urno postavko in kilometrino.");
-          return;
-        }
-        button.disabled = true;
-        try {
-          await saveTodoToServer({ ...todo, billingHourlyRate: hourlyRate, billingKm });
-        } catch (error) {
-          button.disabled = false;
-          alert(error.message);
-        }
-      }));
     }
-
     async function savePayrollDraft() {
       const workerId = billingWorkerId();
       const month = $("billingMonth").value;
@@ -6305,10 +6223,12 @@
       $("todoFormTitle").textContent = state.todoHoursSourceId || state.todoStandaloneHours ? "Pi\u0161i ure na projekt" : $("todoFormId").value ? "Uredi opravilo" : "Novo opravilo";
       ["todoFormClientField", "todoFormAssigneeField", "todoFormAttachments"].forEach((id) => $(id).classList.toggle("hidden", meal));
       ["todoFormTask", "todoFormNotes", "todoFormMaterial"].forEach((id) => $(id).closest("label").classList.toggle("hidden", meal));
-      const showBilling = isAdminView() && completed;
+      const showWorkerMileage = completed && !meal;
+      const showHourlyRate = isAdminView() && completed && !meal;
       const showClientMileage = !meal && (isAdminView() || Boolean(state.todoHoursSourceId) || state.todoStandaloneHours);
       $("todoFormClientBilling").classList.toggle("hidden", !showClientMileage);
-      $("todoFormBilling").classList.toggle("hidden", !showBilling || meal);
+      $("todoFormBilling").classList.toggle("hidden", !showWorkerMileage);
+      $("todoFormHourlyRateField").classList.toggle("hidden", !showHourlyRate);
       $("todoFormUrgentField").classList.toggle("hidden", completed || meal);
       if (completed) $("todoFormUrgent").checked = false;
     }
@@ -6344,13 +6264,22 @@
       renderTodoStatusChoices(todo.status || "open");
       $("todoFormUrgent").checked = Boolean(todo.urgent);
       updateTodoFormStatus();
-      const selectedAssignees = editing ? todoAssigneeIds(todo) : (todo._duplicateAssigneeIds?.length ? todo._duplicateAssigneeIds : [activeWorkerId()]);
+      const draftAssignees = todo._hoursAssigneeIds?.length
+        ? todo._hoursAssigneeIds
+        : (todo._duplicateAssigneeIds?.length ? todo._duplicateAssigneeIds : [activeWorkerId()]);
+      const selectedAssignees = editing ? todoAssigneeIds(todo) : draftAssignees;
       renderTodoFormAssignees(selectedAssignees, state.todoHoursSourceId ? selectedAssignees : null);
       state.todoDialogPhotos = (todo.photos || []).map((photo) => ({ ...photo }));
       state.todoDialogDriveFiles = (todo.driveFiles || []).map((file) => ({ ...file }));
       renderTodoFormPhotos();
       renderTodoFormDriveFiles();
-      $("todoFormHourlyRate").value = editing ? todoHourlyRate(todo) : workerDefaultHourlyRate(activeWorkerId());
+      const rateWorkerId = todo.syncUser || selectedAssignees[0] || activeWorkerId();
+      const requestedHourlyRate = Number(todo.billingHourlyRate);
+      const hourlyRateInput = $("todoFormHourlyRate");
+      hourlyRateInput.value = editing
+        ? todoHourlyRate(todo)
+        : (Number.isFinite(requestedHourlyRate) ? requestedHourlyRate : workerDefaultHourlyRate(rateWorkerId));
+      hourlyRateInput.dataset.autoRate = String(!editing && !Number.isFinite(requestedHourlyRate));
       $("todoFormBillingKm").value = Number(todo.billingKm || 0);
       $("todoFormClientKm").value = Number(todo.clientKm || 0);
       $("todoFormClientVehicle").value = todo.clientVehicle === "van" ? "van" : "personal";
@@ -6433,6 +6362,17 @@
         return;
       }
       if (!validateTodo(todo)) return;
+      if (todo.status === "execution" && !meal) {
+        const missingClientKm = Number(todo.clientKm || 0) === 0;
+        const missingWorkerKm = Number(todo.billingKm || 0) === 0;
+        if (missingClientKm || missingWorkerKm) {
+          const missing = [
+            missingClientKm ? "Kilometrina za stranko je 0 km." : "",
+            missingWorkerKm ? "Kilometrina za delavca je 0 km." : ""
+          ].filter(Boolean).join("\n");
+          if (!confirm(`${missing}\n\nNadaljujem brez vpisane kilometrine?`)) return;
+        }
+      }
       const activeAssignee = activeWorkerId();
       if (existing && !isAdminView()
           && todoAssigneeIds(existing).includes(activeAssignee)
@@ -6467,9 +6407,11 @@
         end: "",
         status: "execution",
         urgent: false,
+        syncUser: source.syncUser || activeWorkerId(),
+        _hoursAssigneeIds: [source.syncUser || activeWorkerId()],
         photos: (source.photos || []).map((photo) => ({ ...photo })),
         driveFiles: (source.driveFiles || []).map((file) => ({ ...file })),
-        billingHourlyRate: workerDefaultHourlyRate(activeWorkerId()),
+        billingHourlyRate: source.billingHourlyRate ?? null,
         billingKm: 0,
         clientKm: 0,
         clientVehicle: "personal"
@@ -7707,6 +7649,15 @@
       if (button.dataset.status === "meal") applyMealDefaults();
       renderTodoStatusChoices(button.dataset.status);
       updateTodoFormStatus();
+    });
+    $("todoFormHourlyRate").addEventListener("input", () => {
+      $("todoFormHourlyRate").dataset.autoRate = "false";
+    });
+    $("todoFormAssignees").addEventListener("change", () => {
+      const hourlyRate = $("todoFormHourlyRate");
+      if (!isAdminView() || hourlyRate.dataset.autoRate !== "true" || $("todoFormStatus").value !== "execution") return;
+      const assignees = selectedTodoFormAssignees();
+      if (assignees.length === 1) hourlyRate.value = workerDefaultHourlyRate(assignees[0]);
     });
     $("todoFormClient").addEventListener("focus", renderTodoClientSuggestions);
     $("todoFormClient").addEventListener("input", renderTodoClientSuggestions);

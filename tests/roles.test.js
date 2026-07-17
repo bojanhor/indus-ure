@@ -190,7 +190,7 @@ test("delavec v zakljucenem vnosu ur lahko navede kilometrino za stranko", () =>
     clientVehicle: "personal"
   });
   assert.equal(workerChange.billingHourlyRate, 22);
-  assert.equal(workerChange.billingKm, 5);
+  assert.equal(workerChange.billingKm, 999);
   assert.equal(workerChange.clientKm, 999);
   assert.equal(workerChange.clientVehicle, "personal");
 
@@ -215,7 +215,7 @@ test("delavec v zakljucenem vnosu ur lahko navede kilometrino za stranko", () =>
     clientVehicle: "van"
   });
   assert.equal(newlyCompleted.billingHourlyRate, 18);
-  assert.equal(newlyCompleted.billingKm, 0);
+  assert.equal(newlyCompleted.billingKm, 100);
   assert.equal(newlyCompleted.clientKm, 36);
   assert.equal(newlyCompleted.clientVehicle, "van");
 
@@ -351,7 +351,9 @@ test("obračun naredi nespremenljiv posnetek ur posameznega delavca", () => {
       { id: "t-ibro", assignmentGroupId: "g-1", syncUser: "ibro", status: "execution", date: "2026-07-15", start: "08:00", end: "10:30", title: "Montaža", client: "Jerin", billingHourlyRate: 20, billingKm: 12 },
       { id: "t-malica", syncUser: "ibro", status: "meal", date: "2026-07-15", start: "10:30", end: "11:15", title: "Malica", billingKm: 0 },
       { id: "t-bojan", syncUser: "bojan", status: "execution", date: "2026-07-15", start: "08:00", end: "09:00", title: "Pregled", billingHourlyRate: 25, billingKm: 0 },
-      { id: "t-open", syncUser: "ibro", status: "open", date: "2026-07-15", start: "10:30", end: "11:30", title: "Odprto" }
+      { id: "t-open", syncUser: "ibro", status: "open", date: "2026-07-15", start: "10:30", end: "11:30", title: "Odprto" },
+      { id: "t-order", syncUser: "ibro", status: "order", date: "2026-07-15", start: "11:30", end: "12:00", title: "Naroči material", billingHourlyRate: 18, billingKm: 30 },
+      { id: "t-progress", syncUser: "ibro", status: "in_progress", date: "2026-07-15", start: "12:00", end: "13:00", title: "V teku", billingHourlyRate: 18, billingKm: 30 }
     ]
   };
   const draft = buildPayrollSnapshot(db, "ibro", "2026-07", { id: "p-1", status: "draft" });
