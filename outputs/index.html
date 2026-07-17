@@ -1624,6 +1624,16 @@
       text-decoration: line-through;
     }
 
+    .day-todo-client {
+      display: block;
+      margin-top: 2px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-weight: 700;
+      opacity: 0.88;
+    }
+
     .calendar-shell {
       overflow: hidden;
       min-height: 620px;
@@ -2549,7 +2559,8 @@
         overflow: hidden;
         text-overflow: ellipsis;
       }
-      .day-todo small { display: none; }
+      .day-todo small:not(.day-todo-client) { display: none; }
+      .day-todo .day-todo-client { display: block; font-size: 9px; line-height: 1.1; }
       .todo-item {
         grid-template-columns: 72px minmax(0, 1fr);
         gap: 8px;
@@ -4401,7 +4412,7 @@
             const item = document.createElement("button");
             item.type = "button";
             item.className = `day-todo todo-status-color ${todoStatusClass(todo.status)} ${todo.done ? "done" : ""}`;
-            item.innerHTML = `${todo.start && todo.end ? `<small>${escapeHtml(todo.start)}&ndash;${escapeHtml(todo.end)}</small><br>` : ""}${todo.urgent ? "<strong>NUJNO</strong><br>" : ""}${escapeHtml(todo.title)}${todo.client ? `<br><small>${escapeHtml(todo.client)}</small>` : ""}<br><small>Za: ${escapeHtml(todoAssigneeNames(todo))}</small><br><small>${todoStatus(todo.status).label}</small>`;
+            item.innerHTML = `${todo.start && todo.end ? `<small class="day-todo-meta">${escapeHtml(todo.start)}&ndash;${escapeHtml(todo.end)}</small><br>` : ""}${todo.urgent ? "<strong>NUJNO</strong><br>" : ""}${escapeHtml(todo.title)}${todo.client ? `<br><small class="day-todo-client">${escapeHtml(todo.client)}</small>` : ""}<br><small class="day-todo-meta">Za: ${escapeHtml(todoAssigneeNames(todo))}</small><br><small class="day-todo-meta">${todoStatus(todo.status).label}</small>`;
             item.addEventListener("click", () => openTodoDialog(todo));
             day.appendChild(item);
           });

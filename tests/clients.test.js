@@ -675,6 +675,13 @@ test("klik na datum odpre dnevno casovnico z gestami in urejanjem casa", () => {
   assert.match(html, /await saveTodoToServer\(\{[\s\S]*?start: dayTimelineTime\(interaction\.startMinute\),[\s\S]*?end: dayTimelineTime\(interaction\.endMinute\)/);
 });
 
+test("ozki koledar ob naslovu dogodka ohrani tudi stranko", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  assert.match(html, /<small class="day-todo-client">\$\{escapeHtml\(todo\.client\)\}<\/small>/);
+  assert.match(html, /\.day-todo small:not\(\.day-todo-client\) \{ display: none; \}/);
+  assert.match(html, /\.day-todo \.day-todo-client \{ display: block; font-size: 9px;/);
+});
+
 test("vlecenje dogodka na dotik zahteva kratek pridrzan dotik", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
   assert.match(html, /const touchHoldRequired = event\.pointerType === "touch" && mode === "move"/);
