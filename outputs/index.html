@@ -627,7 +627,7 @@
     }
 
     .legacy-report-button { display: none !important; }
-    .billing-screen { display: grid; gap: 14px; }
+    .billing-screen { display: grid; gap: 14px; padding: 12px; }
     .billing-title-row, .billing-controls, .billing-actions { display: flex; align-items: end; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
     .billing-title-row strong { display: block; font-size: 19px; }
     .billing-title-row .todo-meta { display: block; margin-top: 3px; }
@@ -1846,20 +1846,19 @@
     .day-timeline-event-meta { display: block; margin-top: 2px; font-size: 11px; line-height: 1.15; opacity: 0.86; }
     .day-resize-handle {
       position: absolute;
-      left: 30%;
-      right: 30%;
+      width: 16px;
       height: 12px;
       z-index: 2;
       cursor: ns-resize;
     }
 
-    .day-resize-handle.start { top: -3px; }
-    .day-resize-handle.end { bottom: -3px; }
+    .day-resize-handle.start { top: -3px; right: 5px; }
+    .day-resize-handle.end { right: 5px; bottom: -3px; }
     .day-resize-handle::after {
       content: "";
       position: absolute;
       left: 0;
-      right: 0;
+      width: 16px;
       top: 5px;
       height: 2px;
       border-radius: 2px;
@@ -2661,7 +2660,7 @@
       .day-time-label { left: 2px; width: 42px; }
       .day-timeline-events { left: 56px; right: 70px; }
       .day-work-blocks { width: 58px; right: 3px; }
-      .billing-screen { gap: 10px; }
+      .billing-screen { gap: 10px; padding: 10px; }
       .billing-title-row { align-items: flex-start; }
       .billing-title-row strong { font-size: 18px; }
       .billing-state { flex: 0 0 auto; }
@@ -4404,11 +4403,11 @@
     function todoDateSort(a, b) {
       if (Number(a.done) !== Number(b.done)) return Number(a.done) - Number(b.done);
       if (Number(a.urgent) !== Number(b.urgent)) return Number(b.urgent) - Number(a.urgent);
-      const dateDifference = String(a.date).localeCompare(String(b.date));
+      const dateDifference = String(b.date).localeCompare(String(a.date));
       if (dateDifference) return dateDifference;
-      const startDifference = String(a.start || "00:00").localeCompare(String(b.start || "00:00"));
+      const startDifference = String(b.start || "00:00").localeCompare(String(a.start || "00:00"));
       if (startDifference) return startDifference;
-      const endDifference = String(a.end || "00:00").localeCompare(String(b.end || "00:00"));
+      const endDifference = String(b.end || "00:00").localeCompare(String(a.end || "00:00"));
       return endDifference || todoSort(a, b);
     }
 

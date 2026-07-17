@@ -607,6 +607,7 @@ test("opravila imajo rocno in datumsko razvrscanje ter neobvezni uri", () => {
   assert.match(html, /value="open">&#268;AKA/);
   assert.match(html, /value="in_progress">V TEKU/);
   assert.match(html, /if \(state\.todoSortMode === "date"\) return list\.filter\(\(todo\) => todo\.date\)\.sort\(todoDateSort\)/);
+  assert.match(html, /function todoDateSort\(a, b\) \{[\s\S]*?String\(b\.date\)\.localeCompare\(String\(a\.date\)\)/);
   assert.match(html, /function todoNeedsOrdering\(todo\)/);
   assert.match(html, /orderStatuses = new Set\(\["order", "order_car", "order_warehouse", "add_to_car"\]\)/);
   assert.match(html, /naro\u010di\(\?=\$\|\[\^\\p\{L\}\\p\{N\}_\]\)/);
@@ -691,7 +692,8 @@ test("klik na datum odpre dnevno casovnico z gestami in urejanjem casa", () => {
   assert.match(html, /function dayTimelineLayouts\(todos\)/);
   assert.match(html, /data-mode = "resize-start"|dataset\.mode = "resize-start"/);
   assert.match(html, /dataset\.mode = "resize-end"/);
-  assert.match(html, /\.day-resize-handle \{[\s\S]*?left: 30%;[\s\S]*?right: 30%;/);
+  assert.match(html, /\.day-resize-handle \{[\s\S]*?width: 16px;[\s\S]*?height: 12px;/);
+  assert.match(html, /\.day-resize-handle\.start \{ top: -3px; right: 5px; \}/);
   assert.match(html, /event\.addEventListener\("pointermove", updateDayTimelineEventPointer, dayEventPointerOptions\)/);
   assert.match(html, /event\.addEventListener\("lostpointercapture", \(pointerEvent\) =>/);
   assert.match(html, /interaction\.holdTimer = setTimeout\([\s\S]*?\}, 220\)/);
