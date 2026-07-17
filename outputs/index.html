@@ -791,76 +791,35 @@
 
     .todo-description { margin: 0; }
 
-    .todo-description-details {
-      margin-top: 8px;
-      overflow: hidden;
+    .todo-expanded-details {
+      display: none;
+      grid-template-columns: minmax(0, 1fr);
+      gap: 8px;
+      margin-top: 9px;
+      padding-top: 9px;
+      border-top: 1px solid var(--line);
+    }
+
+    .todo-item.details-expanded .todo-expanded-details { display: grid; }
+
+    .todo-expanded-section {
+      min-width: 0;
+      display: grid;
+      gap: 7px;
+      padding: 10px;
       border: 1px solid var(--line);
       border-radius: 8px;
       background: #f6f9f6;
     }
 
-    .todo-description-details summary {
-      width: 100%;
-      min-height: 42px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 9px 12px;
-      color: var(--ink);
-      cursor: pointer;
-      font-size: 13px;
-      font-weight: 800;
-      list-style: none;
-      user-select: none;
-    }
-
-    .todo-description-details summary::-webkit-details-marker { display: none; }
-
-    .todo-description-details summary::after {
-      content: "+";
-      margin-left: auto;
-      color: var(--accent);
-      font-size: 18px;
-      line-height: 1;
-    }
-
-    .todo-description-details[open] summary {
-      border-bottom: 1px solid var(--line);
-      background: #edf3ef;
-    }
-
-    .todo-description-details[open] summary::after { content: "\2212"; }
-
-    .todo-description-details .todo-description,
-    .todo-attachments-details .todo-photos-inline {
-      padding: 12px;
-    }
-
-    .todo-details-count {
+    .todo-expanded-section > strong {
       color: var(--muted);
       font-size: 12px;
+      font-weight: 900;
     }
 
-    .todo-compact-actions {
-      display: flex;
-      align-items: flex-start;
-      gap: 6px;
-      flex-wrap: wrap;
-      margin-top: 7px;
-    }
-
-    .todo-compact-actions .todo-description-details {
-      margin-top: 0;
-    }
-
-    .todo-compact-actions .todo-description-details summary {
-      min-height: 34px;
-      padding: 6px 10px;
-    }
-
-    .todo-compact-actions .todo-description-details[open] {
-      flex: 1 0 100%;
-    }
+    .todo-expanded-section .todo-description { white-space: pre-wrap; }
+    .todo-expanded-section .todo-photos-inline { grid-column: auto; padding-top: 0; }
 
     .report-todo-description {
       display: block;
@@ -1120,7 +1079,7 @@
 
     .todo-title-row {
       display: flex;
-      align-items: flex-start;
+      align-items: center;
       gap: 7px;
       min-width: 0;
     }
@@ -1131,12 +1090,34 @@
     }
 
     .todo-title {
+      flex: 1 1 auto;
       min-width: 0;
       font-size: 16px;
       font-weight: 900;
       line-height: 1.2;
       overflow-wrap: anywhere;
     }
+
+    .todo-details-toggle {
+      flex: 0 0 32px;
+      width: 32px;
+      height: 32px;
+      display: inline-grid;
+      place-items: center;
+      padding: 0;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #edf3ef;
+      color: var(--accent);
+    }
+
+    .todo-details-toggle svg {
+      width: 18px;
+      height: 18px;
+      transition: transform 160ms ease;
+    }
+
+    .todo-item.details-expanded .todo-details-toggle svg { transform: rotate(180deg); }
 
     .todo-client-name {
       margin-top: 4px;
@@ -2600,16 +2581,7 @@
       .todo-item .add-photo {
         justify-content: stretch;
       }
-      .todo-compact-actions {
-        gap: 4px;
-        align-items: center;
-      }
-      .todo-compact-actions .todo-description-details summary {
-        min-height: 32px;
-        padding: 5px 8px;
-        font-size: 12px;
-        white-space: nowrap;
-      }
+
       .todo-tools {
         gap: 4px;
       }
@@ -3413,6 +3385,7 @@
       todoLockPending: false,
       todoClientSuggestions: [],
       todoClientSuggestionIndex: -1,
+      expandedTodoIds: new Set(),
       token: localStorage.getItem(tokenKey) || ""
     };
 
@@ -5383,6 +5356,24 @@
         alert("Spremembe stranke so shranjene tudi v Google Sheet.");
       }
     }
+    function todoHasExpandedDetails(todo) {
+      return Boolean(
+        String(todo.notes || "").trim() ||
+        String(todo.material || "").trim() ||
+        (todo.photos || []).length ||
+        (todo.driveFiles || []).length
+      );
+    }
+
+    function todoExpandedDetailsMarkup(todo) {
+      return `<div class="todo-expanded-details" id="todo-details-${escapeHtml(todo.id)}">
+        ${todo.notes ? `<section class="todo-expanded-section"><strong>Opis</strong><div class="todo-description todo-meta">${linkifyText(todo.notes)}</div></section>` : ""}
+        ${todo.material ? `<section class="todo-expanded-section"><strong>Material</strong><div class="todo-description todo-meta">${linkifyText(todo.material)}</div></section>` : ""}
+        ${(todo.photos || []).length ? `<section class="todo-expanded-section"><strong>Priloge (${(todo.photos || []).length})</strong>${renderTodoPhotoHtml(todo)}</section>` : ""}
+        ${(todo.driveFiles || []).length ? `<section class="todo-expanded-section"><strong>Google dokumenti (${(todo.driveFiles || []).length})</strong><div class="todo-drive-files">${renderTodoDriveFilesHtml(todo.driveFiles)}</div></section>` : ""}
+      </div>`;
+    }
+
     function renderTodoItems() {
       const items = $("todoItems");
       const title = $("todoPanelTitle");
@@ -5409,8 +5400,10 @@
         }
         const item = document.createElement("div");
         const reorderable = state.todoSortMode === "manual" && !todo.done && !todo.urgent;
+        const hasExpandedDetails = todoHasExpandedDetails(todo);
+        const detailsExpanded = state.expandedTodoIds.has(todo.id);
         item.dataset.todoId = todo.id;
-        item.className = `todo-item ${todo.done ? "done" : ""} ${todo.urgent ? "urgent" : ""}`;
+        item.className = `todo-item ${todo.done ? "done" : ""} ${todo.urgent ? "urgent" : ""} ${detailsExpanded ? "details-expanded" : ""}`;
         item.innerHTML = `
           <div class="todo-control-stack">
             <button class="drag-handle" type="button" ${reorderable ? "" : "disabled"} title="Povleci za vrstni red (na telefonu pridr&#382;i)" aria-label="Povleci za vrstni red (na telefonu pridr&#382;i)">::</button>
@@ -5431,30 +5424,14 @@
             <div class="todo-title-row">
               <span class="todo-chip todo-status-chip todo-status-color ${todoStatusClass(todo.status)}">${todoStatus(todo.status).label}</span>
               <div class="todo-title">${todo.urgent ? '<span class="todo-chip todo-urgent-chip">NUJNO</span> ' : ""}${linkifyText(todo.title)}</div>
+              ${hasExpandedDetails ? `<button class="todo-details-toggle" type="button" aria-expanded="${detailsExpanded}" aria-controls="todo-details-${escapeHtml(todo.id)}" title="${detailsExpanded ? "Skrij podrobnosti" : "Prikaži podrobnosti"}" aria-label="${detailsExpanded ? "Skrij podrobnosti" : "Prikaži podrobnosti"}"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 7 6 6 6-6"></path></svg></button>` : ""}
             </div>
             ${todo.client ? `<div class="todo-client-name">${escapeHtml(todo.client)}</div>` : ""}
             <div class="todo-primary-meta">
               <span class="todo-chip todo-date-chip ${todo.date ? "" : "is-empty"}" ${todo.date ? "" : 'aria-hidden="true"'}>${todo.date ? todoDateTimeLabel(todo) : "&nbsp;"}</span>
               <span class="todo-chip todo-assignees-chip">Za: ${escapeHtml(todoAssigneeNames(todo))}</span>
             </div>
-            <div class="todo-compact-actions">
-            ${todo.notes ? `<details class="todo-description-details">
-              <summary>Opis</summary>
-              <div class="todo-description todo-meta">${linkifyText(todo.notes)}</div>
-            </details>` : ""}
-            ${todo.material ? `<details class="todo-description-details">
-              <summary>Material</summary>
-              <div class="todo-description todo-meta">${linkifyText(todo.material)}</div>
-            </details>` : ""}
-            ${(todo.photos || []).length ? `<details class="todo-description-details todo-attachments-details">
-              <summary>Priloge <span class="todo-details-count">${(todo.photos || []).length}</span></summary>
-              ${renderTodoPhotoHtml(todo)}
-            </details>` : ""}
-            ${(todo.driveFiles || []).length ? `<details class="todo-description-details">
-              <summary>Dokumenti <span class="todo-details-count">${(todo.driveFiles || []).length}</span></summary>
-              <div class="todo-drive-files">${renderTodoDriveFilesHtml(todo.driveFiles)}</div>
-            </details>` : ""}
-            </div>
+            ${hasExpandedDetails ? todoExpandedDetailsMarkup(todo) : ""}
           </div>
         `;
         const openTodoEditor = (event) => {
@@ -5465,17 +5442,28 @@
         item.querySelector(".edit-todo").addEventListener("click", openTodoEditor);
         const todoSummary = item.querySelector(".todo-summary");
         todoSummary.addEventListener("click", (event) => {
-          if (event.target.closest("a, summary, button, .todo-description-details")) return;
+          if (event.target.closest("a, button, .todo-expanded-details")) return;
           openTodoEditor(event);
         });
         todoSummary.addEventListener("keydown", (event) => {
-          if (!["Enter", " "].includes(event.key) || event.target.closest("a, summary, button, .todo-description-details")) return;
+          if (!["Enter", " "].includes(event.key) || event.target.closest("a, button, .todo-expanded-details")) return;
           openTodoEditor(event);
         });
-        item.querySelectorAll(".todo-description-details").forEach((details) => {
-          details.addEventListener("click", (event) => event.stopPropagation());
-          details.addEventListener("keydown", (event) => event.stopPropagation());
+        const detailsToggle = item.querySelector(".todo-details-toggle");
+        const todoExpandedDetails = item.querySelector(".todo-expanded-details");
+        detailsToggle?.addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          const expanded = item.classList.toggle("details-expanded");
+          if (expanded) state.expandedTodoIds.add(todo.id);
+          else state.expandedTodoIds.delete(todo.id);
+          detailsToggle.setAttribute("aria-expanded", String(expanded));
+          const label = expanded ? "Skrij podrobnosti" : "Prikaži podrobnosti";
+          detailsToggle.setAttribute("aria-label", label);
+          detailsToggle.title = label;
         });
+        todoExpandedDetails?.addEventListener("click", (event) => event.stopPropagation());
+        todoExpandedDetails?.addEventListener("keydown", (event) => event.stopPropagation());
         const dragHandle = item.querySelector(".drag-handle");
         if (reorderable) {
           dragHandle.addEventListener("pointerdown", (event) => {

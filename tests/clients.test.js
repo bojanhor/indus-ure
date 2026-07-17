@@ -153,7 +153,7 @@ test("neposredna izbira statusov prikaze koledarske barve za vsako moznost", () 
 
 test("osnovni pogled priloge samo prikazuje, dodajanje pa ostane v obrazcu", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
-  assert.match(html, /<details class="todo-description-details todo-attachments-details">[\s\S]*?<summary>Priloge <span class="todo-details-count">/);
+  assert.match(html, /<section class="todo-expanded-section"><strong>Priloge \(\$\{\(todo\.photos \|\| \[\]\)\.length\}\)<\/strong>\$\{renderTodoPhotoHtml\(todo\)\}<\/section>/);
   assert.doesNotMatch(html, /class="secondary show-photos"/);
   assert.match(html, /id="todoFormPhotoInput"[^>]*type="file"[^>]*accept="image\/\*"[^>]*multiple/);
   assert.match(html, /id="todoFormCameraInput"[^>]*accept="image\/\*"[^>]*capture="environment"/);
@@ -213,8 +213,8 @@ test("urejanje opravila uporablja svincnik in klik na podatke kartice", () => {
   assert.doesNotMatch(card, /<button class="primary edit-todo"[^>]*>Uredi opravilo<\/button>/);
   assert.doesNotMatch(card, /class="todo-status todo-status-color|class="todo-date"|edit-todo-assignees/);
   assert.match(html, /const todoSummary = item\.querySelector\("\.todo-summary"\);[\s\S]*?todoSummary\.addEventListener\("click"/);
-  assert.match(html, /if \(event\.target\.closest\("a, summary, button, \.todo-description-details"\)\) return;/);
-  assert.match(html, /item\.querySelectorAll\("\.todo-description-details"\)\.forEach\(\(details\) => \{/);
+  assert.match(html, /if \(event\.target\.closest\("a, button, \.todo-expanded-details"\)\) return;/);
+  assert.match(html, /detailsToggle\?\.addEventListener\("click"/);
 });
 
 test("razvrscanje opravil deluje z rocajem, misjo in dotikom", () => {
@@ -248,8 +248,8 @@ test("mobilna kartica zdruzi kontrole v dve kompaktni vrstici", () => {
   assert.match(card, /todo-control-stack[\s\S]*?class="drag-handle"[\s\S]*?todo-tools[\s\S]*?edit-todo[\s\S]*?delete-todo[\s\S]*?class="todo-summary"/);
   assert.doesNotMatch(card, /aria-label="Opravljeno"/);
   assert.equal((card.match(/class="drag-handle"/g) || []).length, 1);
-  assert.match(card, /todo-title-row[\s\S]*?todo-status-color[\s\S]*?todo-title[\s\S]*?todo-client-name[\s\S]*?todo-primary-meta[\s\S]*?Za:/);
-  assert.match(html, /\.todo-compact-actions \{[\s\S]*?display: flex;[\s\S]*?flex-wrap: wrap;/);
+  assert.match(card, /todo-title-row[\s\S]*?todo-status-color[\s\S]*?todo-title[\s\S]*?todo-details-toggle[\s\S]*?todo-client-name[\s\S]*?todo-primary-meta[\s\S]*?Za:/);
+  assert.match(html, /\.todo-expanded-details \{[\s\S]*?display: none;/);
   assert.match(html, /\.todo-edit-icon,\s*\.todo-delete-icon \{\s*width: 32px;\s*height: 32px;/);
 });
 
@@ -257,7 +257,7 @@ test("kartica opravila poravna status datum in udelezence v stalne stolpce", () 
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
   const card = html.match(/item\.innerHTML = `([\s\S]*?)`;\s*const openTodoEditor/)?.[1] || "";
   assert.match(html, /\.todo-primary-meta \{[\s\S]*?display: grid;[\s\S]*?grid-template-columns: 170px minmax\(0, 1fr\);/);
-  assert.match(card, /todo-title-row[\s\S]*?todo-status-color[\s\S]*?todo-title[\s\S]*?todo-client-name[\s\S]*?todo-date-chip[\s\S]*?Za:/);
+  assert.match(card, /todo-title-row[\s\S]*?todo-status-color[\s\S]*?todo-title[\s\S]*?todo-details-toggle[\s\S]*?todo-client-name[\s\S]*?todo-date-chip[\s\S]*?Za:/);
   assert.match(card, /todo-date-chip \$\{todo\.date \? "" : "is-empty"\}/);
   assert.match(html, /\.todo-date-chip\.is-empty \{\s*visibility: hidden;/);
   assert.doesNotMatch(card, /dodal:/i);
@@ -463,13 +463,13 @@ test("opravilo ima loceno ime in dolg vecvrsticni opis", () => {
   assert.match(html, /<label>Ime opravila\s*<input id="todoFormTask" type="text"/);
   assert.match(html, /<label>Opis del\s*<textarea id="todoFormNotes" placeholder="Opi&#353;i, kaj se bo delalo"/);
   assert.match(html, /<label>Material\s*<textarea id="todoFormMaterial"/);
-  assert.match(html, /<details class="todo-description-details">\s*<summary>Opis<\/summary>/);
+  assert.match(html, /function todoExpandedDetailsMarkup\(todo\)/);
+  assert.match(html, /<section class="todo-expanded-section"><strong>Opis<\/strong>/);
   assert.match(html, /<div class="todo-description todo-meta">\$\{linkifyText\(todo\.notes\)\}<\/div>/);
-  assert.doesNotMatch(html, /<details class="todo-description-details" open>/);
+  assert.match(html, /class="todo-details-toggle"[\s\S]*?aria-expanded="\$\{detailsExpanded\}"/);
   assert.match(html, /white-space: pre-wrap/);
-  assert.match(html, /\.todo-description-details summary \{[\s\S]*?min-height: 42px;[\s\S]*?padding: 9px 12px;/);
-  assert.match(html, /\.todo-description-details \{[\s\S]*?border: 1px solid var\(--line\);[\s\S]*?background: #f6f9f6;/);
-  assert.match(html, /\.todo-description-details\[open\] summary::after \{ content: "\\2212"; \}/);
+  assert.match(html, /\.todo-expanded-section \{[\s\S]*?border: 1px solid var\(--line\);[\s\S]*?background: #f6f9f6;/);
+  assert.match(html, /\.todo-item\.details-expanded \.todo-details-toggle svg \{ transform: rotate\(180deg\); \}/);
   assert.doesNotMatch(html, /pageTodoTitle|pageTodoNotes/);
   assert.doesNotMatch(html, /Kaj je treba narediti/);
 });
