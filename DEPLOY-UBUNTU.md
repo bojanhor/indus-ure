@@ -48,6 +48,17 @@ Nastavi dolgo DB geslo ter Google OAuth podatke. `PUBLIC_BASE_URL` in `GOOGLE_RE
 
 Google Cloud OAuth client mora imeti natanko ta Authorized redirect URI. Prijava zahteva samo profil/e-posto; Calendar in Sheets se nato povezeta loceno z gumbom Google sync. Calendar uporablja omejeni obseg `calendar.app.created`: aplikacija ustvari namenski sekundarni koledar `INDUS URE - uporabnik` in nima dostopa do osebnega koledarja. Spremembe se dvosmerno osvezujejo vsako minuto; interval doloca `GOOGLE_SYNC_INTERVAL_MS`.
 
+### Google Dokumenti in preglednice pri opravilih
+
+V `/etc/indus-ure.env` nastavi potrjeno Bojanovo My Drive mapo:
+
+```env
+GOOGLE_DRIVE_TASKS_FOLDER_ID=1_z_1I_wX8-VR0K9rXj7BHRFwc--00Ul5
+GOOGLE_DRIVE_OWNER_EMAIL=bojan@indus.si
+```
+
+Mapa mora ostati v **My Drive** uporabnika `bojan@indus.si`, ne v Shared Drive. V istem Google Cloud projektu mora biti omogocen tudi **Google Drive API**. Ko je nova verzija objavljena, se Bojan v meniju **Google Dokumenti in preglednice** enkrat prijavi in potrdi dovoljenje `drive.file`. Aplikacija z njegovim dovoljenjem ustvari nov Google Dokument ali Preglednico neposredno v tej mapi; Bojan ostane lastnik, delavci pa dobijo pravico urejanja prek dedovanih pravic mape. Zunanje Google Dokumente/Preglednice aplikacija samo pripne kot povezave in jim ne spreminja lastništva, mape ali pravic.
+
 ### Osnovna baza strank v Google Sheets
 
 Google Sheet je avtoritativni vir strank:

@@ -35,6 +35,10 @@ const GOOGLE_REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI || "";
 const GOOGLE_SHEETS_ID = process.env.GOOGLE_SHEETS_ID || "";
 const GOOGLE_SHEETS_RANGE = String(process.env.GOOGLE_SHEETS_RANGE || DEFAULT_CLIENT_SHEET_RANGE).replace(/:[I-L]$/i, ":M");
 const GOOGLE_CALENDAR_SCOPE_VERSION = 2;
+const GOOGLE_DRIVE_SCOPE_VERSION = 1;
+const GOOGLE_DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file";
+const GOOGLE_DRIVE_TASKS_FOLDER_ID = String(process.env.GOOGLE_DRIVE_TASKS_FOLDER_ID || "").trim();
+const GOOGLE_DRIVE_OWNER_EMAIL = String(process.env.GOOGLE_DRIVE_OWNER_EMAIL || "bojan@indus.si").trim().toLowerCase();
 const INDUS_GOOGLE_APP_ID = "indus-ure-v1";
 const GOOGLE_SYNC_INTERVAL_MS = Math.max(60_000, Number(process.env.GOOGLE_SYNC_INTERVAL_MS || 60_000));
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -122,6 +126,57 @@ function limitTodoAttachmentsData(items) {
 
 function validTodoAttachmentId(value) {
   return /^[a-f0-9]{64}$/.test(String(value || ""));
+}
+
+function validGoogleDriveId(value) {
+  return /^[A-Za-z0-9_-]{10,200}$/.test(String(value || ""));
+}
+
+function googleWorkspaceFileInfo(value) {
+  try {
+    const url = new URL(String(value || "").trim());
+    if (url.protocol !== "https:" || url.hostname !== "docs.google.com") return null;
+    const match = url.pathname.match(/^\/(document|spreadsheets)\/d\/([A-Za-z0-9_-]{10,200})(?:\/|$)/);
+    if (!match) return null;
+    return {
+      kind: match[1] === "document" ? "document" : "spreadsheet",
+      fileId: match[2],
+      url: url.toString()
+    };
+  } catch {
+    return null;
+  }
+}
+
+function cleanTodoDriveFiles(items) {
+  const seen = new Set();
+  return (Array.isArray(items) ? items : []).map((item) => {
+    const info = googleWorkspaceFileInfo(item?.url);
+    if (!info || seen.has(info.fileId)) return null;
+    seen.add(info.fileId);
+    const managed = Boolean(item?.managed) && String(item?.ownerEmail || "").trim().toLowerCase() === GOOGLE_DRIVE_OWNER_EMAIL;
+    return {
+      id: String(item?.id || crypto.randomUUID()).slice(0, 100),
+      kind: info.kind,
+      fileId: info.fileId,
+      url: info.url,
+      name: String(item?.name || (info.kind === "document" ? "Google Dokument" : "Google Preglednica")).trim().slice(0, 180),
+      managed,
+      ownerEmail: managed ? GOOGLE_DRIVE_OWNER_EMAIL : "",
+      createdBy: String(item?.createdBy || "").slice(0, 100),
+      createdByName: String(item?.createdByName || "").slice(0, 120),
+      createdAt: String(item?.createdAt || new Date().toISOString()).slice(0, 40)
+    };
+  }).filter(Boolean).slice(0, 12);
+}
+
+function stampTodoDriveFiles(todo, user) {
+  return (todo.driveFiles || []).map((file) => ({
+    ...file,
+    createdBy: file.createdBy || user.id,
+    createdByName: file.createdByName || user.name,
+    createdAt: file.createdAt || new Date().toISOString()
+  }));
 }
 
 function todoAttachmentContentId(data) {
@@ -297,16 +352,21 @@ function normalizeDb(db = {}) {
       changed = true;
     }
     if (!db.users[id].google) {
-      db.users[id].google = { tokens: null, calendarId: "", calendarName: "", connectedAt: "", scopeVersion: 0 };
+      db.users[id].google = { tokens: null, calendarId: "", calendarName: "", connectedAt: "", scopeVersion: 0, driveScopeVersion: 0 };
       changed = true;
     }
     const googleState = db.users[id].google;
+    if (![0, GOOGLE_DRIVE_SCOPE_VERSION].includes(Number(googleState.driveScopeVersion || 0))) {
+      googleState.driveScopeVersion = 0;
+      changed = true;
+    }
     if (Number(googleState.scopeVersion || 0) !== GOOGLE_CALENDAR_SCOPE_VERSION) {
       if (googleState.tokens || googleState.calendarId || googleState.syncToken) {
         googleState.tokens = null;
         googleState.calendarId = "";
         googleState.calendarName = "";
         googleState.syncToken = "";
+        googleState.driveScopeVersion = 0;
         changed = true;
       }
       if (Number(googleState.scopeVersion || 0) !== 0) {
@@ -348,16 +408,21 @@ function normalizeDb(db = {}) {
       changed = true;
     }
     if (!user.google) {
-      user.google = { tokens: null, calendarId: "", calendarName: "", connectedAt: "", scopeVersion: 0 };
+      user.google = { tokens: null, calendarId: "", calendarName: "", connectedAt: "", scopeVersion: 0, driveScopeVersion: 0 };
       changed = true;
     }
     const googleState = user.google;
+    if (![0, GOOGLE_DRIVE_SCOPE_VERSION].includes(Number(googleState.driveScopeVersion || 0))) {
+      googleState.driveScopeVersion = 0;
+      changed = true;
+    }
     if (Number(googleState.scopeVersion || 0) !== GOOGLE_CALENDAR_SCOPE_VERSION) {
       if (googleState.tokens || googleState.calendarId || googleState.syncToken) {
         googleState.tokens = null;
         googleState.calendarId = "";
         googleState.calendarName = "";
         googleState.syncToken = "";
+        googleState.driveScopeVersion = 0;
         changed = true;
       }
       if (Number(googleState.scopeVersion || 0) !== 0) {
@@ -684,6 +749,13 @@ function normalizeDb(db = {}) {
       next.photos = [];
       changed = true;
     }
+    if (!Array.isArray(next.driveFiles)) {
+      next.driveFiles = [];
+      changed = true;
+    }
+    const driveFilesBefore = JSON.stringify(next.driveFiles);
+    next.driveFiles = cleanTodoDriveFiles(next.driveFiles);
+    if (JSON.stringify(next.driveFiles) !== driveFilesBefore) changed = true;
     const photosBefore = JSON.stringify(next.photos);
     next.photos = storeTodoAttachments(db, next, {
       id: next.createdBy || "system",
@@ -1429,6 +1501,7 @@ function cleanTodo(input) {
     billingKm: nonnegativeNumber(input.billingKm, null, 1_000_000),
     clientKm: nonnegativeNumber(input.clientKm, null, 1_000_000),
     clientVehicle: todoVehicle(input.clientVehicle),
+    driveFiles: cleanTodoDriveFiles(input.driveFiles),
     photos: limitTodoAttachmentsData(photos
       .map((photo) => ({
         id: photo.id || crypto.randomUUID(),
@@ -1502,6 +1575,8 @@ function validateTodo(todo, { requireClientId = false } = {}) {
   if ((todo.photos || []).some((photo) => !validTodoAttachmentDataUrl(photo.data) && !validTodoAttachmentId(photo.attachmentId))) return "Priloga ni veljavna slika ali PDF.";
   if ((todo.photos || []).reduce((total, photo) => total + String(photo.data || "").length, 0) > MAX_TODO_ATTACHMENTS_DATA_LENGTH) return "Priloge so skupaj prevelike.";
   if ((todo.photos || []).some((photo) => photo.thumbnailData && !validTodoThumbnailDataUrl(photo.thumbnailData))) return "Predogled PDF priloge ni veljaven.";
+  if ((todo.driveFiles || []).length > 12) return "Najvec je 12 Google dokumentov ali preglednic na opravilo.";
+  if ((todo.driveFiles || []).some((file) => !validGoogleDriveId(file.fileId) || !googleWorkspaceFileInfo(file.url))) return "Google priponka ni veljaven Dokument ali Preglednica.";
   return "";
 }
 
@@ -1636,6 +1711,77 @@ function googleClient(req, tokens) {
   const client = new google.auth.OAuth2(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, googleRedirectUri(req));
   if (tokens) client.setCredentials(tokens);
   return client;
+}
+
+function googleDriveTasksReady() {
+  return googleReady() && validGoogleDriveId(GOOGLE_DRIVE_TASKS_FOLDER_ID) && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(GOOGLE_DRIVE_OWNER_EMAIL);
+}
+
+function googleDriveOwner(db) {
+  return userByEmail(db, GOOGLE_DRIVE_OWNER_EMAIL) || null;
+}
+
+async function createManagedGoogleDriveFile(req, db, actor, input = {}) {
+  if (!googleDriveTasksReady()) {
+    throw new Error("Google Dokumenti niso nastavljeni: manjka mapa ali Bojanov e-naslov v okolju streznika.");
+  }
+  const owner = googleDriveOwner(db);
+  if (!owner || Number(owner.google?.driveScopeVersion || 0) !== GOOGLE_DRIVE_SCOPE_VERSION || !owner.google?.tokens) {
+    throw new Error("Bojan mora najprej v Nastavitvah povezati Google Dokumente in preglednice.");
+  }
+  const kind = input.kind === "spreadsheet" ? "spreadsheet" : input.kind === "document" ? "document" : "";
+  if (!kind) throw new Error("Izberi Google Dokument ali Google Preglednico.");
+  const title = String(input.title || "").trim();
+  if (!title) throw new Error("Najprej vpisi ime opravila.");
+  const client = String(input.client || "").trim();
+  const name = [client, title].filter(Boolean).join(" - ").slice(0, 180);
+  const { google } = require("googleapis");
+  const drive = google.drive({ version: "v3", auth: googleClient(req, owner.google.tokens) });
+  const mimeType = kind === "document"
+    ? "application/vnd.google-apps.document"
+    : "application/vnd.google-apps.spreadsheet";
+  let created = null;
+  try {
+    const response = await drive.files.create({
+      requestBody: {
+        name,
+        mimeType,
+        parents: [GOOGLE_DRIVE_TASKS_FOLDER_ID],
+        appProperties: {
+          indusApp: INDUS_GOOGLE_APP_ID,
+          indusResource: "task-attachment"
+        }
+      },
+      fields: "id,name,mimeType,webViewLink,parents,owners(emailAddress),driveId"
+    });
+    created = response.data;
+    const ownedByBojan = (created.owners || []).some((item) => String(item.emailAddress || "").toLowerCase() === GOOGLE_DRIVE_OWNER_EMAIL);
+    const inConfiguredFolder = (created.parents || []).includes(GOOGLE_DRIVE_TASKS_FOLDER_ID);
+    if (!created.id || !created.webViewLink || created.driveId || !ownedByBojan || !inConfiguredFolder) {
+      throw new Error("Google datoteke ni bilo mogoce ustvariti kot Bojanovo datoteko v izbrani mapi.");
+    }
+    return {
+      id: crypto.randomUUID(),
+      kind,
+      fileId: created.id,
+      url: created.webViewLink,
+      name: String(created.name || name).slice(0, 180),
+      managed: true,
+      ownerEmail: GOOGLE_DRIVE_OWNER_EMAIL,
+      createdBy: actor.id,
+      createdByName: actor.name,
+      createdAt: new Date().toISOString()
+    };
+  } catch (error) {
+    if (created?.id) {
+      try {
+        await drive.files.delete({ fileId: created.id });
+      } catch (cleanupError) {
+        console.warn(`Google osnutka ${created.id} ni bilo mogoce odstraniti: ${cleanupError.message || cleanupError}`);
+      }
+    }
+    throw error;
+  }
 }
 
 function googleEventDescription(fields, notes = "") {
@@ -1930,6 +2076,7 @@ function todoFromGoogleEvent(event, user, db = {}, existing = null) {
     billingKm: nonnegativeNumber(existing?.billingKm, 0, 1_000_000),
     clientKm: nonnegativeNumber(existing?.clientKm, 0, 1_000_000),
     clientVehicle: todoVehicle(existing?.clientVehicle),
+    driveFiles: existing?.driveFiles || [],
     photos: existing?.photos || [],
     syncUser: user.id,
     googleEventId: event.id || existing?.googleEventId || "",
@@ -2360,6 +2507,20 @@ async function handleApi(req, res) {
       return;
     }
 
+    if (url.pathname === "/api/google/drive-status" && req.method === "GET") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      const owner = String(user.email || "").toLowerCase() === GOOGLE_DRIVE_OWNER_EMAIL;
+      const db = await readDbAsync();
+      const driveOwner = googleDriveOwner(db);
+      sendJson(res, 200, {
+        configured: googleDriveTasksReady(),
+        owner,
+        connected: Boolean(driveOwner?.google?.tokens && Number(driveOwner.google.driveScopeVersion || 0) === GOOGLE_DRIVE_SCOPE_VERSION)
+      });
+      return;
+    }
+
     if (url.pathname === "/api/auth/google-url" && req.method === "GET") {
       if (!googleReady()) {
         sendJson(res, 400, { error: "Google prijava se ni nastavljena na strezniku." });
@@ -2405,6 +2566,37 @@ async function handleApi(req, res) {
         ],
         include_granted_scopes: false,
         prompt: "consent"
+      });
+      sendJson(res, 200, { url: authUrl });
+      return;
+    }
+
+    if (url.pathname === "/api/google/drive-auth-url" && req.method === "GET") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      if (String(user.email || "").toLowerCase() !== GOOGLE_DRIVE_OWNER_EMAIL) {
+        sendJson(res, 403, { error: "Google Dokumente lahko poveze samo Bojanov racun." });
+        return;
+      }
+      if (!googleDriveTasksReady()) {
+        sendJson(res, 400, { error: "Google Dokumenti niso nastavljeni: manjka mapa ali Bojanov e-naslov v okolju streznika." });
+        return;
+      }
+      cleanupPendingGoogleStates();
+      const state = `drive:${crypto.randomBytes(24).toString("hex")}`;
+      pendingGoogleConnections.set(state, { userId: user.id, kind: "drive", startedAt: Date.now() });
+      const auth = googleClient(req);
+      const authUrl = auth.generateAuthUrl({
+        access_type: "offline",
+        state,
+        scope: [
+          "https://www.googleapis.com/auth/calendar.app.created",
+          "https://www.googleapis.com/auth/spreadsheets",
+          GOOGLE_DRIVE_FILE_SCOPE
+        ],
+        include_granted_scopes: true,
+        prompt: "consent",
+        login_hint: GOOGLE_DRIVE_OWNER_EMAIL
       });
       sendJson(res, 200, { url: authUrl });
       return;
@@ -2484,7 +2676,8 @@ async function handleApi(req, res) {
       }
       user.google = user.google || {};
       const currentScope = Number(user.google.scopeVersion || 0) === GOOGLE_CALENDAR_SCOPE_VERSION;
-      const refreshToken = result.tokens.refresh_token || (currentScope ? user.google.tokens?.refresh_token : "");
+      const currentDriveScope = Number(user.google.driveScopeVersion || 0) === GOOGLE_DRIVE_SCOPE_VERSION;
+      const refreshToken = result.tokens.refresh_token || ((currentScope || currentDriveScope) ? user.google.tokens?.refresh_token : "");
       if (!refreshToken) {
         sendText(res, 400, "Google ni vrnil trajnega dovoljenja. V Google racunu odstrani dostop INDUS URE in poskusi znova.", "text/plain");
         return;
@@ -2492,6 +2685,7 @@ async function handleApi(req, res) {
       user.google.tokens = { ...result.tokens, refresh_token: refreshToken };
       user.google.connectedAt = new Date().toISOString();
       user.google.scopeVersion = GOOGLE_CALENDAR_SCOPE_VERSION;
+      if (pending.kind === "drive") user.google.driveScopeVersion = GOOGLE_DRIVE_SCOPE_VERSION;
       if (!currentScope) {
         user.google.calendarId = "";
         user.google.calendarName = "";
@@ -2500,7 +2694,9 @@ async function handleApi(req, res) {
         user.google.lastSyncAt = "";
       }
       await writeDbAsync(db);
-      sendText(res, 200, "Google racun je povezan. Lahko zapres to okno in v INDUS URE kliknes Google sync.", "text/plain");
+      sendText(res, 200, pending.kind === "drive"
+        ? "Google Dokumenti in preglednice so povezani. Lahko zapres to okno in se vrnes v INDUS URE."
+        : "Google racun je povezan. Lahko zapres to okno in v INDUS URE kliknes Google sync.", "text/plain");
       return;
     }
 
@@ -3051,6 +3247,7 @@ async function handleApi(req, res) {
           ...assignedTodo,
           assignmentGroupId,
           photos: stampTodoPhotos(todo, user),
+          driveFiles: stampTodoDriveFiles(todo, user),
           syncUser: assigneeId,
           order: newOrder + index,
           createdBy: user.id,
@@ -3068,6 +3265,16 @@ async function handleApi(req, res) {
         todos: visibleTodosForUser(db, user),
         assignedTo: assigneeIds.map((id) => publicDirectoryUser(db.users[id]))
       });
+      return;
+    }
+
+    if (url.pathname === "/api/todos/drive-files" && req.method === "POST") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      const body = await readBody(req);
+      const db = await readDbAsync();
+      const driveFile = await createManagedGoogleDriveFile(req, db, user, body);
+      sendJson(res, 201, { driveFile });
       return;
     }
 
@@ -3351,6 +3558,7 @@ async function handleApi(req, res) {
       const assignmentGroupId = previousTodo.assignmentGroupId || crypto.randomUUID();
       const now = new Date().toISOString();
       const sharedPhotos = stampTodoPhotos(todo, user);
+      const sharedDriveFiles = stampTodoDriveFiles(todo, user);
       const assignmentsChanged = [...currentAssigneeIds].sort().join(",") !== [...assigneeIds].sort().join(",");
       const assigneeNames = assigneeIds.map((assigneeId) => db.users[assigneeId]?.name || assigneeId).join(", ");
       const updatedGroup = [];
@@ -3370,6 +3578,7 @@ async function handleApi(req, res) {
             ...adjusted,
             assignmentGroupId,
             photos: sharedPhotos.map((photo) => ({ ...photo })),
+            driveFiles: sharedDriveFiles.map((file) => ({ ...file })),
             syncUser: assigneeId,
             order: isOpenedTodo ? todo.order : existing.order,
             updatedBy: user.id,
@@ -3393,6 +3602,7 @@ async function handleApi(req, res) {
           ...assignedTodo,
           assignmentGroupId,
           photos: sharedPhotos.map((photo) => ({ ...photo })),
+          driveFiles: sharedDriveFiles.map((file) => ({ ...file })),
           syncUser: assigneeId,
           order: todo.order,
           createdBy: previousTodo.createdBy || user.id,
@@ -3609,6 +3819,7 @@ module.exports = {
   ENTRY_EDIT_LOCK_TTL_MS,
   TODO_EDIT_LOCK_TTL_MS,
   GOOGLE_CALENDAR_SCOPE_VERSION,
+  GOOGLE_DRIVE_SCOPE_VERSION,
   INDUS_GOOGLE_APP_ID,
   TODO_STATUS_DEFINITIONS,
   SESSION_TTL_MS,
@@ -3659,6 +3870,9 @@ module.exports = {
   todoFromGoogleEvent,
   todoToGoogleEvent,
   validTodoAttachmentDataUrl,
+  validGoogleDriveId,
+  googleWorkspaceFileInfo,
+  cleanTodoDriveFiles,
   validateTodo,
   visibleDebtsForUser,
   visibleEntriesForUser,

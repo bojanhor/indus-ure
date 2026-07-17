@@ -5,6 +5,7 @@ const test = require("node:test");
 
 const {
   GOOGLE_CALENDAR_SCOPE_VERSION,
+  GOOGLE_DRIVE_SCOPE_VERSION,
   INDUS_GOOGLE_APP_ID,
   TODO_STATUS_DEFINITIONS,
   buildCalendarIcs,
@@ -22,6 +23,8 @@ const {
   remoteGoogleChangeWins,
   todoFromGoogleEvent,
   todoToGoogleEvent,
+  cleanTodoDriveFiles,
+  googleWorkspaceFileInfo,
   validateTodo
 } = require("../outputs/server");
 
@@ -199,6 +202,25 @@ test("ura opravila zahteva datum in veljaven par od-do", () => {
   assert.equal(validateTodo({ title: "Brez datuma", date: "", start: "08:00", end: "09:00" }), "Za opravilo z uro vnesi tudi datum.");
   assert.equal(validateTodo({ title: "Napacen vrstni red", date: "2026-07-16", start: "10:00", end: "09:00" }), "Ura do mora biti kasneje kot ura od.");
   assert.equal(validateTodo({ title: "Veljavno", date: "2026-07-16", start: "08:00", end: "09:00" }), "");
+});
+
+test("Google Docs in Sheets priponke sprejmejo samo podprte povezave in zunanja lastnistva ne spreminjajo", () => {
+  const documentId = "1_z_1I_wX8-VR0K9rXj7BHRFwc--00Ul5";
+  const sheetId = "1lQ2D1ZQlQyBZfih0B1-Jx-8UI58PK-vRzNbjW1V2MiM";
+  const files = cleanTodoDriveFiles([
+    { url: `https://docs.google.com/document/d/${documentId}/edit?usp=sharing`, name: "Zunanji dokument" },
+    { url: `https://docs.google.com/spreadsheets/d/${sheetId}/edit#gid=42`, name: "Zunanja preglednica", managed: true, ownerEmail: "drugi@indus.si" },
+    { url: `https://docs.google.com/document/d/${documentId}/view`, name: "Podvojeni dokument" },
+    { url: "https://drive.google.com/file/d/abc/view", name: "Neveljavno" }
+  ]);
+  assert.equal(files.length, 2);
+  assert.equal(files[0].kind, "document");
+  assert.equal(files[0].url, `https://docs.google.com/document/d/${documentId}/edit?usp=sharing`);
+  assert.equal(files[0].managed, false);
+  assert.equal(files[1].kind, "spreadsheet");
+  assert.equal(files[1].managed, false);
+  assert.equal(googleWorkspaceFileInfo("https://example.com/document/d/x"), null);
+  assert.equal(GOOGLE_DRIVE_SCOPE_VERSION, 1);
 });
 
 test("stabilni UUID se v Google opis ne zapise kot davcna", () => {

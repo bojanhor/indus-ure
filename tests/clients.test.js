@@ -221,7 +221,10 @@ test("razvrscanje opravil deluje z rocajem, misjo in dotikom", () => {
   const server = fs.readFileSync(path.join(__dirname, "..", "outputs", "server.js"), "utf8");
   assert.match(html, /dragHandle\.addEventListener\("pointerdown"/);
   assert.match(html, /beginTodoPointerDrag\(event, item, todo\.id\)/);
-  assert.match(html, /document\.elementFromPoint\(event\.clientX, event\.clientY\)/);
+  assert.match(html, /document\.elementFromPoint\(clientX, clientY\)/);
+  assert.match(html, /function todoPointerDragScrollVelocity\(clientY\)/);
+  assert.match(html, /window\.scrollBy\(0, velocity\)/);
+  assert.match(html, /requestAnimationFrame\(tickTodoPointerDragAutoScroll\)/);
   assert.match(html, /function todosCanReorderTogether\(sourceId, targetId\)/);
   assert.match(html, /async function reorderTodos\(sourceId, targetId\)/);
   assert.match(html, /const orderDifference = Number\(a\.order \|\| 0\) - Number\(b\.order \|\| 0\)/);
@@ -234,10 +237,10 @@ test("mobilna kartica zdruzi kontrole v dve kompaktni vrstici", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
   const card = html.match(/item\.innerHTML = `([\s\S]*?)`;\s*const openTodoEditor/)?.[1] || "";
   assert.ok(card);
-  assert.match(card, /todo-control-stack[\s\S]*?class="drag-handle"[\s\S]*?class="todo-summary"/);
+  assert.match(card, /todo-control-stack[\s\S]*?class="drag-handle"[\s\S]*?todo-tools[\s\S]*?edit-todo[\s\S]*?delete-todo[\s\S]*?class="todo-summary"/);
   assert.doesNotMatch(card, /aria-label="Opravljeno"/);
   assert.equal((card.match(/class="drag-handle"/g) || []).length, 1);
-  assert.match(card, /todo-compact-actions[\s\S]*?todo-description-details[\s\S]*?todo-attachments-details[\s\S]*?todo-tools[\s\S]*?edit-todo[\s\S]*?delete-todo/);
+  assert.match(card, /todo-title-row[\s\S]*?todo-status-color[\s\S]*?todo-title[\s\S]*?todo-client-name[\s\S]*?todo-primary-meta[\s\S]*?Za:/);
   assert.match(html, /\.todo-compact-actions \{[\s\S]*?display: flex;[\s\S]*?flex-wrap: wrap;/);
   assert.match(html, /\.todo-edit-icon,\s*\.todo-delete-icon \{\s*width: 32px;\s*height: 32px;/);
 });
@@ -245,8 +248,8 @@ test("mobilna kartica zdruzi kontrole v dve kompaktni vrstici", () => {
 test("kartica opravila poravna status datum in udelezence v stalne stolpce", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
   const card = html.match(/item\.innerHTML = `([\s\S]*?)`;\s*const openTodoEditor/)?.[1] || "";
-  assert.match(html, /\.todo-primary-meta \{[\s\S]*?display: grid;[\s\S]*?grid-template-columns: 150px 170px minmax\(180px, 1fr\);/);
-  assert.match(card, /todo-status-color[\s\S]*?todo-date-chip[\s\S]*?Za:/);
+  assert.match(html, /\.todo-primary-meta \{[\s\S]*?display: grid;[\s\S]*?grid-template-columns: 170px minmax\(0, 1fr\);/);
+  assert.match(card, /todo-title-row[\s\S]*?todo-status-color[\s\S]*?todo-title[\s\S]*?todo-client-name[\s\S]*?todo-date-chip[\s\S]*?Za:/);
   assert.match(card, /todo-date-chip \$\{todo\.date \? "" : "is-empty"\}/);
   assert.match(html, /\.todo-date-chip\.is-empty \{\s*visibility: hidden;/);
   assert.doesNotMatch(card, /dodal:/i);
@@ -346,7 +349,7 @@ test("obracun ur podpira delavski in sefovski pogled", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
   assert.doesNotMatch(html, /id="statHoursIbro"|id="statKm"|id="statUnbilled"/);
   assert.doesNotMatch(html, /function renderStats\(\)/);
-  assert.match(html, /id="billingViewBtn"[^>]*>Obra&#269;uni/);
+  assert.match(html, /id="billingMenuBtn" type="button">Obra&#269;uni/);
   assert.match(html, /class="panel billing-screen view-hidden"/);
   assert.match(html, /id="billingWorker"/);
   assert.match(html, /id="billingSaveDraft"/);
@@ -366,7 +369,7 @@ test("obracun ur podpira delavski in sefovski pogled", () => {
   assert.match(html, /function changePayroll\(action\)/);
   assert.match(html, /api\("\/api\/payrolls"\)/);
   assert.doesNotMatch(html, /if \(isAdminView\(\) && view === "billing"\) view = "todos"/);
-  assert.match(html, /billingViewBtn"\)\.addEventListener\("click", \(\) => setView\("billing"\)\)/);
+  assert.match(html, /billingMenuBtn"\)\.addEventListener\("click", \(\) => \{[\s\S]*?setView\("billing"\);[\s\S]*?toolsMenu"\)\.open = false/);
 });test("sefovski seznam privzeto prikaze zakljucena opravila", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
   assert.match(html, /id="reportTodoCompletionFilter"/);
@@ -598,6 +601,9 @@ test("opravila so privzeti levi pogled in status se izbira neposredno brez dropd
   assert.match(html, /view: "todos"/);
   const switchMarkup = html.match(/<div class="view-switch"[\s\S]*?<\/div>/)?.[0] || "";
   assert.ok(switchMarkup.indexOf('id="todosViewBtn"') < switchMarkup.indexOf('id="calendarViewBtn"'));
+  assert.match(html, /id="billingMenuBtn" type="button">Obra&#269;uni<\/button>/);
+  assert.match(html, /id="clientsMenuBtn" type="button">Stranke<\/button>/);
+  assert.match(html, /@media \(max-width: 760px\)[\s\S]*?\.calendar-shell \{[\s\S]*?touch-action: pan-y pinch-zoom;[\s\S]*?\.weekdays,[\s\S]*?\.calendar \{[\s\S]*?grid-template-columns: repeat\(7, minmax\(0, 1fr\)\);/);
   assert.match(html, /id="todoFormStatusChoices"/);
   assert.match(html, /id="todoFormStatus" type="hidden"/);
   assert.doesNotMatch(html, /<select id="todoFormStatus"/);
@@ -680,8 +686,8 @@ test("stranko iz zavihka Stranke sef odpre v obrazcu za urejanje", () => {
 test("globalni iskalnik vrne samo dogodke stranke pa imajo svoj zavihek", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
   assert.match(html, /id="clientSearch" placeholder="I&#353;&#269;i opravilo ali opis"/);
-  assert.match(html, /id="clientsViewBtn" type="button">Stranke<\/button>/);
-  assert.doesNotMatch(html, /id="clientsViewBtn"[^>]*admin-only/);
+  assert.match(html, /id="clientsMenuBtn" type="button">Stranke<\/button>/);
+  assert.match(html, /class="menu-action view-menu-action admin-only" id="clientsMenuBtn"/);
   assert.match(html, /id="clientsSearch" placeholder="I&#353;&#269;i po bazi strank"/);
   assert.match(html, /const visibleRecords = query \? records\.filter\(\(client\) => clientMatches\(client, query\)\) : records;/);
   assert.match(html, /function renderSearch\(\)[\s\S]*?const results = contextTodos\(\)/);
