@@ -1992,6 +1992,29 @@
     .day-timeline-title-nav h3 { min-width: 0; }
     .day-timeline-date-nav { flex: 0 0 auto; font-size: 26px; line-height: 1; }
 
+    .todo-creation-tabs {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 4px;
+      margin: 14px 20px 0;
+      padding: 4px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #edf2ee;
+    }
+    .todo-creation-tab {
+      min-height: 40px;
+      padding: 8px;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--muted);
+      font-weight: 800;
+    }
+    .todo-creation-tab.active {
+      background: #203035;
+      color: #fff;
+    }
+
     .modal-body {
       padding: 18px 20px 20px;
       display: grid;
@@ -3044,6 +3067,10 @@
       <div class="modal-head">
         <h3 id="todoFormTitle">Opravilo</h3>
         <button class="icon-btn" id="closeTodoDialog" type="button" title="Zapri">&times;</button>
+      </div>
+      <div class="todo-creation-tabs hidden" id="todoCreationTabs" role="tablist" aria-label="Vrsta novega vnosa">
+        <button class="todo-creation-tab" type="button" role="tab" data-create-mode="task">Nov dogodek</button>
+        <button class="todo-creation-tab" type="button" role="tab" data-create-mode="hours">Vpis ur na projekt</button>
       </div>
       <div class="modal-body">
         <input type="hidden" id="todoFormId">
@@ -5003,15 +5030,7 @@
           add.title = `Dodaj opravilo za ${activeWorker()?.name || "delavca"}`;
           add.addEventListener("click", () => startTodoForDate(key));
           head.appendChild(add);
-          const addHours = document.createElement("button");
-          addHours.addEventListener("click", (event) => event.stopPropagation());
-          addHours.className = "quick-add quick-add-hours";
-          addHours.type = "button";
-          addHours.textContent = "◷";
-          addHours.title = `Piši ure za ${activeWorker()?.name || "delavca"}`;
-          addHours.setAttribute("aria-label", addHours.title);
-          addHours.addEventListener("click", () => openStandaloneHoursDialog(key).catch((error) => alert(error.message)));
-          head.appendChild(addHours);
+
         }
         day.appendChild(head);
 
@@ -6768,6 +6787,15 @@
       state.todoHoursSourceId = String(todo._hoursSourceId || "");
       state.todoStandaloneHours = Boolean(todo._standaloneHours);
       state.todoDraftSourceProjectTodoId = String(todo.sourceProjectTodoId || "");
+      const canChooseCreationMode = !editing && !state.todoHoursSourceId;
+      const creationTabs = $("todoCreationTabs");
+      creationTabs.classList.toggle("hidden", !canChooseCreationMode);
+      creationTabs.dataset.date = todo.date || "";
+      creationTabs.querySelectorAll("[data-create-mode]").forEach((button) => {
+        const active = state.todoStandaloneHours ? button.dataset.createMode === "hours" : button.dataset.createMode === "task";
+        button.classList.toggle("active", active);
+        button.setAttribute("aria-selected", String(active));
+      });
       const client = findClient(todo.clientId || todo.client);
       $("todoFormId").value = todo.id || "";
       $("todoFormStart").value = todo.start || "";
@@ -8191,6 +8219,15 @@
     });
     $("newTodoButton").addEventListener("click", () => startTodoForDate());
     $("writeHoursButton").addEventListener("click", () => openStandaloneHoursDialog().catch((error) => alert(error.message)));
+    $("todoCreationTabs").addEventListener("click", (event) => {
+      const tab = event.target.closest("[data-create-mode]");
+      if (!tab) return;
+      const date = $("todoCreationTabs").dataset.date || $("todoFormDate").value || dateKey(new Date());
+      const wantsHours = tab.dataset.createMode === "hours";
+      if (wantsHours === state.todoStandaloneHours) return;
+      $("todoDialog").close();
+      (wantsHours ? openStandaloneHoursDialog(date) : openTodoDialog({ date })).catch((error) => alert(error.message));
+    });
 
     document.querySelectorAll(".debt-stat").forEach((button) => {
       button.addEventListener("click", () => openDebtDialog({ person: button.dataset.debtPerson || "ibro" }));
