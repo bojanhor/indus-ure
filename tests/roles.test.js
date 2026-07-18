@@ -19,6 +19,7 @@ const {
   entryForUserRole,
   defaultHourlyRateForUser,
   normalizeDb,
+  normalizePayroll,
   payrollForUser,
   payrollLockForTodos,
   payrollPeriodEnded,
@@ -372,6 +373,17 @@ test("obračun naredi nespremenljiv posnetek ur posameznega delavca", () => {
   assert.equal(payrollLockForTodos(db, [db.todos[1]])?.id, "p-1");
   assert.deepEqual(payrollForUser(db, db.users.ibro).map((payroll) => payroll.id), ["p-1"]);
   assert.equal(payrollForUser(db, db.users.bojan).length, 1);
+});
+test("delna izplačila se seštejejo in zmanjšajo preostanek", () => {
+  const db = { users: { ibro: { id: "ibro" } } };
+  const payroll = normalizePayroll({
+    workerId: "ibro", from: "2026-07-01", to: "2026-07-31", status: "confirmed",
+    lines: [{ todoId: "t1", minutes: 60, hourlyRate: 20 }],
+    payments: [{ id: "pay-1", amount: 7.5, note: "akontacija" }]
+  }, db);
+  assert.equal(payroll.payoutAmount, 20);
+  assert.equal(payroll.paidAmount, 7.5);
+  assert.equal(payroll.remainingAmount, 12.5);
 });
 test("obračun podpira poljubno obdobje in prišteje založen denar", () => {
   const db = {

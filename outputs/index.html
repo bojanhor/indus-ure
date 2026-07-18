@@ -658,6 +658,8 @@
     .billing-period-hint { margin: 0; color: #805f00; font-size: 12px; font-weight: 800; }
     .billing-day-list { display: grid; gap: 9px; }
     .billing-explorer { display: grid; gap: 7px; margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--line); }
+    .billing-payments { display: grid; gap: 6px; }
+    .billing-payment-row { display: flex; justify-content: space-between; gap: 10px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: #f8fbf8; font-size: 13px; }
     .billing-explorer-row { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; text-align: left; align-items: center; padding: 10px; border: 1px solid var(--line); border-radius: 9px; background: #f8fbf8; color: var(--ink); }
     .billing-explorer-row span:last-child { grid-column: 1 / -1; color: var(--muted); font-size: 12px; }
     .billing-day { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; gap: 10px; align-items: center; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--ink); text-align: left; font-weight: 800; }
@@ -2846,6 +2848,7 @@
             <button class="secondary billing-month-step" id="billingNextMonth" type="button" aria-label="Naslednje obdobje">&rsaquo;</button>
           </div>        </div>
         <div class="billing-summary" id="billingSummary"></div>
+        <div class="billing-payments" id="billingPayments"></div>
         <div class="billing-note-panel" id="billingNotePanel">
           <label class="admin-only" for="billingNote">Opomba za delavca
             <textarea id="billingNote" rows="3" placeholder="Npr. pojasnilo obračuna ali dogovor"></textarea>
@@ -2854,6 +2857,7 @@
         </div>
         <div class="billing-actions admin-only" id="billingActions">
                     <button class="secondary" id="billingAddAdvance" type="button">Založil denar</button>
+          <button class="secondary hidden" id="billingAddPayment" type="button">Delno izplačilo</button>
 <button class="primary hidden" id="billingConfirm" type="button">Potrdi obra&#269;un</button>
           <button class="primary hidden" id="billingMarkPaid" type="button">Ozna&#269;i pla&#269;ano</button>
         </div>
@@ -3146,6 +3150,17 @@
           <button type="button" class="secondary" id="cancelTodoDialog">Prekli&#269;i</button>
           <button type="submit" class="primary" id="saveTodoDialog">Shrani</button>
         </div>
+      </div>
+    </form>
+  </dialog>
+  <dialog id="paymentDialog">
+    <form method="dialog" id="paymentForm">
+      <div class="modal-head"><h3>Delno izplačilo</h3><button class="icon-btn" id="closePaymentDialog" type="button" title="Zapri">&times;</button></div>
+      <div class="modal-body">
+        <p class="todo-meta" id="paymentRemaining"></p>
+        <label>Znesek (EUR)<input id="paymentAmount" type="number" min="0.01" step="0.01" inputmode="decimal"></label>
+        <label>Opomba (neobvezno)<textarea id="paymentNote" rows="3" placeholder="Npr. gotovina, nakazilo, akontacija"></textarea></label>
+        <div class="actions"><button class="secondary" id="cancelPaymentDialog" type="button">Prekliči</button><button class="primary" type="submit">Zabeleži izplačilo</button></div>
       </div>
     </form>
   </dialog>
@@ -4389,6 +4404,27 @@
       renderDebtDialog();
     }
 
+    function openPaymentDialog() {
+      const payroll = payrollForBilling(billingWorkerId(), billingRange());
+      if (!payroll) return;
+      const remaining = Number(payroll.remainingAmount ?? (Number(payroll.payoutAmount || payroll.totalAmount || 0) - Number(payroll.paidAmount || 0)));
+      if (remaining <= 0.005) { alert("Ta obračun je že v celoti izplačan."); return; }
+      $("paymentRemaining").textContent = `Preostanek za izplačilo: ${money(remaining)} EUR`;
+      $("paymentAmount").value = "";
+      $("paymentAmount").max = remaining.toFixed(2);
+      $("paymentNote").value = "";
+      $("paymentDialog").showModal();
+    }
+
+    async function savePaymentFromDialog() {
+      const payroll = payrollForBilling(billingWorkerId(), billingRange());
+      if (!payroll) return;
+      const data = await api(`/api/payrolls/${encodeURIComponent(payroll.id)}/payments`, { method: "POST", body: JSON.stringify({ amount: Number($("paymentAmount").value || 0), note: $("paymentNote").value.trim() }) });
+      state.payrolls = data.payrolls || state.payrolls;
+      $("paymentDialog").close();
+      await loadAll();
+      renderBillingView();
+    }
     function advanceProjectOptions() {
       const query = $("advanceProjectSearch")?.value.trim().toLocaleLowerCase("sl") || "";
       return uniqueTodosByEventId(state.todos).filter((todo) => ["execution", "open", "in_progress", "internal"].includes(todo.status)).filter((todo) => !query || `${todo.title} ${todo.client} ${todo.notes}`.toLocaleLowerCase("sl").includes(query)).sort((a, b) => String(a.title).localeCompare(String(b.title), "sl"));
@@ -5625,6 +5661,8 @@
       const advances = useSnapshot ? (payroll.advanceIds || []).map((id) => (state.advances || []).find((item) => item.id === id)).filter(Boolean) : billingAdvances(workerId, range);
       const advanceAmount = useSnapshot ? Number(payroll.advanceAmount || 0) : Number(advances.reduce((sum, item) => sum + Number(item.amount || 0), 0).toFixed(2));
       const payoutAmount = Number((baseTotals.totalAmount + advanceAmount).toFixed(2));
+      const paidAmount = payroll ? Number(payroll.paidAmount || 0) : 0;
+      const remainingAmount = Number((payoutAmount - paidAmount).toFixed(2));
       const stateLabel = payrollStateLabel(payroll, admin);
       $("billingViewTitle").textContent = `Obračun ur · ${worker?.name || "Delavec"}`;
       $("billingSubtitle").textContent = billingRangeLabel(range);
@@ -5634,13 +5672,17 @@
       if (document.activeElement !== noteInput) noteInput.value = noteText;
       noteInput.disabled = Boolean(payroll && ["archiving", "confirmed", "paid"].includes(payroll.status));
       const noteRead = $("billingNoteRead"); noteRead.textContent = noteText ? `Opomba za delavca: ${noteText}` : ""; noteRead.classList.toggle("hidden", admin || !noteText);
-      $("billingSummary").innerHTML = [[`${baseTotals.hours.toLocaleString("sl-SI", { maximumFractionDigits: 2 })} h`, "Oddelane ure"], [`${money(baseTotals.workAmount)} EUR`, "Delo"], [`${baseTotals.km.toLocaleString("sl-SI", { maximumFractionDigits: 1 })} km · ${money(baseTotals.kmAmount)} EUR`, "Kilometrina"], [`${money(advanceAmount)} EUR`, "Založeno"], [`${money(payoutAmount)} EUR`, "Za izplačilo"]].map(([value, label]) => `<div class="billing-summary-card"><strong>${escapeHtml(value)}</strong><span>${escapeHtml(label)}</span></div>`).join("");
+      $("billingSummary").innerHTML = [[`${baseTotals.hours.toLocaleString("sl-SI", { maximumFractionDigits: 2 })} h`, "Oddelane ure"], [`${money(baseTotals.workAmount)} EUR`, "Delo"], [`${baseTotals.km.toLocaleString("sl-SI", { maximumFractionDigits: 1 })} km · ${money(baseTotals.kmAmount)} EUR`, "Kilometrina"], [`${money(advanceAmount)} EUR`, "Založeno"], [`${money(payoutAmount)} EUR`, "Skupaj za izplačilo"], [`${money(paidAmount)} EUR`, "Že izplačano"], [`${money(remainingAmount)} EUR`, "Preostanek"]].map(([value, label]) => `<div class="billing-summary-card"><strong>${escapeHtml(value)}</strong><span>${escapeHtml(label)}</span></div>`).join("");
+      const paymentsBox = $("billingPayments");
+      const payments = payroll?.payments || [];
+      paymentsBox.innerHTML = payments.length ? `<strong>Izplačila</strong>${payments.map((payment) => `<div class="billing-payment-row"><span>${escapeHtml(formatDateTime(payment.createdAt))}${payment.note ? ` · ${escapeHtml(payment.note)}` : ""}</span><strong>${money(payment.amount)} EUR</strong></div>`).join("")}` : "";
       const readyForConfirmation = !payroll || ["draft", "archiving"].includes(payroll.status);
       const periodEnded = payrollPeriodEnded(range);
       const confirmButton = $("billingConfirm"); const showConfirmation = readyForConfirmation && Boolean(lines.length);
       confirmButton.classList.toggle("hidden", !showConfirmation); confirmButton.disabled = showConfirmation && !periodEnded; confirmButton.textContent = payroll?.status === "archiving" ? "Nadaljuj arhiviranje" : "Potrdi obračun"; confirmButton.title = showConfirmation && !periodEnded ? payrollConfirmationHint(range) : "";
       const periodHint = $("billingPeriodHint"); periodHint.textContent = showConfirmation && !periodEnded ? payrollConfirmationHint(range) : ""; periodHint.classList.toggle("hidden", !(showConfirmation && !periodEnded));
       $("billingMarkPaid").classList.toggle("hidden", payroll?.status !== "confirmed");
+      $("billingAddPayment").classList.toggle("hidden", !admin || !payroll || !["confirmed", "paid"].includes(payroll.status) || remainingAmount <= 0.005);
       $("billingAddAdvance").classList.toggle("hidden", !admin || Boolean(payroll && ["confirmed", "paid"].includes(payroll.status)));
       const list = $("billingDayList"); const activities = billingDisplayActivities(workerId, range, lines);
       if (!activities.length) list.innerHTML = `<div class="billing-empty">V tem obdobju ni zaključenih ur ali malic.</div>`;
@@ -8138,7 +8180,11 @@
     $("billingWorker").addEventListener("change", () => { state.billingWorkerId = $("billingWorker").value; localStorage.setItem(billingWorkerKey, state.billingWorkerId); renderBillingView(); });
     $("billingConfirm").addEventListener("click", () => confirmPayroll().catch((error) => alert(error.message)));
     $("billingMarkPaid").addEventListener("click", () => changePayroll("paid").catch((error) => alert(error.message)));
+    $("billingAddPayment").addEventListener("click", openPaymentDialog);
     $("billingAddAdvance").addEventListener("click", openAdvanceDialog);
+    $("closePaymentDialog").addEventListener("click", () => $("paymentDialog").close());
+    $("cancelPaymentDialog").addEventListener("click", () => $("paymentDialog").close());
+    $("paymentForm").addEventListener("submit", (event) => { event.preventDefault(); savePaymentFromDialog().catch((error) => alert(error.message)); });
     ["billingPrevMonth", "billingNextMonth"].forEach((id) => $(id).addEventListener("click", () => {
       const range = billingRange(); const direction = id === "billingNextMonth" ? 1 : -1;
       const start = parseDate(range.from); const end = parseDate(range.to); const span = Math.round((end - start) / 86400000) + 1;

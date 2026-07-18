@@ -1381,8 +1381,13 @@ function normalizePayroll(input, db) {
   const advanceIds = [...new Set((Array.isArray(input?.advanceIds) ? input.advanceIds : []).map(String).filter(Boolean))];
   const advanceAmount = Number((Number(input?.advanceAmount || 0)).toFixed(2));
   const status = PAYROLL_STATUSES.has(input?.status) ? input.status : "draft";
+  const payments = (Array.isArray(input?.payments) ? input.payments : []).map((payment) => {
+    const amount = nonnegativeNumber(payment?.amount, null, 1_000_000);
+    if (amount === null || amount <= 0) return null;
+    return { id: String(payment?.id || crypto.randomUUID()), amount: Number(amount.toFixed(2)), note: String(payment?.note || "").trim().slice(0, 1_000), createdAt: String(payment?.createdAt || new Date().toISOString()), createdBy: String(payment?.createdBy || "system"), createdByName: String(payment?.createdByName || "") };
+  }).filter(Boolean);
   const createdAt = String(input?.createdAt || new Date().toISOString());
-  return {
+  return finalizePayrollAmounts({
     id: String(input?.id || crypto.randomUUID()),
     workerId,
     month: range.month,
@@ -1394,6 +1399,9 @@ function normalizePayroll(input, db) {
     advanceIds,
     advanceAmount,
     payoutAmount: Number((totals.totalAmount + advanceAmount).toFixed(2)),
+    payments,
+    paidAmount: Number((status === "paid" && payments.length === 0 ? totals.totalAmount + advanceAmount : payments.reduce((sum, payment) => sum + payment.amount, 0)).toFixed(2)),
+    remainingAmount: 0,
     ...totals,
     createdBy: String(input?.createdBy || "system"),
     createdByName: String(input?.createdByName || ""),
@@ -1407,9 +1415,14 @@ function normalizePayroll(input, db) {
     paidAt: String(input?.paidAt || ""),
     paidBy: String(input?.paidBy || ""),
     paidByName: String(input?.paidByName || "")
-  };
+  });
 }
 
+function finalizePayrollAmounts(payroll) {
+  payroll.paidAmount = Math.min(payroll.payoutAmount, Math.max(0, Number(payroll.paidAmount || 0)));
+  payroll.remainingAmount = Number((payroll.payoutAmount - payroll.paidAmount).toFixed(2));
+  return payroll;
+}
 function buildPayrollSnapshot(db, workerId, rangeInput, previous = {}, note = undefined) {
   const range = payrollRange(rangeInput);
   if (!range) return null;
@@ -2867,6 +2880,50 @@ async function handleApi(req, res) {
       sendJson(res, 200, { payrolls: payrollForUser(db, user), payroll });
       return;
     }
+    const payrollPaymentMatch = url.pathname.match(/^\/api\/payrolls\/([^/]+)\/payments$/);
+    if (payrollPaymentMatch && req.method === "POST") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      if (user.role !== "boss") {
+        sendJson(res, 403, { error: "Samo šef lahko evidentira izplačilo." });
+        return;
+      }
+      const body = await readBody(req);
+      const amount = nonnegativeNumber(body.amount, null, 1_000_000);
+      const note = String(body.note || "").trim().slice(0, 1_000);
+      if (amount === null || amount <= 0) {
+        sendJson(res, 400, { error: "Vnesi znesek delnega izplačila." });
+        return;
+      }
+      const db = await readDbAsync();
+      const index = db.payrolls.findIndex((payroll) => payroll.id === decodeURIComponent(payrollPaymentMatch[1]));
+      if (index < 0) {
+        sendJson(res, 404, { error: "Obračun ne obstaja." });
+        return;
+      }
+      const current = normalizePayroll(db.payrolls[index], db);
+      if (!current || !["confirmed", "paid"].includes(current.status)) {
+        sendJson(res, 409, { error: "Delno izplačilo je mogoče vpisati samo pri potrjenem obračunu." });
+        return;
+      }
+      if (amount > current.remainingAmount + 0.005) {
+        sendJson(res, 409, { error: `Preostanek za izplačilo je ${current.remainingAmount.toFixed(2)} EUR.` });
+        return;
+      }
+      const now = new Date().toISOString();
+      const payments = [...current.payments, { id: crypto.randomUUID(), amount, note, createdAt: now, createdBy: user.id, createdByName: user.name }];
+      const next = normalizePayroll({ ...current, payments, status: "confirmed", updatedAt: now, updatedBy: user.id, updatedByName: user.name }, db);
+      if (next.remainingAmount <= 0.005) {
+        next.status = "paid";
+        next.paidAt = now;
+        next.paidBy = user.id;
+        next.paidByName = user.name;
+      }
+      db.payrolls[index] = next;
+      await writeDbAsync(db);
+      sendJson(res, 201, { payroll: next, payrolls: payrollForUser(db, user) });
+      return;
+    }
     const payrollMatch = url.pathname.match(/^\/api\/payrolls\/([^/]+)$/);
     if (payrollMatch && req.method === "PUT") {
       const user = await requireUser(req, res);
@@ -2940,6 +2997,7 @@ async function handleApi(req, res) {
         payroll = normalizePayroll({
           ...current,
           status: "paid",
+          payments: current.remainingAmount > 0.005 ? [...(current.payments || []), { id: crypto.randomUUID(), amount: current.remainingAmount, note: "Celotno izplačilo", createdAt: now, createdBy: user.id, createdByName: user.name }] : current.payments,
           updatedBy: user.id,
           updatedByName: user.name,
           updatedAt: now,
