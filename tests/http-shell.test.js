@@ -6,6 +6,10 @@ const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
 
+test("Postgres store singleton is initialized before database startup", async () => {
+  const serverSource = await fs.readFile(path.join(__dirname, "..", "outputs", "server.js"), "utf8");
+  assert.match(serverSource, /let pgStore = null;/);
+});
 function request(port, pathname) {
   return new Promise((resolve, reject) => {
     const request = http.get({ host: "127.0.0.1", port, path: pathname }, (response) => {

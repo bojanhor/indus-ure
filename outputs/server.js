@@ -41,6 +41,7 @@ const ALERT_EMAIL_TO = String(process.env.ALERT_EMAIL_TO || "bojan@indus.si").tr
 const MONITOR_INTERVAL_MS = Math.max(60_000, Number(process.env.MONITOR_INTERVAL_MS || 5 * 60_000));
 const MONITOR_MAX_RSS_MB = Math.max(256, Number(process.env.MONITOR_MAX_RSS_MB || 1_800));
 let pgPool = null;
+let pgStore = null;
 let pgReady = null;
 let mutationQueue = Promise.resolve();
 let monitorTimer = null;
