@@ -1,0 +1,11 @@
+{
+  "name": "INDUS URE",
+  "short_name": "INDUS URE",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f6f7f2",
+  "theme_color": "#1f6f8b",
+  "icons": [
+    { "src": "/assets/indus-icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

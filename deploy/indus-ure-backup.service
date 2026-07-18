@@ -1,16 +1,20 @@
 [Unit]
-Description=Daily PostgreSQL backup for INDUS URE
-After=postgresql.service
+Description=Encrypted PostgreSQL and media backup for INDUS URE
+After=network-online.target postgresql.service indus-ure.service
+Wants=network-online.target
 Requires=postgresql.service
 
 [Service]
 Type=oneshot
-User=postgres
-Group=postgres
+User=indus-ure
+Group=indus-ure
+WorkingDirectory=/opt/indus-ure/current
+EnvironmentFile=/etc/indus-ure.env
 ExecStart=/usr/local/sbin/indus-ure-backup
 UMask=0077
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=true
 ProtectSystem=strict
-ReadWritePaths=/var/backups/indus-ure
+ReadWritePaths=/var/lib/indus-ure /var/backups/indus-ure
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6

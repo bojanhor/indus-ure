@@ -4,6 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>INDUS URE</title>
+  <meta name="theme-color" content="#1f6f8b">
+  <link rel="manifest" href="/manifest.webmanifest">
   <style>
     :root {
       --bg: #f6f7f2;
@@ -2768,14 +2770,15 @@
               <button class="menu-action view-menu-action" id="billingMenuBtn" type="button">Obra&#269;uni</button>
               <button class="menu-action view-menu-action admin-only" id="clientsMenuBtn" type="button">Stranke</button>
               <span class="tools-menu-label">Podatki in sinhronizacija</span>
-              <button class="menu-action" id="googleCalendar" type="button">Google Calendar sync</button>
               <button class="menu-action hidden" id="googleDrive" type="button">Google Dokumenti in preglednice</button>
-              <button class="menu-action admin-only" id="syncClientsBtn" type="button">Sync strank iz Google Sheets</button>
+              <button class="menu-action admin-only" id="notificationsBtn" type="button">Sistemska opozorila <span id="notificationsCount"></span></button>
               <span class="tools-menu-label admin-only">Napredno</span>
               <button class="menu-action admin-only" id="workerBillingBtn" type="button">Privzete urne postavke</button>
               <button class="menu-action admin-only" id="kmRatesBtn" type="button">Tarife kilometrine</button>
               <button class="menu-action admin-only" id="exportCsv" type="button">Izvoz CSV</button>
-              <button class="menu-action admin-only" id="downloadBackup" type="button">Prenesi varnostno kopijo</button>
+              <button class="menu-action admin-only" id="downloadBackup" type="button">Prenesi varnostno kopijo (ZIP)</button>
+              <button class="menu-action admin-only" id="restoreBackup" type="button">Obnovi iz ZIP kopije</button>
+              <input class="hidden-file" id="restoreBackupFile" type="file" accept="application/zip,.zip">
               <button class="menu-action logout-action" id="logoutBtn" type="button">Odjava</button>
             </div>
           </details>
@@ -2873,7 +2876,6 @@
             </select>
           </label>
           <button class="primary" id="addClientBtn" type="button">Dodaj stranko</button>
-          <button class="secondary" id="syncClientsFromTabBtn" type="button">Sync stranke</button>
         </div>
         <div class="todo-head">
           <strong>Vse stranke</strong>
@@ -3340,6 +3342,17 @@
     </form>
   </dialog>
 
+  <dialog id="notificationsDialog">
+    <form method="dialog">
+      <div class="modal-head">
+        <h3>Sistemska opozorila</h3>
+        <button class="icon-btn" id="closeNotifications" type="button" title="Zapri">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="notificationsList" class="debt-list"></div>
+      </div>
+    </form>
+  </dialog>
   <dialog id="debtDialog">
     <form method="dialog" id="debtForm">
       <div class="modal-head">
@@ -3375,7 +3388,6 @@
   </dialog>
 
   <script>
-    const tokenKey = "indus-ure-token";
     const googleEmailKey = "indus-ure-google-email";
     const automaticLoginAttemptKey = "indus-ure-auto-login-at";
     const automaticLoginRetryDelayMs = 60_000;
@@ -3487,7 +3499,6 @@
       users: [],
       workerBilling: [],
       workContext: "",
-      googleSyncing: false,
       todoSortMode: "manual",
       searchReturnState: null,
       sharedDataRefreshing: false,
@@ -3498,7 +3509,13 @@
       todoClientSuggestions: [],
       todoClientSuggestionIndex: -1,
       expandedTodoIds: new Set(),
-      token: localStorage.getItem(tokenKey) || ""
+      token: "",
+      csrfToken: "",
+      sessionExpiresAt: 0,
+      offlineMode: false,
+      syncRevision: 0,
+      lastServerSyncAt: "",
+      notifications: []
     };
 
     const $ = (id) => document.getElementById(id);
@@ -3511,6 +3528,7 @@
 
     function finishTodoMutation() {
       state.todoMutationPending = Math.max(0, state.todoMutationPending - 1);
+      saveOfflineSnapshotSoon();
     }
 
     function isCurrentTodoRevision(revision) {
@@ -3557,8 +3575,8 @@
     function recoverExpiredSession() {
       if (sessionRecoveryPromise) return sessionRecoveryPromise;
       sessionRecoveryPromise = (async () => {
-        localStorage.removeItem(tokenKey);
         state.token = "";
+        state.csrfToken = "";
         const lastAttempt = Number(sessionStorage.getItem(automaticLoginAttemptKey) || 0);
         if (lastAttempt && Date.now() - lastAttempt < automaticLoginRetryDelayMs) {
           throw new Error("Samodejna ponovna prijava ni uspela. Prijavi se z Googlom.");
@@ -3575,64 +3593,186 @@
     }
 
     const offlineTodoDbName = "indus-ure-offline";
+    const offlineDbVersion = 3;
+    const offlineSnapshotStore = "snapshots";
+    let offlineSnapshotTimer = 0;
+
     function offlineTodoDb() {
       return new Promise((resolve, reject) => {
-        const request = indexedDB.open(offlineTodoDbName, 1);
-        request.onupgradeneeded = () => request.result.createObjectStore("todoOps", { keyPath: "id", autoIncrement: true });
+        const request = indexedDB.open(offlineTodoDbName, offlineDbVersion);
+        request.onupgradeneeded = () => {
+          const database = request.result;
+          if (!database.objectStoreNames.contains("todoOps")) database.createObjectStore("todoOps", { keyPath: "id", autoIncrement: true });
+          if (!database.objectStoreNames.contains(offlineSnapshotStore)) database.createObjectStore(offlineSnapshotStore, { keyPath: "userId" });
+        };
         request.onsuccess = () => resolve(request.result);
         request.onerror = () => reject(request.error);
       });
     }
+
+    function offlineStoreRequest(storeName, mode, operation) {
+      return offlineTodoDb().then((database) => new Promise((resolve, reject) => {
+        const transaction = database.transaction(storeName, mode);
+        const store = transaction.objectStore(storeName);
+        const request = operation(store);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      }));
+    }
+
     async function offlineTodoOps() {
-      const db = await offlineTodoDb();
-      return new Promise((resolve, reject) => {
-        const request = db.transaction("todoOps", "readonly").objectStore("todoOps").getAll();
-        request.onsuccess = () => resolve(request.result || []);
-        request.onerror = () => reject(request.error);
-      });
+      return offlineStoreRequest("todoOps", "readonly", (store) => store.getAll());
     }
+
     async function putOfflineTodoOp(operation) {
-      const db = await offlineTodoDb();
-      return new Promise((resolve, reject) => {
-        const request = db.transaction("todoOps", "readwrite").objectStore("todoOps").put(operation);
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () => reject(request.error);
-      });
+      return offlineStoreRequest("todoOps", "readwrite", (store) => store.put(operation));
     }
+
     async function removeOfflineTodoOp(id) {
-      const db = await offlineTodoDb();
-      return new Promise((resolve, reject) => {
-        const request = db.transaction("todoOps", "readwrite").objectStore("todoOps").delete(id);
-        request.onsuccess = () => resolve();
-        request.onerror = () => reject(request.error);
-      });
+      return offlineStoreRequest("todoOps", "readwrite", (store) => store.delete(id));
     }
-    function isNetworkError(error) { return !navigator.onLine || !error?.status; }
+
+    async function clearOfflineUserData(userId) {
+      const id = String(userId || "");
+      if (!id) return;
+      const operations = await offlineTodoOps();
+      await Promise.all(operations
+        .filter((operation) => operation.userId === id)
+        .map((operation) => removeOfflineTodoOp(operation.id)));
+      await offlineStoreRequest(offlineSnapshotStore, "readwrite", (store) => store.delete(id));
+      if (localStorage.getItem("indus-ure-offline-user") === id) localStorage.removeItem("indus-ure-offline-user");
+    }
+
+    function offlineSnapshotTodo(todo) {
+      const copy = JSON.parse(JSON.stringify(todo || {}));
+      copy.photos = (copy.photos || []).map((photo) => {
+        const attachment = { ...photo };
+        const hadPrivateFile = Boolean(attachment.data || attachment.url || attachment.thumbnailData || attachment.thumbnailUrl);
+        delete attachment.data;
+        delete attachment.url;
+        delete attachment.thumbnailData;
+        delete attachment.thumbnailUrl;
+        if (hadPrivateFile) attachment.offlineUnavailable = true;
+        return attachment;
+      });
+      return copy;
+    }
+
+    async function saveOfflineSnapshot() {
+      if (!state.user?.id || !Number.isFinite(Number(state.sessionExpiresAt)) || Number(state.sessionExpiresAt) <= Date.now()) return;
+      const snapshot = {
+        userId: state.user.id,
+        sessionExpiresAt: Number(state.sessionExpiresAt),
+        savedAt: new Date().toISOString(),
+        user: JSON.parse(JSON.stringify(state.user)),
+        users: JSON.parse(JSON.stringify(state.users || [])),
+        entries: JSON.parse(JSON.stringify(state.entries || [])),
+        todos: (state.todos || []).map(offlineSnapshotTodo),
+        debts: JSON.parse(JSON.stringify(state.debts || [])),
+        clients: JSON.parse(JSON.stringify(state.clients || [])),
+        settings: JSON.parse(JSON.stringify(state.settings || {})),
+        billingLocks: JSON.parse(JSON.stringify(state.billingLocks || [])),
+        payrolls: JSON.parse(JSON.stringify(state.payrolls || [])),
+        workerBilling: JSON.parse(JSON.stringify(state.workerBilling || [])),
+        syncRevision: Number(state.syncRevision || 0)
+      };
+      await offlineStoreRequest(offlineSnapshotStore, "readwrite", (store) => store.put(snapshot));
+      localStorage.setItem("indus-ure-offline-user", state.user.id);
+    }
+
+    function saveOfflineSnapshotSoon() {
+      if (offlineSnapshotTimer) clearTimeout(offlineSnapshotTimer);
+      offlineSnapshotTimer = window.setTimeout(() => {
+        offlineSnapshotTimer = 0;
+        saveOfflineSnapshot().catch(() => {});
+      }, 250);
+    }
+
+    async function usableOfflineSnapshot() {
+      const userId = localStorage.getItem("indus-ure-offline-user") || "";
+      const snapshots = userId
+        ? [await offlineStoreRequest(offlineSnapshotStore, "readonly", (store) => store.get(userId))]
+        : await offlineStoreRequest(offlineSnapshotStore, "readonly", (store) => store.getAll());
+      return snapshots
+        .filter((snapshot) => snapshot && Number(snapshot.sessionExpiresAt || 0) > Date.now())
+        .sort((a, b) => String(b.savedAt || "").localeCompare(String(a.savedAt || "")))[0] || null;
+    }
+
+    async function activateOfflineSnapshot() {
+      const snapshot = await usableOfflineSnapshot();
+      if (!snapshot) return false;
+      state.user = snapshot.user;
+      state.users = snapshot.users || [snapshot.user];
+      state.entries = snapshot.entries || [];
+      state.todos = snapshot.todos || [];
+      state.debts = snapshot.debts || [];
+      state.clients = snapshot.clients || [];
+      state.settings = snapshot.settings || state.settings;
+      state.billingLocks = snapshot.billingLocks || [];
+      state.payrolls = snapshot.payrolls || [];
+      state.workerBilling = snapshot.workerBilling || [];
+      state.sessionExpiresAt = Number(snapshot.sessionExpiresAt || 0);
+      state.syncRevision = Number(snapshot.syncRevision || 0);
+      state.token = "offline";
+      state.csrfToken = "";
+      state.offlineMode = true;
+      initializeWorkContext();
+      showApp();
+      refreshClientList();
+      render();
+      await updateOfflineSyncNotice();
+      return true;
+    }
+
+    function isNetworkError(error) {
+      return !navigator.onLine || Number(error?.status || 0) === 0 || /network|failed to fetch/i.test(String(error?.message || ""));
+    }
+
     async function updateOfflineSyncNotice() {
       const notice = $("offlineSyncNotice");
       if (!state.user) return;
       const ops = (await offlineTodoOps()).filter((item) => item.userId === state.user.id);
       const conflicts = ops.filter((item) => item.conflict).length;
-      notice.classList.toggle("hidden", !ops.length);
+      const pendingAttachments = ops.filter((item) => (item.todo?.photos || []).some((photo) => photo.data)).length;
+      const shouldShow = state.offlineMode || ops.length > 0;
+      notice.classList.toggle("hidden", !shouldShow);
       notice.classList.toggle("conflict", Boolean(conflicts));
-      notice.textContent = conflicts
-        ? `${conflicts} sprememba potrebuje pregled povezave.`
-        : `${ops.length} sprememba ${ops.length === 1 ? "čaka" : "čaka"} na povezavo.`;
+      const localPrefix = state.offlineMode
+        ? `Brez povezave. Prikaz je iz ${formatDateTime((await usableOfflineSnapshot())?.savedAt || new Date().toISOString())}. `
+        : "";
+      if (conflicts) {
+        notice.textContent = `${localPrefix}${conflicts} sprememba potrebuje pregled po povezavi.`;
+      } else if (ops.length) {
+        notice.textContent = `${localPrefix}${ops.length} sprememba${ops.length === 1 ? "" : "e"} čaka na povezavo${pendingAttachments ? "; med njimi so tudi priloge" : ""}.`;
+      } else if (state.offlineMode) {
+        notice.textContent = `${localPrefix}Nove spremembe opravil, ur in prilog bodo poslane samodejno, ko se povezava vrne.`;
+      }
     }
+
     async function queueOfflineTodo(operation) {
       const ops = await offlineTodoOps();
       const existing = ops.find((item) => item.userId === state.user.id && item.todoId === operation.todoId && !item.conflict);
       if (existing) {
-        if (existing.kind === "create") existing.todo = operation.todo;
-        else Object.assign(existing, operation);
+        if (existing.kind === "create") {
+          existing.todo = { ...(operation.todo || {}) };
+          delete existing.todo.id;
+        } else {
+          Object.assign(existing, operation);
+        }
+        existing.hasAttachments = Boolean((existing.todo?.photos || []).some((photo) => photo.data));
         await putOfflineTodoOp(existing);
       } else {
-        await putOfflineTodoOp({ ...operation, userId: state.user.id, createdAt: new Date().toISOString() });
+        const queued = { ...operation, userId: state.user.id, createdAt: new Date().toISOString() };
+        if (queued.kind === "create") delete queued.todo?.id;
+        queued.hasAttachments = Boolean((queued.todo?.photos || []).some((photo) => photo.data));
+        await putOfflineTodoOp(queued);
       }
+      saveOfflineSnapshotSoon();
       await updateOfflineSyncNotice();
     }
+
     async function flushOfflineTodoQueue() {
-      if (state.offlineTodoSyncing || !state.user || !state.token || !navigator.onLine) return;
+      if (state.offlineTodoSyncing || !state.user || !state.token || state.offlineMode || !navigator.onLine) return;
       state.offlineTodoSyncing = true;
       try {
         const ops = (await offlineTodoOps()).filter((item) => item.userId === state.user.id && !item.conflict).sort((a, b) => a.id - b.id);
@@ -3645,31 +3785,52 @@
               try {
                 if (op.kind === "update") await api(`/api/todos/${op.todoId}`, { method: "PUT", body: JSON.stringify({ ...op.todo, baseUpdatedAt: op.baseUpdatedAt, editLockToken: lock.lockToken }) });
                 else await api(`/api/todos/${op.todoId}`, { method: "DELETE", body: JSON.stringify({ baseUpdatedAt: op.baseUpdatedAt, editLockToken: lock.lockToken }) });
-              } finally { await api(todoLockUrl(op.todoId), { method: "DELETE", body: JSON.stringify({ lockToken: lock.lockToken }) }).catch(() => {}); }
+              } finally {
+                await api(todoLockUrl(op.todoId), { method: "DELETE", body: JSON.stringify({ lockToken: lock.lockToken }) }).catch(() => {});
+              }
             }
             await removeOfflineTodoOp(op.id);
           } catch (error) {
             if (isNetworkError(error)) break;
-            if (error.status === 409) { op.conflict = true; await putOfflineTodoOp(op); }
+            if (error.status === 409) {
+              op.conflict = true;
+              await putOfflineTodoOp(op);
+            }
           }
         }
-        await loadTodos();
+        if (navigator.onLine && !state.offlineMode) await loadTodos();
       } finally {
         state.offlineTodoSyncing = false;
+        saveOfflineSnapshotSoon();
         await updateOfflineSyncNotice();
       }
     }
     async function api(path, options = {}) {
       const { recoverSession = true, ...requestOptions } = options;
+      if (state.offlineMode && !navigator.onLine) {
+        const error = new Error("Ni povezave s strežnikom.");
+        error.status = 0;
+        throw error;
+      }
       const headers = {
         "Content-Type": "application/json",
         ...(requestOptions.headers || {})
       };
-      const hadSession = Boolean(state.token);
-      if (hadSession) headers.Authorization = "Bearer " + state.token;
-      const response = await fetch(path, { ...requestOptions, headers });
+      const unsafe = !["GET", "HEAD", "OPTIONS"].includes(String(requestOptions.method || "GET").toUpperCase());
+      if (unsafe && state.csrfToken) headers["X-CSRF-Token"] = state.csrfToken;
+      const hadSession = Boolean(state.token && state.token !== "offline");
+      let response;
+      try {
+        response = await fetch(path, { ...requestOptions, headers, credentials: "same-origin" });
+      } catch (cause) {
+        const error = new Error("Povezava s strežnikom ni uspela.");
+        error.status = 0;
+        error.cause = cause;
+        throw error;
+      }
       const text = await response.text();
-      const data = text ? JSON.parse(text) : null;
+      let data = null;
+      try { data = text ? JSON.parse(text) : null; } catch { data = null; }
       if (response.status === 401 && hadSession && recoverSession) await recoverExpiredSession();
       if (!response.ok) {
         const error = new Error(data?.error || "Napaka pri povezavi.");
@@ -3685,24 +3846,58 @@
         $("serverWarning").classList.remove("hidden");
         return;
       }
-      if (!state.token) return;
       try {
-        const me = await api("/api/me");
+        const me = await api("/api/me", { recoverSession: false });
+        state.token = "cookie";
+        state.csrfToken = me.csrfToken || "";
+        state.sessionExpiresAt = Number(me.sessionExpiresAt || 0);
+        state.syncRevision = Number(me.syncRevision || 0);
+        state.lastServerSyncAt = new Date().toISOString();
+        state.offlineMode = false;
         state.user = me.user;
+        localStorage.setItem(googleEmailKey, state.user.email || "");
+        localStorage.setItem("indus-ure-offline-user", state.user.id || "");
         const availableUsers = (await api("/api/users")).users;
         state.users = [...new Map([...availableUsers, state.user].map((user) => [user.id, user])).values()];
         initializeWorkContext();
         showApp();
         await loadAll();
+        await refreshNotifications();
         await updateOfflineSyncNotice();
         await flushOfflineTodoQueue();
-        syncGoogle(false);
-      } catch {
-        localStorage.removeItem(tokenKey);
+      } catch (error) {
+        const openedOffline = isNetworkError(error) ? await activateOfflineSnapshot().catch(() => false) : false;
+        if (openedOffline) return;
         state.token = "";
+        state.csrfToken = "";
+        state.offlineMode = false;
       }
     }
-
+    async function reconnectAfterOffline() {
+      if (!state.user || !navigator.onLine) return;
+      if (!state.offlineMode) {
+        await flushOfflineTodoQueue();
+        return;
+      }
+      try {
+        const me = await api("/api/me", { recoverSession: false });
+        state.token = "cookie";
+        state.csrfToken = me.csrfToken || "";
+        state.sessionExpiresAt = Number(me.sessionExpiresAt || 0);
+        state.syncRevision = Number(me.syncRevision || 0);
+        state.lastServerSyncAt = new Date().toISOString();
+        state.user = me.user;
+        state.offlineMode = false;
+        const directory = await api("/api/users");
+        state.users = [...new Map([...(directory.users || []), state.user].map((user) => [user.id, user])).values()];
+        initializeWorkContext();
+        await loadAll();
+        await flushOfflineTodoQueue();
+        await updateOfflineSyncNotice();
+      } catch (error) {
+        if (error.status === 401) recoverExpiredSession().catch(() => {});
+      }
+    }
     function loggedInHistoryState(value) {
       const current = history.state && typeof history.state === "object" ? history.state : {};
       return { ...current, [loggedInHistoryStateKey]: value };
@@ -3922,9 +4117,6 @@
       $("newTodoButton").classList.toggle("hidden", admin);
       $("writeHoursButton").classList.toggle("hidden", admin);
       document.querySelectorAll(".admin-entry-field").forEach((element) => element.classList.toggle("hidden", !admin));
-      const canSyncOwnGoogle = admin || activeWorkerId() === state.user?.id;
-      $("googleCalendar").classList.toggle("hidden", !canSyncOwnGoogle);
-      $("googleCalendar").textContent = admin ? `Google sync (${state.user?.name || "sef"})` : "Google sync";
       $("googleDrive").classList.toggle("hidden", String(state.user?.email || "").toLowerCase() !== "bojan@indus.si");
     }
 
@@ -3967,7 +4159,7 @@
       state.entries = data.entries;
       refreshClientList();
       render();
-      syncGoogle(false);
+      saveOfflineSnapshotSoon();
     }
 
     async function loadTodos() {
@@ -3978,7 +4170,7 @@
       state.todos = data.todos;
       refreshClientList();
       render();
-      syncGoogle(false);
+      saveOfflineSnapshotSoon();
     }
 
     async function loadAll() {
@@ -4004,8 +4196,10 @@
       state.billingLocks = settings.billingLocks || [];
       state.workerBilling = workerBilling.workers || [];
       state.payrolls = payrolls.payrolls || [];
+      state.offlineMode = false;
       refreshClientList();
       render();
+      saveOfflineSnapshotSoon();
     }
 
     function uiIsBeingEdited() {
@@ -4013,11 +4207,37 @@
       return Boolean(document.querySelector("dialog[open]") || active?.matches('input, textarea, select, [contenteditable="true"]'));
     }
 
+    async function checkServerChanges() {
+      const headers = {};
+      if (state.syncRevision) headers["If-None-Match"] = `"indus-${state.syncRevision}"`;
+      let response;
+      try {
+        response = await fetch("/api/sync-state", { headers, credentials: "same-origin" });
+      } catch {
+        return;
+      }
+      if (response.status === 304) {
+        state.lastServerSyncAt = new Date().toISOString();
+        return;
+      }
+      if (response.status === 401) {
+        await recoverExpiredSession();
+        return;
+      }
+      if (!response.ok) return;
+      const data = await response.json();
+      if (data.userId !== state.user?.id) return;
+      const changed = Number(data.revision || 0) !== Number(state.syncRevision || 0);
+      state.syncRevision = Number(data.revision || 0);
+      state.lastServerSyncAt = data.serverTime || new Date().toISOString();
+      if (changed) await loadAll();
+    }
+
     async function autoRefreshSharedData() {
-      if (!state.token || !state.user || document.visibilityState !== "visible" || state.sharedDataRefreshing || uiIsBeingEdited()) return;
+      if (!state.token || !state.user || state.offlineMode || document.visibilityState !== "visible" || state.sharedDataRefreshing || uiIsBeingEdited()) return;
       state.sharedDataRefreshing = true;
       try {
-        await loadAll();
+        await checkServerChanges();
       } catch {} finally {
         state.sharedDataRefreshing = false;
       }
@@ -4029,17 +4249,6 @@
       renderReport();
       renderBillingView();
     }
-    async function syncClients() {
-      const data = await api("/api/clients/sync", { method: "POST", body: JSON.stringify({}) });
-      state.clients = data.clients || state.clients;
-      refreshClientList();
-      renderSearch();
-      renderReport();
-      renderClients();
-      const problems = Number(data.missingTax || 0) + Number(data.duplicateTax || 0);
-      alert(`Sync strank koncan. Iz Google Sheets prebrano: ${data.total || 0}, uporabnih z enolicno davcno: ${data.usable || 0}.${problems ? ` Popraviti je treba ${problems} vrstic brez davcne ali s podvojeno davcno.` : ""}`);
-    }
-
     async function lockCurrentReportRange() {
       if (!confirm(`Zaklenem obdobje ${$("reportFrom").value} - ${$("reportTo").value} kot obracunano? Ibro potem ne bo mogel spreminjati ur in kilometrov v tem obdobju.`)) return;
       const data = await api("/api/billing-locks", {
@@ -4233,8 +4442,7 @@
           refreshClientList();
           render();
         }
-        syncGoogle(false);
-      } catch (error) {
+        } catch (error) {
         if (isNetworkError(error)) {
           const deleted = previousTodos.find((todo) => todo.id === id);
           if (deleted?.id?.startsWith("offline-")) {
@@ -4357,7 +4565,7 @@
           label: normalizeText(name) === normalizeText(alias) ? "" : name
         });
       };
-      // State vsebuje kanonicne zapise iz Sheetsa; ostali zapisi dopolnijo le stare/ad-hoc stranke.
+      // State vsebuje lokalne kanonicne zapise strank; ostali zapisi dopolnijo le stare ali ad-hoc stranke.
       state.clients.forEach(add);
       allClientRecords().forEach(add);
       return [...suggestions.values()];
@@ -5416,7 +5624,7 @@
       const resuming = payroll?.status === "archiving";
       const message = resuming
         ? "Arhiviranje je bilo prekinjeno. Nadaljujem varno arhiviranje istega obračuna?"
-        : "Potrdim obračun? Zaključeni vnosi ur se zaklenejo, varno premaknejo v arhivski Google koledar delavca in izginejo iz aktivnega koledarja.";
+        : "Potrdim obračun? Zaključeni vnosi ur se zaklenejo, varno premaknejo v interni arhiv in izginejo iz aktivnega koledarja.";
       if (!confirm(message)) return;
       if (payroll) {
         await changePayroll("confirm", true, note);
@@ -5435,7 +5643,7 @@
       const payroll = payrollForBilling(billingWorkerId(), $("billingMonth").value);
       if (!payroll) return;
       const messages = {
-        confirm: "Potrdim obračun? Ure in postavke se zaklenejo, dogodki pa se premaknejo v arhivski Google koledar delavca.",
+        confirm: "Potrdim obračun? Ure in postavke se zaklenejo, dogodki pa se premaknejo v interni arhiv delavca.",
         paid: "Označim obračun kot plačan?",
         reopen: "Ponovno odprem obračun? Ure bo mogoče znova popravljati.",
         delete: "Izbrišem osnutek obračuna? Opravljenih ur ne bom izbrisal."
@@ -5551,11 +5759,8 @@
       $("newClientCountry").value = "Slovenija";
       $("newClientVatPayer").value = "false";
       renderClients();
-      if (data.sheetWrite?.action === "pending") {
-        alert("Ad-hoc stranka je shranjena. Tajnica jo lahko pozneje dopolni.");
-      } else {
-        alert(data.sheetWrite?.action === "updated" ? "Stranka je posodobljena tudi v Google Sheetu." : "Stranka je dodana tudi v Google Sheet Baza Strank.");
-      }
+      alert("Stranka je shranjena v bazo INDUS URE. Tajnica jo lahko pozneje dopolni.");
+
     }
 
     function openClientEditDialog(clientId) {
@@ -5606,11 +5811,8 @@
         vatPayer: $("clientEditVatPayer").value === "true"
       });
       $("clientEditDialog").close();
-      if (data.sheetWrite?.action === "pending") {
-        alert("Spremembe so shranjene lokalno; stranka še nima davčne za zapis v Google Sheet.");
-      } else {
-        alert("Spremembe stranke so shranjene tudi v Google Sheet.");
-      }
+      alert("Spremembe stranke so shranjene v bazi INDUS URE.");
+
     }
     function todoHasExpandedDetails(todo) {
       return Boolean(
@@ -5747,13 +5949,22 @@
       });
     }
 
+    function attachmentSource(photo) {
+      return String(photo?.data || photo?.url || "");
+    }
+
+    function attachmentThumbnailSource(photo) {
+      return String(photo?.thumbnailData || photo?.thumbnailUrl || attachmentSource(photo));
+    }
+
     function isPdfAttachment(photo) {
-      return String(photo?.data || "").startsWith("data:application/pdf;base64,");
+      return String(photo?.mimeType || "").toLowerCase() === "application/pdf"
+        || attachmentSource(photo).startsWith("data:application/pdf;base64,");
     }
 
     function pdfThumbnailMarkup(photo, showBadge = false) {
-      const thumbnail = String(photo?.thumbnailData || "");
-      if (!thumbnail.startsWith("data:image/")) return "PDF";
+      const thumbnail = attachmentThumbnailSource(photo);
+      if (!thumbnail) return "PDF";
       return `<img src="${escapeHtml(thumbnail)}" alt="Predogled prve strani PDF">${showBadge ? `<span class="pdf-thumbnail-badge">PDF</span>` : ""}`;
     }
 
@@ -5808,7 +6019,7 @@
     function openAttachmentPreview(photo, context = {}) {
       if (isPdfAttachment(photo)) {
         const link = document.createElement("a");
-        link.href = photo.data;
+        link.href = attachmentSource(photo);
         link.target = "_blank";
         link.rel = "noopener noreferrer";
         document.body.appendChild(link);
@@ -5832,7 +6043,7 @@
       if (!dialog.open) dialog.showModal();
 
       image.onload = () => requestAnimationFrame(fitAttachmentPreview);
-      image.src = photo.data;
+      image.src = attachmentSource(photo);
       if (image.complete) requestAnimationFrame(fitAttachmentPreview);
     }
     function drawPhotoEditorStroke(context, stroke) {
@@ -6080,7 +6291,7 @@
         requestAnimationFrame(fitPhotoEditorZoom);
       };
       image.onerror = () => alert("Slike ni bilo mogoce odpreti v urejevalniku.");
-      image.src = photo.data;
+      image.src = attachmentSource(photo);
     }
 
     function finishPhotoEditorStroke() {
@@ -6169,7 +6380,7 @@
       return `<div class="todo-photos-inline">${todo.photos.map((photo) => {
         const pdf = isPdfAttachment(photo);
         return `<article class="photo-card">
-          ${pdf ? `<a class="todo-pdf-preview" href="${escapeHtml(photo.data)}" target="_blank" rel="noopener noreferrer" aria-label="Odpri PDF ${escapeHtml(photo.name || "Priloga")}">${pdfThumbnailMarkup(photo, true)}</a>` : `<button class="todo-image-preview" type="button" data-photo-id="${escapeHtml(photo.id)}" aria-label="Povecaj sliko ${escapeHtml(photo.name || "Fotografija")}"><img src="${escapeHtml(photo.data)}" alt="${escapeHtml(photo.name || "Fotografija")}"></button>`}
+          ${pdf ? `<a class="todo-pdf-preview" href="${escapeHtml(attachmentSource(photo))}" target="_blank" rel="noopener noreferrer" aria-label="Odpri PDF ${escapeHtml(photo.name || "Priloga")}">${pdfThumbnailMarkup(photo, true)}</a>` : `<button class="todo-image-preview" type="button" data-photo-id="${escapeHtml(photo.id)}" aria-label="Povecaj sliko ${escapeHtml(photo.name || "Fotografija")}"><img src="${escapeHtml(attachmentSource(photo))}" alt="${escapeHtml(photo.name || "Fotografija")}"></button>`}
           <div>
             <strong>${escapeHtml(photo.name || "Priloga")}</strong>
             <span class="todo-meta">dodal: ${escapeHtml(photo.createdByName || "-")}</span>
@@ -6289,7 +6500,7 @@
       list.innerHTML = state.todoDialogPhotos.map((photo) => `
         <div class="todo-form-photo-row">
           <button class="todo-form-attachment-preview" type="button" data-photo-id="${escapeHtml(photo.id)}">
-            <span class="todo-form-attachment-thumb">${isPdfAttachment(photo) ? pdfThumbnailMarkup(photo) : `<img src="${escapeHtml(photo.data)}" alt="">`}</span>
+            <span class="todo-form-attachment-thumb">${isPdfAttachment(photo) ? pdfThumbnailMarkup(photo) : `<img src="${escapeHtml(attachmentSource(photo))}" alt="">`}</span>
             <span>${escapeHtml(photo.name || "Priloga")}</span>
           </button>
           <div class="todo-form-photo-actions">
@@ -6300,10 +6511,25 @@
       `).join("");
     }
 
+    async function attachmentDataForProcessing(photo) {
+      if (photo?.data) return photo.data;
+      const source = attachmentSource(photo);
+      if (!source) return "";
+      const response = await fetch(source, { credentials: "same-origin" });
+      if (!response.ok) throw new Error("Priloge ni bilo mogoce prenesti.");
+      const blob = await response.blob();
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ""));
+        reader.onerror = () => reject(new Error("Priloge ni bilo mogoce prebrati."));
+        reader.readAsDataURL(blob);
+      });
+    }
+
     async function fillMissingPdfThumbnailsForDialog(photos) {
       for (const photo of photos) {
-        if (!isPdfAttachment(photo) || photo.thumbnailData) continue;
-        const thumbnailData = await createPdfThumbnailSafely(photo.data);
+        if (!isPdfAttachment(photo) || photo.thumbnailData || photo.thumbnailUrl) continue;
+        const thumbnailData = await createPdfThumbnailSafely(await attachmentDataForProcessing(photo));
         if (state.todoDialogPhotos !== photos) return;
         const current = photos.find((item) => item.id === photo.id);
         if (!current || !thumbnailData) continue;
@@ -7270,7 +7496,7 @@
 
     function renewTodoEditLock() {
       const current = state.todoEditLock;
-      if (!current) return Promise.resolve();
+      if (!current || state.offlineMode || !navigator.onLine) return Promise.resolve();
       if (state.todoLockRenewPromise) return state.todoLockRenewPromise;
       const renewal = (async () => {
         try {
@@ -7299,6 +7525,10 @@
       if (state.todoLockPending) return false;
       state.todoLockPending = true;
       try {
+        if (state.offlineMode || !navigator.onLine) {
+          state.todoEditLock = { todoId, token: `offline-${crypto.randomUUID()}`, expiresAt: new Date(state.sessionExpiresAt || Date.now()).toISOString() };
+          return true;
+        }
         const current = state.todoEditLock?.todoId === todoId ? state.todoEditLock : null;
         const data = await api(todoLockUrl(todoId), {
           method: "POST",
@@ -7321,7 +7551,7 @@
       await pauseTodoLockHeartbeat();
       const current = state.todoEditLock?.todoId === openedLock?.todoId ? state.todoEditLock : openedLock;
       clearTodoEditLockState();
-      if (!current) return;
+      if (!current || state.offlineMode || !navigator.onLine) return;
       try {
         await api(todoLockUrl(current.todoId), {
           method: "DELETE",
@@ -7333,10 +7563,10 @@
     function releaseTodoEditLockOnPageHide() {
       const current = state.todoEditLock;
       clearTodoEditLockState();
-      if (!current || !state.token) return;
+      if (!current || !state.token || state.offlineMode || !navigator.onLine) return;
       fetch(todoLockUrl(current.todoId), {
         method: "DELETE",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${state.token}` },
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": state.csrfToken },
         body: JSON.stringify({ lockToken: current.token }),
         keepalive: true
       }).catch(() => {});
@@ -7373,38 +7603,44 @@
       downloadText(csv, `indus-ure-${dateKey(new Date())}.csv`, "text/csv;charset=utf-8");
     }
 
-    function downloadBackup() {
-      downloadText(JSON.stringify({ entries: state.entries, todos: state.todos, debts: state.debts, clients: state.clients }, null, 2), `indus-ure-backup-${dateKey(new Date())}.json`, "application/json");
+    async function downloadBackup() {
+      if (state.offlineMode || !navigator.onLine) throw new Error("Za prenos varnostne kopije potrebuješ povezavo.");
+      const response = await fetch("/api/backup/export", { credentials: "same-origin" });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error || "Varnostne kopije ni bilo mogoče pripraviti.");
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `indus-ure-data-${dateKey(new Date())}.zip`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
     }
 
-    async function syncGoogle(showSuccess = true) {
-      if (state.googleSyncing) return;
-      const todoRevision = state.todoRevision;
-      const todoSnapshotWasStable = state.todoMutationPending === 0;
-      state.googleSyncing = true;
-      try {
-        const status = await api("/api/google/status");
-        if (!status.configured) {
-          if (showSuccess) alert("Google OAuth se ni nastavljen na strezniku.");
-          return;
-        }
-        if (!status.connected) {
-          if (!showSuccess) return;
-          const data = await api("/api/google/auth-url");
-          window.open(data.url, "_blank", "noopener");
-          return;
-        }
-        const data = await api("/api/google/sync", { method: "POST", body: JSON.stringify({}) });
-        state.entries = data.entries || state.entries;
-        if (canApplyTodoSnapshot(todoRevision, todoSnapshotWasStable)) state.todos = data.todos || state.todos;
-        refreshClientList();
-        render();
-        if (showSuccess) alert("Google koledar posodobljen. Posodobljeno: " + (data.pushed || 0) + ", odstranjeno: " + (data.removed || 0) + ".");
-      } catch (error) {
-        if (showSuccess) alert(error.message);
-      } finally {
-        state.googleSyncing = false;
-      }
+    async function restoreBackupFromFile(file) {
+      if (!file) return;
+      if (state.offlineMode || !navigator.onLine) throw new Error("Za obnovo potrebuješ povezavo.");
+      if (!/\.zip$/i.test(file.name) && file.type !== "application/zip") throw new Error("Izberi ZIP varnostno kopijo INDUS URE.");
+      const answer = prompt("Obnova bo zamenjala podatke, nastavitve in priloge na strežniku. OAuth in strežniške skrivnosti ostanejo nespremenjene. Za nadaljevanje vpiši OBNOVI.");
+      if (answer !== "OBNOVI") return;
+      const response = await fetch("/api/backup/restore", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          "Content-Type": "application/zip",
+          "X-CSRF-Token": state.csrfToken,
+          "X-Indus-Restore-Confirm": "OBNOVI"
+        },
+        body: file
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || "Obnova ni uspela.");
+      alert("Obnova je končana. Zaradi varnosti se moraš znova prijaviti.");
+      location.reload();
     }
 
     async function connectGoogleDrive() {
@@ -7621,6 +7857,39 @@
       return result;
     }
 
+    function renderNotifications() {
+      const count = $("notificationsCount");
+      const unread = (state.notifications || []).filter((item) => !item.readAt).length;
+      count.textContent = unread ? `(${unread})` : "";
+      const list = $("notificationsList");
+      if (!list) return;
+      if (!(state.notifications || []).length) {
+        list.innerHTML = `<p class="todo-meta">Ni sistemskih opozoril.</p>`;
+        return;
+      }
+      list.innerHTML = state.notifications.map((item) => `
+        <article class="debt-item" data-notification-id="${escapeHtml(item.id)}">
+          <div>
+            <strong>${escapeHtml(item.title || "Opozorilo")}</strong>
+            <span>${escapeHtml(item.message || "")}</span>
+            <small>${formatDateTime(item.createdAt)}</small>
+          </div>
+          ${item.readAt ? `<span class="todo-meta">Prebrano</span>` : `<button class="secondary read-notification" type="button">Prebrano</button>`}
+        </article>
+      `).join("");
+    }
+
+    async function refreshNotifications() {
+      if (state.user?.role !== "boss" || state.offlineMode || !navigator.onLine) return;
+      const data = await api("/api/notifications");
+      state.notifications = data.notifications || [];
+      renderNotifications();
+    }
+
+    async function openNotifications() {
+      await refreshNotifications();
+      $("notificationsDialog").showModal();
+    }
     function openAccountDialog() {
       $("accountName").value = state.user.name || "";
       $("accountImage").value = "";
@@ -7655,16 +7924,40 @@
     });
 
     $("logoutBtn").addEventListener("click", async () => {
+      if (!navigator.onLine || state.offlineMode) {
+        alert("Odjava potrebuje povezavo, da lahko strežnik varno prekliče sejo. Najprej vzpostavi povezavo in počakaj na prenos sprememb.");
+        return;
+      }
+      const userId = state.user?.id || "";
+      await flushOfflineTodoQueue();
+      const pending = (await offlineTodoOps()).filter((operation) => operation.userId === userId);
+      if (pending.length && !confirm(`${pending.length} lokalnih sprememb še ni bilo varno prenesenih. Z odjavo jih boš s te naprave odstranil. Nadaljujem?`)) return;
       try {
         await api("/api/logout", { method: "POST", body: JSON.stringify({}), recoverSession: false });
       } catch {
-        // Lokalno odjavo izvedemo tudi, ce je seja ze potekla.
+        // Seja je lahko že potekla; lokalni zasebni podatki se kljub temu odstranijo.
       }
-      localStorage.removeItem(tokenKey);
+      await clearOfflineUserData(userId).catch(() => {});
+      state.token = "";
+      state.csrfToken = "";
+      state.user = null;
       location.reload();
     });
 
     $("accountBtn").addEventListener("click", openAccountDialog);
+    $("notificationsBtn").addEventListener("click", () => openNotifications().catch((error) => alert(error.message)));
+    $("closeNotifications").addEventListener("click", () => $("notificationsDialog").close());
+    $("notificationsList").addEventListener("click", async (event) => {
+      const button = event.target.closest(".read-notification");
+      const item = event.target.closest("[data-notification-id]");
+      if (!button || !item) return;
+      try {
+        await api(`/api/notifications/${encodeURIComponent(item.dataset.notificationId)}/read`, { method: "POST", body: JSON.stringify({}) });
+        const notification = state.notifications.find((value) => value.id === item.dataset.notificationId);
+        if (notification) notification.readAt = new Date().toISOString();
+        renderNotifications();
+      } catch (error) { alert(error.message); }
+    });
     $("copyWorkerCalendar").addEventListener("click", () => copyCalendarFeed(false).catch((error) => alert(error.message)));
     $("copyCombinedCalendar").addEventListener("click", () => copyCalendarFeed(true).catch((error) => alert(error.message)));
     $("toolsMenu").querySelectorAll("button").forEach((button) => {
@@ -7951,7 +8244,6 @@
     });
     $("exportReportExcel").addEventListener("click", exportReportExcel);
     $("addClientBtn").addEventListener("click", () => addClientFromForm().catch((error) => alert(error.message)));
-    $("syncClientsFromTabBtn").addEventListener("click", () => syncClients().catch((error) => alert(error.message)));
     $("lockReportRange").addEventListener("click", () => lockCurrentReportRange().catch((error) => alert(error.message)));
     document.querySelectorAll(".report-setting").forEach((button) => {
       button.addEventListener("click", () => editBillingSetting(button.dataset.setting).catch((error) => alert(error.message)));
@@ -8070,14 +8362,18 @@
         openProjectCompletionDialog(hoursSourceId);
       }
     });
-    $("syncClientsBtn").addEventListener("click", () => syncClients().catch((error) => alert(error.message)));
     $("clientSearch").addEventListener("input", handleClientSearchInput);
     $("clientsSearch").addEventListener("input", renderClients);
     $("clearClientSearch").addEventListener("click", clearClientSearchAndRestoreView);
     $("exportCsv").addEventListener("click", exportCsv);
-    $("googleCalendar").addEventListener("click", () => syncGoogle(true));
     $("googleDrive").addEventListener("click", () => connectGoogleDrive().catch((error) => alert(error.message)));
-    $("downloadBackup").addEventListener("click", downloadBackup);
+    $("downloadBackup").addEventListener("click", () => downloadBackup().catch((error) => alert(error.message)));
+    $("restoreBackup").addEventListener("click", () => $("restoreBackupFile").click());
+    $("restoreBackupFile").addEventListener("change", (event) => {
+      const [file] = event.currentTarget.files || [];
+      event.currentTarget.value = "";
+      restoreBackupFromFile(file).catch((error) => alert(error.message));
+    });
     $("todoDialog").addEventListener("close", releaseTodoEditLockForDialog);
     $("todoDialog").addEventListener("close", () => { state.todoDialogReturnDayDate = ""; });
     $("todoDialog").addEventListener("close", () => {
@@ -8462,7 +8758,7 @@
       if (event.target === event.currentTarget) event.currentTarget.close();
     });
 
-    window.addEventListener("online", () => flushOfflineTodoQueue().catch(() => {}));
+    window.addEventListener("online", () => reconnectAfterOffline().catch(() => {}));
     window.addEventListener("offline", () => updateOfflineSyncNotice().catch(() => {}));
     window.addEventListener("pagehide", releaseTodoEditLockOnPageHide);
 
@@ -8474,15 +8770,15 @@
       history.pushState(loggedInHistoryState("active"), "", location.href);
     });
 
-    setInterval(autoRefreshSharedData, 15_000);
+    setInterval(autoRefreshSharedData, 60_000);
     window.addEventListener("focus", autoRefreshSharedData);
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "visible") autoRefreshSharedData();
     });
 
-    setInterval(() => {
-      if (state.token && state.user && document.visibilityState === "visible") syncGoogle(false);
-    }, 60_000);
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () => navigator.serviceWorker.register("/service-worker.js").catch(() => {}));
+    }
 
     boot();
   </script>

@@ -1,20 +1,15 @@
 const http = require("http");
 const fs = require("fs");
+const fsp = fs.promises;
 const path = require("path");
 const crypto = require("crypto");
 const os = require("os");
+const { PostgresStore } = require("./postgres-store");
 const {
-  DEFAULT_CLIENT_SHEET_RANGE,
-  clientToSheetRow,
-  findFirstEmptyClientRow,
   isUsableTaxId,
   normalizeStoredClient,
-  normalizeTaxId,
-  parseSheetClients,
-  rekeyClientReferences,
-  sheetAppendRange,
-  sheetRowRange
-} = require("./client-sync");
+  normalizeTaxId
+} = require("./client-identity");
 
 const PORT = Number(process.env.PORT || 8123);
 const HOST = process.env.HOST || "127.0.0.1";
@@ -23,6 +18,7 @@ const PUBLIC_BASE_URL = String(process.env.PUBLIC_BASE_URL || "").replace(/\/$/,
 const root = __dirname;
 const dataDir = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(root, "data");
 const dbFile = path.join(dataDir, "db.json");
+const MEDIA_DIR = process.env.MEDIA_DIR ? path.resolve(process.env.MEDIA_DIR) : path.join(dataDir, "media");
 const DATABASE_URL = process.env.DATABASE_URL || "";
 const configuredBojanPassword = process.env.INITIAL_BOJAN_PASSWORD || "";
 const configuredIbroPassword = process.env.INITIAL_IBRO_PASSWORD || "";
@@ -32,19 +28,24 @@ const resetUserPasswords = process.env.RESET_USER_PASSWORDS === "true";
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || "";
 const GOOGLE_REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI || "";
-const GOOGLE_SHEETS_ID = process.env.GOOGLE_SHEETS_ID || "";
-const GOOGLE_SHEETS_RANGE = String(process.env.GOOGLE_SHEETS_RANGE || DEFAULT_CLIENT_SHEET_RANGE).replace(/:[I-L]$/i, ":M");
-const GOOGLE_CALENDAR_SCOPE_VERSION = 2;
 const GOOGLE_DRIVE_SCOPE_VERSION = 1;
 const GOOGLE_DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file";
 const GOOGLE_DRIVE_TASKS_FOLDER_ID = String(process.env.GOOGLE_DRIVE_TASKS_FOLDER_ID || "").trim();
 const GOOGLE_DRIVE_OWNER_EMAIL = String(process.env.GOOGLE_DRIVE_OWNER_EMAIL || "bojan@indus.si").trim().toLowerCase();
 const INDUS_GOOGLE_APP_ID = "indus-ure-v1";
-const GOOGLE_SYNC_INTERVAL_MS = Math.max(60_000, Number(process.env.GOOGLE_SYNC_INTERVAL_MS || 60_000));
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const SESSION_COOKIE_NAME = NODE_ENV === "production" ? "__Host-indus-ure" : "indus-ure-session";
+const ALERT_SMTP_URL = String(process.env.ALERT_SMTP_URL || "").trim();
+const ALERT_EMAIL_FROM = String(process.env.ALERT_EMAIL_FROM || "").trim();
+const ALERT_EMAIL_TO = String(process.env.ALERT_EMAIL_TO || "bojan@indus.si").trim();
+const MONITOR_INTERVAL_MS = Math.max(60_000, Number(process.env.MONITOR_INTERVAL_MS || 5 * 60_000));
+const MONITOR_MAX_RSS_MB = Math.max(256, Number(process.env.MONITOR_MAX_RSS_MB || 1_800));
 let pgPool = null;
 let pgReady = null;
 let mutationQueue = Promise.resolve();
+let monitorTimer = null;
+let alertTransport = null;
+const monitorAlertCooldowns = new Map();
 
 const TODO_STATUS_DEFINITIONS = Object.freeze({
   open: { label: "Čaka", googleColorId: "8" },
@@ -224,14 +225,28 @@ function storeTodoAttachments(db, todo, user = {}) {
   return { ...todo, photos };
 }
 
+function attachmentApiUrl(attachmentId, thumbnail = false) {
+  return `/api/attachments/${encodeURIComponent(attachmentId)}${thumbnail ? "/thumbnail" : ""}`;
+}
+
 function hydrateTodoAttachments(db, todo) {
   return {
     ...todo,
-    photos: (todo.photos || []).map((photo) => ({
-      ...photo,
-      data: String(photo.data || db.attachments?.[photo.attachmentId]?.data || ""),
-      thumbnailData: String(photo.thumbnailData || db.attachments?.[photo.attachmentId]?.thumbnailData || "")
-    })).filter((photo) => validTodoAttachmentDataUrl(photo.data))
+    photos: (todo.photos || []).map((photo) => {
+      const attachment = db.attachments?.[photo.attachmentId] || {};
+      const data = String(photo.data || attachment.data || "");
+      const thumbnailData = String(photo.thumbnailData || attachment.thumbnailData || "");
+      const hasStoredOriginal = Boolean(attachment.storageKey);
+      const hasStoredThumbnail = Boolean(attachment.thumbnailKey);
+      return {
+        ...photo,
+        data,
+        thumbnailData,
+        url: hasStoredOriginal ? attachmentApiUrl(photo.attachmentId) : "",
+        thumbnailUrl: hasStoredThumbnail ? attachmentApiUrl(photo.attachmentId, true) : "",
+        mimeType: String(attachment.mimeType || "")
+      };
+    }).filter((photo) => validTodoAttachmentDataUrl(photo.data) || Boolean(photo.url))
   };
 }
 
@@ -309,14 +324,16 @@ function sessionTokenHash(token) {
 }
 
 function createSession(db, userId, now = Date.now()) {
-  const token = crypto.randomBytes(24).toString("hex");
+  const token = crypto.randomBytes(32).toString("hex");
   if (!db.sessions || typeof db.sessions !== "object" || Array.isArray(db.sessions)) db.sessions = {};
   for (const [hash, session] of Object.entries(db.sessions)) {
-    if (!session || Number(session.expiresAt) <= now) {
-      delete db.sessions[hash];
-    }
+    if (!session || Number(session.expiresAt) <= now) delete db.sessions[hash];
   }
-  db.sessions[sessionTokenHash(token)] = { userId, expiresAt: now + SESSION_TTL_MS };
+  db.sessions[sessionTokenHash(token)] = {
+    userId,
+    expiresAt: now + SESSION_TTL_MS,
+    csrfToken: crypto.randomBytes(24).toString("hex")
+  };
   return token;
 }
 
@@ -332,6 +349,75 @@ function revokeSession(db, token) {
   return delete db.sessions[sessionTokenHash(token)];
 }
 
+function requestCookies(req) {
+  return Object.fromEntries(String(req.headers.cookie || "").split(";").map((part) => {
+    const separator = part.indexOf("=");
+    if (separator < 0) return ["", ""];
+    const key = part.slice(0, separator).trim();
+    const value = part.slice(separator + 1).trim();
+    try { return [key, decodeURIComponent(value)]; } catch { return [key, ""]; }
+  }).filter(([key]) => key));
+}
+
+function sessionCookieValue(req) {
+  return requestCookies(req)[SESSION_COOKIE_NAME] || "";
+}
+
+function setSessionCookie(req, res, token) {
+  const secure = NODE_ENV === "production" || String(req.headers["x-forwarded-proto"] || "").toLowerCase() === "https";
+  const parts = [
+    `${SESSION_COOKIE_NAME}=${encodeURIComponent(token)}`,
+    "Path=/",
+    "HttpOnly",
+    "SameSite=Lax",
+    `Max-Age=${Math.floor(SESSION_TTL_MS / 1000)}`
+  ];
+  if (secure) parts.push("Secure");
+  res.setHeader("Set-Cookie", parts.join("; "));
+}
+
+function clearSessionCookie(req, res) {
+  const secure = NODE_ENV === "production" || String(req.headers["x-forwarded-proto"] || "").toLowerCase() === "https";
+  const parts = [`${SESSION_COOKIE_NAME}=`, "Path=/", "HttpOnly", "SameSite=Lax", "Max-Age=0"];
+  if (secure) parts.push("Secure");
+  res.setHeader("Set-Cookie", parts.join("; "));
+}
+
+function isUnsafeRequest(req) {
+  return !["GET", "HEAD", "OPTIONS"].includes(String(req.method || "GET").toUpperCase());
+}
+
+function validCsrf(req, session) {
+  if (!isUnsafeRequest(req)) return true;
+  const actual = String(req.headers["x-csrf-token"] || "");
+  const expected = String(session?.csrfToken || "");
+  if (!actual || !expected || actual.length !== expected.length) return false;
+  return crypto.timingSafeEqual(Buffer.from(actual), Buffer.from(expected));
+}
+
+function normalizeGoogleState(value) {
+  const source = value && typeof value === "object" ? value : {};
+  const state = {
+    tokens: source.tokens || null,
+    connectedAt: String(source.connectedAt || ""),
+    driveScopeVersion: Number(source.driveScopeVersion || 0)
+  };
+  let changed = JSON.stringify(source) !== JSON.stringify(state);
+  const legacyCalendarConnection = Number(source.scopeVersion || 0) !== 0
+    || Boolean(source.calendarId || source.calendarName || source.archiveCalendarId || source.archiveCalendarName || source.syncToken);
+  if (legacyCalendarConnection) {
+    state.tokens = null;
+    state.connectedAt = "";
+    state.driveScopeVersion = 0;
+    changed = true;
+  }
+  if (state.driveScopeVersion !== GOOGLE_DRIVE_SCOPE_VERSION) {
+    if (state.tokens || state.driveScopeVersion) changed = true;
+    state.tokens = null;
+    state.driveScopeVersion = 0;
+  }
+  return { state, changed };
+}
 function normalizeDb(db = {}) {
   let changed = false;
 
@@ -353,31 +439,9 @@ function normalizeDb(db = {}) {
       db.users[id].email = user.email;
       changed = true;
     }
-    if (!db.users[id].google) {
-      db.users[id].google = { tokens: null, calendarId: "", calendarName: "", archiveCalendarId: "", archiveCalendarName: "", connectedAt: "", scopeVersion: 0, driveScopeVersion: 0 };
-      changed = true;
-    }
-    const googleState = db.users[id].google;
-    if (![0, GOOGLE_DRIVE_SCOPE_VERSION].includes(Number(googleState.driveScopeVersion || 0))) {
-      googleState.driveScopeVersion = 0;
-      changed = true;
-    }
-    if (Number(googleState.scopeVersion || 0) !== GOOGLE_CALENDAR_SCOPE_VERSION) {
-      if (googleState.tokens || googleState.calendarId || googleState.syncToken) {
-        googleState.tokens = null;
-        googleState.calendarId = "";
-        googleState.calendarName = "";
-        googleState.archiveCalendarId = "";
-        googleState.archiveCalendarName = "";
-        googleState.syncToken = "";
-        googleState.driveScopeVersion = 0;
-        changed = true;
-      }
-      if (Number(googleState.scopeVersion || 0) !== 0) {
-        googleState.scopeVersion = 0;
-        changed = true;
-      }
-    }
+    const normalizedGoogle = normalizeGoogleState(db.users[id].google);
+    db.users[id].google = normalizedGoogle.state;
+    if (normalizedGoogle.changed) changed = true;
     if (db.users[id].avatar && !validImageDataUrl(db.users[id].avatar, 1_500_000)) {
       db.users[id].avatar = "";
       changed = true;
@@ -411,31 +475,9 @@ function normalizeDb(db = {}) {
       user.role = "worker";
       changed = true;
     }
-    if (!user.google) {
-      user.google = { tokens: null, calendarId: "", calendarName: "", archiveCalendarId: "", archiveCalendarName: "", connectedAt: "", scopeVersion: 0, driveScopeVersion: 0 };
-      changed = true;
-    }
-    const googleState = user.google;
-    if (![0, GOOGLE_DRIVE_SCOPE_VERSION].includes(Number(googleState.driveScopeVersion || 0))) {
-      googleState.driveScopeVersion = 0;
-      changed = true;
-    }
-    if (Number(googleState.scopeVersion || 0) !== GOOGLE_CALENDAR_SCOPE_VERSION) {
-      if (googleState.tokens || googleState.calendarId || googleState.syncToken) {
-        googleState.tokens = null;
-        googleState.calendarId = "";
-        googleState.calendarName = "";
-        googleState.archiveCalendarId = "";
-        googleState.archiveCalendarName = "";
-        googleState.syncToken = "";
-        googleState.driveScopeVersion = 0;
-        changed = true;
-      }
-      if (Number(googleState.scopeVersion || 0) !== 0) {
-        googleState.scopeVersion = 0;
-        changed = true;
-      }
-    }
+    const normalizedGoogle = normalizeGoogleState(user.google);
+    user.google = normalizedGoogle.state;
+    if (normalizedGoogle.changed) changed = true;
     if (user.avatar && !validImageDataUrl(user.avatar, 1_500_000)) {
       user.avatar = "";
       changed = true;
@@ -837,33 +879,35 @@ function getPgPool() {
   return pgPool;
 }
 
+function getPgStore() {
+  if (!pgStore) pgStore = new PostgresStore(getPgPool(), MEDIA_DIR);
+  return pgStore;
+}
+
+function initialDatabaseState() {
+  return {
+    users: JSON.parse(JSON.stringify(defaultUsers)),
+    sessions: {},
+    entries: [],
+    todos: [],
+    attachments: {},
+    debts: [],
+    clients: [],
+    billingLocks: [],
+    payrolls: [],
+    settings: {},
+    calendarToken: crypto.randomBytes(24).toString("hex"),
+    syncRevision: 0
+  };
+}
+
 async function ensurePostgresDb() {
   if (!DATABASE_URL) return;
   if (pgReady) return pgReady;
   pgReady = (async () => {
-    const pool = getPgPool();
-    await pool.query(`
-      create table if not exists app_state (
-        id text primary key,
-        data jsonb not null,
-        updated_at timestamptz not null default now()
-      )
-    `);
-    const existing = await pool.query("select data from app_state where id = $1", ["main"]);
-    if (existing.rowCount === 0) {
-      await pool.query(
-        "insert into app_state (id, data) values ($1, $2::jsonb)",
-        ["main", JSON.stringify({ users: defaultUsers, sessions: {}, entries: [], todos: [], attachments: {}, debts: [], clients: [], calendarToken: crypto.randomBytes(24).toString("hex") })]
-      );
-      return;
-    }
-    const { db, changed } = normalizeDb(existing.rows[0].data);
-    if (changed) {
-      await pool.query(
-        "update app_state set data = $1::jsonb, updated_at = now() where id = $2",
-        [JSON.stringify(db), "main"]
-      );
-    }
+    // Normalize legacy JSON once before writing relational rows so UUID client references,
+    // assignment groups and attachment metadata survive the conversion intact.
+    await getPgStore().ensure(initialDatabaseState(), normalizeDb);
   })();
   return pgReady;
 }
@@ -871,31 +915,31 @@ async function ensurePostgresDb() {
 async function readDbAsync() {
   if (!DATABASE_URL) return readDb();
   await ensurePostgresDb();
-  const result = await getPgPool().query("select data from app_state where id = $1", ["main"]);
-  const { db, changed } = normalizeDb(result.rows[0]?.data || {});
+  const { db, changed } = normalizeDb(await getPgStore().load());
   if (changed) await writeDbAsync(db);
   return db;
 }
 
 async function writeDbAsync(db) {
+  db.syncRevision = Math.max(0, Number(db.syncRevision || 0)) + 1;
   if (!DATABASE_URL) {
     writeDb(db);
     return;
   }
   await ensurePostgresDb();
-  await getPgPool().query(
-    "update app_state set data = $1::jsonb, updated_at = now() where id = $2",
-    [JSON.stringify(db), "main"]
-  );
+  await getPgStore().save(db);
 }
 
-function securityHeaders(extra = {}) {
+function securityHeaders(extra = {}, nonce = "") {
+  const scriptSource = nonce ? `'self' 'nonce-${nonce}'` : "'self'";
+  const styleSource = nonce ? `'self' 'nonce-${nonce}'` : "'self'";
   return {
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "no-referrer",
     "X-Frame-Options": "DENY",
-    "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
-    "Content-Security-Policy": "default-src 'self'; base-uri 'self'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; img-src 'self' data: blob:; object-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'",
+    "Permissions-Policy": "camera=(self), microphone=(), geolocation=()",
+    "Content-Security-Policy": `default-src 'self'; base-uri 'self'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; img-src 'self' data: blob:; object-src 'none'; worker-src 'self'; script-src ${scriptSource}; style-src ${styleSource}`,
+    ...(NODE_ENV === "production" ? { "Strict-Transport-Security": "max-age=31536000; includeSubDomains" } : {}),
     ...extra
   };
 }
@@ -1460,16 +1504,19 @@ function attachResolvedClient(db, item, { createAdHoc = false, user = null } = {
 }
 
 function sessionTokenFromRequest(req) {
-  const auth = req.headers.authorization || "";
-  return auth.startsWith("Bearer ") ? auth.slice(7) : "";
+  return sessionCookieValue(req);
 }
 
 async function getSessionUser(req) {
+  if (req.indusSessionUser !== undefined) return req.indusSessionUser;
   const token = sessionTokenFromRequest(req);
   const db = await readDbAsync();
   const session = sessionForToken(db, token);
-  if (!session) return null;
-  return db.users[session.userId] || null;
+  req.indusDb = db;
+  req.indusSession = session || null;
+  req.indusSessionToken = token;
+  req.indusSessionUser = session ? (db.users[session.userId] || null) : null;
+  return req.indusSessionUser;
 }
 
 async function requireUser(req, res) {
@@ -1478,7 +1525,31 @@ async function requireUser(req, res) {
     sendJson(res, 401, { error: "Prijava je potekla. Prijavi se se enkrat." });
     return null;
   }
+  if (!validCsrf(req, req.indusSession)) {
+    sendJson(res, 403, { error: "Varnostna potrditev seje manjka. Osvezi stran in poskusi znova." });
+    return null;
+  }
   return user;
+}
+
+// The browser asks this endpoint frequently. In PostgreSQL this reads only the
+// session, user and revision row rather than loading every task and attachment.
+async function requireUserForSyncState(req, res) {
+  if (!DATABASE_URL) return requireUser(req, res);
+  await ensurePostgresDb();
+  const token = sessionTokenFromRequest(req);
+  const record = await getPgStore().sessionWithRevision(sessionTokenHash(token));
+  if (!record) {
+    sendJson(res, 401, { error: "Prijava je potekla. Prijavi se se enkrat." });
+    return null;
+  }
+  req.indusSession = record.session;
+  req.indusDb = { syncRevision: record.revision };
+  if (!validCsrf(req, record.session)) {
+    sendJson(res, 403, { error: "Varnostna potrditev seje manjka. Osvezi stran in poskusi znova." });
+    return null;
+  }
+  return record.user;
 }
 
 function audit(user, action) {
@@ -1847,81 +1918,8 @@ async function createManagedGoogleDriveFile(req, db, actor, input = {}) {
   }
 }
 
-function googleEventDescription(fields, notes = "") {
-  const lines = ["INDUS URE"];
-  for (const [label, value] of Object.entries(fields)) {
-    lines.push(`${label}: ${value ?? ""}`);
-  }
-  lines.push("Opombe:");
-  if (notes) lines.push(String(notes).trim());
-  return lines.join("\n");
-}
-
 function todoStatusDefinition(status) {
   return TODO_STATUS_DEFINITIONS[status] || TODO_STATUS_DEFINITIONS.open;
-}
-
-function todoStatusFromGoogle(value, fallback = "open") {
-  const normalized = String(value || "").trim().toLocaleLowerCase("sl");
-  const match = Object.entries(TODO_STATUS_DEFINITIONS)
-    .find(([, definition]) => definition.label.toLocaleLowerCase("sl") === normalized);
-  if (match) return match[0];
-  if (normalized === "odprto") return "open";
-  if (normalized === "izvedba") return "execution";
-  if (normalized === "obračun" || normalized === "obracun") return "execution";
-  return TODO_STATUSES.has(fallback) ? fallback : "open";
-}
-
-function googleEventPrivateProperties(event) {
-  return event?.extendedProperties?.private || {};
-}
-
-function googleItemType(item) {
-  return Array.isArray(item?.photos) ? "todo" : "entry";
-}
-
-function isIndusOwnedGoogleEvent(event, item = null, userId = "", expectedType = "") {
-  const privateProps = googleEventPrivateProperties(event);
-  const type = expectedType || (item ? googleItemType(item) : "");
-  const completeLegacyMarker = Boolean(privateProps.indusId && privateProps.indusType && privateProps.indusUser);
-  if (privateProps.indusApp !== INDUS_GOOGLE_APP_ID && !completeLegacyMarker) return false;
-  if (!privateProps.indusId || !privateProps.indusType || !privateProps.indusUser) return false;
-  if (item && privateProps.indusId !== item.id) return false;
-  if (type && privateProps.indusType !== type) return false;
-  if (userId && privateProps.indusUser !== userId) return false;
-  if (item?.syncUser && privateProps.indusUser !== item.syncUser) return false;
-  if (item?.googleEventId && event?.id && item.googleEventId !== event.id) return false;
-  return true;
-}
-
-function indusGooglePrivateProperties(item, type) {
-  return {
-    indusApp: INDUS_GOOGLE_APP_ID,
-    indusId: item.id,
-    indusType: type,
-    indusUser: item.syncUser || item.createdBy || ""
-  };
-}
-
-function parseGoogleEventDescription(value) {
-  const lines = String(value || "").replaceAll("\r", "").split("\n");
-  const isIndus = lines[0]?.trim() === "INDUS URE";
-  if (!isIndus) return { isIndus: false, fields: {}, notes: String(value || "").trim() };
-  const fields = {};
-  const notes = [];
-  let readingNotes = false;
-  for (const line of lines.slice(1)) {
-    const match = line.match(/^([^:]+):\s*(.*)$/);
-    if (!readingNotes && match && match[1].trim().toLowerCase() === "opombe") {
-      readingNotes = true;
-      if (match[2]) notes.push(match[2]);
-    } else if (readingNotes) {
-      notes.push(line);
-    } else if (match) {
-      fields[match[1].trim().toLowerCase()] = match[2].trim();
-    }
-  }
-  return { isIndus: true, fields, notes: notes.join("\n").trim() };
 }
 
 function entrySummary(entry) {
@@ -1930,629 +1928,29 @@ function entrySummary(entry) {
   if (entry.status === "vacation") return title || "Dopust";
   return `${entry.client || "Stranka"} - ${title}`;
 }
-
-function clientTaxIdForItem(db, item) {
-  const client = (db.clients || []).find((candidate) => candidate.clientId === item.clientId);
-  return client?.taxId || "";
-}
-
-function entryToGoogleEvent(entry, clientTaxId = "") {
-  const event = {
-    summary: entrySummary(entry),
-    description: googleEventDescription({
-      Stranka: entry.client || "",
-      Davcna: clientTaxId || (isUsableTaxId(entry.clientId) ? entry.clientId : ""),
-      Delo: entry.work || "",
-      Material: entry.material || "",
-      Sodelavci: entry.people || "",
-      Km: Number(entry.km || 0)
-    }, entry.notes),
-    extendedProperties: { private: indusGooglePrivateProperties(entry, "entry") }
-  };
-  if (entry.status === "vacation") {
-    event.start = { date: entry.date };
-    event.end = { date: addDaysDashed(entry.date, 1) };
-    return event;
-  }
-  return {
-    ...event,
-    start: { dateTime: `${entry.date}T${entry.start}:00`, timeZone: "Europe/Ljubljana" },
-    end: { dateTime: `${entry.date}T${entry.end}:00`, timeZone: "Europe/Ljubljana" }
-  };
-}
-
-function todoToGoogleEvent(todo, clientTaxId = "") {
-  const status = todoStatusDefinition(todo.status);
-  const event = {
-    summary: `${todo.urgent ? "NUJNO: " : ""}TODO: ${todo.title}`,
-    description: googleEventDescription({
-      Vrsta: "opravilo",
-      Stranka: todo.client || "",
-      Davcna: clientTaxId || (isUsableTaxId(todo.clientId) ? todo.clientId : ""),
-      Material: todo.material || "",
-      Status: status.label,
-      Nujno: todo.urgent ? "DA" : "NE"
-    }, todo.notes),
-    colorId: status.googleColorId,
-    extendedProperties: { private: indusGooglePrivateProperties(todo, "todo") }
-  };
-  if (todo.start && todo.end) {
-    return {
-      ...event,
-      start: { dateTime: `${todo.date}T${todo.start}:00`, timeZone: "Europe/Ljubljana" },
-      end: { dateTime: `${todo.date}T${todo.end}:00`, timeZone: "Europe/Ljubljana" }
-    };
-  }
-  return { ...event, start: { date: todo.date }, end: { date: addDaysDashed(todo.date, 1) } };
-}
-
-function todoToGoogleArchiveEvent(todo, payroll, clientTaxId = "") {
-  const status = todoStatusDefinition(todo.status);
-  const workerName = String(payroll?.workerName || payroll?.workerId || todo.syncUser || "Delavec");
-  const event = todoToGoogleEvent(todo, clientTaxId);
-  return {
-    ...event,
-    summary: `ARHIV: ${todo.title}`,
-    description: googleEventDescription({
-      Vrsta: "arhiv obračuna",
-      Obračun: `${payroll.month || ""} · ${workerName}`,
-      Stranka: todo.client || "",
-      Davcna: clientTaxId || (isUsableTaxId(todo.clientId) ? todo.clientId : ""),
-      Material: todo.material || "",
-      Status: status.label
-    }, todo.notes),
-    extendedProperties: {
-      private: {
-        indusApp: INDUS_GOOGLE_APP_ID,
-        indusId: todo.id,
-        indusType: "payroll-archive",
-        indusUser: todo.syncUser || todo.createdBy || "",
-        indusPayrollId: payroll.id || ""
-      }
-    }
-  };
-}
-function addDaysDashed(date, days) {
-  const parsed = new Date(`${date}T00:00:00`);
-  parsed.setDate(parsed.getDate() + days);
-  return [
-    parsed.getFullYear(),
-    String(parsed.getMonth() + 1).padStart(2, "0"),
-    String(parsed.getDate()).padStart(2, "0")
-  ].join("-");
-}
-
-function googleEventChanged(event, item) {
-  return Boolean(event.updated && event.updated !== item.googleUpdatedAt);
-}
-
-function localItemChanged(item) {
-  return Boolean(item.updatedAt && item.updatedAt !== item.googleSyncedLocalAt);
-}
-
-function remoteGoogleChangeWins(event, item) {
-  if (!localItemChanged(item)) return true;
-  const remoteTime = new Date(event.updated || 0).getTime();
-  const localTime = new Date(item.updatedAt || 0).getTime();
-  return Number.isFinite(remoteTime) && remoteTime >= localTime;
-}
-
-async function ensureGoogleCalendar(calendar, user) {
-  if (Number(user.google?.scopeVersion || 0) !== GOOGLE_CALENDAR_SCOPE_VERSION) {
-    throw new Error("Google dovoljenja je treba ponovno potrditi.");
-  }
-  const name = `INDUS URE - ${user.name || user.id}`;
-  if (user.google?.calendarId) return user.google.calendarId;
-  const created = await calendar.calendars.insert({
-    requestBody: { summary: name, description: "Namenski koledar aplikacije INDUS URE", timeZone: "Europe/Ljubljana" }
-  });
-  user.google.calendarId = created.data.id;
-  user.google.calendarName = created.data.summary || name;
-  user.google.calendarCreatedByApp = true;
-  user.google.syncToken = "";
-  return user.google.calendarId;
-}
-
-async function ensureGoogleArchiveCalendar(calendar, user) {
-  if (Number(user.google?.scopeVersion || 0) !== GOOGLE_CALENDAR_SCOPE_VERSION) {
-    throw new Error("Google dovoljenja je treba ponovno potrditi.");
-  }
-  const name = `INDUS URE - arhiv - ${user.name || user.id}`;
-  if (user.google?.archiveCalendarId) return user.google.archiveCalendarId;
-  const created = await calendar.calendars.insert({
-    requestBody: {
-      summary: name,
-      description: "Arhiv potrjenih obračunov iz aplikacije INDUS URE",
-      timeZone: "Europe/Ljubljana"
-    }
-  });
-  user.google.archiveCalendarId = created.data.id;
-  user.google.archiveCalendarName = created.data.summary || name;
-  user.google.archiveCalendarCreatedByApp = true;
-  return user.google.archiveCalendarId;
-}
-function resolveGoogleClient(db, parsed, summary, existing = {}) {
-  const clients = db.clients || [];
-  const taxId = normalizeTaxId(parsed.fields.davcna || "");
-  let client = existing.clientId ? clients.find((item) => item.clientId === existing.clientId) : null;
-  client = client || (isUsableTaxId(taxId)
-    ? clients.find((item) => normalizeTaxId(item.taxId) === taxId)
-    : null);
-  const requestedName = String(parsed.fields.stranka || existing.client || "").trim().toLowerCase();
-  if (!client && requestedName) {
-    client = clients.find((item) => [item.name, item.search].some((value) => String(value || "").trim().toLowerCase() === requestedName));
-  }
-  if (!client) {
-    const normalizedSummary = String(summary || "").trim().toLowerCase();
-    client = [...clients]
-      .sort((a, b) => String(b.name || "").length - String(a.name || "").length)
-      .find((item) => [item.name, item.search].filter(Boolean).some((value) => normalizedSummary.startsWith(`${String(value).trim().toLowerCase()} - `)));
-  }
-  return client
-    ? { client: client.name, clientId: client.clientId || client.taxId || "" }
-    : { client: existing.client || parsed.fields.stranka || "", clientId: existing.clientId || "" };
-}
-
-function workFromGoogleSummary(summary, client = "") {
-  const value = String(summary || "Google dogodek").trim();
-  const prefix = `${String(client).trim()} - `;
-  return client && value.toLowerCase().startsWith(prefix.toLowerCase()) ? value.slice(prefix.length).trim() : value;
-}
-
-function entryFromGoogleEvent(event, user, db = {}, existing = null) {
-  const allDay = Boolean(event.start?.date);
-  const start = event.start?.dateTime ? new Date(event.start.dateTime) : null;
-  const end = event.end?.dateTime ? new Date(event.end.dateTime) : null;
-  if (!allDay && (!start || !end)) return null;
-  const date = allDay ? event.start.date : [
-    start.getFullYear(),
-    String(start.getMonth() + 1).padStart(2, "0"),
-    String(start.getDate()).padStart(2, "0")
-  ].join("-");
-  const time = (value) => `${String(value.getHours()).padStart(2, "0")}:${String(value.getMinutes()).padStart(2, "0")}`;
-  const parsed = parseGoogleEventDescription(event.description);
-  const clientRef = resolveGoogleClient(db, parsed, event.summary, existing || {});
-  const titleChanged = Boolean(existing && String(event.summary || "") !== entrySummary(existing));
-  const work = titleChanged || !parsed.isIndus
-    ? workFromGoogleSummary(event.summary, clientRef.client)
-    : parsed.fields.delo || existing?.work || workFromGoogleSummary(event.summary, clientRef.client);
-  const now = new Date().toISOString();
-  const hasClient = Boolean(clientRef.clientId);
-  return {
-    id: existing?.id || crypto.randomUUID(),
-    date,
-    start: allDay ? existing?.start || "00:00" : time(start),
-    end: allDay ? existing?.end || "23:59" : time(end),
-    client: hasClient ? clientRef.client : "",
-    clientId: hasClient ? clientRef.clientId : "",
-    status: allDay ? "vacation" : existing?.status || (hasClient ? "unbilled" : "errand"),
-    work,
-    material: parsed.isIndus ? parsed.fields.material || "" : existing?.material || "",
-    people: parsed.isIndus ? parsed.fields.sodelavci || "" : existing?.people || "",
-    km: parsed.isIndus ? Number(parsed.fields.km || 0) : Number(existing?.km || 0),
-    materialCost: Number(existing?.materialCost || 0),
-    notes: parsed.notes,
-    syncUser: user.id,
-    sourceTodoId: existing?.sourceTodoId || "",
-    googleEventId: event.id || existing?.googleEventId || "",
-    googleUpdatedAt: event.updated || "",
-    googleSyncedLocalAt: now,
-    googleManagedByIndus: true,
-    createdBy: existing?.createdBy || user.id,
-    createdByName: existing?.createdByName || user.name,
-    createdAt: existing?.createdAt || now,
-    updatedBy: user.id,
-    updatedByName: user.name,
-    updatedAt: now,
-    history: [...(existing?.history || []), audit(user, existing ? "spremenjeno v Google" : "uvozeno iz Google")]
-  };
-}
-
-function todoFromGoogleEvent(event, user, db = {}, existing = null) {
-  const allDay = Boolean(event.start?.date);
-  const startDateTime = event.start?.dateTime ? new Date(event.start.dateTime) : null;
-  const endDateTime = event.end?.dateTime ? new Date(event.end.dateTime) : null;
-  if (!allDay && (!startDateTime || !endDateTime)) return null;
-  const date = allDay ? event.start.date : [
-    startDateTime.getFullYear(),
-    String(startDateTime.getMonth() + 1).padStart(2, "0"),
-    String(startDateTime.getDate()).padStart(2, "0")
-  ].join("-");
-  const time = (value) => `${String(value.getHours()).padStart(2, "0")}:${String(value.getMinutes()).padStart(2, "0")}`;
-  const parsed = parseGoogleEventDescription(event.description);
-  const clientRef = resolveGoogleClient(db, parsed, event.summary, existing || {});
-  const now = new Date().toISOString();
-  const status = todoStatusFromGoogle(parsed.fields.status, existing?.status || "open");
-  return {
-    id: existing?.id || crypto.randomUUID(),
-    title: String(event.summary || "Google opravilo").replace(/^NUJNO:\s*/i, "").replace(/^TODO:\s*/i, ""),
-    date,
-    start: allDay ? "" : time(startDateTime),
-    end: allDay ? "" : time(endDateTime),
-    client: clientRef.client,
-    clientId: clientRef.clientId,
-    notes: parsed.notes,
-    material: parsed.isIndus ? parsed.fields.material || "" : existing?.material || "",
-    status,
-    order: Number(existing?.order || 0),
-    urgent: String(parsed.fields.nujno || "").toUpperCase() === "DA" || /^NUJNO:/i.test(String(event.summary || "")),
-    done: status === "execution",
-    billingHourlyRate: status === "execution"
-      ? nonnegativeNumber(existing?.billingHourlyRate, defaultHourlyRateForUser(db, user.id), 10_000)
-      : nonnegativeNumber(existing?.billingHourlyRate, null, 10_000),
-    billingKm: nonnegativeNumber(existing?.billingKm, 0, 1_000_000),
-    clientKm: nonnegativeNumber(existing?.clientKm, 0, 1_000_000),
-    clientVehicle: todoVehicle(existing?.clientVehicle),
-    driveFiles: existing?.driveFiles || [],
-    photos: existing?.photos || [],
-    syncUser: user.id,
-    googleEventId: event.id || existing?.googleEventId || "",
-    googleUpdatedAt: event.updated || "",
-    googleSyncedLocalAt: now,
-    googleManagedByIndus: true,
-    googleColorId: String(event.colorId || ""),
-    googleStatusLabel: String(parsed.fields.status || ""),
-    createdBy: existing?.createdBy || user.id,
-    createdByName: existing?.createdByName || user.name,
-    createdAt: existing?.createdAt || now,
-    updatedBy: user.id,
-    updatedByName: user.name,
-    updatedAt: now,
-    history: [...(existing?.history || []), audit(user, existing ? "spremenjeno v Google" : "uvozeno iz Google")]
-  };
-}
-
-async function listGoogleEvents(calendar, calendarId) {
-  const events = [];
-  let pageToken = "";
-  do {
-    const request = { calendarId, maxResults: 2500, showDeleted: false };
-    if (pageToken) request.pageToken = pageToken;
-    const response = await calendar.events.list(request);
-    events.push(...(response.data.items || []));
-    pageToken = response.data.nextPageToken || "";
-  } while (pageToken);
-  return events;
-}
-
-function googleEventTimeMatches(actual = {}, expected = {}) {
-  if (expected.date) return String(actual.date || "") === String(expected.date);
-  if (expected.dateTime) {
-    return String(actual.dateTime || "").slice(0, 19) === String(expected.dateTime).slice(0, 19);
-  }
-  return !actual.date && !actual.dateTime;
-}
-
-function googleEventMatchesRequest(event, requestBody) {
-  const actualPrivate = googleEventPrivateProperties(event);
-  const expectedPrivate = requestBody.extendedProperties?.private || {};
-  const colorMatches = !Object.hasOwn(requestBody, "colorId")
-    || String(event.colorId || "") === String(requestBody.colorId || "");
-  return String(event.summary || "") === String(requestBody.summary || "")
-    && String(event.description || "") === String(requestBody.description || "")
-    && colorMatches
-    && googleEventTimeMatches(event.start, requestBody.start)
-    && googleEventTimeMatches(event.end, requestBody.end)
-    && Object.entries(expectedPrivate).every(([key, value]) => String(actualPrivate[key] || "") === String(value || ""));
-}
-
-function markGoogleItemSynced(item, event, requestBody, expectedType = "") {
-  item.googleUpdatedAt = event.updated || item.googleUpdatedAt || new Date().toISOString();
-  item.googleSyncedLocalAt = item.updatedAt || item.createdAt || new Date().toISOString();
-  item.googleManagedByIndus = true;
-  if (expectedType === "todo") {
-    item.googleColorId = String(requestBody.colorId || "");
-    item.googleStatusLabel = todoStatusDefinition(item.status).label;
-  }
-}
-
-function resetGoogleItemSync(item) {
-  item.googleEventId = "";
-  item.googleUpdatedAt = "";
-  item.googleSyncedLocalAt = item.updatedAt || "";
-  item.googleManagedByIndus = false;
-  item.googleColorId = "";
-  item.googleStatusLabel = "";
-}
-
-async function verifyOwnedGoogleEvent(calendar, calendarId, item, expectedType = "") {
-  try {
-    const response = await calendar.events.get({ calendarId, eventId: item.googleEventId });
-    return {
-      event: response.data,
-      missing: false,
-      owned: isIndusOwnedGoogleEvent(response.data, item, item.syncUser, expectedType)
-    };
-  } catch (error) {
-    if (Number(error.code || error.response?.status) === 404) {
-      return { event: null, missing: true, owned: false };
-    }
-    throw error;
-  }
-}
-
-async function pushGoogleItem(calendar, calendarId, item, requestBody, expectedType = "") {
-  let response;
-  if (item.googleEventId) {
-    const verification = await verifyOwnedGoogleEvent(calendar, calendarId, item, expectedType);
-    if (verification.missing) {
-      item.googleEventId = "";
-    } else if (!verification.owned) {
-      console.warn(`Google dogodek ${item.googleEventId} ni dokazljivo ustvarjen v INDUS URE; sprememba je preskocena.`);
-      return false;
-    }
-  }
-  if (item.googleEventId) {
-    response = await calendar.events.patch({ calendarId, eventId: item.googleEventId, requestBody, sendUpdates: "none" });
-  } else {
-    response = await calendar.events.insert({ calendarId, requestBody, sendUpdates: "none" });
-    item.googleEventId = response.data.id || "";
-  }
-  markGoogleItemSynced(item, response.data, requestBody, expectedType);
-  return true;
-}
-
-async function deleteOwnedGoogleEvent(calendar, calendarId, item, expectedType = "") {
-  if (!item?.googleEventId) return false;
-  const verification = await verifyOwnedGoogleEvent(calendar, calendarId, item, expectedType);
-  if (verification.missing) return true;
-  if (!verification.owned) {
-    console.warn(`Google dogodek ${item.googleEventId} ni dokazljivo ustvarjen v INDUS URE; brisanje je preskoceno.`);
-    return false;
-  }
-  await calendar.events.delete({ calendarId, eventId: item.googleEventId, sendUpdates: "none" }).catch((error) => {
-    if (Number(error.code || error.response?.status) !== 404) throw error;
-  });
-  return true;
-}
-
-async function reconcileGoogleCalendar(calendar, calendarId, db, user) {
-  const records = new Map();
-  for (const item of db.entries.filter((entry) => entry.syncUser === user.id)) {
-    records.set("entry:" + item.id, {
-      item,
-      type: "entry",
-      eligible: Boolean(item.date && item.start && item.end),
-      locked: Boolean(activeEntryEditLock(item.id))
-    });
-  }
-  for (const item of db.todos.filter((todo) => todo.syncUser === user.id)) {
-    records.set("todo:" + item.id, {
-      item,
-      type: "todo",
-      eligible: Boolean(item.date && (!item.done || !item.archivedAt)),
-      locked: Boolean(activeTodoEditLock(item.id))
-    });
-  }
-
-  const remoteGroups = new Map();
-  const remoteEvents = await listGoogleEvents(calendar, calendarId);
-  for (const event of remoteEvents) {
-    if (!event?.id || event.status === "cancelled") continue;
-    const privateProps = googleEventPrivateProperties(event);
-    const type = privateProps.indusType;
-    if (!["entry", "todo"].includes(type)) continue;
-    if (!isIndusOwnedGoogleEvent(event, null, user.id, type)) continue;
-    const key = type + ":" + privateProps.indusId;
-    if (!remoteGroups.has(key)) remoteGroups.set(key, []);
-    remoteGroups.get(key).push(event);
-  }
-
-  let pushed = 0;
-  let removed = 0;
-  for (const [key, events] of remoteGroups) {
-    const record = records.get(key);
-    if (record?.locked) continue;
-    if (!record || !record.eligible) {
-      for (const event of events) {
-        const privateProps = googleEventPrivateProperties(event);
-        const stub = { id: privateProps.indusId, syncUser: user.id, googleEventId: event.id };
-        if (await deleteOwnedGoogleEvent(calendar, calendarId, stub, privateProps.indusType)) removed++;
-      }
-      if (record) resetGoogleItemSync(record.item);
-      continue;
-    }
-
-    const preferred = events.find((event) => event.id === record.item.googleEventId) || events[0];
-    record.remoteEvent = preferred;
-    record.item.googleEventId = preferred.id;
-    for (const duplicate of events.filter((event) => event.id !== preferred.id)) {
-      const stub = { id: record.item.id, syncUser: user.id, googleEventId: duplicate.id };
-      if (await deleteOwnedGoogleEvent(calendar, calendarId, stub, record.type)) removed++;
-    }
-  }
-
-  for (const record of records.values()) {
-    if (record.locked) continue;
-    if (!record.eligible) {
-      if (!record.remoteEvent) resetGoogleItemSync(record.item);
-      continue;
-    }
-    const requestBody = record.type === "entry"
-      ? entryToGoogleEvent(record.item, clientTaxIdForItem(db, record.item))
-      : todoToGoogleEvent(record.item, clientTaxIdForItem(db, record.item));
-    if (record.remoteEvent && googleEventMatchesRequest(record.remoteEvent, requestBody)) {
-      markGoogleItemSynced(record.item, record.remoteEvent, requestBody, record.type);
-      continue;
-    }
-    if (!record.remoteEvent) resetGoogleItemSync(record.item);
-    if (await pushGoogleItem(calendar, calendarId, record.item, requestBody, record.type)) pushed++;
-  }
-
-  return { pushed, removed, pulled: 0, conflicts: 0 };
-}
-
-async function syncGoogleForUser(req, db, user) {
-  if (!googleReady()) throw new Error("Google OAuth se ni nastavljen.");
-  if (!user.google?.tokens || Number(user.google.scopeVersion || 0) !== GOOGLE_CALENDAR_SCOPE_VERSION) {
-    throw new Error("Najprej potrdi omejen dostop do namenskega INDUS koledarja.");
-  }
-  const { google } = require("googleapis");
-  const auth = googleClient(req, user.google.tokens);
-  const calendar = google.calendar({ version: "v3", auth });
-  const calendarId = await ensureGoogleCalendar(calendar, user);
-  const result = await reconcileGoogleCalendar(calendar, calendarId, db, user);
-  user.google.calendarId = calendarId;
-  user.google.syncToken = "";
-  user.google.lastSyncAt = new Date().toISOString();
-  return { ...result, direction: "app_to_google", calendarName: user.google.calendarName || ("INDUS URE - " + user.name) };
-}
-
 function payrollTodosForArchive(db, payroll) {
   const todoIds = new Set((payroll.lines || []).map((line) => String(line.todoId || "")).filter(Boolean));
   return (db.todos || []).filter((todo) => todoIds.has(String(todo.id || "")));
 }
 
-async function archivePayrollTodosToGoogle(req, db, payroll, actor) {
-  if (!googleReady()) throw new Error("Google Calendar za arhiv ni nastavljen na strežniku.");
-  const worker = db.users?.[payroll.workerId];
-  if (!worker?.google?.tokens || Number(worker.google.scopeVersion || 0) !== GOOGLE_CALENDAR_SCOPE_VERSION) {
-    throw new Error(`Delavec ${worker?.name || payroll.workerId} mora najprej povezati svoj Google Calendar.`);
-  }
+async function archivePayrollTodos(db, payroll, actor) {
+  const worker = db.users?.[payroll.workerId] || { id: payroll.workerId, name: payroll.workerId };
   const todos = payrollTodosForArchive(db, payroll);
   if (!todos.length) throw new Error("V obračunu ni vnosov ur za arhiv.");
-
-  const { google } = require("googleapis");
-  const auth = googleClient(req, worker.google.tokens);
-  const calendar = google.calendar({ version: "v3", auth });
-  const activeCalendarId = await ensureGoogleCalendar(calendar, worker);
-  const archiveCalendarId = await ensureGoogleArchiveCalendar(calendar, worker);
   const now = new Date().toISOString();
-
-  // Najprej zanesljivo ustvarimo arhivsko kopijo. Aktivnega dogodka ne brišemo,
-  // dokler kopija v arhivu ni potrjena kot lastna INDUS kopija.
-  for (const todo of todos) {
-    if (todo.archivedAt) continue;
-    const archiveItem = {
-      id: todo.id,
-      syncUser: todo.syncUser || worker.id,
-      googleEventId: todo.archiveGoogleEventId || ""
-    };
-    const requestBody = todoToGoogleArchiveEvent(todo, payroll, clientTaxIdForItem(db, todo));
-    if (!(await pushGoogleItem(calendar, archiveCalendarId, archiveItem, requestBody, "payroll-archive"))) {
-      throw new Error(`Arhivske kopije za opravilo ${todo.title || todo.id} ni bilo mogoče varno ustvariti.`);
-    }
-    if (todo.archiveGoogleEventId !== archiveItem.googleEventId) {
-      todo.archiveGoogleEventId = archiveItem.googleEventId;
-      await writeDbAsync(db);
-    }
-  }
-
-  // Active copies are deleted only after every archive copy exists. Archive markers
-  // are persisted together, so a retry keeps the entire payroll snapshot intact.
   let archivedNow = 0;
   for (const todo of todos) {
     if (todo.archivedAt) continue;
-    if (todo.googleEventId && !(await deleteOwnedGoogleEvent(calendar, activeCalendarId, todo, "todo"))) {
-      throw new Error(`Aktivnega dogodka ${todo.title || todo.id} ni bilo mogo\u010de varno odstraniti.`);
-    }
-    resetGoogleItemSync(todo);
     todo.archivedAt = now;
     todo.archivedPayrollId = payroll.id;
     todo.updatedAt = now;
     todo.updatedBy = actor?.id || payroll.confirmedBy || "system";
     todo.updatedByName = actor?.name || payroll.confirmedByName || "";
-    todo.history = [...(todo.history || []), audit(actor || worker, `arhivirano v obra\u010dunu ${payroll.month}`)];
+    todo.history = [...(todo.history || []), audit(actor || worker, `arhivirano v obračunu ${payroll.month}`)];
     archivedNow += 1;
   }
-  if (archivedNow) await writeDbAsync(db);
-  return { archived: todos.length, archiveCalendarName: worker.google.archiveCalendarName || "" };
+  return { archived: archivedNow, archiveCalendarName: "interni arhiv" };
 }
-async function syncClientsWithSheets(db, user) {
-  if (!GOOGLE_SHEETS_ID) throw new Error("GOOGLE_SHEETS_ID ni nastavljen na strezniku.");
-  if (!user.google?.tokens) throw new Error("Najprej povezi Google racun.");
-  const { google } = require("googleapis");
-  const auth = googleClient({ headers: { host: "localhost" } }, user.google.tokens);
-  const sheets = google.sheets({ version: "v4", auth });
-  const remote = await sheets.spreadsheets.values.get({
-    spreadsheetId: GOOGLE_SHEETS_ID,
-    range: GOOGLE_SHEETS_RANGE
-  }).catch((error) => {
-    throw new Error(`Google Sheets ni mogoce prebrati (${GOOGLE_SHEETS_RANGE}): ${error.message}`);
-  });
-  const rows = remote.data.values || [];
-  const previousClients = db.clients || [];
-  const parsed = parseSheetClients(rows, previousClients);
-  const syncedIds = new Set(parsed.clients.map((client) => client.clientId));
-  const localClients = previousClients
-    .map((client) => normalizeStoredClient(client))
-    .filter((client) => client.source !== "google-sheets" && !syncedIds.has(client.clientId));
-  const nextClients = [...parsed.clients, ...localClients];
-  const references = rekeyClientReferences(db, previousClients, nextClients);
-  db.clients = nextClients;
-  return {
-    imported: parsed.total,
-    total: parsed.total,
-    usable: parsed.usable,
-    missingTax: parsed.missingTax,
-    duplicateTax: parsed.duplicateTax,
-    issues: parsed.issues.slice(0, 100),
-    updatedReferences: references.updated,
-    unresolvedReferences: references.unresolved.slice(0, 100)
-  };
-}
-
-async function upsertClientInSheets(client, user) {
-  if (!GOOGLE_SHEETS_ID) throw new Error("GOOGLE_SHEETS_ID ni nastavljen na strezniku.");
-  if (!user.google?.tokens) throw new Error("Najprej povezi Google racun z dovoljenjem za Google Sheets.");
-  const { google } = require("googleapis");
-  const auth = googleClient({ headers: { host: "localhost" } }, user.google.tokens);
-  const sheets = google.sheets({ version: "v4", auth });
-  const remote = await sheets.spreadsheets.values.get({
-    spreadsheetId: GOOGLE_SHEETS_ID,
-    range: GOOGLE_SHEETS_RANGE
-  });
-  const rows = remote.data.values || [];
-  const matches = rows.slice(1)
-    .map((row, index) => ({ row, rowNumber: index + 2, taxId: normalizeTaxId(row[7]) }))
-    .filter((item) => item.taxId === client.taxId);
-  if (matches.length > 1) {
-    throw new Error(`Davcna ${client.taxId} se v Google Sheetu pojavi veckrat. Najprej odpravi podvojene vrstice.`);
-  }
-  if (matches.length === 1) {
-    await sheets.spreadsheets.values.update({
-      spreadsheetId: GOOGLE_SHEETS_ID,
-      range: sheetRowRange(GOOGLE_SHEETS_RANGE, matches[0].rowNumber),
-      valueInputOption: "USER_ENTERED",
-      requestBody: { values: [clientToSheetRow(client, matches[0].row)] }
-    });
-    return { action: "updated", row: matches[0].rowNumber };
-  }
-  const emptyRow = findFirstEmptyClientRow(rows);
-  if (emptyRow) {
-    await sheets.spreadsheets.values.update({
-      spreadsheetId: GOOGLE_SHEETS_ID,
-      range: sheetRowRange(GOOGLE_SHEETS_RANGE, emptyRow),
-      valueInputOption: "USER_ENTERED",
-      requestBody: { values: [clientToSheetRow(client, rows[emptyRow - 1] || [])] }
-    });
-    return { action: "created", row: emptyRow };
-  }
-  const appended = await sheets.spreadsheets.values.append({
-    spreadsheetId: GOOGLE_SHEETS_ID,
-    range: sheetAppendRange(GOOGLE_SHEETS_RANGE),
-    valueInputOption: "USER_ENTERED",
-    insertDataOption: "INSERT_ROWS",
-    requestBody: { values: [clientToSheetRow(client)] }
-  });
-  return { action: "created", range: appended.data.updates?.updatedRange || "" };
-}
-
-async function deleteGoogleEventForItem(req, db, item) {
-  if (!googleReady() || !item?.googleEventId || !item.syncUser) return false;
-  const user = db.users[item.syncUser];
-  if (!user?.google?.tokens || !user.google.calendarId) return false;
-  try {
-    const { google } = require("googleapis");
-    const auth = googleClient(req, user.google.tokens);
-    const calendar = google.calendar({ version: "v3", auth });
-    return deleteOwnedGoogleEvent(calendar, user.google.calendarId, item, googleItemType(item));
-  } catch (error) {
-    console.warn(`Google dogodka ni bilo mogoce izbrisati: ${error.message || error}`);
-    return false;
-  }
-}
-
 const STATIC_TYPES = {
   ".html": "text/html; charset=utf-8",
   ".css": "text/css; charset=utf-8",
@@ -2567,7 +1965,9 @@ const STATIC_TYPES = {
   ".webp": "image/webp",
   ".ico": "image/x-icon",
   ".woff": "font/woff",
-  ".woff2": "font/woff2"
+  ".woff2": "font/woff2",
+  ".webmanifest": "application/manifest+json; charset=utf-8",
+  ".svg": "image/svg+xml"
 };
 
 function serveStatic(req, res) {
@@ -2593,6 +1993,9 @@ function serveStatic(req, res) {
   let cacheControl = "no-store";
   if (pathname === "/" || pathname === "/index.html") {
     filePath = path.join(root, "index.html");
+  } else if (["/manifest.webmanifest", "/service-worker.js"].includes(pathname)) {
+    filePath = path.join(root, pathname.slice(1));
+    cacheControl = "no-cache";
   } else if (pathname.startsWith("/vendor/pdfjs/")) {
     const vendorRoot = path.resolve(root, "..", "node_modules", "pdfjs-dist");
     const relativePath = pathname.slice("/vendor/pdfjs/".length);
@@ -2627,15 +2030,23 @@ function serveStatic(req, res) {
       sendText(res, 404, "Not found", "text/plain");
       return;
     }
+    let responseData = data;
+    let nonce = "";
+    if (filePath === path.join(root, "index.html")) {
+      nonce = crypto.randomBytes(18).toString("base64");
+      responseData = Buffer.from(data.toString("utf8")
+        .replace("<style>", `<style nonce="${nonce}">`)
+        .replace("<script>", `<script nonce="${nonce}">`), "utf8");
+    }
     res.writeHead(200, securityHeaders({
       "Content-Type": type,
       "Cache-Control": cacheControl,
-      "Content-Length": data.length
-    }));
+      "Content-Length": responseData.length
+    }, nonce));
     if (req.method === "HEAD") {
       res.end();
     } else {
-      res.end(data);
+      res.end(responseData);
     }
   });
 }
@@ -2650,30 +2061,422 @@ function cleanupPendingGoogleStates() {
   }
 }
 
+async function sendAttachmentFile(res, attachment) {
+  const stat = await fsp.stat(attachment.filePath);
+  res.writeHead(200, securityHeaders({
+    "Content-Type": attachment.mimeType || "application/octet-stream",
+    "Content-Length": stat.size,
+    "Cache-Control": "private, max-age=3600",
+    "Content-Disposition": "inline"
+  }));
+  fs.createReadStream(attachment.filePath).on("error", () => res.destroy()).pipe(res);
+}
+
+function attachmentVisibleToUser(db, user, attachmentId) {
+  return (db.todos || []).some((todo) => canManageTodo(user, todo)
+    && (todo.photos || []).some((photo) => photo.attachmentId === attachmentId));
+}
+
+const MAX_BROWSER_RESTORE_BYTES = 1_500 * 1024 * 1024;
+const MAX_BROWSER_RESTORE_FILES = 20_000;
+
+function browserBackupUser(user = {}) {
+  return {
+    id: String(user.id || ""),
+    email: String(user.email || ""),
+    name: String(user.name || ""),
+    role: user.role === "boss" ? "boss" : "worker",
+    avatar: String(user.avatar || "")
+  };
+}
+
+function browserBackupState(db) {
+  const attachments = Object.fromEntries(Object.entries(db.attachments || {}).map(([id, attachment]) => {
+    const copy = { ...attachment };
+    delete copy.data;
+    delete copy.thumbnailData;
+    return [id, copy];
+  }));
+  return {
+    format: "indus-ure-browser-backup-v1",
+    exportedAt: new Date().toISOString(),
+    includes: ["data", "settings", "media"],
+    excludes: ["sessions", "password hashes", "OAuth tokens", "server secrets"],
+    snapshot: {
+      users: Object.fromEntries(Object.entries(db.users || {}).map(([id, user]) => [id, browserBackupUser(user)])),
+      entries: db.entries || [],
+      todos: db.todos || [],
+      attachments,
+      debts: db.debts || [],
+      clients: db.clients || [],
+      billingLocks: db.billingLocks || [],
+      payrolls: db.payrolls || [],
+      settings: db.settings || {}
+    }
+  };
+}
+
+async function sendBrowserBackup(res, db) {
+  const archiver = require("archiver");
+  const filename = `indus-ure-data-${new Date().toISOString().slice(0, 10)}.zip`;
+  const archive = archiver("zip", { zlib: { level: 9 } });
+  archive.on("error", (error) => res.destroy(error));
+  res.writeHead(200, securityHeaders({
+    "Content-Type": "application/zip",
+    "Content-Disposition": `attachment; filename="${filename}"`,
+    "Cache-Control": "no-store"
+  }));
+  archive.pipe(res);
+  archive.append(JSON.stringify(browserBackupState(db), null, 2), { name: "metadata.json" });
+  if (fs.existsSync(MEDIA_DIR)) archive.directory(MEDIA_DIR, "media");
+  await archive.finalize();
+}
+
+function safeRestoreRelativePath(value) {
+  const normalized = String(value || "").replaceAll("\\", "/");
+  if (!normalized || normalized.startsWith("/") || normalized.includes("\u0000")) return "";
+  const parts = normalized.split("/");
+  if (parts.some((part) => !part || part === "." || part === "..")) return "";
+  return normalized;
+}
+
+async function receiveBrowserRestoreZip(req) {
+  const declared = Number(req.headers["content-length"] || 0);
+  if (declared && (!Number.isFinite(declared) || declared > MAX_BROWSER_RESTORE_BYTES)) throw new Error("Varnostna kopija je prevelika za uvoz.");
+  const directory = await fsp.mkdtemp(path.join(os.tmpdir(), "indus-ure-restore-"));
+  const file = path.join(directory, "upload.zip");
+  const output = fs.createWriteStream(file, { mode: 0o600 });
+  let total = 0;
+  req.on("data", (chunk) => {
+    total += chunk.length;
+    if (total > MAX_BROWSER_RESTORE_BYTES) req.destroy(new Error("Varnostna kopija je prevelika za uvoz."));
+  });
+  try {
+    await pipeline(req, output);
+    if (!total) throw new Error("Varnostna kopija je prazna.");
+    return { directory, file };
+  } catch (error) {
+    await fsp.rm(directory, { recursive: true, force: true }).catch(() => {});
+    throw error;
+  }
+}
+
+async function extractBrowserRestoreZip(zipFile, directory) {
+  const unzipper = require("unzipper");
+  const zip = await unzipper.Open.file(zipFile);
+  if (!zip.files.length || zip.files.length > MAX_BROWSER_RESTORE_FILES) throw new Error("ZIP ima neveljavno število datotek.");
+  let total = 0;
+  for (const entry of zip.files) {
+    const relative = safeRestoreRelativePath(entry.path);
+    if (!relative || (!relative.startsWith("media/") && relative !== "metadata.json")) throw new Error("ZIP vsebuje nedovoljeno pot.");
+    if (entry.type === "Directory") continue;
+    const size = Number(entry.uncompressedSize || 0);
+    total += size;
+    if (!Number.isFinite(size) || total > MAX_BROWSER_RESTORE_BYTES) throw new Error("Razširjena varnostna kopija je prevelika.");
+    const destination = path.resolve(directory, relative);
+    if (!destination.startsWith(`${directory}${path.sep}`)) throw new Error("ZIP pot ni varna.");
+    await fsp.mkdir(path.dirname(destination), { recursive: true, mode: 0o700 });
+    await pipeline(entry.stream(), fs.createWriteStream(destination, { mode: 0o600 }));
+  }
+  const metadataPath = path.join(directory, "metadata.json");
+  let metadata;
+  try {
+    metadata = JSON.parse(await fsp.readFile(metadataPath, "utf8"));
+  } catch {
+    throw new Error("ZIP nima veljavne datoteke metadata.json.");
+  }
+  if (metadata?.format !== "indus-ure-browser-backup-v1" || !metadata.snapshot || typeof metadata.snapshot !== "object") {
+    throw new Error("To ni veljavna varnostna kopija INDUS URE.");
+  }
+  return metadata;
+}
+
+function restoredBrowserState(current, metadata) {
+  const snapshot = metadata.snapshot || {};
+  const arrays = ["entries", "todos", "debts", "clients", "billingLocks", "payrolls"];
+  for (const key of arrays) if (snapshot[key] !== undefined && !Array.isArray(snapshot[key])) throw new Error(`Neveljavni podatki: ${key}.`);
+  if (snapshot.attachments !== undefined && (typeof snapshot.attachments !== "object" || Array.isArray(snapshot.attachments))) throw new Error("Neveljavni podatki prilog.");
+  const importedUsers = snapshot.users && typeof snapshot.users === "object" ? snapshot.users : {};
+  const users = Object.fromEntries(Object.entries(current.users || {}).map(([id, currentUser]) => {
+    const imported = importedUsers[id] || {};
+    return [id, {
+      ...currentUser,
+      ...browserBackupUser({ ...currentUser, ...imported }),
+      passwordHash: currentUser.passwordHash,
+      google: currentUser.google
+    }];
+  }));
+  return normalizeDb({
+    ...current,
+    users,
+    sessions: {},
+    entries: snapshot.entries || [],
+    todos: snapshot.todos || [],
+    attachments: snapshot.attachments || {},
+    debts: snapshot.debts || [],
+    clients: snapshot.clients || [],
+    billingLocks: snapshot.billingLocks || [],
+    payrolls: snapshot.payrolls || [],
+    settings: snapshot.settings && typeof snapshot.settings === "object" ? snapshot.settings : {},
+    restoredAt: new Date().toISOString(),
+    restoredFromBrowserBackupAt: String(metadata.exportedAt || "")
+  }).db;
+}
+
+async function assertRestoredMediaExists(restored, stagedMediaDir) {
+  for (const attachment of Object.values(restored.attachments || {})) {
+    for (const key of [attachment.storageKey, attachment.thumbnailKey].filter(Boolean)) {
+      const relative = safeRestoreRelativePath(key);
+      const candidate = relative ? path.resolve(stagedMediaDir, relative) : "";
+      if (!candidate || !candidate.startsWith(`${stagedMediaDir}${path.sep}`) || !fs.existsSync(candidate)) {
+        throw new Error("Varnostna kopija nima vseh datotek prilog.");
+      }
+    }
+  }
+}
+
+async function restoreBrowserBackup(upload, currentDb) {
+  if (!DATABASE_URL) throw new Error("Obnova v brskalniku je na voljo samo s PostgreSQL hrambo.");
+  const stage = await fsp.mkdtemp(path.join(path.dirname(MEDIA_DIR), ".indus-ure-restore-"));
+  let rollbackMedia = "";
+  try {
+    const metadata = await extractBrowserRestoreZip(upload.file, stage);
+    const restored = restoredBrowserState(currentDb, metadata);
+    const stagedMedia = path.join(stage, "media");
+    await fsp.mkdir(stagedMedia, { recursive: true, mode: 0o700 });
+    await assertRestoredMediaExists(restored, stagedMedia);
+    if (fs.existsSync(MEDIA_DIR)) {
+      rollbackMedia = `${MEDIA_DIR}.before-restore-${Date.now()}`;
+      await fsp.rename(MEDIA_DIR, rollbackMedia);
+    }
+    await fsp.rename(stagedMedia, MEDIA_DIR);
+    try {
+      await writeDbAsync(restored);
+    } catch (error) {
+      await fsp.rm(MEDIA_DIR, { recursive: true, force: true }).catch(() => {});
+      if (rollbackMedia && fs.existsSync(rollbackMedia)) await fsp.rename(rollbackMedia, MEDIA_DIR).catch(() => {});
+      throw error;
+    }
+    return { restoredAt: restored.restoredAt, rollbackMedia: rollbackMedia ? path.basename(rollbackMedia) : "" };
+  } finally {
+    await fsp.rm(stage, { recursive: true, force: true }).catch(() => {});
+    await fsp.rm(upload.directory, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+async function backupStatus() {
+  if (!DATABASE_URL) return [];
+  const result = await getPgPool().query("select status, data, created_at, finished_at from indus_backup_runs order by created_at desc limit 12");
+  return result.rows.map((row) => ({ ...row.data, status: row.status, createdAt: row.created_at, finishedAt: row.finished_at }));
+}
+async function sendOperationalAlertEmail(notification) {
+  if (!ALERT_SMTP_URL || !ALERT_EMAIL_FROM || !ALERT_EMAIL_TO) return false;
+  try {
+    if (!alertTransport) alertTransport = require("nodemailer").createTransport(ALERT_SMTP_URL);
+    await alertTransport.sendMail({
+      from: ALERT_EMAIL_FROM,
+      to: ALERT_EMAIL_TO,
+      subject: `[INDUS URE] ${notification.title}`,
+      text: `${notification.message}\n\nČas: ${notification.createdAt}\nKoda: ${notification.code}`
+    });
+    return true;
+  } catch (error) {
+    console.error(`Sistemskega e-poštnega opozorila ni bilo mogoče poslati: ${error.message || error}`);
+    return false;
+  }
+}
+
+async function recordOperationalAlert({ code, severity = "warning", title, message }) {
+  const last = Number(monitorAlertCooldowns.get(code) || 0);
+  if (Date.now() - last < 6 * 60 * 60 * 1000) return false;
+  monitorAlertCooldowns.set(code, Date.now());
+  const notification = { id: crypto.randomUUID(), code, severity, title, message, createdAt: new Date().toISOString() };
+  if (DATABASE_URL) {
+    try {
+      await getPgPool().query(
+        `insert into indus_notifications (id, user_id, severity, data)
+         values ($1, $2, $3, $4::jsonb)`,
+        [notification.id, "bojan", severity, JSON.stringify(notification)]
+      );
+    } catch (error) {
+      console.error(`Sistemskega opozorila ni bilo mogoče shraniti: ${error.message || error}`);
+    }
+  }
+  await sendOperationalAlertEmail(notification);
+  return true;
+}
+
+async function listOperationalNotifications() {
+  if (!DATABASE_URL) return [];
+  const result = await getPgPool().query(
+    `select id, severity, read_at, data, created_at
+     from indus_notifications where user_id = $1 order by created_at desc limit 40`,
+    ["bojan"]
+  );
+  return result.rows.map((row) => ({ ...row.data, id: row.id, severity: row.severity, readAt: row.read_at, createdAt: row.created_at }));
+}
+
+async function markOperationalNotificationRead(id) {
+  if (!DATABASE_URL) return;
+  await getPgPool().query("update indus_notifications set read_at = now() where id = $1 and user_id = $2", [id, "bojan"]);
+}
+
+async function runOperationalMonitor() {
+  const issues = [];
+  if (DATABASE_URL) {
+    try {
+      await getPgPool().query("select 1");
+    } catch {
+      issues.push({ code: "database-unreachable", severity: "critical", title: "PostgreSQL ni dosegljiv", message: "Aplikacija se ne more povezati z bazo podatkov." });
+    }
+    try {
+      const backup = await getPgPool().query("select finished_at from indus_backup_runs where status = 'success' order by finished_at desc limit 1");
+      const latest = new Date(backup.rows[0]?.finished_at || 0).getTime();
+      if (!latest || Date.now() - latest > 36 * 60 * 60 * 1000) {
+        issues.push({ code: "backup-stale", severity: "warning", title: "Varnostna kopija je zastarela", message: "Ni potrjene šifrirane varnostne kopije v zadnjih 36 urah." });
+      }
+    } catch {
+      // Database availability alert above contains the useful information.
+    }
+  }
+  try {
+    const stats = await fsp.statfs(MEDIA_DIR);
+    const free = Number(stats.bavail || stats.bfree || 0);
+    const total = Number(stats.blocks || 0);
+    if (total && (1 - free / total) >= 0.85) {
+      issues.push({ code: "storage-low", severity: "warning", title: "Na strežniku zmanjkuje prostora", message: "Prostor za priloge je nad 85 % zaseden." });
+    }
+  } catch {
+    issues.push({ code: "media-unavailable", severity: "critical", title: "Mapa prilog ni dosegljiva", message: "Strežnik ne more preveriti ali zapisovati prilog." });
+  }
+  const rssMb = process.memoryUsage().rss / 1024 / 1024;
+  if (rssMb > MONITOR_MAX_RSS_MB) {
+    issues.push({ code: "memory-high", severity: "warning", title: "Poraba pomnilnika je visoka", message: `Proces INDUS URE porabi ${Math.round(rssMb)} MB RAM.` });
+  }
+  for (const issue of issues) await recordOperationalAlert(issue);
+}
+
+function startOperationalMonitor() {
+  if (monitorTimer) return;
+  runOperationalMonitor().catch((error) => console.error(`Nadzor strežnika ni uspel: ${error.message || error}`));
+  monitorTimer = setInterval(() => runOperationalMonitor().catch((error) => console.error(`Nadzor strežnika ni uspel: ${error.message || error}`)), MONITOR_INTERVAL_MS);
+  monitorTimer.unref?.();
+}
 async function handleApi(req, res) {
   const url = new URL(req.url, `http://${req.headers.host}`);
 
   try {
+    const attachmentMatch = url.pathname.match(/^\/api\/attachments\/([a-f0-9]{64})(\/thumbnail)?$/);
+    if (attachmentMatch && req.method === "GET") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      const attachmentId = attachmentMatch[1];
+      const db = await readDbAsync();
+      if (!attachmentVisibleToUser(db, user, attachmentId)) {
+        sendJson(res, 404, { error: "Priloga ne obstaja." });
+        return;
+      }
+      if (DATABASE_URL) {
+        const attachment = await getPgStore().getAttachment(attachmentId, Boolean(attachmentMatch[2]));
+        if (!attachment) {
+          sendJson(res, 404, { error: "Priloga ne obstaja." });
+          return;
+        }
+        await sendAttachmentFile(res, attachment);
+        return;
+      }
+      const source = db.attachments?.[attachmentId];
+      const dataUrl = attachmentMatch[2] ? source?.thumbnailData : source?.data;
+      const match = String(dataUrl || "").match(/^data:([^;,]+);base64,([A-Za-z0-9+/]+={0,2})$/);
+      if (!match) {
+        sendJson(res, 404, { error: "Priloga ne obstaja." });
+        return;
+      }
+      const bytes = Buffer.from(match[2], "base64");
+      res.writeHead(200, securityHeaders({ "Content-Type": match[1], "Content-Length": bytes.length, "Cache-Control": "private, max-age=3600", "Content-Disposition": "inline" }));
+      res.end(bytes);
+      return;
+    }
     if (url.pathname === "/api/health" && req.method === "GET") {
       if (DATABASE_URL) await getPgPool().query("select 1");
       sendJson(res, 200, { ok: true });
       return;
     }
 
-    if (url.pathname === "/api/google/status" && req.method === "GET") {
+    if (url.pathname === "/api/backup/status" && req.method === "GET") {
       const user = await requireUser(req, res);
       if (!user) return;
-      sendJson(res, 200, {
-        configured: googleReady(),
-        connected: Boolean(user.google?.tokens && Number(user.google.scopeVersion || 0) === GOOGLE_CALENDAR_SCOPE_VERSION),
-        direction: "app_to_google",
-        calendarName: user.google?.calendarName || "",
-        lastSyncAt: user.google?.lastSyncAt || "",
-        syncIntervalMs: GOOGLE_SYNC_INTERVAL_MS
-      });
+      if (user.role !== "boss") {
+        sendJson(res, 403, { error: "Status varnostnih kopij vidi samo šef." });
+        return;
+      }
+      sendJson(res, 200, { backups: await backupStatus() });
       return;
     }
 
+    if (url.pathname === "/api/backup/export" && req.method === "GET") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      if (user.role !== "boss") {
+        sendJson(res, 403, { error: "Varnostno kopijo lahko izvozi samo šef." });
+        return;
+      }
+      const db = await readDbAsync();
+      await sendBrowserBackup(res, db);
+      return;
+    }
+
+    if (url.pathname === "/api/backup/restore" && req.method === "POST") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      if (user.role !== "boss") {
+        sendJson(res, 403, { error: "Obnovo lahko izvede samo šef." });
+        return;
+      }
+      if (String(req.headers["x-indus-restore-confirm"] || "") !== "OBNOVI") {
+        sendJson(res, 400, { error: "Za obnovo je potrebna izrecna potrditev OBNOVI." });
+        return;
+      }
+      const type = String(req.headers["content-type"] || "").toLowerCase();
+      if (!type.includes("application/zip")) {
+        sendJson(res, 415, { error: "Izberi ZIP varnostno kopijo INDUS URE." });
+        return;
+      }
+      const current = await readDbAsync();
+      const upload = await receiveBrowserRestoreZip(req);
+      const result = await restoreBrowserBackup(upload, current);
+      clearSessionCookie(req, res);
+      sendJson(res, 200, { ok: true, ...result, requiresLogin: true });
+      return;
+    }
+
+    if (url.pathname === "/api/notifications" && req.method === "GET") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      if (user.role !== "boss") {
+        sendJson(res, 403, { error: "Opozorila vidi samo šef." });
+        return;
+      }
+      sendJson(res, 200, { notifications: await listOperationalNotifications() });
+      return;
+    }
+
+    const notificationReadMatch = url.pathname.match(/^\/api\/notifications\/([^/]+)\/read$/);
+    if (notificationReadMatch && req.method === "POST") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      if (user.role !== "boss") {
+        sendJson(res, 403, { error: "Opozorila lahko potrdi samo šef." });
+        return;
+      }
+      await markOperationalNotificationRead(decodeURIComponent(notificationReadMatch[1]));
+      sendJson(res, 200, { ok: true });
+      return;
+    }
+    if (url.pathname === "/api/google/status" || url.pathname === "/api/google/auth-url" || url.pathname === "/api/google/sync") {
+      sendJson(res, 410, { error: "Google Calendar sinhronizacija je bila odstranjena. ICS koledar ostaja samo za branje." });
+      return;
+    }
     if (url.pathname === "/api/google/drive-status" && req.method === "GET") {
       const user = await requireUser(req, res);
       if (!user) return;
@@ -2713,31 +2516,6 @@ async function handleApi(req, res) {
       return;
     }
 
-    if (url.pathname === "/api/google/auth-url" && req.method === "GET") {
-      const user = await requireUser(req, res);
-      if (!user) return;
-      if (!googleReady()) {
-        sendJson(res, 400, { error: "Google OAuth se ni nastavljen na strezniku." });
-        return;
-      }
-      cleanupPendingGoogleStates();
-      const state = `connect:${crypto.randomBytes(24).toString("hex")}`;
-      pendingGoogleConnections.set(state, { userId: user.id, startedAt: Date.now() });
-      const auth = googleClient(req);
-      const authUrl = auth.generateAuthUrl({
-        access_type: "offline",
-        state,
-        scope: [
-          "https://www.googleapis.com/auth/calendar.app.created",
-          "https://www.googleapis.com/auth/spreadsheets"
-        ],
-        include_granted_scopes: false,
-        prompt: "consent"
-      });
-      sendJson(res, 200, { url: authUrl });
-      return;
-    }
-
     if (url.pathname === "/api/google/drive-auth-url" && req.method === "GET") {
       const user = await requireUser(req, res);
       if (!user) return;
@@ -2756,11 +2534,8 @@ async function handleApi(req, res) {
       const authUrl = auth.generateAuthUrl({
         access_type: "offline",
         state,
-        scope: [
-          "https://www.googleapis.com/auth/calendar.app.created",
-          "https://www.googleapis.com/auth/spreadsheets",
-          GOOGLE_DRIVE_FILE_SCOPE
-        ],
+        scope: [GOOGLE_DRIVE_FILE_SCOPE],
+
         include_granted_scopes: true,
         prompt: "consent",
         login_hint: GOOGLE_DRIVE_OWNER_EMAIL
@@ -2807,24 +2582,11 @@ async function handleApi(req, res) {
         }
         const sessionToken = createSession(db, user.id);
         await writeDbAsync(db);
-        const html = `<!doctype html>
-<html lang="sl">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>INDUS URE</title>
-</head>
-<body>
-  <p>Prijava je uspela. Odpiram INDUS URE...</p>
-  <script>
-    localStorage.setItem("indus-ure-token", ${JSON.stringify(sessionToken)});
-    localStorage.setItem("indus-ure-google-email", ${JSON.stringify(email)});
-    sessionStorage.removeItem("indus-ure-auto-login-at");
-    location.replace("/");
-  </script>
-</body>
-</html>`;
-        sendText(res, 200, html, "text/html; charset=utf-8");
+        setSessionCookie(req, res, sessionToken);
+        const destination = new URL("/", absoluteBaseUrl(req));
+        destination.searchParams.set("login", "ok");
+        res.writeHead(303, securityHeaders({ Location: destination.toString(), "Cache-Control": "no-store" }));
+        res.end();
         return;
       }
       const pending = pendingGoogleConnections.get(token);
@@ -2842,41 +2604,23 @@ async function handleApi(req, res) {
         return;
       }
       user.google = user.google || {};
-      const currentScope = Number(user.google.scopeVersion || 0) === GOOGLE_CALENDAR_SCOPE_VERSION;
-      const currentDriveScope = Number(user.google.driveScopeVersion || 0) === GOOGLE_DRIVE_SCOPE_VERSION;
-      const refreshToken = result.tokens.refresh_token || ((currentScope || currentDriveScope) ? user.google.tokens?.refresh_token : "");
+      if (pending.kind !== "drive") {
+        sendText(res, 400, "Ta Google povezava ni vec podprta.", "text/plain");
+        return;
+      }
+      const currentDriveScope = Number(user.google?.driveScopeVersion || 0) === GOOGLE_DRIVE_SCOPE_VERSION;
+      const refreshToken = result.tokens.refresh_token || (currentDriveScope ? user.google.tokens?.refresh_token : "");
       if (!refreshToken) {
         sendText(res, 400, "Google ni vrnil trajnega dovoljenja. V Google racunu odstrani dostop INDUS URE in poskusi znova.", "text/plain");
         return;
       }
-      user.google.tokens = { ...result.tokens, refresh_token: refreshToken };
-      user.google.connectedAt = new Date().toISOString();
-      user.google.scopeVersion = GOOGLE_CALENDAR_SCOPE_VERSION;
-      if (pending.kind === "drive") user.google.driveScopeVersion = GOOGLE_DRIVE_SCOPE_VERSION;
-      if (!currentScope) {
-        user.google.calendarId = "";
-        user.google.calendarName = "";
-        user.google.archiveCalendarId = "";
-        user.google.archiveCalendarName = "";
-        user.google.calendarCreatedByApp = false;
-        user.google.syncToken = "";
-        user.google.lastSyncAt = "";
-      }
+      user.google = {
+        tokens: { ...result.tokens, refresh_token: refreshToken },
+        connectedAt: new Date().toISOString(),
+        driveScopeVersion: GOOGLE_DRIVE_SCOPE_VERSION
+      };
       await writeDbAsync(db);
-      sendText(res, 200, pending.kind === "drive"
-        ? "Google Dokumenti in preglednice so povezani. Lahko zapres to okno in se vrnes v INDUS URE."
-        : "Google racun je povezan. Lahko zapres to okno in v INDUS URE kliknes Google sync.", "text/plain");
-      return;
-    }
-
-    if (url.pathname === "/api/google/sync" && req.method === "POST") {
-      const user = await requireUser(req, res);
-      if (!user) return;
-      const db = await readDbAsync();
-      const current = db.users[user.id];
-      const result = await syncGoogleForUser(req, db, current);
-      await writeDbAsync(db);
-      sendJson(res, 200, { ok: true, ...result, entries: visibleEntriesForUser(db, current), todos: visibleTodosForUser(db, current) });
+      sendText(res, 200, "Google Dokumenti, preglednice in backup so povezani. Lahko zapres to okno in se vrnes v INDUS URE.", "text/plain");
       return;
     }
 
@@ -2900,8 +2644,11 @@ async function handleApi(req, res) {
     }
 
     if (url.pathname === "/api/logout" && req.method === "POST") {
+      const user = await requireUser(req, res);
+      if (!user) return;
       const db = await readDbAsync();
       if (revokeSession(db, sessionTokenFromRequest(req))) await writeDbAsync(db);
+      clearSessionCookie(req, res);
       sendJson(res, 200, { ok: true });
       return;
     }
@@ -2909,7 +2656,26 @@ async function handleApi(req, res) {
     if (url.pathname === "/api/me") {
       const user = await requireUser(req, res);
       if (!user) return;
-      sendJson(res, 200, { user: publicUser(user) });
+      sendJson(res, 200, {
+        user: publicUser(user),
+        csrfToken: req.indusSession?.csrfToken || "",
+        sessionExpiresAt: req.indusSession?.expiresAt || 0,
+        syncRevision: Number(req.indusDb?.syncRevision || 0)
+      });
+      return;
+    }
+
+    if (url.pathname === "/api/sync-state" && req.method === "GET") {
+      const user = await requireUserForSyncState(req, res);
+      if (!user) return;
+      const revision = Number(req.indusDb?.syncRevision || 0);
+      const etag = `"indus-${revision}"`;
+      if (String(req.headers["if-none-match"] || "") === etag) {
+        res.writeHead(304, securityHeaders({ ETag: etag, "Cache-Control": "no-store" }));
+        res.end();
+        return;
+      }
+      sendJson(res, 200, { revision, serverTime: new Date().toISOString(), userId: user.id, etag });
       return;
     }
 
@@ -2987,9 +2753,9 @@ async function handleApi(req, res) {
       }
       if (existingIndex >= 0) db.payrolls[existingIndex] = payroll;
       else db.payrolls.push(payroll);
-      // Persist the locked snapshot before touching Google, so a retry can finish safely.
+      // Persist the locked snapshot before internal archival, so a retry can finish safely.
       await writeDbAsync(db);
-      await archivePayrollTodosToGoogle(req, db, payroll, user);
+      await archivePayrollTodos(db, payroll, user);
       payroll = normalizePayroll({
         ...payroll,
         status: "confirmed",
@@ -3061,7 +2827,7 @@ async function handleApi(req, res) {
         }
         db.payrolls[index] = payroll;
         await writeDbAsync(db);
-        await archivePayrollTodosToGoogle(req, db, payroll, user);
+        await archivePayrollTodos(db, payroll, user);
         payroll = normalizePayroll({
           ...payroll,
           status: "confirmed",
@@ -3379,30 +3145,8 @@ async function handleApi(req, res) {
       } else {
         db.clients.push(client);
       }
-      if (!client.taxId) {
-        await writeDbAsync(db);
-        sendJson(res, 200, { clients: db.clients, sheetWrite: { action: "pending" }, sync: null });
-        return;
-      }
-      const sheetWrite = await upsertClientInSheets(client, current);
-      const sync = await syncClientsWithSheets(db, current);
       await writeDbAsync(db);
-      sendJson(res, 200, { clients: db.clients, sheetWrite, sync });
-      return;
-    }
-
-    if (url.pathname === "/api/clients/sync" && req.method === "POST") {
-      const user = await requireUser(req, res);
-      if (!user) return;
-      if (user.role !== "boss") {
-        sendJson(res, 403, { error: "Samo sef lahko sinhronizira stranke." });
-        return;
-      }
-      const db = await readDbAsync();
-      const current = db.users[user.id];
-      const result = await syncClientsWithSheets(db, current);
-      await writeDbAsync(db);
-      sendJson(res, 200, { clients: db.clients || [], ...result });
+      sendJson(res, 200, { clients: db.clients, client });
       return;
     }
 
@@ -3527,7 +3271,6 @@ async function handleApi(req, res) {
         });
       });
       await writeDbAsync(db);
-      setTimeout(queueBackgroundGoogleSync, 0);
       sendJson(res, 200, {
         todos: visibleTodosForUser(db, user),
         assignedTo: assigneeIds.map((id) => publicDirectoryUser(db.users[id]))
@@ -3695,7 +3438,6 @@ async function handleApi(req, res) {
         sendJson(res, 403, { error: "To obdobje je obracunano. Vnosa ne mores izbrisati." });
         return;
       }
-      await deleteGoogleEventForItem(req, db, entry);
       db.entries = db.entries.filter((item) => item.id !== id);
       await writeDbAsync(db);
       releaseEntryEditLock(id, user, editLockToken);
@@ -3786,7 +3528,6 @@ async function handleApi(req, res) {
       } : item);
       await writeDbAsync(db);
       releaseTodoAssignmentEditLock(db, previousTodo, user, editLockToken);
-      setTimeout(queueBackgroundGoogleSync, 0);
       sendJson(res, 200, { todos: visibleTodosForUser(db, user) });
       return;
     }
@@ -3865,14 +3606,7 @@ async function handleApi(req, res) {
           existingByAssignee.set(assigneeId, item);
         }
       }
-      for (const removedTodo of removedTodos) {
-        if (removedTodo.googleEventId && !(await deleteGoogleEventForItem(req, db, removedTodo))) {
-          sendJson(res, 502, { error: "Dodelitve ni bilo mogoce varno odstraniti iz starega koledarja." });
-          return;
-        }
-      }
-
-      releaseTodoAssignmentEditLock(db, previousTodo, user, editLockToken);
+releaseTodoAssignmentEditLock(db, previousTodo, user, editLockToken);
       const assignmentGroupId = previousTodo.assignmentGroupId || crypto.randomUUID();
       const now = new Date().toISOString();
       const sharedPhotos = stampTodoPhotos(todo, user);
@@ -3938,7 +3672,7 @@ async function handleApi(req, res) {
       db.todos.push(...updatedGroup);
       pruneUnusedTodoAttachments(db);
       await writeDbAsync(db);
-      setTimeout(queueBackgroundGoogleSync, 0);
+      releaseTodoAssignmentEditLock(db, previousTodo, user, editLockToken);
       sendJson(res, 200, { todos: visibleTodosForUser(db, user) });
       return;
     }
@@ -3972,17 +3706,12 @@ async function handleApi(req, res) {
         sendJson(res, 403, { error: `Opravilo je del potrjenega obracuna za ${db.users?.[payrollLock.workerId]?.name || payrollLock.workerId} (${payrollLock.month}). Sef ga mora najprej ponovno odpreti.` });
         return;
       }
-      for (const item of assignmentItems) {
-        if (item.googleEventId && !(await deleteGoogleEventForItem(req, db, item))) {
-          sendJson(res, 502, { error: "Opravila ni bilo mogoce varno odstraniti iz koledarja." });
-          return;
-        }
-      }
-      releaseTodoAssignmentEditLock(db, todo, user, editLockToken);
+releaseTodoAssignmentEditLock(db, todo, user, editLockToken);
       const removedIds = new Set(assignmentItems.map((item) => item.id));
       db.todos = db.todos.filter((item) => !removedIds.has(item.id));
       pruneUnusedTodoAttachments(db);
       await writeDbAsync(db);
+      releaseTodoAssignmentEditLock(db, todo, user, editLockToken);
       sendJson(res, 200, { todos: visibleTodosForUser(db, user) });
       return;
     }
@@ -4045,31 +3774,6 @@ function runSerializedMutation(req, res) {
   mutationQueue = execution.catch((error) => handleUnexpectedRequestError(error, res));
 }
 
-async function syncConnectedGoogleCalendars() {
-  if (!googleReady()) return;
-  const db = await readDbAsync();
-  let changed = false;
-  for (const user of Object.values(db.users || {})) {
-    if (!user.google?.tokens || Number(user.google.scopeVersion || 0) !== GOOGLE_CALENDAR_SCOPE_VERSION) continue;
-    try {
-      const result = await syncGoogleForUser({ headers: { host: "localhost" } }, db, user);
-      changed = true;
-      if (result.pushed || result.removed) {
-        console.log("Google koledar " + user.id + ": posodobljeno " + result.pushed + ", odstranjeno " + result.removed + ".");
-      }
-    } catch (error) {
-      console.error(`Google koledarja za ${user.id} ni bilo mogoce sinhronizirati: ${error.message || error}`);
-    }
-  }
-  if (changed) await writeDbAsync(db);
-}
-
-function queueBackgroundGoogleSync() {
-  mutationQueue = mutationQueue
-    .then(() => syncConnectedGoogleCalendars())
-    .catch((error) => console.error(`Google sync v ozadju ni uspel: ${error.message || error}`));
-}
-
 async function start() {
   if (NODE_ENV === "production" && !DATABASE_URL) {
     throw new Error("V produkciji mora biti nastavljen DATABASE_URL.");
@@ -4080,22 +3784,6 @@ async function start() {
   } else {
     ensureDb();
     console.log(`Shranjevanje: lokalna datoteka ${dbFile}`);
-  }
-
-  if (GOOGLE_SHEETS_ID) {
-    try {
-      const db = await readDbAsync();
-      const bojan = db.users?.bojan;
-      if (bojan?.google?.tokens) {
-        const result = await syncClientsWithSheets(db, bojan);
-        await writeDbAsync(db);
-        console.log(`Google Sheets stranke: ${result.usable}/${result.total} uporabnih, ${result.updatedReferences} referenc posodobljenih.`);
-      } else {
-        console.warn("Google Sheets stranke: Bojanov Google racun se ni povezan.");
-      }
-    } catch (error) {
-      console.error(`Google Sheets strank ob zagonu ni bilo mogoce sinhronizirati: ${error.message || error}`);
-    }
   }
 
   const server = http.createServer((req, res) => {
@@ -4113,18 +3801,18 @@ async function start() {
     }
     serveStatic(req, res);
   });
-  server.requestTimeout = 60_000;
+  // ZIP restore can be large; ordinary API bodies still have their own small limits.
+  server.requestTimeout = 15 * 60_000;
   server.headersTimeout = 65_000;
   server.keepAliveTimeout = 5_000;
+  startOperationalMonitor();
+
   server.listen(PORT, HOST, () => {
     console.log(`INDUS URE lokalno: http://127.0.0.1:${PORT}`);
     for (const url of networkUrls()) console.log(`Na istem omrezju: ${url}`);
     console.log("Uporabnika: bojan in ibro");
   });
-  const googleSyncTimer = setInterval(queueBackgroundGoogleSync, GOOGLE_SYNC_INTERVAL_MS);
-  googleSyncTimer.unref();
-  const initialGoogleSyncTimer = setTimeout(queueBackgroundGoogleSync, 15_000);
-  initialGoogleSyncTimer.unref();
+
 }
 
 if (require.main === module) {
@@ -4137,7 +3825,6 @@ if (require.main === module) {
 module.exports = {
   ENTRY_EDIT_LOCK_TTL_MS,
   TODO_EDIT_LOCK_TTL_MS,
-  GOOGLE_CALENDAR_SCOPE_VERSION,
   GOOGLE_DRIVE_SCOPE_VERSION,
   INDUS_GOOGLE_APP_ID,
   TODO_STATUS_DEFINITIONS,
@@ -4152,36 +3839,24 @@ module.exports = {
   ownsTodoAssignmentEditLock,
   todoAssignmentItems,
   releaseTodoAssignmentEditLock,
-  deleteOwnedGoogleEvent,
   entryEditLockConflict,
-  googleEventMatchesRequest,
-  isIndusOwnedGoogleEvent,
-  pushGoogleItem,
-  reconcileGoogleCalendar,
   buildCalendarIcs,
   buildPayrollSnapshot,
-  todoToGoogleArchiveEvent,
-  archivePayrollTodosToGoogle,
+  archivePayrollTodos,
   canManageEntry,
   canManageTodo,
   sourceTodoForNewEntry,
   defaultHourlyRateForUser,
   entryForUserRole,
   createSession,
-  entryFromGoogleEvent,
-  entryToGoogleEvent,
-  googleEventChanged,
-  localItemChanged,
   normalizeDb,
   normalizePayroll,
   payrollForUser,
   payrollLockForTodos,
   payrollTotals,
   payrollPeriodEnded,
-  parseGoogleEventDescription,
   releaseEntryEditLock,
   releaseTodoEditLock,
-  remoteGoogleChangeWins,
   syncUserForRequest,
   todoAssigneeForUpdate,
   todoAssigneesForRequest,
@@ -4190,8 +3865,6 @@ module.exports = {
   todoForUserRole,
   sessionForToken,
   sessionTokenHash,
-  todoFromGoogleEvent,
-  todoToGoogleEvent,
   validTodoAttachmentDataUrl,
   validGoogleDriveId,
   googleWorkspaceFileInfo,

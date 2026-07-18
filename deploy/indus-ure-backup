@@ -1,21 +1,3 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
-
-umask 077
-backup_dir=/var/backups/indus-ure
-timestamp=$(date --utc +%Y%m%dT%H%M%SZ)
-temporary="${backup_dir}/indus_ure-${timestamp}.dump.tmp"
-target="${temporary%.tmp}"
-
-if [[ ! -d "$backup_dir" ]]; then
-  echo "Manjka $backup_dir; ustvari ga kot root in dodeli postgres:postgres 0700." >&2
-  exit 1
-fi
-
-/usr/bin/pg_dump --format=custom --no-owner --no-acl --file="$temporary" indus_ure
-/usr/bin/mv "$temporary" "$target"
-/usr/bin/sha256sum "$target" > "${target}.sha256"
-
-# Lokalna retencija je 30 dni. Obvezna je tudi locena/off-site kopija.
-/usr/bin/find "$backup_dir" -type f -name 'indus_ure-*.dump' -mtime +30 -delete
-/usr/bin/find "$backup_dir" -type f -name 'indus_ure-*.dump.sha256' -mtime +30 -delete
+exec /usr/bin/node /opt/indus-ure/current/scripts/backup-indus-ure.js

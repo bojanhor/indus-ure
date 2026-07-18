@@ -1,96 +1,137 @@
 # INDUS URE na Ubuntu strezniku
 
-Produkcijska pot je:
+Produkcijska pot:
 
 ```text
-internet -> router TCP 80/443 -> 192.168.50.242 (Nginx) -> 127.0.0.1:8123 (Node) -> 127.0.0.1:5432 (PostgreSQL)
+internet -> router TCP 80/443 -> Nginx -> 127.0.0.1:8123 (Node) -> 127.0.0.1:5432 (PostgreSQL)
+                                      \-> /var/lib/indus-ure/media (priloge)
 ```
 
-Obstojeca testna stran na `8080` in javni forwarding `1900 -> 8080` ostaneta nespremenjena. Nginx deli isti javni port 443 med poddomene po `server_name`. Node port `8123` in PostgreSQL `5432` se ne odpirata v UFW.
+Node port `8123` in PostgreSQL port `5432` ne odpiraj v routerju ali UFW.
+Samo TCP 80 in 443 sta javna; 8081 je po potrebi samo LAN diagnostični port.
 
-## 1. Koda in sistemski uporabnik
+## 0. Pred preklopom
 
-Po potrjenem commitu na GitHubu:
+1. Začasno ustavi vnos novih podatkov za čas preklopa.
+2. Naredi neodvisen pred-migracijski dump trenutne baze:
 
 ```bash
-sudo useradd --system --home /var/lib/indus-ure --create-home --shell /usr/sbin/nologin indus-ure
-sudo install -d -o root -g root -m 0755 /opt/indus-ure/releases
-cd /tmp
-git clone https://github.com/bojanhor/indus-ure.git indus-ure-release
-cd indus-ure-release
-npm ci --omit=dev
-sudo mv /tmp/indus-ure-release /opt/indus-ure/releases/PRVI_COMMIT
-sudo chown -R root:root /opt/indus-ure/releases/PRVI_COMMIT
-sudo ln -sfn /opt/indus-ure/releases/PRVI_COMMIT /opt/indus-ure/current
+sudo -u postgres pg_dump -Fc indus_ure > /var/backups/indus-ure/pre-v2.dump
+sudo sha256sum /var/backups/indus-ure/pre-v2.dump
 ```
 
-Za naslednjo verzijo uporabi novo mapo z imenom commita; prejsnja ostane za hiter rollback.
+3. Zasebni `age` ključ naredi **na Bojanovem računalniku**, ne na strežniku:
+
+```bash
+age-keygen -o indus-ure-recovery.agekey
+age-keygen -y indus-ure-recovery.agekey > indus-ure-recovery.agepub
+```
+
+V `/etc/indus-ure.env` pride samo vsebina javnega ključa (`age1...`). Zasebni
+`.agekey` shrani v dva ločena varna prostora.
+
+## 1. Sistemske zahteve in uporabnik
+
+```bash
+sudo apt update
+sudo apt install -y git nginx postgresql postgresql-contrib age tar certbot python3-certbot-nginx
+sudo useradd --system --home /var/lib/indus-ure --create-home --shell /usr/sbin/nologin indus-ure || true
+sudo install -d -o indus-ure -g indus-ure -m 0700 /var/lib/indus-ure/media
+sudo install -d -o indus-ure -g indus-ure -m 0700 /var/backups/indus-ure
+sudo install -d -o root -g root -m 0755 /opt/indus-ure/releases
+```
+
+Node.js 20 LTS ali novejši mora biti že nameščen.
 
 ## 2. PostgreSQL
-
-Geslo vnesi interaktivno; ne lepi ga v ukaz ali Git:
 
 ```bash
 sudo -u postgres createuser --pwprompt indus_ure
 sudo -u postgres createdb --owner=indus_ure indus_ure
 ```
 
-PostgreSQL naj ostane vezan samo na localhost. Connection string uporablja URL-encoded geslo.
+PostgreSQL ostane vezan na localhost. Geslo URL-kodiraj v `DATABASE_URL`; ne
+zapisuj ga v Git, terminal history ali chat.
 
-## 3. Skrivnosti in okolje
+## 3. Koda in okolje
+
+Za novo izdajo uporabi mapo z imenom Git commita; prejšnja mapa ostane za
+hitri rollback kode.
 
 ```bash
+cd /tmp
+git clone https://github.com/ibrahimetemaj04-art/indus-ure.git indus-ure-release
+cd indus-ure-release
+npm ci --omit=dev
+COMMIT=$(git rev-parse --short HEAD)
+sudo mv /tmp/indus-ure-release /opt/indus-ure/releases/$COMMIT
+sudo chown -R root:root /opt/indus-ure/releases/$COMMIT
+sudo ln -sfn /opt/indus-ure/releases/$COMMIT /opt/indus-ure/current
+
 sudo install -o root -g root -m 0600 /opt/indus-ure/current/.env.example /etc/indus-ure.env
 sudoedit /etc/indus-ure.env
 ```
 
-Nastavi dolgo DB geslo ter Google OAuth podatke. `PUBLIC_BASE_URL` in `GOOGLE_REDIRECT_URI` morata biti `https://ure.indus.si` oziroma `https://ure.indus.si/api/google/callback`. Skrivnosti ne posiljaj v chat in jih ne commitaj.
-
-Google Cloud OAuth client mora imeti natanko ta Authorized redirect URI. Prijava zahteva samo profil/e-posto; Calendar in Sheets se nato povezeta loceno z gumbom Google sync. Calendar uporablja omejeni obseg `calendar.app.created`: aplikacija ustvari namenski sekundarni koledar `INDUS URE - uporabnik` in nima dostopa do osebnega koledarja. Spremembe se dvosmerno osvezujejo vsako minuto; interval doloca `GOOGLE_SYNC_INTERVAL_MS`.
-
-### Google Dokumenti in preglednice pri opravilih
-
-V `/etc/indus-ure.env` nastavi potrjeno Bojanovo My Drive mapo:
+Obvezni deli `/etc/indus-ure.env`:
 
 ```env
+NODE_ENV=production
+HOST=127.0.0.1
+PORT=8123
+PUBLIC_BASE_URL=https://ure.indus.si
+MEDIA_DIR=/var/lib/indus-ure/media
+DATABASE_URL=postgresql://indus_ure:URL_KODIRANO_GESLO@127.0.0.1:5432/indus_ure
+
+GOOGLE_CLIENT_ID=...
+GOOGLE_CLIENT_SECRET=...
+GOOGLE_REDIRECT_URI=https://ure.indus.si/api/google/callback
 GOOGLE_DRIVE_TASKS_FOLDER_ID=1_z_1I_wX8-VR0K9rXj7BHRFwc--00Ul5
+GOOGLE_DRIVE_BACKUP_PARENT_FOLDER_ID=1_z_1I_wX8-VR0K9rXj7BHRFwc--00Ul5
 GOOGLE_DRIVE_OWNER_EMAIL=bojan@indus.si
+
+AGE_RECIPIENT=age1...
+BACKUP_DIR=/var/backups/indus-ure
 ```
 
-Mapa mora ostati v **My Drive** uporabnika `bojan@indus.si`, ne v Shared Drive. V istem Google Cloud projektu mora biti omogocen tudi **Google Drive API**. Ko je nova verzija objavljena, se Bojan v meniju **Google Dokumenti in preglednice** enkrat prijavi in potrdi dovoljenje `drive.file`. Aplikacija z njegovim dovoljenjem ustvari nov Google Dokument ali Preglednico neposredno v tej mapi; Bojan ostane lastnik, delavci pa dobijo pravico urejanja prek dedovanih pravic mape. Zunanje Google Dokumente/Preglednice aplikacija samo pripne kot povezave in jim ne spreminja lastništva, mape ali pravic.
+Google OAuth client potrebuje redirect URL natanko
+`https://ure.indus.si/api/google/callback`. Google Drive API naj bo omogočen.
+Bojanova potrjena Drive mapa ostane v njegovem My Drive; aplikacija lahko v
+njej ustvarja Dokumente in Preglednice, katerih lastnik je Bojan. Zunanje
+Google datoteke se samo pripnejo kot povezave.
 
-### Osnovna baza strank v Google Sheets
+Google Sheets in Google Calendar spremenljivk **ne dodajaj**. ICS povezava je
+samo bralni izvoz.
 
-Google Sheet je avtoritativni vir strank:
+## 4. Varno odstranjevanje starih aplikacijskih Google koledarjev
 
-```env
-GOOGLE_SHEETS_ID=1lQ2D1ZQlQyBZfih0B1-Jx-8UI58PK-vRzNbjW1V2MiM
-GOOGLE_SHEETS_RANGE="'Baza Strank'!A:I"
-```
-
-Stolpci A-I ostanejo: `Srch`, naziv, e-posta, naslov, kraj, posta, drzava, davcna in zavezanec za DDV. Davcna stevilka je `clientId` v strankah, vnosih in opravilih; aplikacija za stranke ne ustvarja GUID-ov. Nova stranka se najprej zapise v Google Sheet in sele nato osvezi v PostgreSQL.
-
-Vrstice brez davcne ali s podvojeno davcno ostanejo vidne kot napaka, vendar jih ni mogoce uporabiti pri novem vnosu, dokler se ne popravijo v osnovnem Sheetu. Bojan mora v aplikaciji enkrat izvesti `Google sync`, da podeli dovoljenje `spreadsheets`.
-
-## 4. Prenos obstojecih podatkov
-
-Pred prenosom ustavi stare vnose in naredi backup.
-
-Ce je vir stara PostgreSQL baza (Render/Neon), uporabi `pg_dump -Fc` in `pg_restore --no-owner --no-acl` v prazno lokalno bazo.
-
-Ce je vir celoten `outputs/data/db.json`:
+Ta korak izvedi **pred prvim zagonom nove verzije**, ker nova verzija zavrže
+stara Calendar dovoljenja. Skripta nikoli ne našteva ali briše osebnih
+koledarjev: obravnava samo koledarje, ki so v stari bazi izrecno označeni kot
+ustvarjeni z INDUS URE, nato preveri še ime in opis.
 
 ```bash
-cd /opt/indus-ure/current
-set -a
-source /etc/indus-ure.env
-set +a
-npm run import:json -- /varna/pot/db.json
+sudo systemd-run --wait --collect --pipe \
+  -p User=indus-ure -p Group=indus-ure -p EnvironmentFile=/etc/indus-ure.env \
+  /usr/bin/node /opt/indus-ure/current/scripts/delete-legacy-google-calendars.js
 ```
 
-Importer zavrne prepis obstojece vrstice. Po preverjenem backupu je zavesten prepis mogoc z `--force`. UI JSON izvoz ni popoln: manjka mu del nastavitev, uporabnikov, zaklepov in Google tokenov.
+Preveri izpis `wouldDelete`. Če vsebuje izključno dummy aplikacijske koledarje,
+izvedi dejanski korak:
 
-## 5. systemd
+```bash
+sudo systemd-run --wait --collect --pipe \
+  -p User=indus-ure -p Group=indus-ure -p EnvironmentFile=/etc/indus-ure.env \
+  /usr/bin/node /opt/indus-ure/current/scripts/delete-legacy-google-calendars.js --confirm
+```
+
+Tako systemd prebere root-only okoljsko datoteko in jo poda samo procesu pod
+uporabnikom `indus-ure`; skrivnosti se ne razkrivajo v ukazni vrstici.
+
+## 5. Relacijska migracija in systemd
+
+Ob prvem zagonu nova aplikacija samodejno prenese obstoječo vrstico
+`app_state/main` v relacijske tabele in jo pusti nedotaknjeno kot povratno
+referenco. Priloge se iz Base64 preselijo v `/var/lib/indus-ure/media`.
 
 ```bash
 sudo install -o root -g root -m 0644 deploy/indus-ure.service /etc/systemd/system/indus-ure.service
@@ -100,66 +141,90 @@ sudo systemctl status indus-ure.service --no-pager
 curl --fail http://127.0.0.1:8123/api/health
 ```
 
-Logi:
+Preveri migracijo brez poseganja v podatke:
 
 ```bash
-journalctl -u indus-ure.service -n 100 --no-pager
+sudo -u postgres psql indus_ure -c "select key, data from indus_meta where key = 'storage_version';"
+sudo -u postgres psql indus_ure -c "select count(*) as clients from indus_clients; select count(*) as tasks from indus_tasks; select count(*) as attachments from indus_attachments;"
 ```
 
-## 6. Nginx in HTTPS
+## 6. Nginx, HTTPS in firewall
 
-Za prvo izdajo certifikata najprej namesti bootstrap konfiguracijo, nato koncno HTTPS konfiguracijo:
+Za prvo izdajo certifikata najprej uporabi bootstrap konfiguracijo, nato
+končno HTTPS konfiguracijo. HTML gre skozi Node, zato se nonce za CSP ustvari
+za vsako stran; slike in ikone ostanejo statične.
 
 ```bash
-sudo apt install -y certbot python3-certbot-nginx
 sudo install -o root -g root -m 0644 deploy/nginx-indus-ure-bootstrap.conf /etc/nginx/conf.d/indus-ure.conf
-sudo nginx -t
-sudo systemctl reload nginx
-sudo ufw allow 80/tcp comment 'Nginx HTTP HTTPS redirect'
-sudo ufw allow 443/tcp comment 'Nginx HTTPS'
+sudo nginx -t && sudo systemctl reload nginx
+sudo ufw allow 80/tcp comment 'INDUS URE HTTP redirect'
+sudo ufw allow 443/tcp comment 'INDUS URE HTTPS'
 sudo ufw allow from 192.168.50.0/24 to any port 8081 proto tcp comment 'INDUS URE LAN'
 sudo certbot certonly --nginx --non-interactive --agree-tos --no-eff-email --email bojan@indus.si -d ure.indus.si
 sudo install -o root -g root -m 0644 deploy/nginx-indus-ure.conf /etc/nginx/conf.d/indus-ure.conf
-sudo nginx -t
-sudo systemctl reload nginx
+sudo nginx -t && sudo systemctl reload nginx
 curl --fail https://ure.indus.si/api/health
+curl -I https://ure.indus.si/
 sudo certbot renew --dry-run --no-random-sleep-on-renew
 ```
 
-Router posreduje samo standardna spletna porta na Nginx:
+Router:
 
 ```text
 TCP 80  -> 192.168.50.242:80
 TCP 443 -> 192.168.50.242:443
 ```
 
-Port `8081` ostane dostopen samo iz LAN-a oziroma pozneje tudi iz tocno dolocenega VPN omrezja. Certbotov systemd timer samodejno obnavlja certifikat, port 80 pa vse druge zahteve preusmeri na HTTPS.
+## 7. Drive in varnostne kopije
 
-## 7. Dnevni backup
+Po prvem uspešnem Google loginu se Bojan v aplikaciji v meniju poveže z Google
+Drive. To ponovno potrdi ožje dovoljenje `drive.file`; Calendar in Sheets
+nista zahtevana.
+
+Nato namesti nočni recovery backup:
 
 ```bash
-sudo install -d -o postgres -g postgres -m 0700 /var/backups/indus-ure
 sudo install -o root -g root -m 0755 deploy/indus-ure-backup /usr/local/sbin/indus-ure-backup
-sudo install -o root -g root -m 0644 deploy/indus-ure-backup.service /etc/systemd/system/
-sudo install -o root -g root -m 0644 deploy/indus-ure-backup.timer /etc/systemd/system/
+sudo install -o root -g root -m 0644 deploy/indus-ure-backup.service /etc/systemd/system/indus-ure-backup.service
+sudo install -o root -g root -m 0644 deploy/indus-ure-backup.timer /etc/systemd/system/indus-ure-backup.timer
 sudo systemctl daemon-reload
 sudo systemctl enable --now indus-ure-backup.timer
 sudo systemctl start indus-ure-backup.service
 sudo systemctl status indus-ure-backup.service --no-pager
-sudo -u postgres pg_restore --list /var/backups/indus-ure/NAJNOVEJSI.dump | head
 ```
 
-Dump vsebuje tudi Google refresh tokene, zato mora ostati zaseben. Lokalna kopija ni dovolj; dodaj se sifrirano off-site kopijo.
+Backup naredi PostgreSQL dump, kopijo prilog in manifest SHA-256, vse zapakira
+ter šifrira z javnim `age` ključem. Paketa se ne da obnoviti brez Bojanovega
+zasebnega ključa. Šifrirana kopija se naloži v namensko podmapo znotraj
+potrjene Google Drive mape in se preveri po velikosti. Ob neuspehu gre
+opozorilo v aplikacijo in po SMTP, če je SMTP nastavljen.
 
-## 8. Cutover in rollback
+Za obnovo na čistem testnem strežniku: dešifriraj paket z zasebnim ključem,
+`pg_restore` uporabi za `database.dump`, nato kopiraj `media/` v `MEDIA_DIR`.
+Strežniške okoljske skrivnosti niso v paketu; obnovi jih iz ločenega varnega
+zapisa in nato ponovno poveži Google Drive.
 
-Pred javnim preklopom preveri Google prijavo za oba dovoljena e-naslova, testni vnos, fotografijo, Google sync, restart servisa in obstoj podatkov po restartu. Staro okolje obdrzi vsaj sedem dni.
+## 8. Preverjanje po preklopu
 
-Rollback kode:
+- prijava za Bojana in Ibra;
+- nov ad-hoc klient, opravilo, ura in priloga;
+- izklopi Wi-Fi, ustvari testno opravilo/prilogo, nato ponovno poveži in
+  preveri vrsto sinhronizacije;
+- odpri ICS povezavo kot read-only koledar;
+- prenesi testni ZIP iz uporabniškega menija;
+- preveri stanje nočnega backupa in sistemska opozorila;
+- preveri `journalctl -u indus-ure.service -n 100 --no-pager`.
+
+## Rollback
+
+Kodni rollback je možen le, če po migraciji še ni novih zapisov, ali pa po
+obnovi pred-migracijskega dumpa. Stara verzija bere `app_state`, nova pa po
+preklopu zapisuje relacijske tabele, zato slepi preklop nazaj po novih vnosih
+ni varen.
 
 ```bash
+sudo systemctl stop indus-ure.service
 sudo ln -sfn /opt/indus-ure/releases/PREJSNJI_COMMIT /opt/indus-ure/current
-sudo systemctl restart indus-ure
+# po potrebi obnovi /var/backups/indus-ure/pre-v2.dump
+sudo systemctl start indus-ure.service
 ```
-
-Rollback podatkov se dela samo iz preverjenega pre-migration dumpa.

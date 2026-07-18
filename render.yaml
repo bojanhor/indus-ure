@@ -1,7 +1,0 @@
-services:
-  - type: web
-    name: indus-ure
-    env: node
-    plan: free
-    buildCommand: npm install
-    startCommand: npm start

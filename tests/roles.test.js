@@ -99,13 +99,13 @@ test("seje prezivijo restart in v bazi ne hranijo dejanskega zetona", () => {
   const token = createSession(sessionDb, "bojan", now);
   const hash = sessionTokenHash(token);
 
-  assert.equal(token.length, 48);
+  assert.equal(token.length, 64);
   assert.equal(hash.length, 64);
   assert.equal(Object.hasOwn(sessionDb.sessions, token), false);
-  assert.deepEqual(sessionForToken(sessionDb, token, now + 1), {
-    userId: "bojan",
-    expiresAt: now + SESSION_TTL_MS
-  });
+  const session = sessionForToken(sessionDb, token, now + 1);
+  assert.equal(session.userId, "bojan");
+  assert.equal(session.expiresAt, now + SESSION_TTL_MS);
+  assert.match(session.csrfToken, /^[a-f0-9]{48}$/);
 
   const restoredDb = JSON.parse(JSON.stringify(sessionDb));
   assert.equal(sessionForToken(restoredDb, token, now + 2)?.userId, "bojan");
