@@ -3860,8 +3860,19 @@
         await updateOfflineSyncNotice();
       }
     }
+    async function refreshSessionSecurityContext() {
+      const me = await api("/api/me", { recoverSession: false, csrfRetried: true });
+      state.token = "cookie";
+      state.csrfToken = me.csrfToken || "";
+      state.sessionExpiresAt = Number(me.sessionExpiresAt || 0);
+      state.syncRevision = Number(me.syncRevision || state.syncRevision || 0);
+      state.lastServerSyncAt = new Date().toISOString();
+      if (me.user) state.user = me.user;
+      return me;
+    }
+
     async function api(path, options = {}) {
-      const { recoverSession = true, ...requestOptions } = options;
+      const { recoverSession = true, csrfRetried = false, ...requestOptions } = options;
       if (state.offlineMode && !navigator.onLine) {
         const error = new Error("Ni povezave s strežnikom.");
         error.status = 0;
@@ -3886,6 +3897,15 @@
       const text = await response.text();
       let data = null;
       try { data = text ? JSON.parse(text) : null; } catch { data = null; }
+      const csrfFailure = response.status === 403 && unsafe && /varnostna potrditev seje manjka/i.test(String(data?.error || ""));
+      if (csrfFailure && !csrfRetried && navigator.onLine) {
+        try {
+          await refreshSessionSecurityContext();
+          return api(path, { ...options, csrfRetried: true });
+        } catch (refreshError) {
+          if (refreshError?.status === 401 && hadSession && recoverSession) await recoverExpiredSession();
+        }
+      }
       if (response.status === 401 && hadSession && recoverSession) await recoverExpiredSession();
       if (!response.ok) {
         const error = new Error(data?.error || "Napaka pri povezavi.");
