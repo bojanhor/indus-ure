@@ -1871,6 +1871,8 @@
     }
 
     .day-timeline-event.is-moving { opacity: 0.88; cursor: grabbing; z-index: 8; }
+    .day-timeline-event.is-day-moving { outline: 3px solid rgba(23, 114, 145, 0.9); outline-offset: 2px; box-shadow: 0 8px 18px rgba(23, 114, 145, 0.28); }
+    .day-timeline-event.is-day-moving::after { content: attr(data-day-target); position: absolute; right: 6px; top: 5px; padding: 2px 5px; border-radius: 999px; background: rgba(17, 38, 46, 0.78); color: #fff; font-size: 10px; font-weight: 900; }
     .day-timeline-event.is-drag-ready { outline: 2px dashed var(--accent); outline-offset: 2px; }
     .day-hours-warning { display: inline-grid; place-items: center; width: 18px; height: 18px; margin-left: 5px; border-radius: 50%; background: #c93131; color: #fff; font-weight: 900; line-height: 1; }
     .day-timeline-event-title { display: block; font-size: 13px; line-height: 1.2; overflow-wrap: anywhere; }
@@ -3022,7 +3024,7 @@
           <button class="secondary zoom-step" id="dayTimelineZoomIn" type="button" aria-label="Povecaj casovnico">&plus;</button>
           <button class="secondary" id="dayTimelineFit" type="button">24 h</button>
         </div>
-        <span class="day-timeline-hint">Dva prsta ali Ctrl + kole&#353;&#269;ek za pove&#269;avo</span>
+        <span class="day-timeline-hint">Zgoraj/dol spremeni uro · vodoravno povleci dogodek čez rob za drug dan</span>
       </div>
       <div class="day-all-day hidden" id="dayAllDay">
         <span class="day-all-day-label">VES DAN</span>
@@ -4502,7 +4504,7 @@
         finishTodoMutation();
       }
     }
-    async function saveTodoTimeToServer(todo, start, end) {
+    async function saveTodoTimeToServer(todo, start, end, date = todo.date) {
       const editLockToken = state.todoEditLock?.todoId === todo.id ? state.todoEditLock.token : "";
       if (!editLockToken) throw new Error("Opravila pred premikom ni bilo mogoce zakleniti.");
       const todoRevision = beginTodoMutation();
@@ -4510,7 +4512,7 @@
         await pauseTodoLockHeartbeat();
         const data = await api(`/api/todos/${encodeURIComponent(todo.id)}/time`, {
           method: "POST",
-          body: JSON.stringify({ start, end, editLockToken })
+          body: JSON.stringify({ start, end, date, editLockToken })
         });
         if (isCurrentTodoRevision(todoRevision)) {
           state.todos = data.todos;
@@ -4519,7 +4521,7 @@
         return data;
       } catch (error) {
         if (!isNetworkError(error)) throw error;
-        const localTodo = { ...todo, start, end, offlinePending: true };
+        const localTodo = { ...todo, start, end, date, offlinePending: true };
         await queueOfflineTodo({ kind: "update", todoId: localTodo.id, todo: localTodo, baseUpdatedAt: todo.updatedAt || "" });
         if (isCurrentTodoRevision(todoRevision)) {
           const index = state.todos.findIndex((item) => item.id === todo.id);
@@ -5326,7 +5328,11 @@
         pointerId: event.pointerId,
         todoId: todo.id,
         mode,
+        startX: event.clientX,
         startY: event.clientY,
+        originalDate: todo.date,
+        targetDate: todo.date,
+        dayOffset: 0,
         originalStart: startMinute,
         originalEnd: endMinute,
         startMinute,
@@ -5355,48 +5361,57 @@
       const rawDelta = (event.clientY - interaction.startY) / state.dayTimelineMinuteHeight;
       const delta = Math.round(rawDelta / 15) * 15;
       if (!interaction.touchReady) {
-        event.preventDefault();
-        event.stopPropagation();
-        // Kratek naravni premik prsta ne preklice vlecenja; po signalu nadaljuj z iste lege.
-        interaction.startY = event.clientY;
+        event.preventDefault(); event.stopPropagation();
+        interaction.startX = event.clientX; interaction.startY = event.clientY;
         return;
       }
-      if (!interaction.moved && Math.abs(event.clientY - interaction.startY) < 4) return;
-      event.preventDefault();
-      event.stopPropagation();
+      const deltaX = event.clientX - interaction.startX;
+      const deltaY = event.clientY - interaction.startY;
+      if (!interaction.moved && Math.max(Math.abs(deltaX), Math.abs(deltaY)) < 4) return;
+      event.preventDefault(); event.stopPropagation();
       if (!interaction.moved) {
         interaction.moved = true;
         interaction.element.classList.add("is-moving");
         interaction.lockPromise = acquireTodoEditLockForDialog(interaction.todoId);
       }
-
+      const isMove = interaction.mode === "move";
+      const dayThreshold = event.pointerType === "touch" ? 96 : 72;
+      const wantsDayMove = isMove && Math.abs(deltaX) >= dayThreshold && Math.abs(deltaX) > Math.abs(deltaY) * 1.35;
+      interaction.dayOffset = wantsDayMove ? (deltaX > 0 ? 1 : -1) : 0;
+      if (interaction.dayOffset) {
+        const target = parseDate(interaction.originalDate);
+        target.setDate(target.getDate() + interaction.dayOffset);
+        interaction.targetDate = dateKey(target);
+        interaction.element.classList.add("is-day-moving");
+        interaction.element.dataset.dayTarget = interaction.dayOffset > 0 ? "→ naslednji dan" : "← prejšnji dan";
+        interaction.element.style.transform = `translateX(${Math.max(-80, Math.min(80, deltaX))}px)`;
+      } else {
+        interaction.targetDate = interaction.originalDate;
+        interaction.element.classList.remove("is-day-moving");
+        delete interaction.element.dataset.dayTarget;
+        interaction.element.style.transform = "";
+      }
       if (interaction.mode === "resize-start") {
-        interaction.startMinute = Math.max(0, Math.min(interaction.originalEnd - 15, interaction.originalStart + delta));
-        interaction.endMinute = interaction.originalEnd;
+        interaction.startMinute = Math.max(0, Math.min(interaction.originalEnd - 15, interaction.originalStart + delta)); interaction.endMinute = interaction.originalEnd;
       } else if (interaction.mode === "resize-end") {
-        interaction.startMinute = interaction.originalStart;
-        interaction.endMinute = Math.min(1440, Math.max(interaction.originalStart + 15, interaction.originalEnd + delta));
+        interaction.startMinute = interaction.originalStart; interaction.endMinute = Math.min(1440, Math.max(interaction.originalStart + 15, interaction.originalEnd + delta));
       } else {
         const duration = interaction.originalEnd - interaction.originalStart;
-        interaction.startMinute = Math.max(0, Math.min(1440 - duration, interaction.originalStart + delta));
-        interaction.endMinute = interaction.startMinute + duration;
+        interaction.startMinute = Math.max(0, Math.min(1440 - duration, interaction.originalStart + delta)); interaction.endMinute = interaction.startMinute + duration;
       }
-
       interaction.element.style.top = Math.round(interaction.startMinute * state.dayTimelineMinuteHeight) + "px";
       interaction.element.style.height = Math.max(18, Math.round((interaction.endMinute - interaction.startMinute) * state.dayTimelineMinuteHeight)) + "px";
       const meta = interaction.element.querySelector(".day-timeline-event-meta");
-      if (meta) {
-        const suffix = meta.textContent.includes(" | ") ? meta.textContent.slice(meta.textContent.indexOf(" | ")) : "";
-        meta.textContent = dayTimelineTime(interaction.startMinute) + "-" + dayTimelineTime(interaction.endMinute) + suffix;
-      }
+      if (meta) { const suffix = meta.textContent.includes(" | ") ? meta.textContent.slice(meta.textContent.indexOf(" | ")) : ""; meta.textContent = dayTimelineTime(interaction.startMinute) + "-" + dayTimelineTime(interaction.endMinute) + suffix; }
     }
-
     async function finishDayTimelineEventPointer(event, cancelled = false) {
       const interaction = state.dayTimelineInteraction;
       if (!interaction || interaction.pointerId !== event.pointerId) return;
       event.stopPropagation();
       state.dayTimelineInteraction = null;
-      interaction.element.classList.remove("is-moving", "is-drag-ready");
+      interaction.element.classList.remove("is-moving", "is-drag-ready", "is-day-moving");
+      interaction.element.style.transform = "";
+      delete interaction.element.dataset.dayTarget;
       clearTimeout(interaction.holdTimer);
       if (cancelled) { renderDayTimeline(); return; }
       const todo = state.todos.find((item) => item.id === interaction.todoId);
@@ -5411,7 +5426,8 @@
         await saveTodoTimeToServer(
           todo,
           dayTimelineTime(interaction.startMinute),
-          dayTimelineTime(interaction.endMinute)
+          dayTimelineTime(interaction.endMinute),
+          interaction.targetDate
         );
         resolveDayTimelineHoursWarning(todo);
         clearTodoEditLockState();

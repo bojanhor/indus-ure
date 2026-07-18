@@ -3702,7 +3702,8 @@ async function handleApi(req, res) {
       }
       const start = roundTimeToQuarterHour(body.start);
       const end = roundTimeToQuarterHour(body.end);
-      const validation = validateTodo({ ...previousTodo, start, end });
+      const date = isDateKey(body.date) ? String(body.date) : previousTodo.date;
+      const validation = validateTodo({ ...previousTodo, date, start, end });
       if (validation) {
         sendJson(res, 400, { error: validation });
         return;
@@ -3719,10 +3720,11 @@ async function handleApi(req, res) {
         ...item,
         start,
         end,
+        date,
         updatedBy: user.id,
         updatedByName: user.name,
         updatedAt: now,
-        history: [...(item.history || []), audit(user, "prestavljen v casovnici")]
+        history: [...(item.history || []), audit(user, date === previousTodo.date ? "prestavljen v casovnici" : `prestavljen na ${date} v casovnici`)]
       } : item);
       await writeDbAsync(db);
       releaseTodoAssignmentEditLock(db, previousTodo, user, editLockToken);
