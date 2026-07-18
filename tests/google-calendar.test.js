@@ -23,6 +23,7 @@ const {
   remoteGoogleChangeWins,
   todoFromGoogleEvent,
   todoToGoogleEvent,
+  todoToGoogleArchiveEvent,
   cleanTodoDriveFiles,
   googleWorkspaceFileInfo,
   validateTodo
@@ -232,6 +233,20 @@ test("stabilni UUID se v Google opis ne zapise kot davcna", () => {
   assert.equal(parseGoogleEventDescription(todoToGoogleEvent(todo, "SI12345678").description).fields.davcna, "SI12345678");
 });
 
+test("potrjen obračun ustvari ločen arhivski Google dogodek", () => {
+  const todo = {
+    id: "archived-todo", title: "Montaža", date: "2026-07-20", start: "08:00", end: "10:00",
+    client: client.name, clientId: client.clientId, notes: "Končano", material: "Vijaki",
+    status: "execution", syncUser: "ibro", urgent: false
+  };
+  const event = todoToGoogleArchiveEvent(todo, { id: "payroll-1", workerId: "ibro", month: "2026-07" }, client.clientId);
+  assert.equal(event.summary, "ARHIV: Montaža");
+  assert.equal(event.extendedProperties.private.indusType, "payroll-archive");
+  assert.equal(event.extendedProperties.private.indusPayrollId, "payroll-1");
+  assert.deepEqual(event.start, { dateTime: "2026-07-20T08:00:00", timeZone: "Europe/Ljubljana" });
+  assert.deepEqual(event.end, { dateTime: "2026-07-20T10:00:00", timeZone: "Europe/Ljubljana" });
+  assert.equal(parseGoogleEventDescription(event.description).fields.vrsta, "arhiv obračuna");
+});
 test("statusi opravil uporabljajo dogovorjene Google barve", () => {
   const expected = {
     open: ["\u010caka", "8"],
@@ -245,7 +260,9 @@ test("statusi opravil uporabljajo dogovorjene Google barve", () => {
     return_and_bill: ["Vrne naj/Pora\u010dunaj", "6"],
     return: ["!!Vrni", "3"],
     meal: ["Malica", "5"],
-    internal: ["Razno/Interno", "5"]
+    internal: ["Razno/Interno", "5"],
+    drive: ["Vožnja", "7"],
+    purchase: ["Nabava", "6"]
   };
   assert.deepEqual(Object.keys(TODO_STATUS_DEFINITIONS), Object.keys(expected));
   for (const [status, [label, colorId]] of Object.entries(expected)) {

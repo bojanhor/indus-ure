@@ -58,7 +58,9 @@ const TODO_STATUS_DEFINITIONS = Object.freeze({
   return_and_bill: { label: "Vrne naj/Poračunaj", googleColorId: "6" },
   return: { label: "!!Vrni", googleColorId: "3" },
   meal: { label: "Malica", googleColorId: "5" },
-  internal: { label: "Razno/Interno", googleColorId: "5" }
+  internal: { label: "Razno/Interno", googleColorId: "5" },
+  drive: { label: "Vožnja", googleColorId: "7" },
+  purchase: { label: "Nabava", googleColorId: "6" }
 });
 const TODO_STATUSES = new Set(Object.keys(TODO_STATUS_DEFINITIONS));
 const TODO_VEHICLES = new Set(["personal", "van"]);
@@ -352,7 +354,7 @@ function normalizeDb(db = {}) {
       changed = true;
     }
     if (!db.users[id].google) {
-      db.users[id].google = { tokens: null, calendarId: "", calendarName: "", connectedAt: "", scopeVersion: 0, driveScopeVersion: 0 };
+      db.users[id].google = { tokens: null, calendarId: "", calendarName: "", archiveCalendarId: "", archiveCalendarName: "", connectedAt: "", scopeVersion: 0, driveScopeVersion: 0 };
       changed = true;
     }
     const googleState = db.users[id].google;
@@ -365,6 +367,8 @@ function normalizeDb(db = {}) {
         googleState.tokens = null;
         googleState.calendarId = "";
         googleState.calendarName = "";
+        googleState.archiveCalendarId = "";
+        googleState.archiveCalendarName = "";
         googleState.syncToken = "";
         googleState.driveScopeVersion = 0;
         changed = true;
@@ -408,7 +412,7 @@ function normalizeDb(db = {}) {
       changed = true;
     }
     if (!user.google) {
-      user.google = { tokens: null, calendarId: "", calendarName: "", connectedAt: "", scopeVersion: 0, driveScopeVersion: 0 };
+      user.google = { tokens: null, calendarId: "", calendarName: "", archiveCalendarId: "", archiveCalendarName: "", connectedAt: "", scopeVersion: 0, driveScopeVersion: 0 };
       changed = true;
     }
     const googleState = user.google;
@@ -421,6 +425,8 @@ function normalizeDb(db = {}) {
         googleState.tokens = null;
         googleState.calendarId = "";
         googleState.calendarName = "";
+        googleState.archiveCalendarId = "";
+        googleState.archiveCalendarName = "";
         googleState.syncToken = "";
         googleState.driveScopeVersion = 0;
         changed = true;
@@ -489,10 +495,15 @@ function normalizeDb(db = {}) {
     db.settings.billing = {};
     changed = true;
   }
+  const legacyKmRate = nonnegativeNumber(db.settings.billing?.kmRate, 0.22, 1_000);
   db.settings.billing = {
-    hourlyRate: Number(db.settings.billing?.hourlyRate || 15),
-    kmRate: Number(db.settings.billing?.kmRate || 0.22),
-    commuteKmPerDay: Number(db.settings.billing?.commuteKmPerDay || 28)
+    hourlyRate: nonnegativeNumber(db.settings.billing?.hourlyRate, 15, 10_000),
+    // Stara enotna tarifa se uporabi samo za prehod ob nadgradnji.
+    kmRate: legacyKmRate,
+    workerOwnVehicleKmRate: nonnegativeNumber(db.settings.billing?.workerOwnVehicleKmRate, legacyKmRate, 1_000),
+    clientPersonalKmRate: nonnegativeNumber(db.settings.billing?.clientPersonalKmRate, legacyKmRate, 1_000),
+    clientVanKmRate: nonnegativeNumber(db.settings.billing?.clientVanKmRate, legacyKmRate, 1_000),
+    commuteKmPerDay: nonnegativeNumber(db.settings.billing?.commuteKmPerDay, 28, 1_000_000)
   };
   for (const user of Object.values(db.users)) {
     const currentRate = nonnegativeNumber(user.billing?.hourlyRate, null, 10_000);
@@ -725,6 +736,12 @@ function normalizeDb(db = {}) {
       next.googleStatusLabel = "";
       changed = true;
     }
+    for (const field of ["archiveGoogleEventId", "archivedAt", "archivedPayrollId"]) {
+      if (typeof next[field] !== "string") {
+        next[field] = "";
+        changed = true;
+      }
+    }
     const billingHourlyRate = nonnegativeNumber(next.billingHourlyRate, null, 10_000);
     if (next.billingHourlyRate !== billingHourlyRate) {
       next.billingHourlyRate = billingHourlyRate;
@@ -743,6 +760,11 @@ function normalizeDb(db = {}) {
     const clientVehicle = todoVehicle(next.clientVehicle);
     if (next.clientVehicle !== clientVehicle) {
       next.clientVehicle = clientVehicle;
+      changed = true;
+    }
+    const clientKmRate = nonnegativeNumber(next.clientKmRate, null, 1_000);
+    if (next.clientKmRate !== clientKmRate) {
+      next.clientKmRate = clientKmRate;
       changed = true;
     }
     if (!Array.isArray(next.photos)) {
@@ -1151,12 +1173,26 @@ function nonnegativeNumber(value, fallback = null, maximum = Number.MAX_SAFE_INT
   return Number.isFinite(number) && number >= 0 && number <= maximum ? number : fallback;
 }
 
-const PAYROLL_STATUSES = new Set(["draft", "confirmed", "paid"]);
+const PAYROLL_STATUSES = new Set(["draft", "archiving", "confirmed", "paid"]);
 const PAYROLL_PAID_TODO_STATUSES = new Set(["execution", "meal"]);
 
 function isPayrollMonth(value) {
   const match = /^(\d{4})-(\d{2})$/.exec(String(value || ""));
   return Boolean(match && Number(match[2]) >= 1 && Number(match[2]) <= 12);
+}
+function payrollPeriodEnded(value, now = new Date()) {
+  const match = /^(\d{4})-(\d{2})$/.exec(String(value || ""));
+  if (!match) return false;
+  const localParts = Object.fromEntries(new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Ljubljana",
+    year: "numeric",
+    month: "2-digit"
+  }).formatToParts(now).filter((part) => part.type !== "literal").map((part) => [part.type, part.value]));
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const currentYear = Number(localParts.year || 0);
+  const currentMonth = Number(localParts.month || 0);
+  return year < currentYear || (year === currentYear && month < currentMonth);
 }
 function payrollMinutesForTodo(todo) {
   if (!todo || !PAYROLL_PAID_TODO_STATUSES.has(todo.status) || !/^\d{4}-\d{2}-\d{2}$/.test(String(todo.date || ""))) return null;
@@ -1172,7 +1208,13 @@ function payrollLineForTodo(db, todo) {
   if (!minutes) return null;
   const hourlyRate = nonnegativeNumber(todo.billingHourlyRate, defaultHourlyRateForUser(db, todo.syncUser || todo.createdBy), 10_000);
   const km = nonnegativeNumber(todo.billingKm, 0, 1_000_000);
-  const kmRate = nonnegativeNumber(db.settings?.billing?.kmRate, 0, 1_000);
+  // Kilometrina delavca je povračilo za njegovo lastno vozilo.
+  // Ne sme se mešati s tarifo, ki se zaračuna stranki za kombi ali osebni avto.
+  const kmRate = nonnegativeNumber(
+    db.settings?.billing?.workerOwnVehicleKmRate,
+    nonnegativeNumber(db.settings?.billing?.kmRate, 0, 1_000),
+    1_000
+  );
   const hours = minutes / 60;
   const workAmount = Number((hours * hourlyRate).toFixed(2));
   const kmAmount = Number((km * kmRate).toFixed(2));
@@ -1269,11 +1311,11 @@ function normalizePayroll(input, db) {
 
 function buildPayrollSnapshot(db, workerId, month, previous = {}, note = undefined) {
   const lockedElsewhere = new Set((db.payrolls || [])
-    .filter((payroll) => payroll.id !== previous.id && ["confirmed", "paid"].includes(payroll.status))
+    .filter((payroll) => payroll.id !== previous.id && ["archiving", "confirmed", "paid"].includes(payroll.status))
     .flatMap((payroll) => payroll.lines || [])
     .map((line) => String(line.todoId || "")));
   const lines = (db.todos || [])
-    .filter((todo) => (todo.syncUser || todo.createdBy) === workerId && String(todo.date || "").startsWith(month))
+    .filter((todo) => (todo.syncUser || todo.createdBy) === workerId && !todo.archivedAt && String(todo.date || "").startsWith(month))
     .filter((todo) => !lockedElsewhere.has(String(todo.id || "")))
     .map((todo) => payrollLineForTodo(db, todo))
     .filter(Boolean)
@@ -1289,7 +1331,7 @@ function payrollForUser(db, user) {
 function payrollLockForTodos(db, todos = []) {
   const ids = new Set(todos.map((todo) => String(todo?.id || "")).filter(Boolean));
   if (!ids.size) return null;
-  return (db.payrolls || []).find((payroll) => ["confirmed", "paid"].includes(payroll.status)
+  return (db.payrolls || []).find((payroll) => ["archiving", "confirmed", "paid"].includes(payroll.status)
     && (payroll.lines || []).some((line) => ids.has(String(line.todoId || "")))) || null;
 }
 function defaultHourlyRateForUser(db, userId) {
@@ -1300,21 +1342,31 @@ function defaultHourlyRateForUser(db, userId) {
   );
 }
 
+function clientKmRateForVehicle(db, vehicle) {
+  const billing = db.settings?.billing || {};
+  const fallback = nonnegativeNumber(billing.kmRate, 0.22, 1_000);
+  return nonnegativeNumber(vehicle === "van" ? billing.clientVanKmRate : billing.clientPersonalKmRate, fallback, 1_000);
+}
+
 function todoForUserRole(user, db, previous, todo) {
   const previousRate = nonnegativeNumber(previous?.billingHourlyRate, null, 10_000);
   const previousKm = nonnegativeNumber(previous?.billingKm, 0, 1_000_000);
   const previousClientKm = nonnegativeNumber(previous?.clientKm, 0, 1_000_000);
   const previousClientVehicle = todoVehicle(previous?.clientVehicle);
+  const requestedClientVehicle = todoVehicle(todo.clientVehicle);
   const isCompleted = todo.status === "execution";
   const canSetClientMileage = isCompleted;
   const defaultRate = defaultHourlyRateForUser(db, todo.syncUser || previous?.syncUser || user.id);
+  const clientKmRate = clientKmRateForVehicle(db, requestedClientVehicle);
   if (user.role !== "boss") {
+    const clientVehicle = canSetClientMileage ? requestedClientVehicle : previousClientVehicle;
     return {
       ...todo,
       billingHourlyRate: isCompleted ? previousRate ?? defaultRate : previousRate,
       billingKm: isCompleted ? nonnegativeNumber(todo.billingKm, previousKm, 1_000_000) : previousKm,
       clientKm: canSetClientMileage ? nonnegativeNumber(todo.clientKm, previousClientKm, 1_000_000) : previousClientKm,
-      clientVehicle: canSetClientMileage ? todoVehicle(todo.clientVehicle) : previousClientVehicle
+      clientVehicle,
+      clientKmRate: canSetClientMileage ? clientKmRateForVehicle(db, clientVehicle) : nonnegativeNumber(previous?.clientKmRate, clientKmRateForVehicle(db, clientVehicle), 1_000)
     };
   }
   return {
@@ -1322,7 +1374,8 @@ function todoForUserRole(user, db, previous, todo) {
     billingHourlyRate: isCompleted ? nonnegativeNumber(todo.billingHourlyRate, previousRate ?? defaultRate, 10_000) : previousRate,
     billingKm: isCompleted ? nonnegativeNumber(todo.billingKm, previousKm, 1_000_000) : previousKm,
     clientKm: nonnegativeNumber(todo.clientKm, previousClientKm, 1_000_000),
-    clientVehicle: todoVehicle(todo.clientVehicle)
+    clientVehicle: requestedClientVehicle,
+    clientKmRate
   };
 }
 
@@ -1510,6 +1563,7 @@ function cleanTodo(input) {
     billingKm: nonnegativeNumber(input.billingKm, null, 1_000_000),
     clientKm: nonnegativeNumber(input.clientKm, null, 1_000_000),
     clientVehicle: todoVehicle(input.clientVehicle),
+    clientKmRate: nonnegativeNumber(input.clientKmRate, null, 1_000),
     driveFiles: cleanTodoDriveFiles(input.driveFiles),
     photos: limitTodoAttachmentsData(photos
       .map((photo) => ({
@@ -1689,7 +1743,7 @@ function buildCalendarIcs(db, { userId = "", combined = false } = {}) {
   }
 
   for (const todo of todos) {
-    if (!todo.date || todo.done) continue;
+    if (!todo.date || todo.archivedAt) continue;
     const description = [
       todo.client ? `Stranka: ${todo.client}` : "",
       todo.urgent ? "NUJNO: DA" : "",
@@ -1932,6 +1986,32 @@ function todoToGoogleEvent(todo, clientTaxId = "") {
   return { ...event, start: { date: todo.date }, end: { date: addDaysDashed(todo.date, 1) } };
 }
 
+function todoToGoogleArchiveEvent(todo, payroll, clientTaxId = "") {
+  const status = todoStatusDefinition(todo.status);
+  const workerName = String(payroll?.workerName || payroll?.workerId || todo.syncUser || "Delavec");
+  const event = todoToGoogleEvent(todo, clientTaxId);
+  return {
+    ...event,
+    summary: `ARHIV: ${todo.title}`,
+    description: googleEventDescription({
+      Vrsta: "arhiv obračuna",
+      Obračun: `${payroll.month || ""} · ${workerName}`,
+      Stranka: todo.client || "",
+      Davcna: clientTaxId || (isUsableTaxId(todo.clientId) ? todo.clientId : ""),
+      Material: todo.material || "",
+      Status: status.label
+    }, todo.notes),
+    extendedProperties: {
+      private: {
+        indusApp: INDUS_GOOGLE_APP_ID,
+        indusId: todo.id,
+        indusType: "payroll-archive",
+        indusUser: todo.syncUser || todo.createdBy || "",
+        indusPayrollId: payroll.id || ""
+      }
+    }
+  };
+}
 function addDaysDashed(date, days) {
   const parsed = new Date(`${date}T00:00:00`);
   parsed.setDate(parsed.getDate() + days);
@@ -1973,6 +2053,24 @@ async function ensureGoogleCalendar(calendar, user) {
   return user.google.calendarId;
 }
 
+async function ensureGoogleArchiveCalendar(calendar, user) {
+  if (Number(user.google?.scopeVersion || 0) !== GOOGLE_CALENDAR_SCOPE_VERSION) {
+    throw new Error("Google dovoljenja je treba ponovno potrditi.");
+  }
+  const name = `INDUS URE - arhiv - ${user.name || user.id}`;
+  if (user.google?.archiveCalendarId) return user.google.archiveCalendarId;
+  const created = await calendar.calendars.insert({
+    requestBody: {
+      summary: name,
+      description: "Arhiv potrjenih obračunov iz aplikacije INDUS URE",
+      timeZone: "Europe/Ljubljana"
+    }
+  });
+  user.google.archiveCalendarId = created.data.id;
+  user.google.archiveCalendarName = created.data.summary || name;
+  user.google.archiveCalendarCreatedByApp = true;
+  return user.google.archiveCalendarId;
+}
 function resolveGoogleClient(db, parsed, summary, existing = {}) {
   const clients = db.clients || [];
   const taxId = normalizeTaxId(parsed.fields.davcna || "");
@@ -2222,7 +2320,7 @@ async function reconcileGoogleCalendar(calendar, calendarId, db, user) {
     records.set("todo:" + item.id, {
       item,
       type: "todo",
-      eligible: Boolean(item.date && !item.done),
+      eligible: Boolean(item.date && (!item.done || !item.archivedAt)),
       locked: Boolean(activeTodoEditLock(item.id))
     });
   }
@@ -2300,6 +2398,66 @@ async function syncGoogleForUser(req, db, user) {
   return { ...result, direction: "app_to_google", calendarName: user.google.calendarName || ("INDUS URE - " + user.name) };
 }
 
+function payrollTodosForArchive(db, payroll) {
+  const todoIds = new Set((payroll.lines || []).map((line) => String(line.todoId || "")).filter(Boolean));
+  return (db.todos || []).filter((todo) => todoIds.has(String(todo.id || "")));
+}
+
+async function archivePayrollTodosToGoogle(req, db, payroll, actor) {
+  if (!googleReady()) throw new Error("Google Calendar za arhiv ni nastavljen na strežniku.");
+  const worker = db.users?.[payroll.workerId];
+  if (!worker?.google?.tokens || Number(worker.google.scopeVersion || 0) !== GOOGLE_CALENDAR_SCOPE_VERSION) {
+    throw new Error(`Delavec ${worker?.name || payroll.workerId} mora najprej povezati svoj Google Calendar.`);
+  }
+  const todos = payrollTodosForArchive(db, payroll);
+  if (!todos.length) throw new Error("V obračunu ni vnosov ur za arhiv.");
+
+  const { google } = require("googleapis");
+  const auth = googleClient(req, worker.google.tokens);
+  const calendar = google.calendar({ version: "v3", auth });
+  const activeCalendarId = await ensureGoogleCalendar(calendar, worker);
+  const archiveCalendarId = await ensureGoogleArchiveCalendar(calendar, worker);
+  const now = new Date().toISOString();
+
+  // Najprej zanesljivo ustvarimo arhivsko kopijo. Aktivnega dogodka ne brišemo,
+  // dokler kopija v arhivu ni potrjena kot lastna INDUS kopija.
+  for (const todo of todos) {
+    if (todo.archivedAt) continue;
+    const archiveItem = {
+      id: todo.id,
+      syncUser: todo.syncUser || worker.id,
+      googleEventId: todo.archiveGoogleEventId || ""
+    };
+    const requestBody = todoToGoogleArchiveEvent(todo, payroll, clientTaxIdForItem(db, todo));
+    if (!(await pushGoogleItem(calendar, archiveCalendarId, archiveItem, requestBody, "payroll-archive"))) {
+      throw new Error(`Arhivske kopije za opravilo ${todo.title || todo.id} ni bilo mogoče varno ustvariti.`);
+    }
+    if (todo.archiveGoogleEventId !== archiveItem.googleEventId) {
+      todo.archiveGoogleEventId = archiveItem.googleEventId;
+      await writeDbAsync(db);
+    }
+  }
+
+  // Active copies are deleted only after every archive copy exists. Archive markers
+  // are persisted together, so a retry keeps the entire payroll snapshot intact.
+  let archivedNow = 0;
+  for (const todo of todos) {
+    if (todo.archivedAt) continue;
+    if (todo.googleEventId && !(await deleteOwnedGoogleEvent(calendar, activeCalendarId, todo, "todo"))) {
+      throw new Error(`Aktivnega dogodka ${todo.title || todo.id} ni bilo mogo\u010de varno odstraniti.`);
+    }
+    resetGoogleItemSync(todo);
+    todo.archivedAt = now;
+    todo.archivedPayrollId = payroll.id;
+    todo.updatedAt = now;
+    todo.updatedBy = actor?.id || payroll.confirmedBy || "system";
+    todo.updatedByName = actor?.name || payroll.confirmedByName || "";
+    todo.history = [...(todo.history || []), audit(actor || worker, `arhivirano v obra\u010dunu ${payroll.month}`)];
+    archivedNow += 1;
+  }
+  if (archivedNow) await writeDbAsync(db);
+  return { archived: todos.length, archiveCalendarName: worker.google.archiveCalendarName || "" };
+}
 async function syncClientsWithSheets(db, user) {
   if (!GOOGLE_SHEETS_ID) throw new Error("GOOGLE_SHEETS_ID ni nastavljen na strezniku.");
   if (!user.google?.tokens) throw new Error("Najprej povezi Google racun.");
@@ -2698,6 +2856,8 @@ async function handleApi(req, res) {
       if (!currentScope) {
         user.google.calendarId = "";
         user.google.calendarName = "";
+        user.google.archiveCalendarId = "";
+        user.google.archiveCalendarName = "";
         user.google.calendarCreatedByApp = false;
         user.google.syncToken = "";
         user.google.lastSyncAt = "";
@@ -2773,7 +2933,7 @@ async function handleApi(req, res) {
       const user = await requireUser(req, res);
       if (!user) return;
       if (user.role !== "boss") {
-        sendJson(res, 403, { error: "Samo sef lahko pripravi obracun." });
+        sendJson(res, 403, { error: "Samo sef lahko potrdi obracun." });
         return;
       }
       const body = await readBody(req);
@@ -2783,6 +2943,10 @@ async function handleApi(req, res) {
         sendJson(res, 400, { error: "Delavec ali obracunsko obdobje ni pravilno." });
         return;
       }
+      if (!payrollPeriodEnded(month)) {
+        sendJson(res, 409, { error: "Obracun lahko potrdis sele po koncu izbranega obracunskega meseca." });
+        return;
+      }
       const db = await readDbAsync();
       if (!db.users?.[workerId]) {
         sendJson(res, 400, { error: "Delavec ne obstaja." });
@@ -2790,33 +2954,59 @@ async function handleApi(req, res) {
       }
       const existingIndex = db.payrolls.findIndex((payroll) => payroll.workerId === workerId && payroll.month === month);
       const previous = existingIndex >= 0 ? db.payrolls[existingIndex] : {};
-      if (previous.status && previous.status !== "draft") {
-        sendJson(res, 409, { error: "Ta obracun je ze potrjen ali placan. Najprej ga izrecno ponovno odpri." });
+      if (previous.status && !["draft", "archiving"].includes(previous.status)) {
+        sendJson(res, 409, { error: "Ta obracun je ze potrjen ali placan." });
         return;
       }
       const now = new Date().toISOString();
-      const payroll = buildPayrollSnapshot(db, workerId, month, {
-        ...previous,
-        id: previous.id || crypto.randomUUID(),
-        status: "draft",
-        createdBy: previous.createdBy || user.id,
-        createdByName: previous.createdByName || user.name,
-        createdAt: previous.createdAt || now,
-        updatedBy: user.id,
-        updatedByName: user.name,
-        updatedAt: now
-      }, body.note);
+      let payroll;
+      if (previous.status === "archiving") {
+        // Resume exactly the snapshot that was locked before archiving started.
+        payroll = normalizePayroll({
+          ...previous,
+          updatedBy: user.id,
+          updatedByName: user.name,
+          updatedAt: now
+        }, db);
+      } else {
+        payroll = buildPayrollSnapshot(db, workerId, month, {
+          ...previous,
+          id: previous.id || crypto.randomUUID(),
+          status: "archiving",
+          createdBy: previous.createdBy || user.id,
+          createdByName: previous.createdByName || user.name,
+          createdAt: previous.createdAt || now,
+          updatedBy: user.id,
+          updatedByName: user.name,
+          updatedAt: now
+        }, body.note);
+      }
       if (!payroll?.lines.length) {
         sendJson(res, 400, { error: "Za izbrani mesec delavec nima zakljucenih vnosov ur." });
         return;
       }
       if (existingIndex >= 0) db.payrolls[existingIndex] = payroll;
       else db.payrolls.push(payroll);
+      // Persist the locked snapshot before touching Google, so a retry can finish safely.
+      await writeDbAsync(db);
+      await archivePayrollTodosToGoogle(req, db, payroll, user);
+      payroll = normalizePayroll({
+        ...payroll,
+        status: "confirmed",
+        updatedBy: user.id,
+        updatedByName: user.name,
+        updatedAt: new Date().toISOString(),
+        confirmedAt: payroll.confirmedAt || new Date().toISOString(),
+        confirmedBy: user.id,
+        confirmedByName: user.name
+      }, db);
+      const finalIndex = db.payrolls.findIndex((item) => item.id === payroll.id);
+      if (finalIndex >= 0) db.payrolls[finalIndex] = payroll;
+      else db.payrolls.push(payroll);
       await writeDbAsync(db);
       sendJson(res, 200, { payrolls: payrollForUser(db, user), payroll });
       return;
     }
-
     const payrollMatch = url.pathname.match(/^\/api\/payrolls\/([^/]+)$/);
     if (payrollMatch && req.method === "PUT") {
       const user = await requireUser(req, res);
@@ -2835,6 +3025,10 @@ async function handleApi(req, res) {
       }
       const current = db.payrolls[index];
       const now = new Date().toISOString();
+      if (action === "confirm" && !payrollPeriodEnded(current.month)) {
+        sendJson(res, 409, { error: "Obracun lahko potrdis sele po koncu izbranega obracunskega meseca." });
+        return;
+      }
       let payroll;
       if (action === "refresh") {
         if (current.status !== "draft") {
@@ -2848,20 +3042,36 @@ async function handleApi(req, res) {
           updatedAt: now
         }, body.note);
       } else if (action === "confirm") {
-        if (current.status !== "draft") {
-          sendJson(res, 409, { error: "Potrdi lahko samo osnutek obracuna." });
+        if (!["draft", "archiving"].includes(current.status)) {
+          sendJson(res, 409, { error: "Potrdi lahko samo odprt ali nedokončano arhiviran obračun." });
           return;
         }
-        payroll = buildPayrollSnapshot(db, current.workerId, current.month, {
-          ...current,
+        payroll = current.status === "archiving"
+          ? normalizePayroll({ ...current, updatedBy: user.id, updatedByName: user.name, updatedAt: now }, db)
+          : buildPayrollSnapshot(db, current.workerId, current.month, {
+            ...current,
+            status: "archiving",
+            updatedBy: user.id,
+            updatedByName: user.name,
+            updatedAt: now
+          }, body.note);
+        if (!payroll?.lines.length) {
+          sendJson(res, 400, { error: "Obracun nima zakljucenih vnosov ur." });
+          return;
+        }
+        db.payrolls[index] = payroll;
+        await writeDbAsync(db);
+        await archivePayrollTodosToGoogle(req, db, payroll, user);
+        payroll = normalizePayroll({
+          ...payroll,
           status: "confirmed",
           updatedBy: user.id,
           updatedByName: user.name,
-          updatedAt: now,
-          confirmedAt: now,
+          updatedAt: new Date().toISOString(),
+          confirmedAt: payroll.confirmedAt || new Date().toISOString(),
           confirmedBy: user.id,
           confirmedByName: user.name
-        }, body.note);
+        }, db);
       } else if (action === "paid") {
         if (current.status !== "confirmed") {
           sendJson(res, 409, { error: "Kot placanega lahko oznacis samo potrjen obracun." });
@@ -3085,10 +3295,16 @@ async function handleApi(req, res) {
       const body = await readBody(req);
       const db = await readDbAsync();
       db.settings = db.settings || {};
+      const previousBilling = db.settings.billing || {};
+      const legacyKmRate = nonnegativeNumber(body.kmRate, nonnegativeNumber(previousBilling.kmRate, 0.22, 1_000), 1_000);
       db.settings.billing = {
-        hourlyRate: Number(body.hourlyRate || 15),
-        kmRate: Number(body.kmRate || 0.22),
-        commuteKmPerDay: Number(body.commuteKmPerDay || 28)
+        hourlyRate: nonnegativeNumber(body.hourlyRate, nonnegativeNumber(previousBilling.hourlyRate, 15, 10_000), 10_000),
+        // Ohranjeno samo zaradi starih podatkov; UI uporablja tri ločene tarife spodaj.
+        kmRate: legacyKmRate,
+        workerOwnVehicleKmRate: nonnegativeNumber(body.workerOwnVehicleKmRate, nonnegativeNumber(previousBilling.workerOwnVehicleKmRate, legacyKmRate, 1_000), 1_000),
+        clientPersonalKmRate: nonnegativeNumber(body.clientPersonalKmRate, nonnegativeNumber(previousBilling.clientPersonalKmRate, legacyKmRate, 1_000), 1_000),
+        clientVanKmRate: nonnegativeNumber(body.clientVanKmRate, nonnegativeNumber(previousBilling.clientVanKmRate, legacyKmRate, 1_000), 1_000),
+        commuteKmPerDay: nonnegativeNumber(body.commuteKmPerDay, nonnegativeNumber(previousBilling.commuteKmPerDay, 28, 1_000_000), 1_000_000)
       };
       await writeDbAsync(db);
       sendJson(res, 200, { settings: db.settings });
@@ -3944,6 +4160,8 @@ module.exports = {
   reconcileGoogleCalendar,
   buildCalendarIcs,
   buildPayrollSnapshot,
+  todoToGoogleArchiveEvent,
+  archivePayrollTodosToGoogle,
   canManageEntry,
   canManageTodo,
   sourceTodoForNewEntry,
@@ -3959,6 +4177,7 @@ module.exports = {
   payrollForUser,
   payrollLockForTodos,
   payrollTotals,
+  payrollPeriodEnded,
   parseGoogleEventDescription,
   releaseEntryEditLock,
   releaseTodoEditLock,

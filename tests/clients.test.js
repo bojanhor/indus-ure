@@ -145,9 +145,13 @@ test("neposredna izbira statusov prikaze koledarske barve za vsako moznost", () 
   assert.match(html, /\.todo-status-execution \{ --todo-bg: #51b749; --todo-fg: #fff; \}/);
   assert.match(html, /\.todo-status-return \{ --todo-bg: #dbadff; --todo-fg: #202124;/);
   assert.match(html, /\.todo-status-meal,[\s\S]*?\.todo-status-internal \{ --todo-bg: #fbd75b; --todo-fg: #202124;/);
+  assert.match(html, /\.todo-status-drive \{ --todo-bg: #46d6db; --todo-fg: #202124;/);
+  assert.match(html, /\.todo-status-purchase \{ --todo-bg: #ffb878; --todo-fg: #202124;/);
   assert.match(html, /class="todo-status-choice todo-status-color \$\{todoStatusClass\(status\.id\)\}"/);
   assert.doesNotMatch(html, /class="todo-option-\$\{status\.id\}"/);
   assert.match(html, /id: "execution", label: "Zaklju\\u010deno"/);
+  assert.match(html, /id: "drive", label: "Vožnja"/);
+  assert.match(html, /id: "purchase", label: "Nabava"/);
   assert.doesNotMatch(html, />Izvedba<\/option>/);
 });
 
@@ -195,6 +199,8 @@ test("slikovne priloge je mogoce risarsko urediti tudi pri spremembi opravila", 
   assert.match(html, /function undoPhotoEditorAction\(\)[\s\S]*?strokes\.pop\(\)/);
   assert.match(html, /function canvasAsLimitedJpegDataUrl\(canvas, maxLength = 680_000\)/);
   assert.match(html, /state\.todoDialogPhotos = nextPhotos;[\s\S]*?renderTodoFormPhotos\(\)/);
+  assert.match(html, /#photoEditorDialog > form \{ height: 100%; min-height: 0; display: grid; grid-template-rows: auto auto minmax\(0, 1fr\) auto; \}/);
+  assert.match(html, /#photoEditorDialog \.photo-editor-toolbar \{ max-height: 32dvh; overflow-y: auto;/);
 });
 
 test("brisanje opravila je majhna dostopna ikona kosa", () => {
@@ -313,14 +319,58 @@ test("sef ureja postavke in kilometrino samo v obrazcu opravila", () => {
   assert.match(html, /hourlyRate\.value = workerDefaultHourlyRate\(assignees\[0\]\)/);
   assert.match(html, /id="todoFormClientKm"/);
   assert.match(html, /id="todoFormClientVehicle"/);
+  assert.match(html, /Vpiši samo, če si bil s svojim lastnim vozilom/);
+  assert.match(html, /id="todoFormClientKmRateNote"/);
+  assert.match(html, /id="kmRatesDialog"/);
+  assert.match(html, /id="workerOwnVehicleKmRate"/);
+  assert.match(html, /Povračilo delavcu za lastno vozilo/);
+  assert.match(html, /id="clientPersonalKmRate"/);
+  assert.match(html, /id="clientVanKmRate"/);
+  assert.match(html, /Stranki: osebni avto/);
+  assert.match(html, /Stranki: kombi/);
+  assert.doesNotMatch(html, /id="workerKmRate"/);
+  assert.doesNotMatch(html, /id="billingKmRate"|id="saveBillingKmRate"/);
+  assert.match(html, /id="billingNote"/);
+  assert.match(html, /id="billingNotePanel"/);
+  assert.match(html, /localStorage\.setItem\(billingNoteStorageKey/);
+  assert.match(html, /document\.activeElement !== noteInput/);
+  assert.match(html, /function syncModalPageScrollLock\(\)/);
+  assert.match(html, /body\.classList\.add\("modal-open"\)/);
+  assert.match(html, /#workerBillingDialog \.worker-billing table \{ min-width: 0; \}/);
+  assert.match(html, /#workerBillingDialog \.worker-rate-input \{ width: calc\(100% - 52px\);/);
   assert.match(html, /const showClientMileage = !meal && \(isAdminView\(\) \|\| Boolean\(state\.todoHoursSourceId\) \|\| state\.todoStandaloneHours\)/);
   assert.match(html, /clientKm: 0,[\s\S]*?clientVehicle: "personal"/);
   assert.match(html, /<option value="personal">Osebni<\/option>/);
   assert.match(html, /<option value="van">Kombi<\/option>/);
   assert.doesNotMatch(html, /class="todo-billing"/);
+  assert.match(server, /workerOwnVehicleKmRate: nonnegativeNumber\(body\.workerOwnVehicleKmRate/);
+  assert.match(server, /db\.settings\?\.billing\?\.workerOwnVehicleKmRate/);
   assert.match(server, /user\.role !== "boss"[\s\S]*Samo sef lahko spreminja urne postavke delavcev/);
   assert.match(server, /const adjusted = todoForUserRole\(user, db, existing/);
   assert.match(server, /billingHourlyRate: isOpenedTodo \? todo\.billingHourlyRate : existing\.billingHourlyRate/);
+});
+test("potrditev obračuna arhivira ure brez koraka osnutka, obračunski dan pa odpre zgodovinski dnevni pogled", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  const server = fs.readFileSync(path.join(__dirname, "..", "outputs", "server.js"), "utf8");
+  assert.match(html, /id="billingConfirm"[^>]*>Potrdi obra&#269;un<\/button>/);
+  assert.doesNotMatch(html, /id="billingSaveDraft"|id="billingDeleteDraft"/);
+  assert.match(html, /function confirmPayroll\(\)[\s\S]*?arhivski Google koledar delavca/);
+  assert.match(html, /function calendarTodos\(\{ includeArchived = false \} = \{\}\)[\s\S]*?!todo\.archivedAt/);
+  assert.match(html, /function openBillingDayTimeline\(workerId, date\)[\s\S]*?openDayTimeline\(date, \{ includeArchived: true \}\)/);
+  assert.match(server, /function archivePayrollTodosToGoogle\(/);
+  assert.match(server, /function ensureGoogleArchiveCalendar\(/);
+  assert.match(server, /archiveCalendarId/);
+  assert.match(server, /await archivePayrollTodosToGoogle\(req, db, payroll, user\)/);
+  assert.match(server, /eligible: Boolean\(item\.date && \(!item\.done \|\| !item\.archivedAt\)\)/);
+  assert.match(server, /PAYROLL_STATUSES = new Set\(\["draft", "archiving", "confirmed", "paid"\]\)/);
+  assert.match(server, /previous\.status === "archiving"/);
+  assert.match(server, /Persist the locked snapshot before touching Google/);
+  assert.match(html, /Nadaljuj arhiviranje/);
+  assert.match(html, /id="billingPeriodHint"/);
+  assert.match(html, /function payrollPeriodEnded\(month, now = new Date\(\)\)/);
+  assert.match(html, /confirmButton\.disabled = showConfirmation && !periodEnded/);
+  assert.match(server, /if \(!payrollPeriodEnded\(month\)\)/);
+  assert.match(server, /action === "confirm" && !payrollPeriodEnded\(current\.month\)/);
 });
 test("koledar ustvarja in prikazuje samo kanonicna opravila", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
@@ -377,8 +427,8 @@ test("obracun ur podpira delavski in sefovski pogled", () => {
   assert.match(html, /id="billingMenuBtn" type="button">Obra&#269;uni/);
   assert.match(html, /class="panel billing-screen view-hidden"/);
   assert.match(html, /id="billingWorker"/);
-  assert.match(html, /id="billingSaveDraft"/);
-  assert.match(html, /id="billingConfirm"/);
+  assert.doesNotMatch(html, /id="billingSaveDraft"/);
+  assert.match(html, /id="billingConfirm"[^>]*>Potrdi obra&#269;un<\/button>/);
   assert.match(html, /id="billingMarkPaid"/);
   assert.match(html, /function billingLiveLines\(workerId, month\)/);
   assert.match(html, /const payrollPaidTodoStatuses = new Set\(\["execution", "meal"\]\)/);
@@ -388,15 +438,17 @@ test("obracun ur podpira delavski in sefovski pogled", () => {
   assert.match(html, /filter\(\(line\) => Number\(line\.minutes \|\| 0\) > 0\)/);
   assert.match(html, /class="billing-day billing-open-day"/);
   assert.match(html, /class="billing-day-hours"/);
+  assert.match(html, /const hasGap = rows\.some\(\(row, index\) => index > 0 && billingGapMinutes\(rows\[index - 1\], row\) > 0\)/);
+  assert.match(html, /class="billing-gap-alert"/);
   assert.match(html, /class="billing-day-work">Delo:/);
   assert.match(html, /class="billing-day-km">Kilometrina:/);
   assert.match(html, /grid-template-areas: "date hours" "work km"/);
-  assert.match(html, /function openBillingDayTimeline\(workerId, date\)[\s\S]*?openDayTimeline\(date\)/);
+  assert.match(html, /function openBillingDayTimeline\(workerId, date\)[\s\S]*?openDayTimeline\(date, \{ includeArchived: true \}\)/);
   assert.doesNotMatch(html, /class="billing-task-row \$\{todoExists/);
   assert.doesNotMatch(html, /linkifyText\(row\.title\)/);
   assert.match(html, /\.billing-period \{ display: grid; grid-template-columns: 40px minmax\(0, 1fr\) 40px; width: 100%; \}/);
   assert.doesNotMatch(html, /class="billing-gap billing-open-day"/);
-  assert.match(html, /function changePayroll\(action\)/);
+  assert.match(html, /function changePayroll\(action, skipConfirmation = false, note = undefined\)/);
   assert.match(html, /api\("\/api\/payrolls"\)/);
   assert.doesNotMatch(html, /if \(isAdminView\(\) && view === "billing"\) view = "todos"/);
   assert.match(html, /billingMenuBtn"\)\.addEventListener\("click", \(\) => \{[\s\S]*?setView\("billing"\);[\s\S]*?toolsMenu"\)\.open = false/);
@@ -514,7 +566,11 @@ test("pogled opravil uporablja samo gumb in skupni obrazec ima Preklici", () => 
   assert.match(html, /id="duplicateTodoFromDialog">Podvoji<\/button>/);
   assert.match(html, /async function duplicateTodoFromCurrent\(\)/);
   assert.match(html, /_duplicateAssigneeIds: todoAssigneeIds\(source\)/);
-  assert.match(html, /status: source\.status === "execution" \? "open" : source\.status/);
+  assert.match(html, /status: source\.status,/);
+  assert.match(html, /sourceProjectTodoId: source\.sourceProjectTodoId \|\| ""/);
+  assert.match(html, /Novo zaključeno opravilo/);
+  assert.match(html, /id="todoFormSourceProject"[\s\S]*?id="openTodoSourceProject"/);
+  assert.match(html, /sourceProjectTodoId: existing\?\.sourceProjectTodoId \|\| state\.todoHoursSourceId \|\| state\.todoDraftSourceProjectTodoId \|\| ""/);
   assert.match(html, /photos: \(source\.photos \|\| \[\]\)\.map\(\(photo\) => \(\{ \.\.\.photo, id: "" \}\)\)/);
   assert.match(html, /duplicateTodoFromDialog"\)\.addEventListener\("click", \(\) => duplicateTodoFromCurrent\(\)/);
   assert.match(html, /\$\("cancelTodoDialog"\)\.addEventListener\("click", \(\) => \$\("todoDialog"\)\.close\(\)\)/);
@@ -607,6 +663,8 @@ test("filtriranje po strankah je samostojen prikaz brez gumba Vse stranke", () =
   assert.match(html, /list\.classList\.toggle\("hidden", !active\)/);
   assert.match(html, /if \(!active\) \{[\s\S]*?state\.selectedClient = "";[\s\S]*?return;/);
   assert.match(html, /state\.selectedClient = state\.selectedClient === client \? "" : client/);
+  assert.match(html, /const clientsInTodoOrder = todoClients\(\)\.map\(\(client\) =>/);
+  assert.doesNotMatch(html, /clientsByEnteredHours|b\.enteredMinutes - a\.enteredMinutes/);
 });
 test("opravila imajo rocno in datumsko razvrscanje ter neobvezni uri", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
@@ -633,6 +691,8 @@ test("opravila imajo rocno in datumsko razvrscanje ter neobvezni uri", () => {
   assert.match(html, /end: \$\("todoFormEnd"\)\.value/);
   assert.match(html, /Za opravilo z uro vnesi tudi datum/);
   assert.match(html, /\$\("todoFormStart"\)\.value = ""/);
+  assert.match(html, /alert\("Vpiši ime opravila\."\)/);
+  assert.doesNotMatch(html, /id="todoFormTask"[^>]*required/);
   assert.match(html, /localStorage\.setItem\(todoSortStorageKey\(\), state\.todoSortMode\)/);
   assert.match(html, /return \(orders\.length \? Math\.min\(\.\.\.orders\) : 0\) - 1/);
   assert.match(html, /const projectHoursSourceStatuses = new Set\(\["open", "in_progress"\]\)/);
@@ -677,7 +737,7 @@ test("sefovski pogled prikaze skupno opravilo samo enkrat po skritem ID", () => 
 });
 test("sefovski koledar zdruzi skupna opravila in ponudi locena feeda", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
-  assert.match(html, /function calendarTodos\(\)/);
+  assert.match(html, /function calendarTodos\(/);
   assert.match(html, /const key = todo\.assignmentGroupId \|\| todo\.id/);
   assert.match(html, /return \[\.\.\.groups\.values\(\)\]/);
   assert.match(html, /id="copyWorkerCalendar"/);

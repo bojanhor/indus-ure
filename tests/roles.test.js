@@ -21,6 +21,7 @@ const {
   normalizeDb,
   payrollForUser,
   payrollLockForTodos,
+  payrollPeriodEnded,
   releaseEntryEditLock,
   releaseTodoEditLock,
   releaseTodoAssignmentEditLock,
@@ -168,7 +169,7 @@ test("delavec v zakljucenem vnosu ur lahko navede kilometrino za stranko", () =>
       bojan: { id: "bojan", role: "boss", billing: { hourlyRate: 25 } },
       ibro: { id: "ibro", role: "worker", billing: { hourlyRate: 18 } }
     },
-    settings: { billing: { hourlyRate: 15 } }
+    settings: { billing: { hourlyRate: 15, kmRate: 0.22, workerOwnVehicleKmRate: 0.37, clientPersonalKmRate: 0.34, clientVanKmRate: 0.48 } }
   };
   const previous = {
     id: "t1",
@@ -193,6 +194,7 @@ test("delavec v zakljucenem vnosu ur lahko navede kilometrino za stranko", () =>
   assert.equal(workerChange.billingKm, 999);
   assert.equal(workerChange.clientKm, 999);
   assert.equal(workerChange.clientVehicle, "personal");
+  assert.equal(workerChange.clientKmRate, 0.34);
 
   const bossChange = todoForUserRole(boss, billingDb, previous, {
     ...previous,
@@ -205,6 +207,7 @@ test("delavec v zakljucenem vnosu ur lahko navede kilometrino za stranko", () =>
   assert.equal(bossChange.billingKm, 12.5);
   assert.equal(bossChange.clientKm, 24);
   assert.equal(bossChange.clientVehicle, "personal");
+  assert.equal(bossChange.clientKmRate, 0.34);
 
   const newlyCompleted = todoForUserRole(worker, billingDb, null, {
     syncUser: "ibro",
@@ -218,6 +221,7 @@ test("delavec v zakljucenem vnosu ur lahko navede kilometrino za stranko", () =>
   assert.equal(newlyCompleted.billingKm, 100);
   assert.equal(newlyCompleted.clientKm, 36);
   assert.equal(newlyCompleted.clientVehicle, "van");
+  assert.equal(newlyCompleted.clientKmRate, 0.48);
 
   const ordinaryTask = todoForUserRole(worker, billingDb, previous, {
     ...previous,
@@ -345,7 +349,7 @@ test("obračun naredi nespremenljiv posnetek ur posameznega delavca", () => {
       bojan: { id: "bojan", name: "Bojan", role: "boss", billing: { hourlyRate: 25 } },
       ibro: { id: "ibro", name: "Ibro", role: "worker", billing: { hourlyRate: 18 } }
     },
-    settings: { billing: { hourlyRate: 15, kmRate: 0.22 } },
+    settings: { billing: { hourlyRate: 15, kmRate: 0.22, workerOwnVehicleKmRate: 0.37, clientPersonalKmRate: 0.35, clientVanKmRate: 0.48 } },
     payrolls: [],
     todos: [
       { id: "t-ibro", assignmentGroupId: "g-1", syncUser: "ibro", status: "execution", date: "2026-07-15", start: "08:00", end: "10:30", title: "Montaža", client: "Jerin", billingHourlyRate: 20, billingKm: 12 },
@@ -361,11 +365,16 @@ test("obračun naredi nespremenljiv posnetek ur posameznega delavca", () => {
   assert.equal(draft.minutes, 195);
   assert.equal(draft.hours, 3.25);
   assert.equal(draft.workAmount, 63.5);
-  assert.equal(draft.kmAmount, 2.64);
-  assert.equal(draft.totalAmount, 66.14);
+  assert.equal(draft.kmAmount, 4.44);
+  assert.equal(draft.totalAmount, 67.94);
   db.payrolls = [{ ...draft, status: "confirmed" }];
   assert.equal(payrollLockForTodos(db, [db.todos[0]])?.id, "p-1");
   assert.equal(payrollLockForTodos(db, [db.todos[1]])?.id, "p-1");
   assert.deepEqual(payrollForUser(db, db.users.ibro).map((payroll) => payroll.id), ["p-1"]);
   assert.equal(payrollForUser(db, db.users.bojan).length, 1);
+});
+test("obracun je mogoce potrditi sele po koncu izbranega meseca", () => {
+  assert.equal(payrollPeriodEnded("2026-07", new Date("2026-07-31T12:00:00Z")), false);
+  assert.equal(payrollPeriodEnded("2026-07", new Date("2026-08-01T12:00:00Z")), true);
+  assert.equal(payrollPeriodEnded("2026-08", new Date("2026-08-01T12:00:00Z")), false);
 });

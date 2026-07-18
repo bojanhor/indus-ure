@@ -32,6 +32,10 @@
       -webkit-text-size-adjust: 100%;
     }
 
+    html.modal-open,
+    body.modal-open { overflow: hidden; overscroll-behavior: none; }
+    body.modal-open { position: fixed; inset: 0; width: 100%; }
+
     body.admin-view,
     body.admin-view .main { background: #eaf6fb; }
     body.admin-view .topbar,
@@ -637,7 +641,7 @@
     .billing-state.paid { background: #dff4e2; color: #24743a; }
     .billing-period, .billing-worker-control, .billing-rate-control { display: flex; align-items: end; gap: 8px; flex-wrap: wrap; }
     .billing-period label, .billing-worker-control, .billing-rate-control label { display: grid; gap: 4px; color: var(--muted); font-size: 12px; font-weight: 800; }
-    .billing-period input, .billing-worker-control select, .billing-rate-control input, .billing-note-panel textarea { min-height: 40px; border: 1px solid var(--line); border-radius: 8px; padding: 7px 9px; background: #fff; font: inherit; }
+    .billing-period input, .billing-worker-control select, .billing-rate-control input { min-height: 40px; border: 1px solid var(--line); border-radius: 8px; padding: 7px 9px; background: #fff; font: inherit; }
     .billing-rate-control input { width: 88px; }
     .billing-worker-control select { min-width: 220px; }
     .billing-month-step { min-width: 40px; min-height: 40px; padding: 0; }
@@ -645,14 +649,15 @@
     .billing-summary-card { padding: 13px; border: 1px solid var(--line); border-radius: 8px; background: #f8faf7; }
     .billing-summary-card strong { display: block; font-size: 22px; line-height: 1.1; }
     .billing-summary-card span { display: block; margin-top: 5px; color: var(--muted); font-size: 12px; }
-    .billing-note-panel { border: 1px solid var(--line); border-radius: 8px; padding: 10px; background: #fbfcfa; }
+    .billing-note-panel { display: grid; gap: 6px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: #fbfcfa; }
     .billing-note-panel label { display: grid; gap: 5px; color: var(--muted); font-size: 12px; font-weight: 800; }
-    .billing-note-panel textarea { width: 100%; resize: vertical; }
-    .billing-note-panel p { margin: 0; white-space: pre-wrap; }
-    .billing-day-list { display: grid; gap: 9px; }
+    .billing-note-panel textarea { width: 100%; min-height: 76px; resize: vertical; border: 1px solid var(--line); border-radius: 8px; padding: 8px 9px; background: #fff; color: var(--ink); font: inherit; }
+    .billing-note-panel textarea:disabled { color: var(--ink); background: #f3f6f3; }
+    .billing-period-hint { margin: 0; color: #805f00; font-size: 12px; font-weight: 800; }    .billing-day-list { display: grid; gap: 9px; }
     .billing-day { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; gap: 10px; align-items: center; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--ink); text-align: left; font-weight: 800; }
     .billing-day:hover, .billing-day:focus-visible { background: #f4f8f5; }
     .billing-day-hours { color: var(--muted); font-size: 13px; white-space: nowrap; }
+    .billing-gap-alert { color: var(--red); font-weight: 900; }
     .billing-day-work, .billing-day-km { color: var(--accent-dark); font-size: 13px; font-weight: 900; white-space: nowrap; }
     .billing-task-row { display: grid; grid-template-columns: 92px minmax(0, 1fr) 64px 92px; gap: 10px; align-items: center; padding: 10px 12px; border-top: 1px solid var(--line); }
     .billing-task-row small { color: var(--muted); }
@@ -1021,6 +1026,8 @@
     .todo-status-return { --todo-bg: #dbadff; --todo-fg: #202124; --todo-border: #8e5bb7; }
     .todo-status-meal,
     .todo-status-internal { --todo-bg: #fbd75b; --todo-fg: #202124; --todo-border: #d6ad2f; }
+    .todo-status-drive { --todo-bg: #46d6db; --todo-fg: #202124; --todo-border: #249ca2; }
+    .todo-status-purchase { --todo-bg: #ffb878; --todo-fg: #202124; --todo-border: #d8883f; }
 
 
     .day-todo.todo-status-color {
@@ -2687,6 +2694,29 @@
       .billing-line-edit { grid-column: 1 / -1; justify-content: stretch; }
       .billing-line-edit label { flex: 1; }
       .billing-line-edit input { width: 100%; }
+      #photoEditorDialog { width: 100vw; height: 100dvh; max-height: none; border-radius: 0; }
+      #photoEditorDialog > form { height: 100%; min-height: 0; display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; }
+      #photoEditorDialog .modal-head { padding: 10px 12px; }
+      #photoEditorDialog .photo-editor-toolbar { max-height: 32dvh; overflow-y: auto; align-content: start; gap: 6px; padding: 8px; }
+      #photoEditorDialog .photo-editor-text-entry { flex-basis: 100%; }
+      #photoEditorDialog .photo-editor-text-tools { width: 100%; }
+      #photoEditorDialog .photo-editor-canvas-shell { min-height: 0; max-height: none; padding: 6px; }
+      #photoEditorDialog .actions.modal-body { padding: 10px 12px; }
+      #workerBillingDialog { width: min(calc(100vw - 20px), 520px); max-height: calc(100dvh - 20px); overflow-y: auto; }
+      #workerBillingDialog .modal-head { padding: 13px 14px; }
+      #workerBillingDialog .modal-body { padding: 12px; }
+      #workerBillingDialog .worker-billing-scroll { overflow: visible; }
+      #workerBillingDialog .worker-billing table { min-width: 0; }
+      #workerBillingDialog .worker-billing thead { display: none; }
+      #workerBillingDialog .worker-billing tbody { display: grid; gap: 8px; }
+      #workerBillingDialog .worker-billing tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 5px 8px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: #f8faf7; }
+      #workerBillingDialog .worker-billing td { padding: 0; border: 0; }
+      #workerBillingDialog .worker-billing td:nth-child(1) { min-width: 0; overflow-wrap: anywhere; }
+      #workerBillingDialog .worker-billing td:nth-child(2) { align-self: center; color: var(--muted); font-size: 12px; text-align: right; }
+      #workerBillingDialog .worker-billing td:nth-child(3) { grid-column: 1 / -1; display: grid; gap: 4px; font-size: 0; }
+      #workerBillingDialog .worker-billing td:nth-child(3)::before { content: "Privzeta urna postavka"; color: var(--muted); font-size: 12px; font-weight: 800; }
+      #workerBillingDialog .worker-billing td:nth-child(4) { grid-column: 1 / -1; }
+      #workerBillingDialog .worker-rate-input { width: calc(100% - 52px); max-width: calc(100% - 52px); }
     }
   </style>
 </head>
@@ -2743,6 +2773,7 @@
               <button class="menu-action admin-only" id="syncClientsBtn" type="button">Sync strank iz Google Sheets</button>
               <span class="tools-menu-label admin-only">Napredno</span>
               <button class="menu-action admin-only" id="workerBillingBtn" type="button">Privzete urne postavke</button>
+              <button class="menu-action admin-only" id="kmRatesBtn" type="button">Tarife kilometrine</button>
               <button class="menu-action admin-only" id="exportCsv" type="button">Izvoz CSV</button>
               <button class="menu-action admin-only" id="downloadBackup" type="button">Prenesi varnostno kopijo</button>
               <button class="menu-action logout-action" id="logoutBtn" type="button">Odjava</button>
@@ -2787,27 +2818,20 @@
             </label>
             <button class="secondary billing-month-step" id="billingNextMonth" type="button" aria-label="Naslednji mesec">&rsaquo;</button>
           </div>
-          <div class="billing-rate-control admin-only">
-            <label>EUR/km
-              <input id="billingKmRate" type="number" min="0" max="1000" step="0.01">
-            </label>
-            <button class="secondary" id="saveBillingKmRate" type="button">Shrani tarifo</button>
-          </div>
+
         </div>
         <div class="billing-summary" id="billingSummary"></div>
         <div class="billing-note-panel" id="billingNotePanel">
           <label class="admin-only" for="billingNote">Opomba za delavca
-            <textarea id="billingNote" rows="2" placeholder="Npr. povzetek, dogovor ali pojasnilo obra&#269;una"></textarea>
+            <textarea id="billingNote" rows="3" placeholder="Npr. pojasnilo obračuna ali dogovor"></textarea>
           </label>
-          <p class="todo-meta" id="billingNoteRead"></p>
+          <p class="todo-meta hidden" id="billingNoteRead"></p>
         </div>
         <div class="billing-actions admin-only" id="billingActions">
-          <button class="secondary" id="billingSaveDraft" type="button">Pripravi osnutek</button>
           <button class="primary hidden" id="billingConfirm" type="button">Potrdi obra&#269;un</button>
           <button class="primary hidden" id="billingMarkPaid" type="button">Ozna&#269;i pla&#269;ano</button>
-          <button class="secondary hidden" id="billingReopen" type="button">Ponovno odpri</button>
-          <button class="secondary hidden" id="billingDeleteDraft" type="button">Zbri&#353;i osnutek</button>
         </div>
+        <p class="billing-period-hint hidden" id="billingPeriodHint"></p>
         <div class="billing-day-list" id="billingDayList"></div>
       </section>
       <section class="panel report-view clients-screen view-hidden">
@@ -2903,7 +2927,7 @@
         </div>
         <div class="report-controls compact-report-controls">
           <button class="secondary report-setting" data-setting="hourlyRate" type="button">Urna postavka: <strong id="hourlyRateLabel">15 EUR</strong></button>
-          <button class="secondary report-setting" data-setting="kmRate" type="button">Kilometrina: <strong id="kmRateLabel">0,22 EUR/km</strong></button>
+
           <button class="secondary report-setting" data-setting="commuteKmPerDay" type="button">Dom-slu&#382;ba: <strong id="commuteKmLabel">28 km/dan</strong></button>
         </div>
         <div class="report-grid" id="reportSummary"></div>
@@ -3020,7 +3044,7 @@
           <div class="todo-form-assignees" id="todoFormAssignees"></div>
         </div>
         <label>Ime opravila
-          <input id="todoFormTask" type="text" placeholder="Ime opravila" list="todoFormTaskSuggestions" required>
+          <input id="todoFormTask" type="text" placeholder="Ime opravila" list="todoFormTaskSuggestions">
           <datalist id="todoFormTaskSuggestions"></datalist>
         </label>
         <label>Opis del
@@ -3045,6 +3069,7 @@
               </select>
             </label>
           </div>
+          <p class="todo-meta" id="todoFormClientKmRateNote"></p>
         </div>
         <div class="todo-form-billing" id="todoFormBilling">
           <div class="modal-grid">
@@ -3053,6 +3078,7 @@
             </label>
             <label>Kilometrina za delavca (km)
               <input id="todoFormBillingKm" type="number" min="0" max="1000000" step="0.1">
+              <small class="todo-meta">Vpiši samo, če si bil s svojim lastnim vozilom.</small>
             </label>
           </div>
         </div>
@@ -3084,6 +3110,9 @@
           </div>
         </div>
         <div class="audit-box hidden" id="todoFormAudit"></div>
+        <div class="audit-box hidden" id="todoFormSourceProject">
+          <span>Izvorno opravilo: </span><button class="secondary" id="openTodoSourceProject" type="button">Odpri in uredi</button>
+        </div>
         <div class="actions">
           <button type="button" class="danger" id="deleteTodoFromDialog">Izbri&#353;i opravilo</button>
           <button type="button" class="secondary hidden" id="duplicateTodoFromDialog">Podvoji</button>
@@ -3254,6 +3283,35 @@
     </form>
   </dialog>
 
+  <dialog id="kmRatesDialog">
+    <form method="dialog" id="kmRatesForm">
+      <div class="modal-head">
+        <h3>Tarife kilometrine</h3>
+        <button class="icon-btn" id="closeKmRates" type="button" title="Zapri">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="modal-grid">
+          <label>Povračilo delavcu za lastno vozilo (EUR/km)
+            <input id="workerOwnVehicleKmRate" type="number" min="0" max="1000" step="0.01">
+          </label>
+        </div>
+        <p class="todo-meta">Ta tarifa se uporabi samo pri obračunu kilometrine delavca.</p>
+        <div class="modal-grid">
+          <label>Stranki: osebni avto (EUR/km)
+            <input id="clientPersonalKmRate" type="number" min="0" max="1000" step="0.01">
+          </label>
+          <label>Stranki: kombi (EUR/km)
+            <input id="clientVanKmRate" type="number" min="0" max="1000" step="0.01">
+          </label>
+        </div>
+        <div class="actions">
+          <button class="secondary" id="cancelKmRates" type="button">Prekliči</button>
+          <button class="primary" id="saveKmRates" type="button">Shrani tarife</button>
+        </div>
+      </div>
+    </form>
+  </dialog>
+
   <dialog id="accountDialog">
     <form method="dialog" id="accountForm">
       <div class="modal-head">
@@ -3349,7 +3407,9 @@
       { id: "open", label: "\u010caka" },
       { id: "return", label: "!!Vrni" },
       { id: "meal", label: "Malica" },
-      { id: "internal", label: "Razno/Interno" }
+      { id: "internal", label: "Razno/Interno" },
+      { id: "drive", label: "Vožnja" },
+      { id: "purchase", label: "Nabava" }
     ];
     const todoStatusById = Object.fromEntries(todoStatusDefinitions.map((status) => [status.id, status]));
 
@@ -3397,10 +3457,12 @@
       todoHoursSourceId: "",
       todoStandaloneHours: false,
       todoHoursSourceOriginal: null,
+      todoDraftSourceProjectTodoId: "",
       todoHoursSavedSourceId: "",
       todoHoursCompletionSourceId: "",
       todoDialogReturnDayDate: "",
       dayTimelineDate: "",
+      dayTimelineIncludeArchived: false,
       dayTimelineDrafts: new Map(),
       dayTimelineHoursWarning: null,
       dayTimelineHoursResolvedSourceId: "",
@@ -3417,7 +3479,7 @@
       offlineTodoSyncing: false,
       attachmentPreview: null,
       reportClientId: "",
-      settings: { billing: { hourlyRate: 15, kmRate: 0.22, commuteKmPerDay: 28 } },
+      settings: { billing: { hourlyRate: 15, kmRate: 0.22, workerOwnVehicleKmRate: 0.22, clientPersonalKmRate: 0.22, clientVanKmRate: 0.22, commuteKmPerDay: 28 } },
       billingLocks: [],
       payrolls: [],
       billingWorkerId: "",
@@ -3655,7 +3717,24 @@
     let modalHistorySequence = 0;
     let modalHistoryClosingFromBack = false;
     let modalHistoryIgnoreNextPopstate = false;
+    let modalScrollLockY = 0;
     const modalHistoryTokens = new WeakMap();
+
+    function syncModalPageScrollLock() {
+      const hasOpenModal = Boolean(document.querySelector("dialog[open]"));
+      const locked = document.body.classList.contains("modal-open");
+      if (hasOpenModal && !locked) {
+        modalScrollLockY = window.scrollY || window.pageYOffset || 0;
+        document.documentElement.classList.add("modal-open");
+        document.body.classList.add("modal-open");
+        document.body.style.top = `-${modalScrollLockY}px`;
+      } else if (!hasOpenModal && locked) {
+        document.documentElement.classList.remove("modal-open");
+        document.body.classList.remove("modal-open");
+        document.body.style.top = "";
+        window.scrollTo(0, modalScrollLockY);
+      }
+    }
 
     function modalHistoryState(dialogId, token) {
       const current = history.state && typeof history.state === "object" ? history.state : {};
@@ -3702,11 +3781,16 @@
       HTMLDialogElement.prototype.showModal = function (...args) {
         const result = nativeShowModal.apply(this, args);
         registerOpenModalHistory(this);
+        syncModalPageScrollLock();
         return result;
       };
       document.querySelectorAll("dialog").forEach((dialog) => {
-        dialog.addEventListener("close", () => unregisterClosedModalHistory(dialog));
+        dialog.addEventListener("close", () => {
+          unregisterClosedModalHistory(dialog);
+          syncModalPageScrollLock();
+        });
       });
+      syncModalPageScrollLock();
     }
 
     function showApp() {
@@ -3824,8 +3908,8 @@
       return state.todos.filter((todo) => (todo.syncUser || todo.createdBy) === workerId);
     }
 
-    function calendarTodos() {
-      return uniqueTodosByEventId(contextTodos());
+    function calendarTodos({ includeArchived = false } = {}) {
+      return uniqueTodosByEventId(contextTodos()).filter((todo) => includeArchived || !todo.archivedAt);
     }
 
     function applyWorkContextUi() {
@@ -3967,10 +4051,10 @@
     }
 
     async function editBillingSetting(key) {
-      const billing = state.settings.billing || { hourlyRate: 15, kmRate: 0.22, commuteKmPerDay: 28 };
+      const billing = state.settings.billing || { hourlyRate: 15, kmRate: 0.22, workerOwnVehicleKmRate: 0.22, clientPersonalKmRate: 0.22, clientVanKmRate: 0.22, commuteKmPerDay: 28 };
       const labels = {
         hourlyRate: "urna postavka EUR",
-        kmRate: "kilometrina EUR/km",
+
         commuteKmPerDay: "kilometri dom-sluzba na dan"
       };
       const next = prompt(`Vpisi ${labels[key]}:`, billing[key]);
@@ -4329,7 +4413,7 @@
         return false;
       }
       if (!todo.title) {
-        alert("Vpisi, kaj je treba narediti.");
+        alert("Vpiši ime opravila.");
         return false;
       }
       if (Boolean(todo.start) !== Boolean(todo.end)) {
@@ -4636,7 +4720,7 @@
 
     function dayTimelineTodos() {
       if (!state.dayTimelineDate) return [];
-      return calendarTodos().filter((todo) => todo.date === state.dayTimelineDate).map((todo) => {
+      return calendarTodos({ includeArchived: state.dayTimelineIncludeArchived }).filter((todo) => todo.date === state.dayTimelineDate).map((todo) => {
         const draft = state.dayTimelineDrafts.get(todo.id);
         return draft ? { ...todo, ...draft } : todo;
       }).sort((a, b) => {
@@ -4882,8 +4966,9 @@
       scroll.scrollTop = 0;
     }
 
-    function openDayTimeline(date) {
+    function openDayTimeline(date, { includeArchived = false } = {}) {
       state.dayTimelineDate = date;
+      state.dayTimelineIncludeArchived = Boolean(includeArchived);
       state.dayTimelineInteraction = null;
       state.dayTimelinePointers.clear();
       state.dayTimelineGesture = null;
@@ -4902,7 +4987,7 @@
       const date = parseDate(state.dayTimelineDate);
       if (!date) return;
       date.setDate(date.getDate() + dayOffset);
-      openDayTimeline(dateKey(date));
+      openDayTimeline(dateKey(date), { includeArchived: state.dayTimelineIncludeArchived });
     }
 
     function beginDayTimelineEventPointer(event, todo) {
@@ -5108,7 +5193,7 @@
       if (horizontalSwipe && !remaining) {
         const date = parseDate(state.dayTimelineDate);
         date.setDate(date.getDate() + (event.clientX < gesture.startX ? 1 : -1));
-        openDayTimeline(dateKey(date));
+        openDayTimeline(dateKey(date), { includeArchived: state.dayTimelineIncludeArchived });
       } else if (isEmptyTap && !remaining) {
         openNewTodoFromDayTimeline(event.clientY).catch((error) => alert(error.message));
       }
@@ -5142,7 +5227,7 @@
     }
 
     function billingLiveLines(workerId, month) {
-      const kmRate = Number(state.settings.billing?.kmRate || 0);
+      const kmRate = Number(state.settings.billing?.workerOwnVehicleKmRate ?? state.settings.billing?.kmRate ?? 0);
       return state.todos
         .filter((todo) => (todo.syncUser || todo.createdBy) === workerId && payrollPaidTodoStatuses.has(todo.status) && String(todo.date || "").startsWith(month))
         .map((todo) => {
@@ -5197,7 +5282,7 @@
     function openBillingDayTimeline(workerId, date) {
       if (!date) return;
       if (isAdminView() && workerId && workerId !== activeWorkerId()) setWorkContext(`worker:${workerId}`);
-      openDayTimeline(date);
+      openDayTimeline(date, { includeArchived: true });
     }
     function billingLineTotals(lines) {
       const minutes = lines.reduce((total, line) => total + Number(line.minutes || 0), 0);
@@ -5208,9 +5293,10 @@
     }
 
     function payrollStateLabel(payroll, isAdmin) {
-      if (!payroll) return isAdmin ? "Ni osnutka" : "V pripravi";
-      if (payroll.status === "draft") return isAdmin ? "Osnutek" : "Šef ureja obračun";
-      if (payroll.status === "confirmed") return "Potrjeno · čaka plačilo";
+      if (!payroll) return isAdmin ? "Za potrditev" : "V pripravi";
+      if (payroll.status === "draft") return "Odprto za potrditev";
+      if (payroll.status === "archiving") return "Arhiviranje v teku";
+      if (payroll.status === "confirmed") return "Potrjeno · arhivirano";
       return "Plačano";
     }
 
@@ -5224,6 +5310,29 @@
       select.value = workerId;
     }
 
+    function payrollPeriodEnded(month, now = new Date()) {
+      const match = /^(\d{4})-(\d{2})$/.exec(String(month || ""));
+      if (!match) return false;
+      const year = Number(match[1]);
+      const monthIndex = Number(match[2]);
+      return year < now.getFullYear() || (year === now.getFullYear() && monthIndex < now.getMonth() + 1);
+    }
+
+    function payrollConfirmationHint(month) {
+      const match = /^(\d{4})-(\d{2})$/.exec(String(month || ""));
+      if (!match) return "Obra\u010dunskega obdobja ni mogo\u010de potrditi.";
+      const nextMonth = new Date(Number(match[1]), Number(match[2]), 1);
+      return `Potrditev obra\u010duna je mogo\u010da po ${nextMonth.toLocaleDateString("sl-SI", { day: "numeric", month: "long", year: "numeric" })}.`;
+    }
+
+    function billingNoteStorageKey(workerId, month) {
+      return `indus-ure:billing-note:${workerId || ""}:${month || ""}`;
+    }
+
+    function billingNoteValue(workerId, month, payroll) {
+      if (payroll && ["archiving", "confirmed", "paid"].includes(payroll.status)) return String(payroll.note || "");
+      return localStorage.getItem(billingNoteStorageKey(workerId, month)) ?? String(payroll?.note || "");
+    }
     function renderBillingView() {
       const monthInput = $("billingMonth");
       if (!/^\d{4}-\d{2}$/.test(monthInput.value)) monthInput.value = dateKey(new Date()).slice(0, 7);
@@ -5233,7 +5342,7 @@
       const worker = billingWorker();
       renderBillingWorkerSelect(workerId);
       const payroll = payrollForBilling(workerId, month);
-      const useSnapshot = Boolean(payroll && ["confirmed", "paid"].includes(payroll.status));
+      const useSnapshot = Boolean(payroll && ["archiving", "confirmed", "paid"].includes(payroll.status));
       const lines = useSnapshot ? payroll.lines : billingLiveLines(workerId, month);
       const totals = useSnapshot ? {
         minutes: Number(payroll.minutes || 0), hours: Number(payroll.hours || 0), km: Number(payroll.km || 0),
@@ -5245,24 +5354,32 @@
       const status = $("billingState");
       status.textContent = stateLabel;
       status.className = `billing-state ${payroll?.status || ""}`;
-      $("billingKmRate").value = Number(state.settings.billing?.kmRate || 0);
+
+      const noteInput = $("billingNote");
+      const noteText = billingNoteValue(workerId, month, payroll);
+      if (document.activeElement !== noteInput) noteInput.value = noteText;
+      noteInput.disabled = Boolean(payroll && ["archiving", "confirmed", "paid"].includes(payroll.status));
+      const noteRead = $("billingNoteRead");
+      noteRead.textContent = noteText ? `Opomba za delavca: ${noteText}` : "";
+      noteRead.classList.toggle("hidden", admin || !noteText);
       $("billingSummary").innerHTML = [
         [`${totals.hours.toLocaleString("sl-SI", { maximumFractionDigits: 2 })} h`, "Oddelane ure"],
         [`${money(totals.workAmount)} EUR`, "Delo"],
         [`${totals.km.toLocaleString("sl-SI", { maximumFractionDigits: 1 })} km · ${money(totals.kmAmount)} EUR`, "Kilometrina"],
         [`${money(totals.totalAmount)} EUR`, "Za izplačilo"]
       ].map(([value, label]) => `<div class="billing-summary-card"><strong>${escapeHtml(value)}</strong><span>${escapeHtml(label)}</span></div>`).join("");
-      const note = payroll?.note || "";
-      $("billingNote").value = note;
-      $("billingNoteRead").textContent = note;
-      $("billingNoteRead").classList.toggle("hidden", !note || admin);
-      $("billingNotePanel").classList.toggle("hidden", !admin && !note);
-      const draft = payroll?.status === "draft";
-      $("billingSaveDraft").textContent = payroll ? "Osveži osnutek" : "Pripravi osnutek";
-      $("billingConfirm").classList.toggle("hidden", !draft || !lines.length);
+      const readyForConfirmation = !payroll || ["draft", "archiving"].includes(payroll.status);
+      const periodEnded = payrollPeriodEnded(month);
+      const confirmButton = $("billingConfirm");
+      const showConfirmation = readyForConfirmation && Boolean(lines.length);
+      confirmButton.classList.toggle("hidden", !showConfirmation);
+      confirmButton.disabled = showConfirmation && !periodEnded;
+      confirmButton.textContent = payroll?.status === "archiving" ? "Nadaljuj arhiviranje" : "Potrdi obra\u010dun";
+      confirmButton.title = showConfirmation && !periodEnded ? payrollConfirmationHint(month) : "";
+      const periodHint = $("billingPeriodHint");
+      periodHint.textContent = showConfirmation && !periodEnded ? payrollConfirmationHint(month) : "";
+      periodHint.classList.toggle("hidden", !(showConfirmation && !periodEnded));
       $("billingMarkPaid").classList.toggle("hidden", payroll?.status !== "confirmed");
-      $("billingReopen").classList.toggle("hidden", !payroll || payroll.status === "draft");
-      $("billingDeleteDraft").classList.toggle("hidden", !draft);
       const list = $("billingDayList");
       const activities = billingDisplayActivities(workerId, month, lines);
       if (!activities.length) {
@@ -5277,9 +5394,10 @@
       });
       list.innerHTML = [...days.entries()].map(([date, rows]) => {
         const day = billingLineTotals(rows);
+        const hasGap = rows.some((row, index) => index > 0 && billingGapMinutes(rows[index - 1], row) > 0);
         return `<button class="billing-day billing-open-day" type="button" data-date="${escapeHtml(date)}" data-worker-id="${escapeHtml(workerId)}" aria-label="Odpri dnevni pregled za ${escapeHtml(formatDate(date))}">
           <strong>${escapeHtml(formatDate(date))}</strong>
-          <span class="billing-day-hours">${day.hours.toLocaleString("sl-SI", { maximumFractionDigits: 2 })} h</span>
+          <span class="billing-day-hours">${hasGap ? '<span class="billing-gap-alert" title="Ure niso v neprekinjenem kosu">!</span> ' : ""}${day.hours.toLocaleString("sl-SI", { maximumFractionDigits: 2 })} h</span>
           <span class="billing-day-work">Delo: ${money(day.workAmount)} EUR</span>
           <span class="billing-day-km">Kilometrina: ${money(day.kmAmount)} EUR</span>
         </button>`;
@@ -5288,32 +5406,46 @@
         button.addEventListener("click", () => openBillingDayTimeline(button.dataset.workerId, button.dataset.date));
       });
     }
-    async function savePayrollDraft() {
+    async function confirmPayroll() {
       const workerId = billingWorkerId();
       const month = $("billingMonth").value;
+      if (!payrollPeriodEnded(month)) throw new Error(payrollConfirmationHint(month));
+      const payroll = payrollForBilling(workerId, month);
+      const note = billingNoteValue(workerId, month, payroll);
+      if (payroll && !["draft", "archiving"].includes(payroll.status)) return;
+      const resuming = payroll?.status === "archiving";
+      const message = resuming
+        ? "Arhiviranje je bilo prekinjeno. Nadaljujem varno arhiviranje istega obračuna?"
+        : "Potrdim obračun? Zaključeni vnosi ur se zaklenejo, varno premaknejo v arhivski Google koledar delavca in izginejo iz aktivnega koledarja.";
+      if (!confirm(message)) return;
+      if (payroll) {
+        await changePayroll("confirm", true, note);
+        return;
+      }
       const data = await api("/api/payrolls", {
         method: "POST",
-        body: JSON.stringify({ workerId, month, note: $("billingNote").value.trim() })
+        body: JSON.stringify({ workerId, month, note })
       });
       state.payrolls = data.payrolls || state.payrolls;
+      localStorage.removeItem(billingNoteStorageKey(workerId, month));
+      await loadAll();
       renderBillingView();
     }
-
-    async function changePayroll(action) {
+    async function changePayroll(action, skipConfirmation = false, note = undefined) {
       const payroll = payrollForBilling(billingWorkerId(), $("billingMonth").value);
       if (!payroll) return;
       const messages = {
-        confirm: "Potrdim obračun? Ure in postavke iz tega obračuna bodo zaklenjene do ponovnega odpiranja.",
+        confirm: "Potrdim obračun? Ure in postavke se zaklenejo, dogodki pa se premaknejo v arhivski Google koledar delavca.",
         paid: "Označim obračun kot plačan?",
         reopen: "Ponovno odprem obračun? Ure bo mogoče znova popravljati.",
         delete: "Izbrišem osnutek obračuna? Opravljenih ur ne bom izbrisal."
       };
-      if (messages[action] && !confirm(messages[action])) return;
-      const note = $("billingNote").value.trim();
+      if (!skipConfirmation && messages[action] && !confirm(messages[action])) return;
       const data = action === "delete"
         ? await api(`/api/payrolls/${encodeURIComponent(payroll.id)}`, { method: "DELETE" })
-        : await api(`/api/payrolls/${encodeURIComponent(payroll.id)}`, { method: "PUT", body: JSON.stringify({ action, note }) });
+        : await api(`/api/payrolls/${encodeURIComponent(payroll.id)}`, { method: "PUT", body: JSON.stringify({ action, ...(note === undefined ? {} : { note }) }) });
       state.payrolls = data.payrolls || state.payrolls;
+      await loadAll();
       renderBillingView();
     }
     function renderTodos() {
@@ -5343,7 +5475,7 @@
         return;
       }
       const modeTodos = sortedTodosForMode();
-      const clientsByEnteredHours = todoClients().map((client) => {
+      const clientsInTodoOrder = todoClients().map((client) => {
         const clientTodos = modeTodos.filter((todo) => todo.client === client);
         const enteredMinutes = clientTodos.reduce((total, todo) => {
           const start = dayTimelineMinutes(todo.start);
@@ -5351,8 +5483,8 @@
           return start === null || end === null || end <= start ? total : total + end - start;
         }, 0);
         return { client, clientTodos, enteredMinutes };
-      }).sort((a, b) => b.enteredMinutes - a.enteredMinutes || a.client.localeCompare(b.client, "sl"));
-      clientsByEnteredHours.forEach(({ client, clientTodos, enteredMinutes }) => {
+      });
+      clientsInTodoOrder.forEach(({ client, clientTodos, enteredMinutes }) => {
         const open = clientTodos.filter((todo) => !todo.done).length;
         const card = document.createElement("button");
         card.type = "button";
@@ -6199,6 +6331,17 @@
       `;
     }
 
+    function renderTodoFormSourceProject(todo) {
+      const box = $("todoFormSourceProject");
+      const button = $("openTodoSourceProject");
+      const sourceId = String(todo.sourceProjectTodoId || "");
+      const source = sourceId ? state.todos.find((item) => item.id === sourceId) : null;
+      box.classList.toggle("hidden", !sourceId);
+      button.dataset.sourceTodoId = sourceId;
+      button.disabled = !source;
+      button.textContent = source ? `Odpri in uredi: ${source.title || "opravilo"}` : "Izvorno opravilo ni več na voljo";
+    }
+
     function applyMealDefaults() {
       const now = new Date();
       const startMinutes = Math.min(23 * 60, Math.round((now.getHours() * 60 + now.getMinutes()) / 15) * 15);
@@ -6220,7 +6363,11 @@
       const completed = $("todoFormStatus").value === "execution";
       const meal = $("todoFormStatus").value === "meal";
       $("todoFormStatusField").classList.toggle("hidden", Boolean(state.todoHoursSourceId) || state.todoStandaloneHours || completed);
-      $("todoFormTitle").textContent = state.todoHoursSourceId || state.todoStandaloneHours ? "Pi\u0161i ure na projekt" : $("todoFormId").value ? "Uredi opravilo" : "Novo opravilo";
+      $("todoFormTitle").textContent = state.todoHoursSourceId || state.todoStandaloneHours
+        ? "Pi\u0161i ure na projekt"
+        : completed
+          ? ($("todoFormId").value ? "Uredi zaključeno opravilo" : "Novo zaključeno opravilo")
+          : $("todoFormId").value ? "Uredi opravilo" : "Novo opravilo";
       ["todoFormClientField", "todoFormAssigneeField", "todoFormAttachments"].forEach((id) => $(id).classList.toggle("hidden", meal));
       ["todoFormTask", "todoFormNotes", "todoFormMaterial"].forEach((id) => $(id).closest("label").classList.toggle("hidden", meal));
       const showWorkerMileage = completed && !meal;
@@ -6231,6 +6378,22 @@
       $("todoFormHourlyRateField").classList.toggle("hidden", !showHourlyRate);
       $("todoFormUrgentField").classList.toggle("hidden", completed || meal);
       if (completed) $("todoFormUrgent").checked = false;
+      updateTodoClientKmRateNote();
+    }
+
+    function todoClientKmRate(vehicle) {
+      const billing = state.settings?.billing || {};
+      const legacy = Number(billing.kmRate || 0);
+      const value = vehicle === "van" ? billing.clientVanKmRate : billing.clientPersonalKmRate;
+      return Number.isFinite(Number(value)) ? Number(value) : legacy;
+    }
+
+    function updateTodoClientKmRateNote() {
+      const note = $("todoFormClientKmRateNote");
+      const km = Number($("todoFormClientKm").value || 0);
+      const rate = todoClientKmRate($("todoFormClientVehicle").value);
+      const total = Number((km * rate).toFixed(2));
+      note.textContent = `Tarifa za stranko: ${money(rate)} EUR/km${km ? ` · skupaj ${money(total)} EUR` : ""}`;
     }
 
     function renderTodoTaskSuggestions() {
@@ -6249,6 +6412,7 @@
       if (editing && !(await acquireTodoEditLockForDialog(todo.id))) return;
       state.todoHoursSourceId = String(todo._hoursSourceId || "");
       state.todoStandaloneHours = Boolean(todo._standaloneHours);
+      state.todoDraftSourceProjectTodoId = String(todo.sourceProjectTodoId || "");
       const client = findClient(todo.clientId || todo.client);
       $("todoFormId").value = todo.id || "";
       $("todoFormStart").value = todo.start || "";
@@ -6283,10 +6447,12 @@
       $("todoFormBillingKm").value = Number(todo.billingKm || 0);
       $("todoFormClientKm").value = Number(todo.clientKm || 0);
       $("todoFormClientVehicle").value = todo.clientVehicle === "van" ? "van" : "personal";
+      updateTodoClientKmRateNote();
       $("deleteTodoFromDialog").classList.toggle("hidden", !editing);
       $("duplicateTodoFromDialog").classList.toggle("hidden", !editing || Boolean(state.todoHoursSourceId));
       $("writeHoursFromTodo").classList.toggle("hidden", !editing || Boolean(state.todoHoursSourceId) || !projectHoursSourceStatuses.has(todoStatus(todo.status).id));
       renderTodoFormAudit(todo);
+      renderTodoFormSourceProject(todo);
       ["todoFormPhotoInput", "todoFormCameraInput", "todoFormPdfInput"].forEach((id) => { $(id).value = ""; });
       $("todoFormDriveLink").value = "";
       $("todoDialog").showModal();
@@ -6322,7 +6488,7 @@
         assigneeIds,
         syncUser: existing?.syncUser || assigneeIds[0] || activeWorkerId(),
         urgent: $("todoFormStatus").value === "execution" ? false : $("todoFormUrgent").checked,
-        sourceProjectTodoId: existing?.sourceProjectTodoId || state.todoHoursSourceId || "",
+        sourceProjectTodoId: existing?.sourceProjectTodoId || state.todoHoursSourceId || state.todoDraftSourceProjectTodoId || "",
         done: $("todoFormStatus").value === "execution",
         billingHourlyRate: hourlyRate,
         billingKm,
@@ -6441,8 +6607,11 @@
         date: source.date,
         start: source.start,
         end: source.end,
-        status: source.status === "execution" ? "open" : source.status,
+        status: source.status,
         urgent: source.status === "execution" ? false : Boolean(source.urgent),
+        sourceProjectTodoId: source.sourceProjectTodoId || "",
+        billingHourlyRate: source.billingHourlyRate ?? null,
+        billingKm: 0,
         clientKm: 0,
         clientVehicle: "personal",
         photos: (source.photos || []).map((photo) => ({ ...photo, id: "" })),
@@ -6581,7 +6750,7 @@
     function reportTotals(entries) {
       const from = $("reportFrom").value;
       const to = $("reportTo").value;
-      const billing = state.settings.billing || { hourlyRate: 15, kmRate: 0.22, commuteKmPerDay: 28 };
+      const billing = state.settings.billing || { hourlyRate: 15, kmRate: 0.22, workerOwnVehicleKmRate: 0.22, clientPersonalKmRate: 0.22, clientVanKmRate: 0.22, commuteKmPerDay: 28 };
       const counted = entries.filter((entry) => entry.status !== "vacation");
       const ibroEntries = counted.filter((entry) => (entry.syncUser || entry.createdBy) === "ibro");
       const workdayEntries = ibroEntries.filter((entry) => !["errand", "vacation"].includes(entry.status));
@@ -6600,7 +6769,8 @@
         .filter((debt) => monthKeys.has(debt.month) && debt.person === "bojan")
         .reduce((sum, debt) => sum + Number(debt.amount || 0), 0);
       const hoursPay = ibroHours * billing.hourlyRate;
-      const kmPay = kmTotal * billing.kmRate;
+      const kmRate = Number(billing.workerOwnVehicleKmRate ?? billing.kmRate ?? 0);
+      const kmPay = kmTotal * kmRate;
       return {
         ibroHours,
         ibroWorkdays,
@@ -6620,10 +6790,10 @@
       const entries = reportEntries();
       const todos = filterReportTodos(reportTodos());
       const totals = reportTotals(entries);
-      const billing = state.settings.billing || { hourlyRate: 15, kmRate: 0.22, commuteKmPerDay: 28 };
+      const billing = state.settings.billing || { hourlyRate: 15, kmRate: 0.22, workerOwnVehicleKmRate: 0.22, clientPersonalKmRate: 0.22, clientVanKmRate: 0.22, commuteKmPerDay: 28 };
       const client = normalizeClientName($("reportClient").value || state.reportClient || "");
       $("hourlyRateLabel").textContent = `${money(billing.hourlyRate)} EUR`;
-      $("kmRateLabel").textContent = `${money(billing.kmRate)} EUR/km`;
+
       $("commuteKmLabel").textContent = `${billing.commuteKmPerDay.toLocaleString("sl-SI")} km/dan`;
       $("lockReportRange").classList.toggle("hidden", state.user?.role !== "boss");
       $("clientDetailTitle").textContent = client ? `Stranka: ${client}` : "Vsa dela in opravila";
@@ -6631,7 +6801,7 @@
       $("reportSummary").innerHTML = [
         ["Ibro ure", `${totals.ibroHours.toLocaleString("sl-SI", { maximumFractionDigits: 1 })} h x ${money(billing.hourlyRate)} EUR = ${money(totals.hoursPay)} EUR`],
         ["Dom-sluzba", `${totals.commuteDays} dni x ${billing.commuteKmPerDay.toLocaleString("sl-SI")} km = ${totals.commuteKm.toLocaleString("sl-SI")} km`],
-        ["Kilometrina", `${totals.kmTotal.toLocaleString("sl-SI", { maximumFractionDigits: 1 })} km x ${money(billing.kmRate)} EUR = ${money(totals.kmPay)} EUR`],
+        ["Kilometrina delavca", `${totals.kmTotal.toLocaleString("sl-SI", { maximumFractionDigits: 1 })} km x ${money(billing.workerOwnVehicleKmRate ?? billing.kmRate ?? 0)} EUR = ${money(totals.kmPay)} EUR`],
         ["Skupaj za izplacilo", `${money(totals.payout)} EUR`]
       ].map(([label, value]) => `<div class="stat"><strong>${escapeHtml(value)}</strong><span>${escapeHtml(label)}</span></div>`).join("");
 
@@ -6674,7 +6844,7 @@
       const entries = reportEntries();
       const todos = reportTodos();
       const totals = reportTotals(entries);
-      const billing = state.settings.billing || { hourlyRate: 15, kmRate: 0.22, commuteKmPerDay: 28 };
+      const billing = state.settings.billing || { hourlyRate: 15, kmRate: 0.22, workerOwnVehicleKmRate: 0.22, clientPersonalKmRate: 0.22, clientVanKmRate: 0.22, commuteKmPerDay: 28 };
       const rows = [
         ["INDUS URE obracun", "", "", ""],
         ["Obdobje", $("reportFrom").value, $("reportTo").value, ""],
@@ -6684,7 +6854,7 @@
         ["Ibro ure", totals.ibroHours.toFixed(2), `${billing.hourlyRate} EUR`, totals.hoursPay.toFixed(2)],
         ["Vpisani km", totals.enteredKm.toFixed(1), "", ""],
         ["Pot dom-sluzba", `${totals.commuteDays} dni x ${billing.commuteKmPerDay} km`, "", totals.commuteKm.toFixed(1)],
-        ["Kilometrina skupaj", totals.kmTotal.toFixed(1), `${billing.kmRate} EUR`, totals.kmPay.toFixed(2)],
+        ["Kilometrina delavca", totals.kmTotal.toFixed(1), `${billing.workerOwnVehicleKmRate ?? billing.kmRate ?? 0} EUR`, totals.kmPay.toFixed(2)],
         ["Bojan dolg", "", "", totals.bojanDebt.toFixed(2)],
         ["Ibro dolg", "", "", `-${totals.ibroDebt.toFixed(2)}`],
         ["SKUPAJ", "", "", totals.payout.toFixed(2)],
@@ -7505,6 +7675,30 @@
       $("workerBillingDialog").showModal();
     });
     $("closeWorkerBilling").addEventListener("click", () => $("workerBillingDialog").close());
+    $("kmRatesBtn").addEventListener("click", () => {
+      const billing = state.settings.billing || {};
+      const legacyRate = Number(billing.kmRate || 0);
+      $("workerOwnVehicleKmRate").value = Number(billing.workerOwnVehicleKmRate ?? legacyRate);
+      $("clientPersonalKmRate").value = Number(billing.clientPersonalKmRate ?? legacyRate);
+      $("clientVanKmRate").value = Number(billing.clientVanKmRate ?? legacyRate);
+      $("kmRatesDialog").showModal();
+    });
+    ["closeKmRates", "cancelKmRates"].forEach((id) => $(id).addEventListener("click", () => $("kmRatesDialog").close()));
+    $("saveKmRates").addEventListener("click", async () => {
+      const workerOwnVehicleKmRate = parseBillingNumber($("workerOwnVehicleKmRate").value, 1_000);
+      const clientPersonalKmRate = parseBillingNumber($("clientPersonalKmRate").value, 1_000);
+      const clientVanKmRate = parseBillingNumber($("clientVanKmRate").value, 1_000);
+      if (workerOwnVehicleKmRate === null || clientPersonalKmRate === null || clientVanKmRate === null) {
+        alert("Vnesi veljavni tarifi kilometrine.");
+        return;
+      }
+      try {
+        await saveBillingSettings({ ...(state.settings.billing || {}), workerOwnVehicleKmRate, clientPersonalKmRate, clientVanKmRate });
+        $("kmRatesDialog").close();
+      } catch (error) {
+        alert(error.message);
+      }
+    });
     document.addEventListener("click", (event) => {
       const menu = $("toolsMenu");
       if (menu?.open && !menu.contains(event.target)) closeToolsMenu();
@@ -7593,28 +7787,19 @@
       $("toolsMenu").open = false;
     });
     $("billingMonth").addEventListener("change", renderBillingView);
+    $("billingNote").addEventListener("input", () => {
+      const workerId = billingWorkerId();
+      const month = $("billingMonth").value;
+      localStorage.setItem(billingNoteStorageKey(workerId, month), $("billingNote").value);
+    });
     $("billingWorker").addEventListener("change", () => {
       state.billingWorkerId = $("billingWorker").value;
       localStorage.setItem(billingWorkerKey, state.billingWorkerId);
       renderBillingView();
     });
-    $("billingSaveDraft").addEventListener("click", () => savePayrollDraft().catch((error) => alert(error.message)));
-    $("billingConfirm").addEventListener("click", () => changePayroll("confirm").catch((error) => alert(error.message)));
+    $("billingConfirm").addEventListener("click", () => confirmPayroll().catch((error) => alert(error.message)));
     $("billingMarkPaid").addEventListener("click", () => changePayroll("paid").catch((error) => alert(error.message)));
-    $("billingReopen").addEventListener("click", () => changePayroll("reopen").catch((error) => alert(error.message)));
-    $("billingDeleteDraft").addEventListener("click", () => changePayroll("delete").catch((error) => alert(error.message)));
-    $("saveBillingKmRate").addEventListener("click", async () => {
-      const kmRate = parseBillingNumber($("billingKmRate").value, 1_000);
-      if (kmRate === null) {
-        alert("Vnesi veljavno tarifo kilometrine.");
-        return;
-      }
-      try {
-        await saveBillingSettings({ ...(state.settings.billing || {}), kmRate });
-      } catch (error) {
-        alert(error.message);
-      }
-    });
+
     ["billingPrevMonth", "billingNextMonth"].forEach((id) => $(id).addEventListener("click", () => {
       const input = $("billingMonth");
       if (!/^\d{4}-\d{2}$/.test(input.value)) input.value = dateKey(new Date()).slice(0, 7);
@@ -7653,6 +7838,8 @@
     $("todoFormHourlyRate").addEventListener("input", () => {
       $("todoFormHourlyRate").dataset.autoRate = "false";
     });
+    $("todoFormClientKm").addEventListener("input", updateTodoClientKmRateNote);
+    $("todoFormClientVehicle").addEventListener("change", updateTodoClientKmRateNote);
     $("todoFormAssignees").addEventListener("change", () => {
       const hourlyRate = $("todoFormHourlyRate");
       if (!isAdminView() || hourlyRate.dataset.autoRate !== "true" || $("todoFormStatus").value !== "execution") return;
@@ -7686,6 +7873,18 @@
     });
     $("deleteTodoFromDialog").addEventListener("click", () => deleteTodoFromDialog().catch((error) => alert(error.message)));
     $("duplicateTodoFromDialog").addEventListener("click", () => duplicateTodoFromCurrent().catch((error) => alert(error.message)));
+    $("openTodoSourceProject").addEventListener("click", async (event) => {
+      const sourceId = event.currentTarget.dataset.sourceTodoId || "";
+      const source = state.todos.find((todo) => todo.id === sourceId);
+      if (!source) {
+        alert("Izvorno opravilo ni več na voljo.");
+        return;
+      }
+      await releaseTodoEditLockForDialog();
+      $("todoDialog").close();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      await openTodoDialog(source);
+    });
     $("writeHoursFromTodo").addEventListener("click", () => openHoursTodoFromCurrent().catch((error) => alert(error.message)));
     document.querySelectorAll("[data-create-drive]").forEach((button) => {
       button.addEventListener("click", () => createTodoGoogleDriveFile(button.dataset.createDrive).catch((error) => alert(error.message)));
