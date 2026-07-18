@@ -1722,21 +1722,22 @@
       justify-content: space-between;
       align-items: center;
       gap: 8px;
-      min-height: 24px;
+      min-height: 29px;
     }
 
-    .day-number { font-weight: 800; font-size: 15px; }
-    .day-edit-hint { width: 22px; height: 22px; padding: 0; border-radius: 6px; color: var(--accent-dark); background: transparent; font-size: 15px; }
+    .day-number { font-weight: 800; font-size: 16px; }
+    .day-edit-hint { width: 26px; height: 26px; padding: 0; border-radius: 7px; color: var(--accent-dark); background: transparent; font-size: 19px; }
 
     .quick-add {
-      width: 24px;
-      height: 24px;
+      width: 26px;
+      height: 26px;
       border-radius: 7px;
       color: var(--accent-dark);
       background: #e3f0ee;
-      font-size: 18px;
+      font-size: 19px;
       line-height: 1;
     }
+    .quick-add-hours { font-size: 17px; }
 
     .billed { background: var(--green); }
     .warranty { background: var(--red); }
@@ -2591,10 +2592,11 @@
         padding: 4px;
         gap: 3px;
       }
-      .day-head { gap: 2px; min-height: 20px; }
-      .day-number { font-size: 13px; }
+      .day-head { gap: 2px; min-height: 25px; }
+      .day-number { font-size: 14px; }
       .day-edit-hint,
-      .quick-add { width: 20px; height: 20px; font-size: 13px; }
+      .quick-add { width: 23px; height: 23px; font-size: 15px; }
+      .quick-add-hours { font-size: 15px; }
       .day-todo {
         min-width: 0;
         min-height: 27px;
@@ -2792,7 +2794,7 @@
               <button class="menu-action" id="accountBtn" type="button">Ra&#269;un in profil</button>
               <span class="tools-menu-label">Delo</span>
               <button class="menu-action view-menu-action" id="billingMenuBtn" type="button">Obra&#269;uni</button>
-              <button class="menu-action view-menu-action admin-only" id="clientsMenuBtn" type="button">Stranke</button>
+              <button class="menu-action view-menu-action" id="clientsMenuBtn" type="button">Stranke</button>
               <span class="tools-menu-label">Podatki in sinhronizacija</span>
               <button class="menu-action hidden" id="googleDrive" type="button">Google Dokumenti in preglednice</button>
               <button class="menu-action admin-only" id="notificationsBtn" type="button">Sistemska opozorila <span id="notificationsCount"></span></button>
@@ -2871,7 +2873,7 @@
         <div class="search-control">
           <input class="search" id="clientsSearch" placeholder="I&#353;&#269;i po bazi strank">
         </div>
-        <div class="report-controls admin-only">
+        <div class="report-controls">
           <label>Naziv stranke
             <input id="newClientName" placeholder="Naziv stranke">
           </label>
@@ -3518,6 +3520,7 @@
       todoRevision: 0,
       todoMutationPending: 0,
       debts: [],
+      advances: [],
       clients: [],
       selectedClient: "",
       todoHoursSourceId: "",
@@ -3607,6 +3610,20 @@
 
     function closeToolsMenu() {
       $("toolsMenu")?.removeAttribute("open");
+    }
+
+    function keepToolsMenuInViewport() {
+      const menu = $("toolsMenu");
+      const panel = menu?.querySelector(".tools-menu-panel");
+      if (!menu?.open || !panel) return;
+      panel.style.transform = "";
+      requestAnimationFrame(() => {
+        if (!menu.open) return;
+        const rect = panel.getBoundingClientRect();
+        const inset = 10;
+        const shift = rect.left < inset ? inset - rect.left : rect.right > window.innerWidth - inset ? window.innerWidth - inset - rect.right : 0;
+        panel.style.transform = shift ? `translateX(${Math.round(shift)}px)` : "";
+      });
     }
 
     let sessionRecoveryPromise = null;
@@ -3761,6 +3778,7 @@
       state.entries = snapshot.entries || [];
       state.todos = snapshot.todos || [];
       state.debts = snapshot.debts || [];
+      state.advances = snapshot.advances || [];
       state.clients = snapshot.clients || [];
       state.settings = snapshot.settings || state.settings;
       state.billingLocks = snapshot.billingLocks || [];
@@ -4258,15 +4276,17 @@
         api("/api/entries"),
         api("/api/todos"),
         api("/api/debts"),
+        api("/api/advances"),
         api("/api/clients"),
         api("/api/settings"),
         workerBillingRequest,
         api("/api/payrolls")
       ]);
-      state.entries = entries.entries;
-      if (canApplyTodoSnapshot(todoRevision, todoSnapshotWasStable)) state.todos = todos.todos;
-      state.debts = debts.debts;
-      state.clients = clients.clients;
+      state.entries = entries.entries || [];
+      if (canApplyTodoSnapshot(todoRevision, todoSnapshotWasStable)) state.todos = todos.todos || [];
+      state.debts = debts.debts || [];
+      state.advances = advances.advances || [];
+      state.clients = clients.clients || [];
       state.settings = settings.settings || state.settings;
       state.billingLocks = settings.billingLocks || [];
       state.workerBilling = workerBilling.workers || [];
@@ -4678,7 +4698,7 @@
       if (exact) return exact;
       const input = normalizeText(value);
       if (!input) return null;
-      const matches = state.clients.filter((client) => client.clientId && client.search
+      const matches = (state.clients || []).filter((client) => client.clientId && client.search
         && normalizeText(client.search).includes(input));
       return matches.length === 1 ? matches[0] : null;
     }
@@ -4697,7 +4717,7 @@
         });
       };
       // State vsebuje lokalne kanonicne zapise strank; ostali zapisi dopolnijo le stare ali ad-hoc stranke.
-      state.clients.forEach(add);
+      (state.clients || []).forEach(add);
       allClientRecords().forEach(add);
       return [...suggestions.values()];
     }
@@ -4797,6 +4817,7 @@
       $("billingMenuBtn").classList.toggle("active", view === "billing");
       $("clientsMenuBtn").classList.toggle("active", view === "clients");
       $("reportViewBtn").classList.toggle("active", view === "report");
+      if (view === "calendar") renderMonth();
       if (view === "todos") renderTodos();
       if (view === "billing") renderBillingView();
       if (view === "clients") renderClients();
@@ -4811,15 +4832,21 @@
       openTodoDialog({ date });
     }
 
+    function todoOrderForCurrentUser(todo) {
+      const userId = activeWorkerId() || state.user?.id || "";
+      const personalOrder = Number(todo?.userOrders?.[userId]);
+      return Number.isFinite(personalOrder) ? personalOrder : Number(todo?.order || 0);
+    }
+
     function nextTodoOrder() {
-      const orders = contextTodos().map((todo) => Number(todo.order || 0));
+      const orders = contextTodos().map(todoOrderForCurrentUser);
       return (orders.length ? Math.min(...orders) : 0) - 1;
     }
 
     function todoSort(a, b) {
       if (Number(a.done) !== Number(b.done)) return Number(a.done) - Number(b.done);
       if (Number(a.urgent) !== Number(b.urgent)) return Number(b.urgent) - Number(a.urgent);
-      const orderDifference = Number(a.order || 0) - Number(b.order || 0);
+      const orderDifference = todoOrderForCurrentUser(a) - todoOrderForCurrentUser(b);
       if (orderDifference) return orderDifference;
       return String(a.date || "9999-12-31").localeCompare(String(b.date || "9999-12-31"));
     }
@@ -4961,7 +4988,7 @@
         const editHint = document.createElement("button");
         editHint.className = "day-edit-hint";
         editHint.type = "button";
-        editHint.textContent = String.fromCodePoint(0x270e);
+        editHint.textContent = "◷";
         editHint.title = "Odpri dnevni pregled";
         editHint.setAttribute("aria-label", "Odpri dnevni pregled");
         editHint.addEventListener("click", (event) => { event.stopPropagation(); openDayTimeline(key); });
@@ -4976,6 +5003,15 @@
           add.title = `Dodaj opravilo za ${activeWorker()?.name || "delavca"}`;
           add.addEventListener("click", () => startTodoForDate(key));
           head.appendChild(add);
+          const addHours = document.createElement("button");
+          addHours.addEventListener("click", (event) => event.stopPropagation());
+          addHours.className = "quick-add quick-add-hours";
+          addHours.type = "button";
+          addHours.textContent = "◷";
+          addHours.title = `Piši ure za ${activeWorker()?.name || "delavca"}`;
+          addHours.setAttribute("aria-label", addHours.title);
+          addHours.addEventListener("click", () => openStandaloneHoursDialog(key).catch((error) => alert(error.message)));
+          head.appendChild(addHours);
         }
         day.appendChild(head);
 
@@ -5817,7 +5853,7 @@
             <span class="todo-meta">Dav&#269;na / ID: ${escapeHtml(client.clientId || "MANJKA ALI JE PODVOJENA")}</span>
             ${client.syncError ? `<span class="todo-meta error">${escapeHtml(client.syncError)}</span>` : ""}
           </div>
-          <button class="secondary open-client" type="button" data-client-id="${escapeHtml(client.clientId || "")}" data-client-name="${escapeHtml(client.name)}" ${client.clientId ? "" : "disabled"}>${isAdminView() ? "Uredi" : "Opravila"}</button>
+          <button class="secondary open-client" type="button" data-client-id="${escapeHtml(client.clientId || "")}" data-client-name="${escapeHtml(client.name)}" ${client.clientId ? "" : "disabled"}>Uredi</button>
         </div>
       `).join("") || "<p>Ni strank za to iskanje.</p>";
     }
@@ -5859,7 +5895,6 @@
     }
 
     function openClientEditDialog(clientId) {
-      if (!isAdminView()) return;
       const client = allClientRecords().find((item) => item.clientId === clientId || item.id === clientId);
       if (!client) {
         alert("Stranke ni bilo mogoče najti.");
@@ -6730,7 +6765,6 @@
     }
     async function openTodoDialog(todo = {}) {
       const editing = Boolean(todo.id);
-      if (editing && !(await acquireTodoEditLockForDialog(todo.id))) return;
       state.todoHoursSourceId = String(todo._hoursSourceId || "");
       state.todoStandaloneHours = Boolean(todo._standaloneHours);
       state.todoDraftSourceProjectTodoId = String(todo.sourceProjectTodoId || "");
@@ -6776,6 +6810,7 @@
       renderTodoFormSourceProject(todo);
       ["todoFormPhotoInput", "todoFormCameraInput", "todoFormPdfInput"].forEach((id) => { $(id).value = ""; });
       $("todoFormDriveLink").value = "";
+      if (editing && !(await acquireTodoEditLockForDialog(todo.id))) return;
       $("todoDialog").showModal();
       requestAnimationFrame(() => $(editing ? "todoFormTask" : "todoFormClient").focus());
       fillMissingPdfThumbnailsForDialog(state.todoDialogPhotos).catch((error) => console.warn(error));
@@ -6904,10 +6939,10 @@
         clientVehicle: "personal"
       });
     }
-    async function openStandaloneHoursDialog() {
+    async function openStandaloneHoursDialog(date = dateKey(new Date())) {
       await openTodoDialog({
         _standaloneHours: true,
-        date: dateKey(new Date()),
+        date,
         status: "execution",
         urgent: false,
         photos: []
@@ -7403,8 +7438,9 @@
       const ordersById = new Map(ordered.map((todo, index) => [todo.id, index + 1]));
       const previousTodos = state.todos.slice();
       const todoRevision = beginTodoMutation();
+      const orderingUserId = activeWorkerId() || state.user?.id || "";
       state.todos = state.todos.map((todo) => ordersById.has(todo.id)
-        ? { ...todo, order: ordersById.get(todo.id) }
+        ? { ...todo, userOrders: { ...(todo.userOrders || {}), [orderingUserId]: ordersById.get(todo.id) } }
         : todo);
       refreshClientList();
       render();
@@ -7482,7 +7518,7 @@
           syncError: existing?.syncError || source.syncError || ""
         });
       };
-      state.clients.forEach((client) => add(client.name, client));
+      (state.clients || []).forEach((client) => add(client.name, client));
       contextEntries().forEach((entry) => {
         if (!["errand", "vacation"].includes(entry.status)) add(entry.client, { clientId: entry.clientId });
       });
@@ -8095,6 +8131,8 @@
     $("toolsMenu").querySelectorAll("button").forEach((button) => {
       button.addEventListener("click", closeToolsMenu);
     });
+    $("toolsMenu").addEventListener("toggle", keepToolsMenuInViewport);
+    window.addEventListener("resize", keepToolsMenuInViewport);
     $("workerBillingBtn").addEventListener("click", () => {
       renderWorkerBillingTable();
       $("workerBillingDialog").showModal();
@@ -8438,11 +8476,7 @@
     $("clientsList").addEventListener("click", (event) => {
       const button = event.target.closest(".open-client");
       if (!button) return;
-      if (isAdminView()) openClientEditDialog(button.dataset.clientId);
-      else {
-        state.selectedClient = button.dataset.clientName;
-        setView("todos");
-      }
+      openClientEditDialog(button.dataset.clientId);
     });
     $("closeClientEdit").addEventListener("click", () => $("clientEditDialog").close());
     $("cancelClientEdit").addEventListener("click", () => $("clientEditDialog").close());

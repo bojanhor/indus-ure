@@ -11,7 +11,7 @@ const {
   normalizeTaxId,
   resolveStableClientId
 } = require("../outputs/client-identity");
-const { normalizeDb, validateTodo } = require("../outputs/server");
+const { normalizeDb, pruneUnusedAdHocClients, validateTodo } = require("../outputs/server");
 
 const serverPath = path.join(__dirname, "../outputs/server.js");
 const storePath = path.join(__dirname, "../outputs/postgres-store.js");
@@ -76,4 +76,18 @@ test("stranke so v relacijski tabeli; Sheet API ni del streznika", () => {
   assert.doesNotMatch(source, /GOOGLE_SHEETS/);
   assert.doesNotMatch(source, /syncClientsWithSheets/);
   assert.doesNotMatch(source, /upsertClientInSheets/);
+});
+test("nevezana ad-hoc stranka se odstrani, povezana pa ostane", () => {
+  const usedId = createClientId();
+  const staleId = createClientId();
+  const database = {
+    todos: [{ id: "task-1", clientId: usedId, client: "Jerin" }],
+    entries: [],
+    clients: [
+      normalizeStoredClient({ clientId: usedId, name: "ABC RENT", search: "Jerin", source: "ad-hoc" }),
+      normalizeStoredClient({ clientId: staleId, name: "Začasna", search: "Zacasna", source: "ad-hoc" })
+    ]
+  };
+  assert.equal(pruneUnusedAdHocClients(database), true);
+  assert.deepEqual(database.clients.map((client) => client.clientId), [usedId]);
 });

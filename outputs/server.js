@@ -265,6 +265,25 @@ function pruneUnusedTodoAttachments(db) {
   return changed;
 }
 
+function pruneUnusedAdHocClients(db) {
+  const used = new Set();
+  for (const item of [...(db.todos || []), ...(db.entries || [])]) {
+    const clientId = String(item?.clientId || "").trim();
+    const clientName = String(item?.client || "").trim().toLowerCase();
+    if (clientId) used.add(`id:${clientId}`);
+    if (clientName) used.add(`name:${clientName}`);
+  }
+  const previous = Array.isArray(db.clients) ? db.clients : [];
+  const retained = previous.filter((client) => {
+    if (client?.source !== "ad-hoc") return true;
+    const clientId = String(client.clientId || client.id || "").trim();
+    const names = [client.name, client.search].map((value) => String(value || "").trim().toLowerCase()).filter(Boolean);
+    return (clientId && used.has(`id:${clientId}`)) || names.some((name) => used.has(`name:${name}`));
+  });
+  if (retained.length === previous.length) return false;
+  db.clients = retained;
+  return true;
+}
 
 function hashPassword(password, salt = crypto.randomBytes(16).toString("hex")) {
   const hash = crypto.pbkdf2Sync(String(password), salt, 120000, 32, "sha256").toString("hex");
@@ -3177,7 +3196,7 @@ async function handleApi(req, res) {
       }
       const now = new Date().toISOString();
       todos.forEach((todo, index) => {
-        todo.order = index + 1;
+        todo.userOrders = { ...(todo.userOrders || {}), [user.id]: index + 1 };
         todo.updatedBy = user.id;
         todo.updatedByName = user.name;
         todo.updatedAt = now;
@@ -3312,10 +3331,6 @@ async function handleApi(req, res) {
     if (url.pathname === "/api/clients" && req.method === "POST") {
       const user = await requireUser(req, res);
       if (!user) return;
-      if (user.role !== "boss") {
-        sendJson(res, 403, { error: "Samo sef lahko dodaja ali spreminja stranke." });
-        return;
-      }
       let client = cleanClient(await readBody(req));
       const validation = validateClient(client);
       if (validation) {
@@ -3875,6 +3890,7 @@ releaseTodoAssignmentEditLock(db, previousTodo, user, editLockToken);
       db.todos = db.todos.filter((item) => !oldGroupIds.has(item.id));
       db.todos.push(...updatedGroup);
       pruneUnusedTodoAttachments(db);
+      pruneUnusedAdHocClients(db);
       await writeDbAsync(db);
       releaseTodoAssignmentEditLock(db, previousTodo, user, editLockToken);
       sendJson(res, 200, { todos: visibleTodosForUser(db, user) });
@@ -3914,6 +3930,7 @@ releaseTodoAssignmentEditLock(db, todo, user, editLockToken);
       const removedIds = new Set(assignmentItems.map((item) => item.id));
       db.todos = db.todos.filter((item) => !removedIds.has(item.id));
       pruneUnusedTodoAttachments(db);
+      pruneUnusedAdHocClients(db);
       await writeDbAsync(db);
       releaseTodoAssignmentEditLock(db, todo, user, editLockToken);
       sendJson(res, 200, { todos: visibleTodosForUser(db, user) });
@@ -4059,6 +4076,7 @@ module.exports = {
   payrollLockForTodos,
   payrollTotals,
   payrollPeriodEnded,
+  pruneUnusedAdHocClients,
   releaseEntryEditLock,
   releaseTodoEditLock,
   syncUserForRequest,
