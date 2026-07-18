@@ -647,6 +647,19 @@
     .billing-rate-control input { width: 88px; }
     .billing-worker-control select { min-width: 220px; }
     .billing-month-step { min-width: 40px; min-height: 40px; padding: 0; }
+    .billing-range-picker { min-height: 40px; white-space: nowrap; }
+    .billing-range-calendar { display: grid; gap: 10px; }
+    .billing-range-calendar-head { display: grid; grid-template-columns: 40px minmax(0, 1fr) 40px; align-items: center; gap: 8px; text-align: center; }
+    .billing-range-calendar-head strong { font-size: 16px; }
+    .billing-range-calendar-weekdays, .billing-range-calendar-days { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 3px; }
+    .billing-range-calendar-weekdays span { color: var(--muted); font-size: 11px; font-weight: 800; text-align: center; }
+    .billing-range-calendar-days button { min-height: 38px; padding: 3px; border: 0; border-radius: 7px; background: transparent; color: var(--ink); font: inherit; font-weight: 800; cursor: pointer; }
+    .billing-range-calendar-days button:hover, .billing-range-calendar-days button:focus-visible { background: #e2efec; outline: 2px solid transparent; }
+    .billing-range-calendar-days button.is-range { border-radius: 0; background: #d9ece8; }
+    .billing-range-calendar-days button.is-range-start, .billing-range-calendar-days button.is-range-end { border-radius: 7px; background: var(--blue); color: #fff; }
+    .billing-range-calendar-days button.is-range-start.is-range-end { border-radius: 7px; }
+    .billing-range-calendar-days .billing-range-empty { min-height: 38px; }
+    .billing-range-calendar-hint { margin: 0; color: var(--muted); font-size: 13px; }
     .billing-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
     .billing-summary-card { padding: 13px; border: 1px solid var(--line); border-radius: 8px; background: #f8faf7; }
     .billing-summary-card strong { display: block; font-size: 22px; line-height: 1.1; }
@@ -662,9 +675,14 @@
     .billing-payment-row { display: flex; justify-content: space-between; gap: 10px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: #f8fbf8; font-size: 13px; }
     .billing-explorer-row { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; text-align: left; align-items: center; padding: 10px; border: 1px solid var(--line); border-radius: 9px; background: #f8fbf8; color: var(--ink); }
     .billing-explorer-row span:last-child { grid-column: 1 / -1; color: var(--muted); font-size: 12px; }
-    .billing-day { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; gap: 10px; align-items: center; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--ink); text-align: left; font-weight: 800; }
-    .billing-day:hover, .billing-day:focus-visible { background: #f4f8f5; }
+    .billing-day { overflow: hidden; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--ink); }
+    .billing-day-overview { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; gap: 10px; align-items: center; padding: 12px; border: 0; background: #fff; color: var(--ink); text-align: left; font: inherit; font-weight: 800; cursor: pointer; }
+    .billing-day-overview:hover, .billing-day-overview:focus-visible { background: #f4f8f5; }
     .billing-day-hours { color: var(--muted); font-size: 13px; white-space: nowrap; }
+    .billing-financial-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 9px; align-items: center; padding: 8px 12px; border-top: 1px solid var(--line); background: #fbfdfb; color: var(--muted); font-size: 13px; }
+    .billing-financial-row.advance strong { color: #8a5b00; }
+    .billing-financial-row.payment strong { color: var(--accent-dark); }
+    .billing-financial-delete { min-height: 30px; padding: 3px 8px; font-size: 12px; }
     .billing-gap-alert { color: var(--red); font-weight: 900; }
     .billing-day-work, .billing-day-km { color: var(--accent-dark); font-size: 13px; font-weight: 900; white-space: nowrap; }
     .billing-task-row { display: grid; grid-template-columns: 92px minmax(0, 1fr) 64px 92px; gap: 10px; align-items: center; padding: 10px 12px; border-top: 1px solid var(--line); }
@@ -2726,14 +2744,16 @@
       .billing-worker-control, .billing-worker-control select { width: 100%; min-width: 0; }
       .billing-period { display: grid; grid-template-columns: 40px minmax(0, 1fr) minmax(0, 1fr) 40px; width: 100%; }
       .billing-period label, .billing-period input { width: 100%; min-width: 0; }
+      .billing-range-picker { grid-column: 1 / -1; width: 100%; }
       .billing-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
       .billing-summary-card { padding: 11px; }
       .billing-summary-card strong { font-size: clamp(17px, 5vw, 22px); overflow-wrap: anywhere; }
-      .billing-day { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "date hours" "work km"; row-gap: 5px; }
-      .billing-day > strong { grid-area: date; align-self: center; }
+      .billing-day-overview { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "date hours" "work km"; row-gap: 5px; }
+      .billing-day-overview > strong { grid-area: date; align-self: center; }
       .billing-day-hours { grid-area: hours; }
       .billing-day-work { grid-area: work; }
       .billing-day-km { grid-area: km; }
+      .billing-financial-row { grid-template-columns: minmax(0, 1fr) auto auto; }
       .billing-task-row { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "time hours" "info pay"; gap: 4px 8px; align-items: start; }
       .billing-task-time { grid-area: time; }
       .billing-task-info { grid-area: info; }
@@ -2864,6 +2884,7 @@
             <select id="billingWorker"></select>
           </label>
           <div class="billing-period">
+            <button class="secondary billing-range-picker" id="billingRangePicker" type="button" aria-label="Izberi obračunsko obdobje v koledarju">Koledar obdobja</button>
             <button class="secondary billing-month-step" id="billingPrevMonth" type="button" aria-label="Prejšnje obdobje">&lsaquo;</button>
             <label>Od
               <input id="billingFrom" type="date">
@@ -2882,7 +2903,7 @@
           </label>
           <p class="todo-meta hidden" id="billingNoteRead"></p>
         </div>
-        <div class="billing-actions admin-only" id="billingActions">
+        <div class="billing-actions" id="billingActions">
                     <button class="secondary" id="billingAddAdvance" type="button">Založil denar</button>
           <button class="secondary hidden" id="billingAddPayment" type="button">Delno izplačilo</button>
 <button class="primary hidden" id="billingConfirm" type="button">Potrdi obra&#269;un</button>
@@ -3134,7 +3155,7 @@
         </div>
         <div class="todo-form-billing" id="todoFormBilling">
           <div class="modal-grid">
-            <label class="admin-entry-field" id="todoFormHourlyRateField">Urna postavka za delavca (EUR/h)
+            <label id="todoFormHourlyRateField">Urna postavka za delavca (EUR/h)
               <input id="todoFormHourlyRate" type="number" min="0" max="10000" step="0.01">
             </label>
             <label>Kilometrina za delavca (km)
@@ -3184,6 +3205,23 @@
       </div>
     </form>
   </dialog>
+  <dialog id="billingRangeDialog">
+    <form method="dialog">
+      <div class="modal-head"><h3>Izberi obračunsko obdobje</h3><button class="icon-btn" id="closeBillingRangeDialog" type="button" title="Zapri">&times;</button></div>
+      <div class="modal-body billing-range-calendar">
+        <div class="billing-range-calendar-head">
+          <button class="secondary icon-btn" id="billingRangePrev" type="button" aria-label="Prejšnji mesec">&lsaquo;</button>
+          <strong id="billingRangeMonthTitle"></strong>
+          <button class="secondary icon-btn" id="billingRangeNext" type="button" aria-label="Naslednji mesec">&rsaquo;</button>
+        </div>
+        <div class="billing-range-calendar-weekdays" aria-hidden="true"><span>Pon</span><span>Tor</span><span>Sre</span><span>Čet</span><span>Pet</span><span>Sob</span><span>Ned</span></div>
+        <div class="billing-range-calendar-days" id="billingRangeCalendarDays" role="grid" aria-label="Koledar obračunskega obdobja"></div>
+        <p class="billing-range-calendar-hint" id="billingRangeHint"></p>
+        <div class="modal-actions"><button class="secondary" id="cancelBillingRangeDialog" type="button">Prekliči</button><button class="primary" id="applyBillingRangeDialog" type="button">Uporabi obdobje</button></div>
+      </div>
+    </form>
+  </dialog>
+
   <dialog id="paymentDialog">
     <form method="dialog" id="paymentForm">
       <div class="modal-head"><h3>Delno izplačilo</h3><button class="icon-btn" id="closePaymentDialog" type="button" title="Zapri">&times;</button></div>
@@ -3591,6 +3629,7 @@
       todoLockRenewPromise: null,
       todoLockPending: false,
       todoClientSuggestions: [],
+      billingRangeDraft: null,
       todoClientSuggestionIndex: -1,
       expandedTodoIds: new Set(),
       token: "",
@@ -4528,6 +4567,22 @@
       const data = await api("/api/advances", { method: "POST", body: JSON.stringify({ person: $("advanceWorker").value, date: $("advanceDate").value, amount: Number($("advanceAmount").value || 0), reason: $("advanceReason").value.trim(), projectTodoId: $("advanceProject").value, photos: state.advancePhotos }) });
       state.advances = data.advances || state.advances;
       $("advanceDialog").close(); await loadAll(); renderBillingView();
+    }
+
+    async function deleteAdvanceFromBilling(id) {
+      if (!confirm("Izbrišem založeni znesek?")) return;
+      const data = await api(`/api/advances/${encodeURIComponent(id)}`, { method: "DELETE" });
+      state.advances = data.advances || state.advances;
+      await loadAll();
+      renderBillingView();
+    }
+
+    async function deletePayrollPaymentFromBilling(payrollId, paymentId) {
+      if (!confirm("Izbrišem evidentirano izplačilo? Obračun bo znova odprt za preostanek izplačila.")) return;
+      const data = await api(`/api/payrolls/${encodeURIComponent(payrollId)}/payments/${encodeURIComponent(paymentId)}`, { method: "DELETE" });
+      state.payrolls = data.payrolls || state.payrolls;
+      await loadAll();
+      renderBillingView();
     }
     async function saveClientToServer(client) {
       const data = await api("/api/clients", { method: "POST", body: JSON.stringify(client) });
@@ -5607,6 +5662,69 @@
       }
     }
 
+    function openBillingRangePicker() {
+      const range = billingRange();
+      state.billingRangeDraft = { from: range.from, to: range.to, month: range.from.slice(0, 7) };
+      renderBillingRangePicker();
+      $("billingRangeDialog").showModal();
+    }
+
+    function shiftBillingRangePickerMonth(direction) {
+      const draft = state.billingRangeDraft;
+      if (!draft) return;
+      const [year, month] = String(draft.month || dateKey(new Date()).slice(0, 7)).split("-").map(Number);
+      const target = new Date(year, month - 1 + direction, 1);
+      draft.month = `${target.getFullYear()}-${String(target.getMonth() + 1).padStart(2, "0")}`;
+      renderBillingRangePicker();
+    }
+
+    function selectBillingRangeDate(key) {
+      const draft = state.billingRangeDraft;
+      if (!draft) return;
+      if (!draft.from || draft.to) {
+        draft.from = key;
+        draft.to = "";
+      } else if (key < draft.from) {
+        draft.to = draft.from;
+        draft.from = key;
+      } else {
+        draft.to = key;
+      }
+      renderBillingRangePicker();
+    }
+
+    function renderBillingRangePicker() {
+      const draft = state.billingRangeDraft;
+      if (!draft) return;
+      const [year, month] = String(draft.month).split("-").map(Number);
+      const first = new Date(year, month - 1, 1);
+      const daysInMonth = new Date(year, month, 0).getDate();
+      const leading = (first.getDay() + 6) % 7;
+      $("billingRangeMonthTitle").textContent = `${monthNames[month - 1]} ${year}`;
+      const cells = Array.from({ length: leading }, () => `<span class="billing-range-empty" aria-hidden="true"></span>`);
+      for (let day = 1; day <= daysInMonth; day += 1) {
+        const key = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+        const inRange = Boolean(draft.from && draft.to && key >= draft.from && key <= draft.to);
+        const classes = [inRange ? "is-range" : "", key === draft.from ? "is-range-start" : "", key === draft.to ? "is-range-end" : ""].filter(Boolean).join(" ");
+        cells.push(`<button type="button" class="${classes}" data-range-date="${key}" aria-label="${escapeHtml(formatDate(key))}">${day}</button>`);
+      }
+      $("billingRangeCalendarDays").innerHTML = cells.join("");
+      $("billingRangeCalendarDays").querySelectorAll("[data-range-date]").forEach((button) => button.addEventListener("click", () => selectBillingRangeDate(button.dataset.rangeDate)));
+      $("billingRangeHint").textContent = !draft.from || !draft.to
+        ? "Izberi začetek in konec obdobja. Za en sam dan klikni datum dvakrat."
+        : `Izbrano: ${billingRangeLabel(draft)}.`;
+    }
+
+    function applyBillingRangePicker() {
+      const draft = state.billingRangeDraft;
+      if (!draft?.from) return;
+      $("billingFrom").value = draft.from;
+      $("billingTo").value = draft.to || draft.from;
+      $("billingRangeDialog").close();
+      state.billingRangeDraft = null;
+      renderBillingView();
+    }
+
     function billingRange() {
       const monthInput = $("billingMonth");
       if (!/^\d{4}-\d{2}$/.test(monthInput.value)) monthInput.value = dateKey(new Date()).slice(0, 7);
@@ -5764,23 +5882,46 @@
       noteInput.disabled = Boolean(payroll && ["archiving", "confirmed", "paid"].includes(payroll.status));
       const noteRead = $("billingNoteRead"); noteRead.textContent = noteText ? `Opomba za delavca: ${noteText}` : ""; noteRead.classList.toggle("hidden", admin || !noteText);
       $("billingSummary").innerHTML = [[`${baseTotals.hours.toLocaleString("sl-SI", { maximumFractionDigits: 2 })} h`, "Oddelane ure"], [`${money(baseTotals.workAmount)} EUR`, "Delo"], [`${baseTotals.km.toLocaleString("sl-SI", { maximumFractionDigits: 1 })} km · ${money(baseTotals.kmAmount)} EUR`, "Kilometrina"], [`${money(advanceAmount)} EUR`, "Založeno"], [`${money(payoutAmount)} EUR`, "Skupaj za izplačilo"], [`${money(paidAmount)} EUR`, "Že izplačano"], [`${money(remainingAmount)} EUR`, "Preostanek"]].map(([value, label]) => `<div class="billing-summary-card"><strong>${escapeHtml(value)}</strong><span>${escapeHtml(label)}</span></div>`).join("");
-      const paymentsBox = $("billingPayments");
-      const payments = payroll?.payments || [];
-      paymentsBox.innerHTML = payments.length ? `<strong>Izplačila</strong>${payments.map((payment) => `<div class="billing-payment-row"><span>${escapeHtml(formatDateTime(payment.createdAt))}${payment.note ? ` · ${escapeHtml(payment.note)}` : ""}</span><strong>${money(payment.amount)} EUR</strong></div>`).join("")}` : "";
+      $("billingPayments").replaceChildren();
       const readyForConfirmation = !payroll || ["draft", "archiving"].includes(payroll.status);
       const periodEnded = payrollPeriodEnded(range);
-      const confirmButton = $("billingConfirm"); const showConfirmation = readyForConfirmation && Boolean(lines.length);
+      const confirmButton = $("billingConfirm"); const showConfirmation = admin && readyForConfirmation && Boolean(lines.length);
       confirmButton.classList.toggle("hidden", !showConfirmation); confirmButton.disabled = showConfirmation && !periodEnded; confirmButton.textContent = payroll?.status === "archiving" ? "Nadaljuj arhiviranje" : "Potrdi obračun"; confirmButton.title = showConfirmation && !periodEnded ? payrollConfirmationHint(range) : "";
       const periodHint = $("billingPeriodHint"); periodHint.textContent = showConfirmation && !periodEnded ? payrollConfirmationHint(range) : ""; periodHint.classList.toggle("hidden", !(showConfirmation && !periodEnded));
-      $("billingMarkPaid").classList.toggle("hidden", payroll?.status !== "confirmed");
+      $("billingMarkPaid").classList.toggle("hidden", !admin || payroll?.status !== "confirmed");
       $("billingAddPayment").classList.toggle("hidden", !admin || !payroll || !["confirmed", "paid"].includes(payroll.status) || remainingAmount <= 0.005);
-      $("billingAddAdvance").classList.toggle("hidden", !admin || Boolean(payroll && ["confirmed", "paid"].includes(payroll.status)));
-      const list = $("billingDayList"); const activities = billingDisplayActivities(workerId, range, lines);
-      if (!activities.length) list.innerHTML = `<div class="billing-empty">V tem obdobju ni zaključenih ur ali malic.</div>`;
+      $("billingAddAdvance").classList.toggle("hidden", Boolean(payroll && ["confirmed", "paid"].includes(payroll.status)));
+
+      const list = $("billingDayList");
+      const activities = billingDisplayActivities(workerId, range, lines);
+      const paymentItems = (payroll?.payments || []).map((payment) => ({
+        ...payment,
+        date: /^\d{4}-\d{2}-\d{2}/.test(String(payment.createdAt || "")) ? String(payment.createdAt).slice(0, 10) : ""
+      })).filter((payment) => payment.date >= range.from && payment.date <= range.to);
+      const dayRows = new Map();
+      const ensureDay = (date) => {
+        if (!dayRows.has(date)) dayRows.set(date, { work: [], advances: [], payments: [] });
+        return dayRows.get(date);
+      };
+      activities.forEach((activity) => ensureDay(activity.date).work.push(activity));
+      advances.forEach((advance) => ensureDay(advance.date).advances.push(advance));
+      paymentItems.forEach((payment) => ensureDay(payment.date).payments.push(payment));
+      const isBoss = state.user?.role === "boss";
+      const canDeleteAdvances = !useSnapshot;
+      if (!dayRows.size) list.innerHTML = `<div class="billing-empty">V tem obdobju ni zaključenih ur, založitev ali izplačil.</div>`;
       else {
-        const days = new Map(); activities.forEach((activity) => { const rows = days.get(activity.date) || []; rows.push(activity); days.set(activity.date, rows); });
-        list.innerHTML = [...days.entries()].map(([date, rows]) => { const day = billingLineTotals(rows); const hasGap = rows.some((row, index) => index > 0 && billingGapMinutes(rows[index - 1], row) > 0); return `<button class="billing-day billing-open-day" type="button" data-date="${escapeHtml(date)}" data-worker-id="${escapeHtml(workerId)}"><strong>${escapeHtml(formatDate(date))}</strong><span class="billing-day-hours">${hasGap ? '<span class="billing-gap-alert" title="Ure niso v neprekinjenem kosu">!</span> ' : ""}${day.hours.toLocaleString("sl-SI", { maximumFractionDigits: 2 })} h</span><span class="billing-day-work">Delo: ${money(day.workAmount)} EUR</span><span class="billing-day-km">Kilometrina: ${money(day.kmAmount)} EUR</span></button>`; }).join("");
+        list.innerHTML = [...dayRows.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([date, items]) => {
+          const day = billingLineTotals(items.work);
+          const hasGap = items.work.some((row, index) => index > 0 && billingGapMinutes(items.work[index - 1], row) > 0);
+          const financialRows = [
+            ...items.advances.map((advance) => `<div class="billing-financial-row advance"><span>Založeno${advance.reason ? ` · ${escapeHtml(advance.reason)}` : ""}</span><strong>${money(advance.amount)} EUR</strong>${canDeleteAdvances && (isBoss || advance.person === state.user?.id) ? `<button class="danger billing-financial-delete delete-billing-advance" type="button" data-advance-id="${escapeHtml(advance.id)}">Izbriši</button>` : ""}</div>`),
+            ...items.payments.map((payment) => `<div class="billing-financial-row payment"><span>Izplačano${payment.note ? ` · ${escapeHtml(payment.note)}` : ""}</span><strong>${money(payment.amount)} EUR</strong>${isBoss ? `<button class="danger billing-financial-delete delete-billing-payment" type="button" data-payroll-id="${escapeHtml(payroll.id)}" data-payment-id="${escapeHtml(payment.id)}">Izbriši</button>` : ""}</div>`)
+          ].join("");
+          return `<div class="billing-day"><button class="billing-day-overview billing-open-day" type="button" data-date="${escapeHtml(date)}" data-worker-id="${escapeHtml(workerId)}"><strong>${escapeHtml(formatDate(date))}</strong><span class="billing-day-hours">${hasGap ? '<span class="billing-gap-alert" title="Ure niso v neprekinjenem kosu">!</span> ' : ""}${day.hours.toLocaleString("sl-SI", { maximumFractionDigits: 2 })} h</span><span class="billing-day-work">Delo: ${money(day.workAmount)} EUR</span><span class="billing-day-km">Kilometrina: ${money(day.kmAmount)} EUR</span></button>${financialRows}</div>`;
+        }).join("");
         list.querySelectorAll(".billing-open-day").forEach((button) => button.addEventListener("click", () => openBillingDayTimeline(button.dataset.workerId, button.dataset.date)));
+        list.querySelectorAll(".delete-billing-advance").forEach((button) => button.addEventListener("click", () => deleteAdvanceFromBilling(button.dataset.advanceId).catch((error) => alert(error.message))));
+        list.querySelectorAll(".delete-billing-payment").forEach((button) => button.addEventListener("click", () => deletePayrollPaymentFromBilling(button.dataset.payrollId, button.dataset.paymentId).catch((error) => alert(error.message))));
       }
       renderBillingExplorer();
     }    async function confirmPayroll() {
@@ -6746,7 +6887,7 @@
       ["todoFormClientField", "todoFormAssigneeField", "todoFormAttachments"].forEach((id) => $(id).classList.toggle("hidden", meal));
       ["todoFormTask", "todoFormNotes", "todoFormMaterial"].forEach((id) => $(id).closest("label").classList.toggle("hidden", meal));
       const showWorkerMileage = completed && !meal;
-      const showHourlyRate = isAdminView() && completed && !meal;
+      const showHourlyRate = state.user?.role === "boss" && completed && !meal;
       const showClientMileage = !meal && (isAdminView() || Boolean(state.todoHoursSourceId) || state.todoStandaloneHours);
       $("todoFormClientBilling").classList.toggle("hidden", !showClientMileage);
       $("todoFormBilling").classList.toggle("hidden", !showWorkerMileage);
@@ -8287,6 +8428,12 @@
       $("toolsMenu").open = false;
     });
     ["billingFrom", "billingTo"].forEach((id) => $(id).addEventListener("change", renderBillingView));
+    $("billingRangePicker").addEventListener("click", openBillingRangePicker);
+    $("billingRangePrev").addEventListener("click", () => shiftBillingRangePickerMonth(-1));
+    $("billingRangeNext").addEventListener("click", () => shiftBillingRangePickerMonth(1));
+    $("closeBillingRangeDialog").addEventListener("click", () => $("billingRangeDialog").close());
+    $("cancelBillingRangeDialog").addEventListener("click", () => $("billingRangeDialog").close());
+    $("applyBillingRangeDialog").addEventListener("click", applyBillingRangePicker);
     $("billingNote").addEventListener("input", () => localStorage.setItem(billingNoteStorageKey(billingWorkerId(), billingRange()), $("billingNote").value));
     $("billingWorker").addEventListener("change", () => { state.billingWorkerId = $("billingWorker").value; localStorage.setItem(billingWorkerKey, state.billingWorkerId); renderBillingView(); });
     $("billingConfirm").addEventListener("click", () => confirmPayroll().catch((error) => alert(error.message)));

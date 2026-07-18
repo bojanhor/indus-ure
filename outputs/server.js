@@ -2943,6 +2943,48 @@ async function handleApi(req, res) {
       sendJson(res, 201, { payroll: next, payrolls: payrollForUser(db, user) });
       return;
     }
+    const payrollPaymentDeleteMatch = url.pathname.match(/^\/api\/payrolls\/([^/]+)\/payments\/([^/]+)$/);
+    if (payrollPaymentDeleteMatch && req.method === "DELETE") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      if (user.role !== "boss") {
+        sendJson(res, 403, { error: "Samo šef lahko izbriše evidentirano izplačilo." });
+        return;
+      }
+      const payrollId = decodeURIComponent(payrollPaymentDeleteMatch[1]);
+      const paymentId = decodeURIComponent(payrollPaymentDeleteMatch[2]);
+      const db = await readDbAsync();
+      const index = db.payrolls.findIndex((payroll) => payroll.id === payrollId);
+      if (index < 0) {
+        sendJson(res, 404, { error: "Obračun ne obstaja." });
+        return;
+      }
+      const current = normalizePayroll(db.payrolls[index], db);
+      if (!current || !["confirmed", "paid"].includes(current.status)) {
+        sendJson(res, 409, { error: "Izplačilo lahko izbrišeš samo pri potrjenem obračunu." });
+        return;
+      }
+      if (!(current.payments || []).some((payment) => payment.id === paymentId)) {
+        sendJson(res, 404, { error: "Izplačilo ne obstaja." });
+        return;
+      }
+      const now = new Date().toISOString();
+      const payroll = normalizePayroll({
+        ...current,
+        status: "confirmed",
+        payments: current.payments.filter((payment) => payment.id !== paymentId),
+        paidAt: "",
+        paidBy: "",
+        paidByName: "",
+        updatedAt: now,
+        updatedBy: user.id,
+        updatedByName: user.name
+      }, db);
+      db.payrolls[index] = payroll;
+      await writeDbAsync(db);
+      sendJson(res, 200, { payroll, payrolls: payrollForUser(db, user) });
+      return;
+    }
     const payrollMatch = url.pathname.match(/^\/api\/payrolls\/([^/]+)$/);
     if (payrollMatch && req.method === "PUT") {
       const user = await requireUser(req, res);
@@ -3288,6 +3330,34 @@ async function handleApi(req, res) {
       });
       await writeDbAsync(db);
       sendJson(res, 201, { advances: visibleAdvancesForUser(db, user) });
+      return;
+    }
+    const advanceMatch = url.pathname.match(/^\/api\/advances\/([^/]+)$/);
+    if (advanceMatch && req.method === "DELETE") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      const id = decodeURIComponent(advanceMatch[1]);
+      const db = await readDbAsync();
+      const index = db.debts.findIndex((item) => item.id === id && item.type === "advance");
+      if (index < 0) {
+        sendJson(res, 404, { error: "Založeni znesek ne obstaja." });
+        return;
+      }
+      const advance = db.debts[index];
+      if (user.role !== "boss" && advance.person !== user.id) {
+        sendJson(res, 403, { error: "Lahko izbrišeš samo svoj založeni znesek." });
+        return;
+      }
+      const usedInConfirmedPayroll = (db.payrolls || []).some((payroll) => ["archiving", "confirmed", "paid"].includes(payroll.status)
+        && (payroll.advanceIds || []).map(String).includes(id));
+      if (usedInConfirmedPayroll) {
+        sendJson(res, 409, { error: "Založeni znesek je že del potrjenega obračuna. Šef mora obračun najprej ponovno odpreti." });
+        return;
+      }
+      db.debts.splice(index, 1);
+      pruneUnusedTodoAttachments(db);
+      await writeDbAsync(db);
+      sendJson(res, 200, { advances: visibleAdvancesForUser(db, user) });
       return;
     }
     if (url.pathname === "/api/debts" && req.method === "GET") {
