@@ -252,7 +252,10 @@ function hydrateTodoAttachments(db, todo) {
 }
 
 function pruneUnusedTodoAttachments(db) {
-  const used = new Set((db.todos || []).flatMap((todo) => (todo.photos || []).map((photo) => photo.attachmentId)).filter(validTodoAttachmentId));
+  const used = new Set([
+    ...(db.todos || []).flatMap((todo) => (todo.photos || []).map((photo) => photo.attachmentId)),
+    ...(db.debts || []).flatMap((debt) => (debt.photos || []).map((photo) => photo.attachmentId))
+  ].filter(validTodoAttachmentId));
   let changed = false;
   for (const attachmentId of Object.keys(db.attachments || {})) {
     if (used.has(attachmentId)) continue;
@@ -832,19 +835,29 @@ function normalizeDb(db = {}) {
 
   if (pruneUnusedTodoAttachments(db)) changed = true;
 
-  db.debts = db.debts.map((debt) => ({
-    id: debt.id || crypto.randomUUID(),
-    month: /^\d{4}-\d{2}$/.test(String(debt.month || "")) ? String(debt.month) : new Date().toISOString().slice(0, 7),
-    person: ["ibro", "bojan"].includes(debt.person) ? debt.person : "ibro",
-    amount: Number(debt.amount || 0),
-    reason: String(debt.reason || "").trim(),
-    createdBy: debt.createdBy || "system",
-    createdByName: debt.createdByName || "",
-    createdAt: debt.createdAt || new Date().toISOString(),
-    updatedBy: debt.updatedBy || debt.createdBy || "system",
-    updatedByName: debt.updatedByName || debt.createdByName || "",
-    updatedAt: debt.updatedAt || debt.createdAt || new Date().toISOString()
-  })).filter((debt) => debt.amount || debt.reason);
+  db.debts = db.debts.map((debt) => {
+    const type = debt.type === "advance" ? "advance" : "debt";
+    const person = cleanUserId(debt.person) || (type === "advance" ? "" : (["ibro", "bojan"].includes(debt.person) ? debt.person : "ibro"));
+    const next = {
+      id: debt.id || crypto.randomUUID(),
+      type,
+      month: /^\d{4}-\d{2}$/.test(String(debt.month || "")) ? String(debt.month) : new Date().toISOString().slice(0, 7),
+      date: isDateKey(debt.date) ? String(debt.date) : "",
+      person,
+      amount: Number(debt.amount || 0),
+      reason: String(debt.reason || "").trim(),
+      projectTodoId: String(debt.projectTodoId || ""),
+      photos: Array.isArray(debt.photos) ? debt.photos : [],
+      createdBy: debt.createdBy || "system",
+      createdByName: debt.createdByName || "",
+      createdAt: debt.createdAt || new Date().toISOString(),
+      updatedBy: debt.updatedBy || debt.createdBy || "system",
+      updatedByName: debt.updatedByName || debt.createdByName || "",
+      updatedAt: debt.updatedAt || debt.createdAt || new Date().toISOString()
+    };
+    if (type === "advance") next.photos = storeTodoAttachments(db, next, { id: next.createdBy, name: next.createdByName }).photos;
+    return next;
+  }).filter((debt) => debt.amount || debt.reason);
 
   return { db, changed };
 }
@@ -1037,10 +1050,18 @@ function visibleTodosForUser(db, user) {
   }));
 }
 
+function hydrateDebtAttachments(db, debt) {
+  return hydrateTodoAttachments(db, { ...debt, photos: debt.photos || [] });
+}
+
 function visibleDebtsForUser(db, user) {
   const debts = db.debts || [];
-  if (user.role === "boss") return debts;
-  return debts.filter((debt) => debt.person === user.id);
+  const visible = user.role === "boss" ? debts : debts.filter((debt) => debt.person === user.id);
+  return visible.map((debt) => hydrateDebtAttachments(db, debt));
+}
+
+function visibleAdvancesForUser(db, user) {
+  return visibleDebtsForUser(db, user).filter((debt) => debt.type === "advance");
 }
 
 function canManageEntry(user, entry) {
@@ -1221,11 +1242,33 @@ function nonnegativeNumber(value, fallback = null, maximum = Number.MAX_SAFE_INT
 const PAYROLL_STATUSES = new Set(["draft", "archiving", "confirmed", "paid"]);
 const PAYROLL_PAID_TODO_STATUSES = new Set(["execution", "meal"]);
 
+function isDateKey(value) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(value || ""));
+}
+
+function payrollRange(input = {}) {
+  input = typeof input === "string" ? { month: input } : (input || {});
+  const month = String(input.month || "");
+  const legacyMonth = isPayrollMonth(month) ? month : "";
+  const from = isDateKey(input.from) ? String(input.from) : (legacyMonth ? `${legacyMonth}-01` : "");
+  const to = isDateKey(input.to)
+    ? String(input.to)
+    : (legacyMonth ? `${legacyMonth}-${String(new Date(Number(legacyMonth.slice(0, 4)), Number(legacyMonth.slice(5, 7)), 0).getDate()).padStart(2, "0")}` : "");
+  return from && to && from <= to ? { from, to, month: legacyMonth || from.slice(0, 7) } : null;
+}
+
 function isPayrollMonth(value) {
   const match = /^(\d{4})-(\d{2})$/.exec(String(value || ""));
   return Boolean(match && Number(match[2]) >= 1 && Number(match[2]) <= 12);
 }
 function payrollPeriodEnded(value, now = new Date()) {
+  if (typeof value === "object" && value) {
+    const range = payrollRange(value);
+    if (!range) return false;
+    const parts = Object.fromEntries(new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Ljubljana", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(now).filter((part) => part.type !== "literal").map((part) => [part.type, part.value]));
+    const today = `${parts.year}-${parts.month}-${parts.day}`;
+    return range.to < today;
+  }
   const match = /^(\d{4})-(\d{2})$/.exec(String(value || ""));
   if (!match) return false;
   const localParts = Object.fromEntries(new Intl.DateTimeFormat("en-CA", {
@@ -1248,7 +1291,7 @@ function payrollMinutesForTodo(todo) {
   return minutes > 0 ? minutes : null;
 }
 
-function payrollLineForTodo(db, todo) {
+function payrollLineForTodo(db, todo, workerId = "") {
   const minutes = payrollMinutesForTodo(todo);
   if (!minutes) return null;
   const hourlyRate = nonnegativeNumber(todo.billingHourlyRate, defaultHourlyRateForUser(db, todo.syncUser || todo.createdBy), 10_000);
@@ -1266,6 +1309,7 @@ function payrollLineForTodo(db, todo) {
   return {
     todoId: String(todo.id || ""),
     assignmentGroupId: String(todo.assignmentGroupId || todo.id || ""),
+    workerId: String(workerId || todo.syncUser || todo.createdBy || ""),
     date: String(todo.date || ""),
     start: String(todo.start || ""),
     end: String(todo.end || ""),
@@ -1297,10 +1341,14 @@ function payrollTotals(lines = []) {
   };
 }
 
+function payrollAdvances(db, workerId, range) {
+  return (db.debts || []).filter((item) => item.type === "advance" && item.person === workerId && item.date >= range.from && item.date <= range.to);
+}
+
 function normalizePayroll(input, db) {
   const workerId = cleanUserId(input?.workerId);
-  const month = String(input?.month || "");
-  if (!workerId || !db.users?.[workerId] || !isPayrollMonth(month)) return null;
+  const range = payrollRange(input);
+  if (!workerId || !db.users?.[workerId] || !range) return null;
   const lines = (Array.isArray(input?.lines) ? input.lines : []).map((line) => {
     const minutes = Math.round(Number(line?.minutes || 0));
     const hourlyRate = nonnegativeNumber(line?.hourlyRate, null, 10_000);
@@ -1313,6 +1361,7 @@ function normalizePayroll(input, db) {
     return {
       todoId: String(line.todoId),
       assignmentGroupId: String(line.assignmentGroupId || line.todoId),
+      workerId,
       date: String(line.date || ""),
       start: String(line.start || ""),
       end: String(line.end || ""),
@@ -1329,15 +1378,22 @@ function normalizePayroll(input, db) {
     };
   }).filter(Boolean);
   const totals = payrollTotals(lines);
+  const advanceIds = [...new Set((Array.isArray(input?.advanceIds) ? input.advanceIds : []).map(String).filter(Boolean))];
+  const advanceAmount = Number((Number(input?.advanceAmount || 0)).toFixed(2));
   const status = PAYROLL_STATUSES.has(input?.status) ? input.status : "draft";
   const createdAt = String(input?.createdAt || new Date().toISOString());
   return {
     id: String(input?.id || crypto.randomUUID()),
     workerId,
-    month,
+    month: range.month,
+    from: range.from,
+    to: range.to,
     status,
     note: String(input?.note || "").trim().slice(0, 2_000),
     lines,
+    advanceIds,
+    advanceAmount,
+    payoutAmount: Number((totals.totalAmount + advanceAmount).toFixed(2)),
     ...totals,
     createdBy: String(input?.createdBy || "system"),
     createdByName: String(input?.createdByName || ""),
@@ -1354,18 +1410,21 @@ function normalizePayroll(input, db) {
   };
 }
 
-function buildPayrollSnapshot(db, workerId, month, previous = {}, note = undefined) {
+function buildPayrollSnapshot(db, workerId, rangeInput, previous = {}, note = undefined) {
+  const range = payrollRange(rangeInput);
+  if (!range) return null;
   const lockedElsewhere = new Set((db.payrolls || [])
     .filter((payroll) => payroll.id !== previous.id && ["archiving", "confirmed", "paid"].includes(payroll.status))
     .flatMap((payroll) => payroll.lines || [])
     .map((line) => String(line.todoId || "")));
   const lines = (db.todos || [])
-    .filter((todo) => (todo.syncUser || todo.createdBy) === workerId && !todo.archivedAt && String(todo.date || "").startsWith(month))
+    .filter((todo) => (todo.syncUser || todo.createdBy) === workerId && !todo.archivedAt && String(todo.date || "") >= range.from && String(todo.date || "") <= range.to)
     .filter((todo) => !lockedElsewhere.has(String(todo.id || "")))
-    .map((todo) => payrollLineForTodo(db, todo))
+    .map((todo) => payrollLineForTodo(db, todo, workerId))
     .filter(Boolean)
     .sort((a, b) => a.date.localeCompare(b.date) || a.start.localeCompare(b.start) || a.title.localeCompare(b.title));
-  return normalizePayroll({ ...previous, workerId, month, lines, note: note === undefined ? previous.note : note }, db);
+  const advances = payrollAdvances(db, workerId, range);
+  return normalizePayroll({ ...previous, workerId, ...range, lines, advanceIds: advances.map((item) => item.id), advanceAmount: advances.reduce((total, item) => total + Number(item.amount || 0), 0), note: note === undefined ? previous.note : note }, db);
 }
 
 function payrollForUser(db, user) {
@@ -1683,6 +1742,37 @@ function cleanDebt(input) {
     amount: Number(input.amount || 0),
     reason: String(input.reason || "").trim()
   };
+}
+
+function cleanAdvance(input) {
+  const photos = Array.isArray(input.photos) ? input.photos : [];
+  return {
+    type: "advance",
+    person: cleanUserId(input.person || input.workerId),
+    date: String(input.date || "").trim(),
+    amount: Number(input.amount || 0),
+    reason: String(input.reason || input.comment || "").trim().slice(0, 2_000),
+    projectTodoId: String(input.projectTodoId || "").trim().slice(0, 100),
+    photos: limitTodoAttachmentsData(photos.map((photo) => ({
+      id: photo.id || crypto.randomUUID(),
+      name: String(photo.name || "priloga").slice(0, 120),
+      attachmentId: String(photo.attachmentId || ""),
+      data: String(photo.data || ""),
+      thumbnailData: String(photo.thumbnailData || ""),
+      createdBy: photo.createdBy || "",
+      createdByName: photo.createdByName || "",
+      createdAt: photo.createdAt || new Date().toISOString()
+    })).filter((photo) => validTodoAttachmentDataUrl(photo.data) || validTodoAttachmentId(photo.attachmentId)).slice(0, 8))
+  };
+}
+
+function validateAdvance(advance, db) {
+  if (!advance.person || !db.users?.[advance.person]) return "Izberi delavca.";
+  if (!isDateKey(advance.date)) return "Datum zalozenega denarja ni pravilen.";
+  if (!Number.isFinite(advance.amount) || advance.amount <= 0) return "Vnesi znesek.";
+  if (!advance.reason) return "Vnesi komentar.";
+  if ((advance.photos || []).some((photo) => !validTodoAttachmentDataUrl(photo.data) && !validTodoAttachmentId(photo.attachmentId))) return "Priloga ni veljavna slika ali PDF.";
+  return "";
 }
 
 function validateClient(client) {
@@ -2074,8 +2164,11 @@ async function sendAttachmentFile(res, attachment) {
 }
 
 function attachmentVisibleToUser(db, user, attachmentId) {
-  return (db.todos || []).some((todo) => canManageTodo(user, todo)
+  const todoVisible = (db.todos || []).some((todo) => canManageTodo(user, todo)
     && (todo.photos || []).some((photo) => photo.attachmentId === attachmentId));
+  const advanceVisible = (db.debts || []).some((debt) => (user.role === "boss" || debt.person === user.id)
+    && (debt.photos || []).some((photo) => photo.attachmentId === attachmentId));
+  return todoVisible || advanceVisible;
 }
 
 const MAX_BROWSER_RESTORE_BYTES = 1_500 * 1024 * 1024;
@@ -2705,12 +2798,12 @@ async function handleApi(req, res) {
       }
       const body = await readBody(req);
       const workerId = cleanUserId(body.workerId);
-      const month = String(body.month || "");
-      if (!workerId || !isPayrollMonth(month)) {
+      const range = payrollRange(body);
+      if (!workerId || !range) {
         sendJson(res, 400, { error: "Delavec ali obracunsko obdobje ni pravilno." });
         return;
       }
-      if (!payrollPeriodEnded(month)) {
+      if (!payrollPeriodEnded(range)) {
         sendJson(res, 409, { error: "Obracun lahko potrdis sele po koncu izbranega obracunskega meseca." });
         return;
       }
@@ -2719,7 +2812,7 @@ async function handleApi(req, res) {
         sendJson(res, 400, { error: "Delavec ne obstaja." });
         return;
       }
-      const existingIndex = db.payrolls.findIndex((payroll) => payroll.workerId === workerId && payroll.month === month);
+      const existingIndex = db.payrolls.findIndex((payroll) => payroll.workerId === workerId && payroll.from === range.from && payroll.to === range.to);
       const previous = existingIndex >= 0 ? db.payrolls[existingIndex] : {};
       if (previous.status && !["draft", "archiving"].includes(previous.status)) {
         sendJson(res, 409, { error: "Ta obracun je ze potrjen ali placan." });
@@ -2736,7 +2829,7 @@ async function handleApi(req, res) {
           updatedAt: now
         }, db);
       } else {
-        payroll = buildPayrollSnapshot(db, workerId, month, {
+        payroll = buildPayrollSnapshot(db, workerId, range, {
           ...previous,
           id: previous.id || crypto.randomUUID(),
           status: "archiving",
@@ -2749,7 +2842,7 @@ async function handleApi(req, res) {
         }, body.note);
       }
       if (!payroll?.lines.length) {
-        sendJson(res, 400, { error: "Za izbrani mesec delavec nima zakljucenih vnosov ur." });
+        sendJson(res, 400, { error: "Za izbrano obdobje delavec nima zakljucenih vnosov ur." });
         return;
       }
       if (existingIndex >= 0) db.payrolls[existingIndex] = payroll;
@@ -2792,7 +2885,7 @@ async function handleApi(req, res) {
       }
       const current = db.payrolls[index];
       const now = new Date().toISOString();
-      if (action === "confirm" && !payrollPeriodEnded(current.month)) {
+      if (action === "confirm" && !payrollPeriodEnded(current)) {
         sendJson(res, 409, { error: "Obracun lahko potrdis sele po koncu izbranega obracunskega meseca." });
         return;
       }
@@ -2802,7 +2895,7 @@ async function handleApi(req, res) {
           sendJson(res, 409, { error: "Potrjen obracun najprej ponovno odpri." });
           return;
         }
-        payroll = buildPayrollSnapshot(db, current.workerId, current.month, {
+        payroll = buildPayrollSnapshot(db, current.workerId, current, {
           ...current,
           updatedBy: user.id,
           updatedByName: user.name,
@@ -2815,7 +2908,7 @@ async function handleApi(req, res) {
         }
         payroll = current.status === "archiving"
           ? normalizePayroll({ ...current, updatedBy: user.id, updatedByName: user.name, updatedAt: now }, db)
-          : buildPayrollSnapshot(db, current.workerId, current.month, {
+          : buildPayrollSnapshot(db, current.workerId, current, {
             ...current,
             status: "archiving",
             updatedBy: user.id,
@@ -2859,7 +2952,7 @@ async function handleApi(req, res) {
           sendJson(res, 409, { error: "Obracun je ze odprt za popravke." });
           return;
         }
-        payroll = buildPayrollSnapshot(db, current.workerId, current.month, {
+        payroll = buildPayrollSnapshot(db, current.workerId, current, {
           ...current,
           status: "draft",
           updatedBy: user.id,
@@ -3078,6 +3171,48 @@ async function handleApi(req, res) {
       return;
     }
 
+    if (url.pathname === "/api/advances" && req.method === "GET") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      const db = await readDbAsync();
+      sendJson(res, 200, { advances: visibleAdvancesForUser(db, user) });
+      return;
+    }
+
+    if (url.pathname === "/api/advances" && req.method === "POST") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      const db = await readDbAsync();
+      let advance = cleanAdvance(await readBody(req));
+      if (user.role !== "boss") advance.person = user.id;
+      const validation = validateAdvance(advance, db);
+      if (validation) {
+        sendJson(res, 400, { error: validation });
+        return;
+      }
+      if (advance.projectTodoId) {
+        const project = db.todos.find((todo) => todo.id === advance.projectTodoId);
+        if (!project || !["execution", "open", "in_progress", "internal"].includes(project.status)) {
+          sendJson(res, 400, { error: "Povezano opravilo ni vec odprto." });
+          return;
+        }
+      }
+      advance = storeTodoAttachments(db, advance, user);
+      const now = new Date().toISOString();
+      db.debts.push({
+        id: crypto.randomUUID(),
+        ...advance,
+        createdBy: user.id,
+        createdByName: user.name,
+        createdAt: now,
+        updatedBy: user.id,
+        updatedByName: user.name,
+        updatedAt: now
+      });
+      await writeDbAsync(db);
+      sendJson(res, 201, { advances: visibleAdvancesForUser(db, user) });
+      return;
+    }
     if (url.pathname === "/api/debts" && req.method === "GET") {
       const user = await requireUser(req, res);
       if (!user) return;
@@ -3250,6 +3385,10 @@ async function handleApi(req, res) {
       const minOrder = db.todos.reduce((min, item) => Math.min(min, Number(item.order || 0)), 0);
       const newOrder = todo.order || minOrder - 1;
       const assigneeIds = todoAssigneesForRequest(user, body.assigneeIds || todo.syncUser, db.users);
+      if (todo.status === "execution" && assigneeIds.length !== 1) {
+        sendJson(res, 400, { error: "Zakljucene ure se vpisujejo posebej za enega delavca." });
+        return;
+      }
       const assignmentGroupId = crypto.randomUUID();
       assigneeIds.forEach((assigneeId, index) => {
         const assignee = db.users[assigneeId];
@@ -3596,6 +3735,10 @@ async function handleApi(req, res) {
         if (!assigneeIds.includes(nextAssignee)) assigneeIds.push(nextAssignee);
       }
 
+      if (todo.status === "execution" && assigneeIds.length !== 1) {
+        sendJson(res, 400, { error: "Zakljucene ure se vpisujejo posebej za enega delavca." });
+        return;
+      }
       const desiredAssignees = new Set(assigneeIds);
       const existingByAssignee = new Map();
       const removedTodos = [];

@@ -655,7 +655,11 @@
     .billing-note-panel label { display: grid; gap: 5px; color: var(--muted); font-size: 12px; font-weight: 800; }
     .billing-note-panel textarea { width: 100%; min-height: 76px; resize: vertical; border: 1px solid var(--line); border-radius: 8px; padding: 8px 9px; background: #fff; color: var(--ink); font: inherit; }
     .billing-note-panel textarea:disabled { color: var(--ink); background: #f3f6f3; }
-    .billing-period-hint { margin: 0; color: #805f00; font-size: 12px; font-weight: 800; }    .billing-day-list { display: grid; gap: 9px; }
+    .billing-period-hint { margin: 0; color: #805f00; font-size: 12px; font-weight: 800; }
+    .billing-day-list { display: grid; gap: 9px; }
+    .billing-explorer { display: grid; gap: 7px; margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--line); }
+    .billing-explorer-row { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; text-align: left; align-items: center; padding: 10px; border: 1px solid var(--line); border-radius: 9px; background: #f8fbf8; color: var(--ink); }
+    .billing-explorer-row span:last-child { grid-column: 1 / -1; color: var(--muted); font-size: 12px; }
     .billing-day { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; gap: 10px; align-items: center; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--ink); text-align: left; font-weight: 800; }
     .billing-day:hover, .billing-day:focus-visible { background: #f4f8f5; }
     .billing-day-hours { color: var(--muted); font-size: 13px; white-space: nowrap; }
@@ -2691,7 +2695,7 @@
       .billing-state { flex: 0 0 auto; }
       .billing-controls { display: grid; grid-template-columns: minmax(0, 1fr); align-items: stretch; }
       .billing-worker-control, .billing-worker-control select { width: 100%; min-width: 0; }
-      .billing-period { display: grid; grid-template-columns: 40px minmax(0, 1fr) 40px; width: 100%; }
+      .billing-period { display: grid; grid-template-columns: 40px minmax(0, 1fr) minmax(0, 1fr) 40px; width: 100%; }
       .billing-period label, .billing-period input { width: 100%; min-width: 0; }
       .billing-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
       .billing-summary-card { padding: 11px; }
@@ -2831,14 +2835,16 @@
             <select id="billingWorker"></select>
           </label>
           <div class="billing-period">
-            <button class="secondary billing-month-step" id="billingPrevMonth" type="button" aria-label="Prej&#353;nji mesec">&lsaquo;</button>
-            <label>Obdobje
-              <input id="billingMonth" type="month">
+            <button class="secondary billing-month-step" id="billingPrevMonth" type="button" aria-label="Prejšnje obdobje">&lsaquo;</button>
+            <label>Od
+              <input id="billingFrom" type="date">
             </label>
-            <button class="secondary billing-month-step" id="billingNextMonth" type="button" aria-label="Naslednji mesec">&rsaquo;</button>
-          </div>
-
-        </div>
+            <label>Do
+              <input id="billingTo" type="date">
+            </label>
+            <input id="billingMonth" type="hidden">
+            <button class="secondary billing-month-step" id="billingNextMonth" type="button" aria-label="Naslednje obdobje">&rsaquo;</button>
+          </div>        </div>
         <div class="billing-summary" id="billingSummary"></div>
         <div class="billing-note-panel" id="billingNotePanel">
           <label class="admin-only" for="billingNote">Opomba za delavca
@@ -2847,11 +2853,13 @@
           <p class="todo-meta hidden" id="billingNoteRead"></p>
         </div>
         <div class="billing-actions admin-only" id="billingActions">
-          <button class="primary hidden" id="billingConfirm" type="button">Potrdi obra&#269;un</button>
+                    <button class="secondary" id="billingAddAdvance" type="button">Založil denar</button>
+<button class="primary hidden" id="billingConfirm" type="button">Potrdi obra&#269;un</button>
           <button class="primary hidden" id="billingMarkPaid" type="button">Ozna&#269;i pla&#269;ano</button>
         </div>
         <p class="billing-period-hint hidden" id="billingPeriodHint"></p>
         <div class="billing-day-list" id="billingDayList"></div>
+        <div class="billing-explorer admin-only" id="billingExplorer"></div>
       </section>
       <section class="panel report-view clients-screen view-hidden">
         <div class="search-control">
@@ -3138,6 +3146,19 @@
           <button type="button" class="secondary" id="cancelTodoDialog">Prekli&#269;i</button>
           <button type="submit" class="primary" id="saveTodoDialog">Shrani</button>
         </div>
+      </div>
+    </form>
+  </dialog>
+  <dialog id="advanceDialog">
+    <form method="dialog" id="advanceForm">
+      <div class="modal-head"><h3>Založil denar</h3><button class="icon-btn" id="closeAdvanceDialog" type="button" title="Zapri">&times;</button></div>
+      <div class="modal-body">
+        <div class="modal-grid"><label>Datum <input id="advanceDate" type="date"></label><label>Znesek (EUR) <input id="advanceAmount" type="number" min="0.01" step="0.01" inputmode="decimal"></label></div>
+        <label>Delavec <select id="advanceWorker"></select></label>
+        <label>Komentar <textarea id="advanceReason" rows="3" placeholder="Kaj je bilo založeno in zakaj"></textarea></label>
+        <label>Poveži s projektom (testno)<input id="advanceProjectSearch" type="search" placeholder="Išči odprto opravilo"><select id="advanceProject"><option value="">Brez povezave</option></select></label>
+        <div class="todo-form-attachments"><strong>Dokazilo</strong><div id="advancePhotoList"></div><div class="todo-form-attachment-actions"><label class="secondary add-photo">Galerija slik<input class="hidden-file" id="advancePhotoInput" type="file" accept="image/*" multiple></label><label class="secondary add-photo">Fotografiraj<input class="hidden-file" id="advanceCameraInput" type="file" accept="image/*" capture="environment"></label><label class="secondary add-photo">PDF / datoteka<input class="hidden-file" id="advancePdfInput" type="file" accept="application/pdf,.pdf" multiple></label></div></div>
+        <div class="actions"><button class="secondary" id="cancelAdvanceDialog" type="button">Prekliči</button><button class="primary" id="saveAdvance" type="submit">Shrani</button></div>
       </div>
     </form>
   </dialog>
@@ -3685,6 +3706,7 @@
         entries: JSON.parse(JSON.stringify(state.entries || [])),
         todos: (state.todos || []).map(offlineSnapshotTodo),
         debts: JSON.parse(JSON.stringify(state.debts || [])),
+        advances: JSON.parse(JSON.stringify(state.advances || [])),
         clients: JSON.parse(JSON.stringify(state.clients || [])),
         settings: JSON.parse(JSON.stringify(state.settings || {})),
         billingLocks: JSON.parse(JSON.stringify(state.billingLocks || [])),
@@ -4195,7 +4217,7 @@
       const workerBillingRequest = state.user?.role === "boss"
         ? api("/api/workers/billing")
         : Promise.resolve({ workers: [] });
-      const [entries, todos, debts, clients, settings, workerBilling, payrolls] = await Promise.all([
+      const [entries, todos, debts, advances, clients, settings, workerBilling, payrolls] = await Promise.all([
         api("/api/entries"),
         api("/api/todos"),
         api("/api/debts"),
@@ -4367,6 +4389,41 @@
       renderDebtDialog();
     }
 
+    function advanceProjectOptions() {
+      const query = $("advanceProjectSearch")?.value.trim().toLocaleLowerCase("sl") || "";
+      return uniqueTodosByEventId(state.todos).filter((todo) => ["execution", "open", "in_progress", "internal"].includes(todo.status)).filter((todo) => !query || `${todo.title} ${todo.client} ${todo.notes}`.toLocaleLowerCase("sl").includes(query)).sort((a, b) => String(a.title).localeCompare(String(b.title), "sl"));
+    }
+
+    function renderAdvanceProjects() {
+      const select = $("advanceProject"); if (!select) return;
+      const selected = select.value;
+      select.innerHTML = `<option value="">Brez povezave</option>${advanceProjectOptions().map((todo) => `<option value="${escapeHtml(todo.id)}">${escapeHtml([todo.client, todo.title, todoStatus(todo.status).label].filter(Boolean).join(" · "))}</option>`).join("")}`;
+      if ([...select.options].some((option) => option.value === selected)) select.value = selected;
+    }
+
+    function renderAdvancePhotos() {
+      $("advancePhotoList").innerHTML = state.advancePhotos.map((photo) => `<div class="todo-form-photo-row"><button class="todo-form-attachment-preview advance-photo-preview" type="button" data-photo-id="${escapeHtml(photo.id)}"><span class="todo-form-attachment-thumb">${isPdfAttachment(photo) ? pdfThumbnailMarkup(photo) : `<img src="${escapeHtml(attachmentSource(photo))}" alt="">`}</span><span>${escapeHtml(photo.name || "Priloga")}</span></button><button class="danger remove-advance-photo" type="button" data-photo-id="${escapeHtml(photo.id)}">Odstrani</button></div>`).join("");
+    }
+
+    function openAdvanceDialog() {
+      const range = billingRange();
+      $("advanceDate").value = range.to;
+      $("advanceAmount").value = ""; $("advanceReason").value = ""; $("advanceProjectSearch").value = ""; state.advancePhotos = [];
+      const workerId = billingWorkerId();
+      const workers = isAdminView() ? state.users : [activeWorker()];
+      $("advanceWorker").innerHTML = workers.map((worker) => `<option value="${escapeHtml(worker.id)}">${escapeHtml(worker.name || worker.id)}</option>`).join("");
+      $("advanceWorker").value = workerId;
+      $("advanceWorker").disabled = !isAdminView();
+      renderAdvanceProjects(); renderAdvancePhotos();
+      ["advancePhotoInput", "advanceCameraInput", "advancePdfInput"].forEach((id) => { $(id).value = ""; });
+      $("advanceDialog").showModal();
+    }
+
+    async function saveAdvanceFromDialog() {
+      const data = await api("/api/advances", { method: "POST", body: JSON.stringify({ person: $("advanceWorker").value, date: $("advanceDate").value, amount: Number($("advanceAmount").value || 0), reason: $("advanceReason").value.trim(), projectTodoId: $("advanceProject").value, photos: state.advancePhotos }) });
+      state.advances = data.advances || state.advances;
+      $("advanceDialog").close(); await loadAll(); renderBillingView();
+    }
     async function saveClientToServer(client) {
       const data = await api("/api/clients", { method: "POST", body: JSON.stringify(client) });
       state.clients = data.clients;
@@ -5423,11 +5480,24 @@
       }
     }
 
-    function billingMonthLabel(month) {
-      const [year, monthNumber] = String(month).split("-").map(Number);
-      return new Date(year, monthNumber - 1, 1).toLocaleDateString("sl-SI", { month: "long", year: "numeric" });
+    function billingRange() {
+      const monthInput = $("billingMonth");
+      if (!/^\d{4}-\d{2}$/.test(monthInput.value)) monthInput.value = dateKey(new Date()).slice(0, 7);
+      const [year, month] = monthInput.value.split("-").map(Number);
+      const defaultFrom = `${monthInput.value}-01`;
+      const defaultTo = `${monthInput.value}-${String(new Date(year, month, 0).getDate()).padStart(2, "0")}`;
+      if (!/^\d{4}-\d{2}-\d{2}$/.test($("billingFrom").value)) $("billingFrom").value = defaultFrom;
+      if (!/^\d{4}-\d{2}-\d{2}$/.test($("billingTo").value) || $("billingTo").value < $("billingFrom").value) $("billingTo").value = defaultTo;
+      monthInput.value = $("billingFrom").value.slice(0, 7);
+      return { from: $("billingFrom").value, to: $("billingTo").value };
     }
 
+    function billingRangeLabel(range) {
+      if (!range?.from || !range?.to) return "";
+      const from = formatDate(range.from);
+      const to = formatDate(range.to);
+      return range.from === range.to ? from : `${from} – ${to}`;
+    }
     function billingWorkerId() {
       if (!isAdminView()) return activeWorkerId();
       const workers = state.workerBilling.length ? state.workerBilling : state.users;
@@ -5446,53 +5516,33 @@
         || activeWorker();
     }
 
-    function payrollForBilling(workerId, month) {
-      return state.payrolls.find((payroll) => payroll.workerId === workerId && payroll.month === month) || null;
+    function payrollForBilling(workerId, range) {
+      return state.payrolls.find((payroll) => payroll.workerId === workerId && payroll.from === range.from && payroll.to === range.to) || null;
     }
 
-    function billingLiveLines(workerId, month) {
+    function billingLiveLines(workerId, range) {
       const kmRate = Number(state.settings.billing?.workerOwnVehicleKmRate ?? state.settings.billing?.kmRate ?? 0);
       return state.todos
-        .filter((todo) => (todo.syncUser || todo.createdBy) === workerId && payrollPaidTodoStatuses.has(todo.status) && String(todo.date || "").startsWith(month))
+        .filter((todo) => (todo.syncUser || todo.createdBy) === workerId && payrollPaidTodoStatuses.has(todo.status) && String(todo.date || "") >= range.from && String(todo.date || "") <= range.to)
         .map((todo) => {
           const hours = duration(todo);
           const hourlyRate = todoHourlyRate(todo);
           const km = Number(todo.billingKm || 0);
           const workAmount = Number((hours * hourlyRate).toFixed(2));
           const kmAmount = Number((km * kmRate).toFixed(2));
-          return {
-            todoId: todo.id,
-            assignmentGroupId: todo.assignmentGroupId || todo.id,
-            date: todo.date,
-            start: todo.start,
-            end: todo.end,
-            title: todo.title,
-            client: todo.client,
-            minutes: Math.round(hours * 60),
-            hours,
-            hourlyRate,
-            km,
-            kmRate,
-            workAmount,
-            kmAmount,
-            totalAmount: Number((workAmount + kmAmount).toFixed(2))
-          };
+          return { todoId: todo.id, assignmentGroupId: todo.assignmentGroupId || todo.id, workerId, date: todo.date, start: todo.start, end: todo.end, title: todo.title, client: todo.client, minutes: Math.round(hours * 60), hours, hourlyRate, km, kmRate, workAmount, kmAmount, totalAmount: Number((workAmount + kmAmount).toFixed(2)) };
         })
         .filter((line) => line.hours > 0)
         .sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.start).localeCompare(String(b.start)) || String(a.title).localeCompare(String(b.title)));
     }
 
-    function billingDisplayActivities(workerId, month, billedLines) {
-      return (billedLines || [])
-        .filter((line) => String(line.date || "").startsWith(month))
-        .filter((line) => /^\d{2}:\d{2}$/.test(String(line.start || "")) && /^\d{2}:\d{2}$/.test(String(line.end || "")))
-        .filter((line) => Number(line.minutes || 0) > 0)
-        .map((line) => ({ ...line, payable: true }))
-        .sort((a, b) => String(a.date).localeCompare(String(b.date))
-          || String(a.start).localeCompare(String(b.start))
-          || String(a.end).localeCompare(String(b.end)));
+    function billingAdvances(workerId, range) {
+      return (state.advances || []).filter((advance) => advance.person === workerId && advance.date >= range.from && advance.date <= range.to);
     }
-    function billingGapMinutes(previous, next) {
+
+    function billingDisplayActivities(workerId, range, billedLines) {
+      return (billedLines || []).filter((line) => String(line.date || "") >= range.from && String(line.date || "") <= range.to).filter((line) => /^\d{2}:\d{2}$/.test(String(line.start || "")) && /^\d{2}:\d{2}$/.test(String(line.end || ""))).filter((line) => Number(line.minutes || 0) > 0).map((line) => ({ ...line, payable: true })).sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.start).localeCompare(String(b.start)) || String(a.end).localeCompare(String(b.end)));
+    }    function billingGapMinutes(previous, next) {
       return Math.max(0, minutes(next.start) - minutes(previous.end));
     }
 
@@ -5534,145 +5584,96 @@
       select.value = workerId;
     }
 
-    function payrollPeriodEnded(month, now = new Date()) {
-      const match = /^(\d{4})-(\d{2})$/.exec(String(month || ""));
-      if (!match) return false;
-      const year = Number(match[1]);
-      const monthIndex = Number(match[2]);
-      return year < now.getFullYear() || (year === now.getFullYear() && monthIndex < now.getMonth() + 1);
+    function payrollPeriodEnded(range, now = new Date()) {
+      return Boolean(range?.to && range.to < dateKey(now));
     }
 
-    function payrollConfirmationHint(month) {
-      const match = /^(\d{4})-(\d{2})$/.exec(String(month || ""));
-      if (!match) return "Obra\u010dunskega obdobja ni mogo\u010de potrditi.";
-      const nextMonth = new Date(Number(match[1]), Number(match[2]), 1);
-      return `Potrditev obra\u010duna je mogo\u010da po ${nextMonth.toLocaleDateString("sl-SI", { day: "numeric", month: "long", year: "numeric" })}.`;
+    function payrollConfirmationHint(range) {
+      return `Potrditev obračuna je mogoča po ${formatDate(range.to)}.`;
+    }
+    function billingNoteStorageKey(workerId, range) {
+      return `indus-ure:billing-note:${workerId || ""}:${range?.from || ""}:${range?.to || ""}`;
     }
 
-    function billingNoteStorageKey(workerId, month) {
-      return `indus-ure:billing-note:${workerId || ""}:${month || ""}`;
-    }
-
-    function billingNoteValue(workerId, month, payroll) {
+    function billingNoteValue(workerId, range, payroll) {
       if (payroll && ["archiving", "confirmed", "paid"].includes(payroll.status)) return String(payroll.note || "");
-      return localStorage.getItem(billingNoteStorageKey(workerId, month)) ?? String(payroll?.note || "");
+      return localStorage.getItem(billingNoteStorageKey(workerId, range)) ?? String(payroll?.note || "");
     }
+    function renderBillingExplorer() {
+      const box = $("billingExplorer");
+      if (!isAdminView()) { box.replaceChildren(); return; }
+      const rows = state.payrolls.slice().sort((a, b) => String(b.to || b.month || "").localeCompare(String(a.to || a.month || "")) || String(a.updatedAt || "").localeCompare(String(b.updatedAt || "")));
+      box.innerHTML = `<div class="todo-head"><strong>Vsi obračuni</strong><span class="todo-meta">${rows.length}</span></div>${rows.length ? rows.map((payroll) => `<button class="billing-explorer-row" type="button" data-worker-id="${escapeHtml(payroll.workerId)}" data-from="${escapeHtml(payroll.from || `${payroll.month}-01`)}" data-to="${escapeHtml(payroll.to || `${payroll.month}-31`)}"><strong>${escapeHtml(userDisplayName(payroll.workerId))}</strong><span>${escapeHtml(billingRangeLabel(payroll))}</span><span>${money(payroll.payoutAmount ?? payroll.totalAmount)} EUR · ${escapeHtml(payrollStateLabel(payroll, true))}</span></button>`).join("") : `<p class="todo-meta">Še ni shranjenih obračunov.</p>`}`;
+      box.querySelectorAll(".billing-explorer-row").forEach((button) => button.addEventListener("click", () => {
+        state.billingWorkerId = button.dataset.workerId;
+        $("billingFrom").value = button.dataset.from;
+        $("billingTo").value = button.dataset.to;
+        renderBillingView();
+      }));
+    }
+
     function renderBillingView() {
-      const monthInput = $("billingMonth");
-      if (!/^\d{4}-\d{2}$/.test(monthInput.value)) monthInput.value = dateKey(new Date()).slice(0, 7);
-      const month = monthInput.value;
+      const range = billingRange();
       const admin = isAdminView();
       const workerId = billingWorkerId();
       const worker = billingWorker();
       renderBillingWorkerSelect(workerId);
-      const payroll = payrollForBilling(workerId, month);
+      const payroll = payrollForBilling(workerId, range);
       const useSnapshot = Boolean(payroll && ["archiving", "confirmed", "paid"].includes(payroll.status));
-      const lines = useSnapshot ? payroll.lines : billingLiveLines(workerId, month);
-      const totals = useSnapshot ? {
-        minutes: Number(payroll.minutes || 0), hours: Number(payroll.hours || 0), km: Number(payroll.km || 0),
-        workAmount: Number(payroll.workAmount || 0), kmAmount: Number(payroll.kmAmount || 0), totalAmount: Number(payroll.totalAmount || 0)
-      } : billingLineTotals(lines);
+      const lines = useSnapshot ? payroll.lines : billingLiveLines(workerId, range);
+      const baseTotals = useSnapshot ? { minutes: Number(payroll.minutes || 0), hours: Number(payroll.hours || 0), km: Number(payroll.km || 0), workAmount: Number(payroll.workAmount || 0), kmAmount: Number(payroll.kmAmount || 0), totalAmount: Number(payroll.totalAmount || 0) } : billingLineTotals(lines);
+      const advances = useSnapshot ? (payroll.advanceIds || []).map((id) => (state.advances || []).find((item) => item.id === id)).filter(Boolean) : billingAdvances(workerId, range);
+      const advanceAmount = useSnapshot ? Number(payroll.advanceAmount || 0) : Number(advances.reduce((sum, item) => sum + Number(item.amount || 0), 0).toFixed(2));
+      const payoutAmount = Number((baseTotals.totalAmount + advanceAmount).toFixed(2));
       const stateLabel = payrollStateLabel(payroll, admin);
       $("billingViewTitle").textContent = `Obračun ur · ${worker?.name || "Delavec"}`;
-      $("billingSubtitle").textContent = billingMonthLabel(month);
-      const status = $("billingState");
-      status.textContent = stateLabel;
-      status.className = `billing-state ${payroll?.status || ""}`;
-
+      $("billingSubtitle").textContent = billingRangeLabel(range);
+      const status = $("billingState"); status.textContent = stateLabel; status.className = `billing-state ${payroll?.status || ""}`;
       const noteInput = $("billingNote");
-      const noteText = billingNoteValue(workerId, month, payroll);
+      const noteText = billingNoteValue(workerId, range, payroll);
       if (document.activeElement !== noteInput) noteInput.value = noteText;
       noteInput.disabled = Boolean(payroll && ["archiving", "confirmed", "paid"].includes(payroll.status));
-      const noteRead = $("billingNoteRead");
-      noteRead.textContent = noteText ? `Opomba za delavca: ${noteText}` : "";
-      noteRead.classList.toggle("hidden", admin || !noteText);
-      $("billingSummary").innerHTML = [
-        [`${totals.hours.toLocaleString("sl-SI", { maximumFractionDigits: 2 })} h`, "Oddelane ure"],
-        [`${money(totals.workAmount)} EUR`, "Delo"],
-        [`${totals.km.toLocaleString("sl-SI", { maximumFractionDigits: 1 })} km · ${money(totals.kmAmount)} EUR`, "Kilometrina"],
-        [`${money(totals.totalAmount)} EUR`, "Za izplačilo"]
-      ].map(([value, label]) => `<div class="billing-summary-card"><strong>${escapeHtml(value)}</strong><span>${escapeHtml(label)}</span></div>`).join("");
+      const noteRead = $("billingNoteRead"); noteRead.textContent = noteText ? `Opomba za delavca: ${noteText}` : ""; noteRead.classList.toggle("hidden", admin || !noteText);
+      $("billingSummary").innerHTML = [[`${baseTotals.hours.toLocaleString("sl-SI", { maximumFractionDigits: 2 })} h`, "Oddelane ure"], [`${money(baseTotals.workAmount)} EUR`, "Delo"], [`${baseTotals.km.toLocaleString("sl-SI", { maximumFractionDigits: 1 })} km · ${money(baseTotals.kmAmount)} EUR`, "Kilometrina"], [`${money(advanceAmount)} EUR`, "Založeno"], [`${money(payoutAmount)} EUR`, "Za izplačilo"]].map(([value, label]) => `<div class="billing-summary-card"><strong>${escapeHtml(value)}</strong><span>${escapeHtml(label)}</span></div>`).join("");
       const readyForConfirmation = !payroll || ["draft", "archiving"].includes(payroll.status);
-      const periodEnded = payrollPeriodEnded(month);
-      const confirmButton = $("billingConfirm");
-      const showConfirmation = readyForConfirmation && Boolean(lines.length);
-      confirmButton.classList.toggle("hidden", !showConfirmation);
-      confirmButton.disabled = showConfirmation && !periodEnded;
-      confirmButton.textContent = payroll?.status === "archiving" ? "Nadaljuj arhiviranje" : "Potrdi obra\u010dun";
-      confirmButton.title = showConfirmation && !periodEnded ? payrollConfirmationHint(month) : "";
-      const periodHint = $("billingPeriodHint");
-      periodHint.textContent = showConfirmation && !periodEnded ? payrollConfirmationHint(month) : "";
-      periodHint.classList.toggle("hidden", !(showConfirmation && !periodEnded));
+      const periodEnded = payrollPeriodEnded(range);
+      const confirmButton = $("billingConfirm"); const showConfirmation = readyForConfirmation && Boolean(lines.length);
+      confirmButton.classList.toggle("hidden", !showConfirmation); confirmButton.disabled = showConfirmation && !periodEnded; confirmButton.textContent = payroll?.status === "archiving" ? "Nadaljuj arhiviranje" : "Potrdi obračun"; confirmButton.title = showConfirmation && !periodEnded ? payrollConfirmationHint(range) : "";
+      const periodHint = $("billingPeriodHint"); periodHint.textContent = showConfirmation && !periodEnded ? payrollConfirmationHint(range) : ""; periodHint.classList.toggle("hidden", !(showConfirmation && !periodEnded));
       $("billingMarkPaid").classList.toggle("hidden", payroll?.status !== "confirmed");
-      const list = $("billingDayList");
-      const activities = billingDisplayActivities(workerId, month, lines);
-      if (!activities.length) {
-        list.innerHTML = `<div class="billing-empty">V tem obdobju ni zakljucenih ur ali malic.</div>`;
-        return;
+      $("billingAddAdvance").classList.toggle("hidden", !admin || Boolean(payroll && ["confirmed", "paid"].includes(payroll.status)));
+      const list = $("billingDayList"); const activities = billingDisplayActivities(workerId, range, lines);
+      if (!activities.length) list.innerHTML = `<div class="billing-empty">V tem obdobju ni zaključenih ur ali malic.</div>`;
+      else {
+        const days = new Map(); activities.forEach((activity) => { const rows = days.get(activity.date) || []; rows.push(activity); days.set(activity.date, rows); });
+        list.innerHTML = [...days.entries()].map(([date, rows]) => { const day = billingLineTotals(rows); const hasGap = rows.some((row, index) => index > 0 && billingGapMinutes(rows[index - 1], row) > 0); return `<button class="billing-day billing-open-day" type="button" data-date="${escapeHtml(date)}" data-worker-id="${escapeHtml(workerId)}"><strong>${escapeHtml(formatDate(date))}</strong><span class="billing-day-hours">${hasGap ? '<span class="billing-gap-alert" title="Ure niso v neprekinjenem kosu">!</span> ' : ""}${day.hours.toLocaleString("sl-SI", { maximumFractionDigits: 2 })} h</span><span class="billing-day-work">Delo: ${money(day.workAmount)} EUR</span><span class="billing-day-km">Kilometrina: ${money(day.kmAmount)} EUR</span></button>`; }).join("");
+        list.querySelectorAll(".billing-open-day").forEach((button) => button.addEventListener("click", () => openBillingDayTimeline(button.dataset.workerId, button.dataset.date)));
       }
-      const days = new Map();
-      activities.forEach((activity) => {
-        const rows = days.get(activity.date) || [];
-        rows.push(activity);
-        days.set(activity.date, rows);
-      });
-      list.innerHTML = [...days.entries()].map(([date, rows]) => {
-        const day = billingLineTotals(rows);
-        const hasGap = rows.some((row, index) => index > 0 && billingGapMinutes(rows[index - 1], row) > 0);
-        return `<button class="billing-day billing-open-day" type="button" data-date="${escapeHtml(date)}" data-worker-id="${escapeHtml(workerId)}" aria-label="Odpri dnevni pregled za ${escapeHtml(formatDate(date))}">
-          <strong>${escapeHtml(formatDate(date))}</strong>
-          <span class="billing-day-hours">${hasGap ? '<span class="billing-gap-alert" title="Ure niso v neprekinjenem kosu">!</span> ' : ""}${day.hours.toLocaleString("sl-SI", { maximumFractionDigits: 2 })} h</span>
-          <span class="billing-day-work">Delo: ${money(day.workAmount)} EUR</span>
-          <span class="billing-day-km">Kilometrina: ${money(day.kmAmount)} EUR</span>
-        </button>`;
-      }).join("");
-      list.querySelectorAll(".billing-open-day").forEach((button) => {
-        button.addEventListener("click", () => openBillingDayTimeline(button.dataset.workerId, button.dataset.date));
-      });
-    }
-    async function confirmPayroll() {
+      renderBillingExplorer();
+    }    async function confirmPayroll() {
       const workerId = billingWorkerId();
-      const month = $("billingMonth").value;
-      if (!payrollPeriodEnded(month)) throw new Error(payrollConfirmationHint(month));
-      const payroll = payrollForBilling(workerId, month);
-      const note = billingNoteValue(workerId, month, payroll);
+      const range = billingRange();
+      if (!payrollPeriodEnded(range)) throw new Error(payrollConfirmationHint(range));
+      const payroll = payrollForBilling(workerId, range);
+      const note = billingNoteValue(workerId, range, payroll);
       if (payroll && !["draft", "archiving"].includes(payroll.status)) return;
-      const resuming = payroll?.status === "archiving";
-      const message = resuming
-        ? "Arhiviranje je bilo prekinjeno. Nadaljujem varno arhiviranje istega obračuna?"
-        : "Potrdim obračun? Zaključeni vnosi ur se zaklenejo, varno premaknejo v interni arhiv in izginejo iz aktivnega koledarja.";
-      if (!confirm(message)) return;
-      if (payroll) {
-        await changePayroll("confirm", true, note);
-        return;
-      }
-      const data = await api("/api/payrolls", {
-        method: "POST",
-        body: JSON.stringify({ workerId, month, note })
-      });
+      if (!confirm("Potrdim obračun? Zaključeni vnosi ur se zaklenejo, varno premaknejo v interni arhiv in izginejo iz aktivnega koledarja.")) return;
+      if (payroll) { await changePayroll("confirm", true, note); return; }
+      const data = await api("/api/payrolls", { method: "POST", body: JSON.stringify({ workerId, from: range.from, to: range.to, note }) });
       state.payrolls = data.payrolls || state.payrolls;
-      localStorage.removeItem(billingNoteStorageKey(workerId, month));
-      await loadAll();
-      renderBillingView();
+      localStorage.removeItem(billingNoteStorageKey(workerId, range));
+      await loadAll(); renderBillingView();
     }
+
     async function changePayroll(action, skipConfirmation = false, note = undefined) {
-      const payroll = payrollForBilling(billingWorkerId(), $("billingMonth").value);
+      const payroll = payrollForBilling(billingWorkerId(), billingRange());
       if (!payroll) return;
-      const messages = {
-        confirm: "Potrdim obračun? Ure in postavke se zaklenejo, dogodki pa se premaknejo v interni arhiv delavca.",
-        paid: "Označim obračun kot plačan?",
-        reopen: "Ponovno odprem obračun? Ure bo mogoče znova popravljati.",
-        delete: "Izbrišem osnutek obračuna? Opravljenih ur ne bom izbrisal."
-      };
+      const messages = { confirm: "Potrdim obračun? Ure in postavke se zaklenejo, dogodki pa se premaknejo v interni arhiv delavca.", paid: "Označim obračun kot plačan?", reopen: "Ponovno odprem obračun? Ure bo mogoče znova popravljati.", delete: "Izbrišem osnutek obračuna? Opravljenih ur ne bom izbrisal." };
       if (!skipConfirmation && messages[action] && !confirm(messages[action])) return;
-      const data = action === "delete"
-        ? await api(`/api/payrolls/${encodeURIComponent(payroll.id)}`, { method: "DELETE" })
-        : await api(`/api/payrolls/${encodeURIComponent(payroll.id)}`, { method: "PUT", body: JSON.stringify({ action, ...(note === undefined ? {} : { note }) }) });
+      const data = action === "delete" ? await api(`/api/payrolls/${encodeURIComponent(payroll.id)}`, { method: "DELETE" }) : await api(`/api/payrolls/${encodeURIComponent(payroll.id)}`, { method: "PUT", body: JSON.stringify({ action, ...(note === undefined ? {} : { note }) }) });
       state.payrolls = data.payrolls || state.payrolls;
-      await loadAll();
-      renderBillingView();
-    }
-    function renderTodos() {
+      await loadAll(); renderBillingView();
+    }    function renderTodos() {
       renderClientTodoList();
       renderTodoItems();
     }
@@ -6815,8 +6816,8 @@
         end: "",
         status: "execution",
         urgent: false,
-        syncUser: source.syncUser || activeWorkerId(),
-        _hoursAssigneeIds: [source.syncUser || activeWorkerId()],
+        syncUser: activeWorkerId() || source.syncUser || state.user?.id || "",
+        _hoursAssigneeIds: [activeWorkerId() || source.syncUser || state.user?.id || ""],
         photos: (source.photos || []).map((photo) => ({ ...photo })),
         driveFiles: (source.driveFiles || []).map((file) => ({ ...file })),
         billingHourlyRate: source.billingHourlyRate ?? null,
@@ -8132,29 +8133,40 @@
       setView("billing");
       $("toolsMenu").open = false;
     });
-    $("billingMonth").addEventListener("change", renderBillingView);
-    $("billingNote").addEventListener("input", () => {
-      const workerId = billingWorkerId();
-      const month = $("billingMonth").value;
-      localStorage.setItem(billingNoteStorageKey(workerId, month), $("billingNote").value);
-    });
-    $("billingWorker").addEventListener("change", () => {
-      state.billingWorkerId = $("billingWorker").value;
-      localStorage.setItem(billingWorkerKey, state.billingWorkerId);
-      renderBillingView();
-    });
+    ["billingFrom", "billingTo"].forEach((id) => $(id).addEventListener("change", renderBillingView));
+    $("billingNote").addEventListener("input", () => localStorage.setItem(billingNoteStorageKey(billingWorkerId(), billingRange()), $("billingNote").value));
+    $("billingWorker").addEventListener("change", () => { state.billingWorkerId = $("billingWorker").value; localStorage.setItem(billingWorkerKey, state.billingWorkerId); renderBillingView(); });
     $("billingConfirm").addEventListener("click", () => confirmPayroll().catch((error) => alert(error.message)));
     $("billingMarkPaid").addEventListener("click", () => changePayroll("paid").catch((error) => alert(error.message)));
-
+    $("billingAddAdvance").addEventListener("click", openAdvanceDialog);
     ["billingPrevMonth", "billingNextMonth"].forEach((id) => $(id).addEventListener("click", () => {
-      const input = $("billingMonth");
-      if (!/^\d{4}-\d{2}$/.test(input.value)) input.value = dateKey(new Date()).slice(0, 7);
-      const [year, month] = input.value.split("-").map(Number);
-      const next = new Date(year, month - 1 + (id === "billingNextMonth" ? 1 : -1), 1);
-      input.value = `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}`;
-      renderBillingView();
+      const range = billingRange(); const direction = id === "billingNextMonth" ? 1 : -1;
+      const start = parseDate(range.from); const end = parseDate(range.to); const span = Math.round((end - start) / 86400000) + 1;
+      start.setDate(start.getDate() + direction * span); end.setDate(end.getDate() + direction * span);
+      $("billingFrom").value = dateKey(start); $("billingTo").value = dateKey(end); renderBillingView();
     }));
-    $("clientsMenuBtn").addEventListener("click", () => {
+    $("closeAdvanceDialog").addEventListener("click", () => $("advanceDialog").close());
+    $("cancelAdvanceDialog").addEventListener("click", () => $("advanceDialog").close());
+    $("advanceProjectSearch").addEventListener("input", renderAdvanceProjects);
+    $("advanceForm").addEventListener("submit", (event) => { event.preventDefault(); saveAdvanceFromDialog().catch((error) => alert(error.message)); });
+    async function handleAdvanceAttachments(event) {
+      try {
+        const files = [...event.target.files].slice(0, Math.max(0, 8 - state.advancePhotos.length));
+        for (const file of files) {
+          const attachment = await todoAttachmentFromFile(file);
+          if (todoAttachmentsDataLength(state.advancePhotos) + attachment.data.length > 4_800_000) throw new Error("Priloge so skupaj prevelike.");
+          state.advancePhotos.push(attachment);
+        }
+        renderAdvancePhotos();
+      } catch (error) { alert(error.message); } finally { event.target.value = ""; }
+    }
+    ["advancePhotoInput", "advanceCameraInput", "advancePdfInput"].forEach((id) => $(id).addEventListener("change", handleAdvanceAttachments));
+    $("advancePhotoList").addEventListener("click", (event) => {
+      const remove = event.target.closest(".remove-advance-photo");
+      if (remove) { state.advancePhotos = state.advancePhotos.filter((photo) => photo.id !== remove.dataset.photoId); renderAdvancePhotos(); return; }
+      const preview = event.target.closest(".advance-photo-preview");
+      if (preview) { const photo = state.advancePhotos.find((item) => item.id === preview.dataset.photoId); if (photo) openAttachmentPreview(photo); }
+    });    $("clientsMenuBtn").addEventListener("click", () => {
       setView("clients");
       $("toolsMenu").open = false;
     });

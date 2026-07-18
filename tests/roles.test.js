@@ -373,6 +373,23 @@ test("obračun naredi nespremenljiv posnetek ur posameznega delavca", () => {
   assert.deepEqual(payrollForUser(db, db.users.ibro).map((payroll) => payroll.id), ["p-1"]);
   assert.equal(payrollForUser(db, db.users.bojan).length, 1);
 });
+test("obračun podpira poljubno obdobje in prišteje založen denar", () => {
+  const db = {
+    users: { ibro: { id: "ibro", billing: { hourlyRate: 20 } } },
+    settings: { billing: { workerOwnVehicleKmRate: 0.22 } },
+    payrolls: [],
+    debts: [{ id: "a-1", type: "advance", person: "ibro", date: "2026-07-17", amount: 12.5 }],
+    todos: [
+      { id: "before", syncUser: "ibro", status: "execution", date: "2026-07-14", start: "08:00", end: "09:00", title: "Pred" },
+      { id: "inside", syncUser: "ibro", status: "execution", date: "2026-07-16", start: "08:00", end: "10:00", title: "V obdobju" },
+      { id: "after", syncUser: "ibro", status: "execution", date: "2026-07-19", start: "08:00", end: "09:00", title: "Po" }
+    ]
+  };
+  const payroll = buildPayrollSnapshot(db, "ibro", { from: "2026-07-15", to: "2026-07-18" }, { status: "draft" });
+  assert.deepEqual(payroll.lines.map((line) => line.todoId), ["inside"]);
+  assert.equal(payroll.advanceAmount, 12.5);
+  assert.equal(payroll.payoutAmount, 52.5);
+});
 test("obracun je mogoce potrditi sele po koncu izbranega meseca", () => {
   assert.equal(payrollPeriodEnded("2026-07", new Date("2026-07-31T12:00:00Z")), false);
   assert.equal(payrollPeriodEnded("2026-07", new Date("2026-08-01T12:00:00Z")), true);
