@@ -904,16 +904,32 @@
 
     .todo-item.dragging {
       opacity: 0.45;
-      outline: 2px dashed var(--accent);
     }
 
-    .todo-item.drag-target {
-      outline: 2px solid var(--accent);
-      outline-offset: 2px;
+    .todo-drag-ghost {
+      position: fixed;
+      z-index: 1200;
+      display: none;
+      box-sizing: border-box;
+      border: 2px dashed var(--accent);
+      border-radius: 8px;
+      background: rgba(32, 120, 150, 0.08);
+      box-shadow: 0 8px 18px rgba(19, 73, 91, 0.16);
+      pointer-events: none;
+      transform: translate(-50%, -22px);
+      opacity: 0.88;
     }
 
-    .todo-item.drag-target-before { box-shadow: 0 -4px 0 var(--accent); }
-    .todo-item.drag-target-after { box-shadow: 0 4px 0 var(--accent); }
+    .todo-drop-indicator {
+      position: fixed;
+      z-index: 1201;
+      display: none;
+      height: 4px;
+      border-radius: 999px;
+      background: var(--accent);
+      box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.9), 0 2px 7px rgba(19, 73, 91, 0.24);
+      pointer-events: none;
+    }
 
     .drag-handle {
       min-width: 42px;
@@ -7112,12 +7128,38 @@
     }
 
     const TODO_TOUCH_DRAG_HOLD_MS = 180;
+    const TODO_DRAG_AUTOSCROLL_SLOW_PX_PER_SECOND = 84;
+    const TODO_DRAG_AUTOSCROLL_FAST_PX_PER_SECOND = 280;
     let todoPointerDrag = null;
 
     function clearTodoDragVisuals() {
-      document.querySelectorAll(".todo-item.dragging, .todo-item.drag-target").forEach((item) => {
-        item.classList.remove("dragging", "drag-target", "drag-target-before", "drag-target-after");
-      });
+      document.querySelectorAll(".todo-item.dragging").forEach((item) => item.classList.remove("dragging"));
+      document.querySelectorAll(".todo-drag-ghost, .todo-drop-indicator").forEach((element) => element.remove());
+    }
+
+    function updateTodoPointerDragGhost(drag) {
+      const ghost = drag?.ghostElement;
+      if (!ghost) return;
+      ghost.style.left = `${drag.clientX}px`;
+      ghost.style.top = `${drag.clientY + (drag.pointerType === "touch" ? 40 : 0)}px`;
+      ghost.style.display = "block";
+    }
+
+    function updateTodoPointerDragIndicator(drag) {
+      const indicator = drag?.indicatorElement;
+      const target = drag?.targetElement;
+      if (!indicator) return;
+      if (!target) {
+        indicator.style.display = "none";
+        return;
+      }
+      const rect = target.getBoundingClientRect();
+      const left = Math.max(8, rect.left + 8);
+      const width = Math.max(24, Math.min(window.innerWidth - left - 8, rect.width - 16));
+      indicator.style.left = `${left}px`;
+      indicator.style.top = `${drag.targetPlacement === "before" ? rect.top - 2 : rect.bottom - 2}px`;
+      indicator.style.width = `${width}px`;
+      indicator.style.display = "block";
     }
 
     function updateTodoPointerDragTarget(clientX, clientY) {
@@ -7133,15 +7175,11 @@
         targetId = target.dataset.todoId;
         targetElement = target;
       }
-      if (drag.targetElement === targetElement && drag.targetPlacement === targetPlacement) {
-        drag.targetId = targetId;
-        return;
-      }
-      drag.targetElement?.classList.remove("drag-target", "drag-target-before", "drag-target-after");
       drag.targetElement = targetElement;
       drag.targetId = targetId;
       drag.targetPlacement = targetPlacement;
-      if (targetElement) targetElement.classList.add("drag-target", `drag-target-${targetPlacement}`);
+      updateTodoPointerDragGhost(drag);
+      updateTodoPointerDragIndicator(drag);
     }
 
     function todoPointerDragScrollVelocity(clientY) {
@@ -7151,7 +7189,8 @@
       const direction = topDistance ? -1 : bottomDistance ? 1 : 0;
       const proximity = Math.min(1, Math.max(topDistance, bottomDistance) / edge);
       if (!direction) return 0;
-      return direction * (28 + (140 - 28) * proximity ** 2);
+      return direction * (TODO_DRAG_AUTOSCROLL_SLOW_PX_PER_SECOND
+        + (TODO_DRAG_AUTOSCROLL_FAST_PX_PER_SECOND - TODO_DRAG_AUTOSCROLL_SLOW_PX_PER_SECOND) * proximity ** 2);
     }
 
     function tickTodoPointerDragAutoScroll(timestamp) {
@@ -7178,6 +7217,7 @@
       clearTodoDragVisuals();
       return drag;
     }
+
     function activateTodoPointerDrag() {
       const drag = todoPointerDrag;
       if (!drag || drag.active) return;
@@ -7185,6 +7225,16 @@
       drag.active = true;
       drag.handle.classList.remove("drag-armed");
       drag.item.classList.add("dragging");
+      const sourceRect = drag.item.getBoundingClientRect();
+      drag.ghostElement = document.createElement("div");
+      drag.ghostElement.className = "todo-drag-ghost";
+      drag.ghostElement.setAttribute("aria-hidden", "true");
+      drag.ghostElement.style.width = `${Math.max(120, Math.min(sourceRect.width, window.innerWidth - 24))}px`;
+      drag.ghostElement.style.height = `${Math.max(58, Math.min(sourceRect.height, 150))}px`;
+      drag.indicatorElement = document.createElement("div");
+      drag.indicatorElement.className = "todo-drop-indicator";
+      drag.indicatorElement.setAttribute("aria-hidden", "true");
+      document.body.append(drag.ghostElement, drag.indicatorElement);
       updateTodoPointerDragTarget(drag.clientX, drag.clientY);
       drag.autoScrollAt = performance.now();
       drag.autoScrollFrame = requestAnimationFrame(tickTodoPointerDragAutoScroll);
@@ -7212,7 +7262,9 @@
         clientY: event.clientY,
         autoScrollFrame: 0,
         autoScrollAt: performance.now(),
-        holdTimer: 0
+        holdTimer: 0,
+        ghostElement: null,
+        indicatorElement: null
       };
       try {
         event.currentTarget.setPointerCapture?.(event.pointerId);
@@ -7243,6 +7295,7 @@
       drag.clientY = event.clientY;
       updateTodoPointerDragTarget(event.clientX, event.clientY);
     }
+
     function finishTodoPointerDrag(event) {
       if (!todoPointerDrag || todoPointerDrag.pointerId !== event.pointerId) return;
       event.preventDefault();
