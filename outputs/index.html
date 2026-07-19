@@ -3451,10 +3451,10 @@
           <input id="todoFormTask" type="text" placeholder="Ime opravila" list="todoFormTaskSuggestions">
           <datalist id="todoFormTaskSuggestions"></datalist>
         </label>
-        <label>Opis del
+        <label><span id="todoFormNotesLabel">Opis del</span>
           <textarea id="todoFormNotes" placeholder="Opi&#353;i, kaj se bo delalo"></textarea>
         </label>
-        <label>Material
+        <label id="todoFormMaterialField"><span>Material</span>
           <textarea id="todoFormMaterial" placeholder="Vpi&#353;i porabljen material"></textarea>
         </label>
         <label class="todo-form-urgent" id="todoFormUrgentField">
@@ -3867,7 +3867,7 @@
       { id: "purchase", label: "Nabava" }
     ];
     const todoStatusById = Object.fromEntries(todoStatusDefinitions.map((status) => [status.id, status]));
-
+    const todoLogisticsStatusIds = new Set(["order", "order_car", "order_warehouse", "ordered", "add_to_car", "return_and_bill", "return"]);
     function todoStatus(status) {
       return todoStatusById[status] || todoStatusById.open;
     }
@@ -7482,7 +7482,11 @@
           ? ($("todoFormId").value ? "Uredi vpis ur" : "Novo zaključeno opravilo")
           : $("todoFormId").value ? "Uredi opravilo" : "Novo opravilo";
       ["todoFormClientField", "todoFormAssigneeField", "todoFormAttachments"].forEach((id) => $(id).classList.toggle("hidden", meal));
-      ["todoFormTask", "todoFormNotes", "todoFormMaterial"].forEach((id) => $(id).closest("label").classList.toggle("hidden", meal));
+      const logisticsStatus = todoLogisticsStatusIds.has($("todoFormStatus").value);
+      ["todoFormTask", "todoFormNotes"].forEach((id) => $(id).closest("label").classList.toggle("hidden", meal));
+      $("todoFormMaterialField").classList.toggle("hidden", meal || logisticsStatus);
+      $("todoFormNotesLabel").textContent = logisticsStatus ? "Opis" : "Opis del";
+      $("todoFormNotes").placeholder = logisticsStatus ? "Vpi\u0161i opis" : "Opi\u0161i, kaj se bo delalo";
       const showWorkerMileage = completed && !meal;
       const showHourlyRate = state.user?.role === "boss" && completed && !meal;
       const showClientMileage = !meal && (isAdminView() || Boolean(state.todoHoursSourceId) || state.todoStandaloneHours);
