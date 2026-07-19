@@ -2533,7 +2533,33 @@
       line-height: 1.4;
     }
 
-    .client-billing-summary { grid-template-columns: repeat(4, minmax(150px, 1fr)); }
+    .client-billing-summary { display: block; }
+
+    .client-billing-summary-list {
+      display: grid;
+      margin: 0;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fff;
+    }
+
+    .client-billing-summary-list > div {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 16px;
+      min-height: 48px;
+      padding: 10px 13px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .client-billing-summary-list > div:last-child { border-bottom: 0; }
+    .client-billing-summary-list dt { margin: 0; color: var(--muted); font-size: 14px; font-weight: 700; }
+    .client-billing-summary-list dd { margin: 0; text-align: right; color: var(--ink); font-size: 17px; font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .client-billing-summary-list .is-total { background: #e8f3f0; }
+    .client-billing-summary-list .is-total dt,
+    .client-billing-summary-list .is-total dd { color: #07536d; font-weight: 900; }
 
     .client-billing-detail { display: grid; gap: 0; }
 
@@ -2664,7 +2690,6 @@
       flex-wrap: wrap;
     }
 
-    .client-billing-summary { grid-template-columns: repeat(5, minmax(145px, 1fr)); }
 
     .client-billing-client-overview {
       display: grid;
@@ -3083,7 +3108,6 @@
       .client-billing-controls .client-billing-client,
       .client-billing-controls .client-billing-sort-control,
       .client-billing-controls > button { grid-column: 1 / -1; }
-      .client-billing-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .client-billing-client-card-head { display: grid; gap: 3px; }
       .client-billing-client-travel { grid-template-columns: 1fr; }
       .client-billing-row { grid-template-columns: 1fr; gap: 8px; padding: 12px 0; }
@@ -3312,7 +3336,6 @@
         <div class="client-billing-intro">
           <div>
             <h2>Obra&#269;un strank</h2>
-            <p>Najprej izberi stranko, nato odpri njeno kronolo&#353;ko poro&#269;ilo izvedenih storitev. Cena dela se zaenkrat ne obra&#269;unava samodejno, ker je urna postavka delavca lo&#269;ena od cene za stranko.</p>
           </div>
           <div class="client-billing-intro-actions">
             <button class="secondary hidden" id="reportBackToClients" type="button">&larr; Vse stranke</button>
@@ -3343,7 +3366,7 @@
           <button class="secondary" id="clearReportClient" type="button">Po&#269;isti iskanje</button>
         </div>
         <p class="todo-meta client-billing-notice" id="reportBillingNotice"></p>
-        <div class="report-grid client-billing-summary" id="reportSummary"></div>
+        <div class="client-billing-summary" id="reportSummary"></div>
         <div class="client-detail client-billing-detail">
           <div class="todo-head">
             <div>
@@ -8007,8 +8030,8 @@
       return `<article class="client-billing-row">
         <div class="client-billing-when"><strong>${todo.date ? formatDate(todo.date) : "Brez datuma"}</strong><span>${escapeHtml(time)}</span></div>
         <div class="client-billing-main">
-          <div class="client-billing-title-row"><span class="client-billing-client-name">${escapeHtml(todo.client || "Brez stranke")}</span><h3>${escapeHtml(todo.title || "Brez naziva")}</h3></div>
-          <div class="client-billing-meta"><span>Izvajalec: ${escapeHtml(todoAssigneeNames(todo))}</span>${todo.sourceProjectTodoId ? "<span>Vpis ur na projekt</span>" : ""}${clientBill ? `<span>Obračun stranki potrjen ${escapeHtml(formatDateTime(clientBill.confirmedAt))}</span>` : ""}</div>
+          <div class="client-billing-title-row"><h3>${escapeHtml(todo.title || "Brez naziva")}</h3></div>
+          <div class="client-billing-meta"><span>Izvajalec: ${escapeHtml(todoAssigneeNames(todo))}</span>${clientBill ? `<span>Obračun stranki potrjen ${escapeHtml(formatDateTime(clientBill.confirmedAt))}</span>` : ""}</div>
           <div class="client-billing-charges">${charges}</div>
           ${details}
         </div>
@@ -8041,29 +8064,31 @@
       $("reportLineCount").textContent = detail
         ? `${totals.count} ${totals.count === 1 ? "vpis" : "vpisov"}`
         : `${summaries.length} ${summaries.length === 1 ? "stranka" : "strank"}`;
-      $("reportBillingNotice").textContent = detail
+      const reportNotice = detail
         ? (pendingClientBillLines.length
-          ? `${pendingClientBillLines.length} ${pendingClientBillLines.length === 1 ? "vpis čaka" : "vpisov čaka"} na potrditev obračuna stranki. V aktivni arhiv se premaknejo šele, ko je potrjen tudi obračun posameznega delavca.`
-          : "Vsi prikazani vpisi so že vključeni v potrjen obračun stranki. Arhiviranje je odvisno še od potrditve obračuna posameznega delavca.")
+          ? `\u010caka na obra\u010dun stranki: ${pendingClientBillLines.length} ${pendingClientBillLines.length === 1 ? "vpis" : "vpisov"}. Arhiviranje se izvede po obeh obra\u010dunih.`
+          : "Obra\u010dun stranki je potrjen. Vpis se arhivira po potrditvi obra\u010duna izvajalca.")
         : `Izberi stranko za njen podroben kronolo\u0161ki pregled izvedenih storitev. Seznam je razvr\u0161\u010den po ${reportClientSortLabel()}.`;
+      $("reportBillingNotice").textContent = reportNotice;
       $("reportBackToClients").classList.toggle("hidden", !detail);
       $("confirmClientBill").classList.toggle("hidden", !detail || !pendingClientBillLines.length);
       $("confirmClientBill").disabled = !detail || !pendingClientBillLines.length;
       $("confirmClientBill").textContent = `Potrdi obračun stranki${pendingClientBillLines.length ? ` (${pendingClientBillLines.length})` : ""}`;
       $("clearReportClient").textContent = detail ? "Počisti izbor" : "Počisti iskanje";
       $("exportReportExcel").textContent = detail ? "Izvozi poročilo" : "Izvozi evidenco";
-      $("reportSummary").innerHTML = detail ? [
-        ["Zaključene storitve", `${totals.count}`],
+      const summaryRows = detail ? [
+        ["Zaklju\u010dene storitve", `${totals.count}`],
         ["Opravljene ure", `${reportNumber(totals.hours)} h`],
-        ["Stroški prevoza (obe smeri) – osebni avto", reportTransportText(totals.personalKm, totals.personalAmount)],
-        ["Stroški prevoza (obe smeri) – kombi", reportTransportText(totals.vanKm, totals.vanAmount)],
-        ["Stroški prevoza skupaj", `${money(totals.clientKmAmount)} EUR`]
+        ["Stro\u0161ki prevoza (obe smeri) \u2013 osebni avto", reportTransportText(totals.personalKm, totals.personalAmount)],
+        ["Stro\u0161ki prevoza (obe smeri) \u2013 kombi", reportTransportText(totals.vanKm, totals.vanAmount)],
+        ["Stro\u0161ki prevoza skupaj", `${money(totals.clientKmAmount)} EUR`]
       ] : [
         ["Stranke", `${summaries.length}`],
-        ["Zaključene storitve", `${totals.count}`],
+        ["Zaklju\u010dene storitve", `${totals.count}`],
         ["Opravljene ure", `${reportNumber(totals.hours)} h`],
-        ["Stroški prevoza skupaj", `${money(totals.clientKmAmount)} EUR`]
-      ].map(([label, value]) => `<div class="stat"><strong>${escapeHtml(value)}</strong><span>${escapeHtml(label)}</span></div>`).join("");
+        ["Stro\u0161ki prevoza skupaj", `${money(totals.clientKmAmount)} EUR`]
+      ];
+      $("reportSummary").innerHTML = `<dl class="client-billing-summary-list">${summaryRows.map(([label, value]) => `<div class="${label.endsWith("skupaj") ? "is-total" : ""}"><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join("")}</dl>`;
       $("clientDetailList").classList.toggle("client-billing-client-overview", !detail);
       $("clientDetailList").innerHTML = detail
         ? lines.map(renderClientBillingRow).join("") || `<p class="todo-meta">Za ta izbor ni zaključenih storitev.</p>`
