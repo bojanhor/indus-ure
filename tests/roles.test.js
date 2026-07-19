@@ -402,6 +402,19 @@ test("obračun podpira poljubno obdobje in prišteje založen denar", () => {
   assert.equal(payroll.advanceAmount, 12.5);
   assert.equal(payroll.payoutAmount, 52.5);
 });
+test("osebni nakup se odšteje od izplačila delavca", () => {
+  const db = {
+    users: { ibro: { id: "ibro", billing: { hourlyRate: 20 } } },
+    settings: { billing: { workerOwnVehicleKmRate: 0.22 } },
+    payrolls: [],
+    debts: [{ id: "purchase-1", type: "personal_purchase", person: "ibro", date: "2026-07-17", amount: 7.5 }],
+    todos: [{ id: "inside", syncUser: "ibro", status: "execution", date: "2026-07-16", start: "08:00", end: "10:00", title: "V obdobju" }]
+  };
+  const payroll = buildPayrollSnapshot(db, "ibro", { from: "2026-07-15", to: "2026-07-18" }, { status: "draft" });
+  assert.deepEqual(payroll.personalPurchaseIds, ["purchase-1"]);
+  assert.equal(payroll.personalPurchaseAmount, 7.5);
+  assert.equal(payroll.payoutAmount, 32.5);
+});
 test("obracun je mogoce potrditi sele po koncu izbranega meseca", () => {
   assert.equal(payrollPeriodEnded("2026-07", new Date("2026-07-31T12:00:00Z")), false);
   assert.equal(payrollPeriodEnded("2026-07", new Date("2026-08-01T12:00:00Z")), true);

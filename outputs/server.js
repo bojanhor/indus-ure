@@ -855,8 +855,8 @@ function normalizeDb(db = {}) {
   if (pruneUnusedTodoAttachments(db)) changed = true;
 
   db.debts = db.debts.map((debt) => {
-    const type = debt.type === "advance" ? "advance" : "debt";
-    const person = cleanUserId(debt.person) || (type === "advance" ? "" : (["ibro", "bojan"].includes(debt.person) ? debt.person : "ibro"));
+    const type = ["advance", "personal_purchase"].includes(debt.type) ? debt.type : "debt";
+    const person = cleanUserId(debt.person) || (["advance", "personal_purchase"].includes(type) ? "" : (["ibro", "bojan"].includes(debt.person) ? debt.person : "ibro"));
     const next = {
       id: debt.id || crypto.randomUUID(),
       type,
@@ -874,7 +874,7 @@ function normalizeDb(db = {}) {
       updatedByName: debt.updatedByName || debt.createdByName || "",
       updatedAt: debt.updatedAt || debt.createdAt || new Date().toISOString()
     };
-    if (type === "advance") next.photos = storeTodoAttachments(db, next, { id: next.createdBy, name: next.createdByName }).photos;
+    if (["advance", "personal_purchase"].includes(type)) next.photos = storeTodoAttachments(db, next, { id: next.createdBy, name: next.createdByName }).photos;
     return next;
   }).filter((debt) => debt.amount || debt.reason);
 
@@ -1081,6 +1081,10 @@ function visibleDebtsForUser(db, user) {
 
 function visibleAdvancesForUser(db, user) {
   return visibleDebtsForUser(db, user).filter((debt) => debt.type === "advance");
+}
+
+function visiblePersonalPurchasesForUser(db, user) {
+  return visibleDebtsForUser(db, user).filter((debt) => debt.type === "personal_purchase");
 }
 
 function canManageEntry(user, entry) {
@@ -1364,6 +1368,10 @@ function payrollAdvances(db, workerId, range) {
   return (db.debts || []).filter((item) => item.type === "advance" && item.person === workerId && item.date >= range.from && item.date <= range.to);
 }
 
+function payrollPersonalPurchases(db, workerId, range) {
+  return (db.debts || []).filter((item) => item.type === "personal_purchase" && item.person === workerId && item.date >= range.from && item.date <= range.to);
+}
+
 function normalizePayroll(input, db) {
   const workerId = cleanUserId(input?.workerId);
   const range = payrollRange(input);
@@ -1399,6 +1407,8 @@ function normalizePayroll(input, db) {
   const totals = payrollTotals(lines);
   const advanceIds = [...new Set((Array.isArray(input?.advanceIds) ? input.advanceIds : []).map(String).filter(Boolean))];
   const advanceAmount = Number((Number(input?.advanceAmount || 0)).toFixed(2));
+  const personalPurchaseIds = [...new Set((Array.isArray(input?.personalPurchaseIds) ? input.personalPurchaseIds : []).map(String).filter(Boolean))];
+  const personalPurchaseAmount = Number((Number(input?.personalPurchaseAmount || 0)).toFixed(2));
   const status = PAYROLL_STATUSES.has(input?.status) ? input.status : "draft";
   const payments = (Array.isArray(input?.payments) ? input.payments : []).map((payment) => {
     const amount = nonnegativeNumber(payment?.amount, null, 1_000_000);
@@ -1417,9 +1427,11 @@ function normalizePayroll(input, db) {
     lines,
     advanceIds,
     advanceAmount,
-    payoutAmount: Number((totals.totalAmount + advanceAmount).toFixed(2)),
+    personalPurchaseIds,
+    personalPurchaseAmount,
+    payoutAmount: Math.max(0, Number((totals.totalAmount + advanceAmount - personalPurchaseAmount).toFixed(2))),
     payments,
-    paidAmount: Number((status === "paid" && payments.length === 0 ? totals.totalAmount + advanceAmount : payments.reduce((sum, payment) => sum + payment.amount, 0)).toFixed(2)),
+    paidAmount: Number((status === "paid" && payments.length === 0 ? Math.max(0, totals.totalAmount + advanceAmount - personalPurchaseAmount) : payments.reduce((sum, payment) => sum + payment.amount, 0)).toFixed(2)),
     remainingAmount: 0,
     ...totals,
     createdBy: String(input?.createdBy || "system"),
@@ -1456,7 +1468,8 @@ function buildPayrollSnapshot(db, workerId, rangeInput, previous = {}, note = un
     .filter(Boolean)
     .sort((a, b) => a.date.localeCompare(b.date) || a.start.localeCompare(b.start) || a.title.localeCompare(b.title));
   const advances = payrollAdvances(db, workerId, range);
-  return normalizePayroll({ ...previous, workerId, ...range, lines, advanceIds: advances.map((item) => item.id), advanceAmount: advances.reduce((total, item) => total + Number(item.amount || 0), 0), note: note === undefined ? previous.note : note }, db);
+  const personalPurchases = payrollPersonalPurchases(db, workerId, range);
+  return normalizePayroll({ ...previous, workerId, ...range, lines, advanceIds: advances.map((item) => item.id), advanceAmount: advances.reduce((total, item) => total + Number(item.amount || 0), 0), personalPurchaseIds: personalPurchases.map((item) => item.id), personalPurchaseAmount: personalPurchases.reduce((total, item) => total + Number(item.amount || 0), 0), note: note === undefined ? previous.note : note }, db);
 }
 
 function payrollForUser(db, user) {
@@ -1796,6 +1809,15 @@ function cleanAdvance(input) {
       createdAt: photo.createdAt || new Date().toISOString()
     })).filter((photo) => validTodoAttachmentDataUrl(photo.data) || validTodoAttachmentId(photo.attachmentId)).slice(0, 8))
   };
+}
+
+function cleanPersonalPurchase(input) {
+  return { ...cleanAdvance(input), type: "personal_purchase", projectTodoId: "" };
+}
+
+function validatePersonalPurchase(purchase, db) {
+  const error = validateAdvance(purchase, db);
+  return error ? error.replace("zalozenega denarja", "osebnega nakupa") : "";
 }
 
 function validateAdvance(advance, db) {
@@ -3358,6 +3380,70 @@ async function handleApi(req, res) {
       pruneUnusedTodoAttachments(db);
       await writeDbAsync(db);
       sendJson(res, 200, { advances: visibleAdvancesForUser(db, user) });
+      return;
+    }
+    if (url.pathname === "/api/personal-purchases" && req.method === "GET") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      const db = await readDbAsync();
+      sendJson(res, 200, { purchases: visiblePersonalPurchasesForUser(db, user) });
+      return;
+    }
+
+    if (url.pathname === "/api/personal-purchases" && req.method === "POST") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      const db = await readDbAsync();
+      let purchase = cleanPersonalPurchase(await readBody(req));
+      if (user.role !== "boss") purchase.person = user.id;
+      const validation = validatePersonalPurchase(purchase, db);
+      if (validation) {
+        sendJson(res, 400, { error: validation });
+        return;
+      }
+      purchase = storeTodoAttachments(db, purchase, user);
+      const now = new Date().toISOString();
+      db.debts.push({
+        id: crypto.randomUUID(),
+        ...purchase,
+        createdBy: user.id,
+        createdByName: user.name,
+        createdAt: now,
+        updatedBy: user.id,
+        updatedByName: user.name,
+        updatedAt: now
+      });
+      await writeDbAsync(db);
+      sendJson(res, 201, { purchases: visiblePersonalPurchasesForUser(db, user) });
+      return;
+    }
+
+    const personalPurchaseMatch = url.pathname.match(/^\/api\/personal-purchases\/([^/]+)$/);
+    if (personalPurchaseMatch && req.method === "DELETE") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      const id = decodeURIComponent(personalPurchaseMatch[1]);
+      const db = await readDbAsync();
+      const index = db.debts.findIndex((item) => item.id === id && item.type === "personal_purchase");
+      if (index < 0) {
+        sendJson(res, 404, { error: "Osebni nakup ne obstaja." });
+        return;
+      }
+      const purchase = db.debts[index];
+      if (user.role !== "boss" && purchase.person !== user.id) {
+        sendJson(res, 403, { error: "Lahko izbrišeš samo svoj osebni nakup." });
+        return;
+      }
+      const usedInConfirmedPayroll = (db.payrolls || []).some((payroll) => ["archiving", "confirmed", "paid"].includes(payroll.status)
+        && (payroll.personalPurchaseIds || []).map(String).includes(id));
+      if (usedInConfirmedPayroll) {
+        sendJson(res, 409, { error: "Osebni nakup je že del potrjenega obračuna. Šef mora obračun najprej ponovno odpreti." });
+        return;
+      }
+      db.debts.splice(index, 1);
+      pruneUnusedTodoAttachments(db);
+      await writeDbAsync(db);
+      sendJson(res, 200, { purchases: visiblePersonalPurchasesForUser(db, user) });
       return;
     }
     if (url.pathname === "/api/debts" && req.method === "GET") {

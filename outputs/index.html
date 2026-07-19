@@ -1683,13 +1683,31 @@
       text-decoration: line-through;
     }
 
-    .day-todo-client {
+    .day-todo-time,
+    .day-todo-client,
+    .day-todo-title {
       display: block;
-      margin-top: 2px;
+      min-width: 0;
       overflow-wrap: anywhere;
       white-space: normal;
+    }
+
+    .day-todo-time {
+      font-size: 0.92em;
+      font-weight: 800;
+      font-variant-numeric: tabular-nums;
+      opacity: 0.92;
+    }
+
+    .day-todo-client {
+      margin-top: 2px;
       font-weight: 700;
       opacity: 0.88;
+    }
+
+    .day-todo-title {
+      margin-top: 2px;
+      font-weight: 800;
     }
 
     .calendar-shell {
@@ -2648,8 +2666,11 @@
         overflow: hidden;
         text-overflow: ellipsis;
       }
-      .day-todo small:not(.day-todo-client) { display: none; }
-      .day-todo .day-todo-client { display: block; font-size: 9px; line-height: 1.1; }
+      .day-todo .day-todo-time,
+      .day-todo .day-todo-client,
+      .day-todo .day-todo-title { display: block; font-size: 9px; line-height: 1.1; overflow-wrap: anywhere; }
+      .day-todo .day-todo-client,
+      .day-todo .day-todo-title { margin-top: 2px; }
       .todo-item {
         grid-template-columns: 72px minmax(0, 1fr);
         gap: 8px;
@@ -2904,7 +2925,7 @@
           <p class="todo-meta hidden" id="billingNoteRead"></p>
         </div>
         <div class="billing-actions" id="billingActions">
-                    <button class="secondary" id="billingAddAdvance" type="button">Založil denar</button>
+                    <button class="secondary" id="billingAddAdvance" type="button">Založil denar</button><button class="secondary" id="billingAddPurchase" type="button">Osebni nakup</button>
           <button class="secondary hidden" id="billingAddPayment" type="button">Delno izplačilo</button>
 <button class="primary hidden" id="billingConfirm" type="button">Potrdi obra&#269;un</button>
           <button class="primary hidden" id="billingMarkPaid" type="button">Ozna&#269;i pla&#269;ano</button>
@@ -3235,12 +3256,12 @@
   </dialog>
   <dialog id="advanceDialog">
     <form method="dialog" id="advanceForm">
-      <div class="modal-head"><h3>Založil denar</h3><button class="icon-btn" id="closeAdvanceDialog" type="button" title="Zapri">&times;</button></div>
+      <div class="modal-head"><h3 id="advanceDialogTitle">Založil denar</h3><button class="icon-btn" id="closeAdvanceDialog" type="button" title="Zapri">&times;</button></div>
       <div class="modal-body">
         <div class="modal-grid"><label>Datum <input id="advanceDate" type="date"></label><label>Znesek (EUR) <input id="advanceAmount" type="number" min="0.01" step="0.01" inputmode="decimal"></label></div>
         <label>Delavec <select id="advanceWorker"></select></label>
         <label>Komentar <textarea id="advanceReason" rows="3" placeholder="Kaj je bilo založeno in zakaj"></textarea></label>
-        <label>Poveži s projektom (testno)<input id="advanceProjectSearch" type="search" placeholder="Išči odprto opravilo"><select id="advanceProject"><option value="">Brez povezave</option></select></label>
+        <label id="advanceProjectField">Poveži s projektom (testno)<input id="advanceProjectSearch" type="search" placeholder="Išči odprto opravilo"><select id="advanceProject"><option value="">Brez povezave</option></select></label>
         <div class="todo-form-attachments"><strong>Dokazilo</strong><div id="advancePhotoList"></div><div class="todo-form-attachment-actions"><label class="secondary add-photo">Galerija slik<input class="hidden-file" id="advancePhotoInput" type="file" accept="image/*" multiple></label><label class="secondary add-photo">Fotografiraj<input class="hidden-file" id="advanceCameraInput" type="file" accept="image/*" capture="environment"></label><label class="secondary add-photo">PDF / datoteka<input class="hidden-file" id="advancePdfInput" type="file" accept="application/pdf,.pdf" multiple></label></div></div>
         <div class="actions"><button class="secondary" id="cancelAdvanceDialog" type="button">Prekliči</button><button class="primary" id="saveAdvance" type="submit">Shrani</button></div>
       </div>
@@ -3586,6 +3607,8 @@
       todoMutationPending: 0,
       debts: [],
       advances: [],
+      personalPurchases: [],
+      financialEntryMode: "advance",
       clients: [],
       selectedClient: "",
       todoHoursSourceId: "",
@@ -3807,6 +3830,7 @@
         todos: (state.todos || []).map(offlineSnapshotTodo),
         debts: JSON.parse(JSON.stringify(state.debts || [])),
         advances: JSON.parse(JSON.stringify(state.advances || [])),
+        personalPurchases: JSON.parse(JSON.stringify(state.personalPurchases || [])),
         clients: JSON.parse(JSON.stringify(state.clients || [])),
         settings: JSON.parse(JSON.stringify(state.settings || {})),
         billingLocks: JSON.parse(JSON.stringify(state.billingLocks || [])),
@@ -3845,6 +3869,7 @@
       state.todos = snapshot.todos || [];
       state.debts = snapshot.debts || [];
       state.advances = snapshot.advances || [];
+      state.personalPurchases = snapshot.personalPurchases || [];
       state.clients = snapshot.clients || [];
       state.settings = snapshot.settings || state.settings;
       state.billingLocks = snapshot.billingLocks || [];
@@ -4338,11 +4363,12 @@
       const workerBillingRequest = state.user?.role === "boss"
         ? api("/api/workers/billing")
         : Promise.resolve({ workers: [] });
-      const [entries, todos, debts, advances, clients, settings, workerBilling, payrolls] = await Promise.all([
+      const [entries, todos, debts, advances, personalPurchases, clients, settings, workerBilling, payrolls] = await Promise.all([
         api("/api/entries"),
         api("/api/todos"),
         api("/api/debts"),
         api("/api/advances"),
+        api("/api/personal-purchases"),
         api("/api/clients"),
         api("/api/settings"),
         workerBillingRequest,
@@ -4352,6 +4378,7 @@
       if (canApplyTodoSnapshot(todoRevision, todoSnapshotWasStable)) state.todos = todos.todos || [];
       state.debts = debts.debts || [];
       state.advances = advances.advances || [];
+      state.personalPurchases = personalPurchases.purchases || [];
       state.clients = clients.clients || [];
       state.settings = settings.settings || state.settings;
       state.billingLocks = settings.billingLocks || [];
@@ -4549,23 +4576,32 @@
       $("advancePhotoList").innerHTML = state.advancePhotos.map((photo) => `<div class="todo-form-photo-row"><button class="todo-form-attachment-preview advance-photo-preview" type="button" data-photo-id="${escapeHtml(photo.id)}"><span class="todo-form-attachment-thumb">${isPdfAttachment(photo) ? pdfThumbnailMarkup(photo) : `<img src="${escapeHtml(attachmentSource(photo))}" alt="">`}</span><span>${escapeHtml(photo.name || "Priloga")}</span></button><button class="danger remove-advance-photo" type="button" data-photo-id="${escapeHtml(photo.id)}">Odstrani</button></div>`).join("");
     }
 
-    function openAdvanceDialog() {
+    function openAdvanceDialog(mode = "advance") {
+      state.financialEntryMode = mode === "purchase" ? "purchase" : "advance";
+      const purchase = state.financialEntryMode === "purchase";
       const range = billingRange();
       $("advanceDate").value = range.to;
       $("advanceAmount").value = ""; $("advanceReason").value = ""; $("advanceProjectSearch").value = ""; state.advancePhotos = [];
+      $("advanceDialogTitle").textContent = purchase ? "Osebni nakup (v odbitek)" : "Založil denar";
+      $("saveAdvance").textContent = purchase ? "Dodaj v odbitek" : "Shrani";
+      $("advanceProjectField").classList.toggle("hidden", purchase);
       const workerId = billingWorkerId();
       const workers = isAdminView() ? state.users : [activeWorker()];
       $("advanceWorker").innerHTML = workers.map((worker) => `<option value="${escapeHtml(worker.id)}">${escapeHtml(worker.name || worker.id)}</option>`).join("");
       $("advanceWorker").value = workerId;
       $("advanceWorker").disabled = !isAdminView();
+      $("advanceWorker").closest("label").classList.toggle("hidden", state.user?.role !== "boss");
       renderAdvanceProjects(); renderAdvancePhotos();
       ["advancePhotoInput", "advanceCameraInput", "advancePdfInput"].forEach((id) => { $(id).value = ""; });
       $("advanceDialog").showModal();
     }
 
     async function saveAdvanceFromDialog() {
-      const data = await api("/api/advances", { method: "POST", body: JSON.stringify({ person: $("advanceWorker").value, date: $("advanceDate").value, amount: Number($("advanceAmount").value || 0), reason: $("advanceReason").value.trim(), projectTodoId: $("advanceProject").value, photos: state.advancePhotos }) });
-      state.advances = data.advances || state.advances;
+      const purchase = state.financialEntryMode === "purchase";
+      const endpoint = purchase ? "/api/personal-purchases" : "/api/advances";
+      const data = await api(endpoint, { method: "POST", body: JSON.stringify({ person: $("advanceWorker").value, date: $("advanceDate").value, amount: Number($("advanceAmount").value || 0), reason: $("advanceReason").value.trim(), projectTodoId: purchase ? "" : $("advanceProject").value, photos: state.advancePhotos }) });
+      if (purchase) state.personalPurchases = data.purchases || state.personalPurchases;
+      else state.advances = data.advances || state.advances;
       $("advanceDialog").close(); await loadAll(); renderBillingView();
     }
 
@@ -4577,6 +4613,13 @@
       renderBillingView();
     }
 
+    async function deletePersonalPurchaseFromBilling(id) {
+      if (!confirm("Izbrišem osebni nakup?")) return;
+      const data = await api(`/api/personal-purchases/${encodeURIComponent(id)}`, { method: "DELETE" });
+      state.personalPurchases = data.purchases || state.personalPurchases;
+      await loadAll();
+      renderBillingView();
+    }
     async function deletePayrollPaymentFromBilling(payrollId, paymentId) {
       if (!confirm("Izbrišem evidentirano izplačilo? Obračun bo znova odprt za preostanek izplačila.")) return;
       const data = await api(`/api/payrolls/${encodeURIComponent(payrollId)}/payments/${encodeURIComponent(paymentId)}`, { method: "DELETE" });
@@ -5022,6 +5065,16 @@
       }
     }
 
+    function calendarDayTodoSort(a, b) {
+      const aHasTime = Boolean(a.start && a.end);
+      const bHasTime = Boolean(b.start && b.end);
+      if (aHasTime !== bHasTime) return aHasTime ? 1 : -1;
+      if (!aHasTime) return todoSort(a, b);
+      return String(a.start).localeCompare(String(b.start))
+        || String(a.end).localeCompare(String(b.end))
+        || todoSort(a, b);
+    }
+
     function renderMonth() {
       const calendar = $("calendar");
       calendar.innerHTML = "";
@@ -5091,12 +5144,15 @@
 
         todos
           .filter((todo) => todo.date === key)
-          .sort(todoSort)
+          .sort(calendarDayTodoSort)
           .forEach((todo) => {
             const item = document.createElement("button");
             item.type = "button";
             item.className = `day-todo todo-status-color ${todoStatusClass(todo.status)} ${todo.done ? "done" : ""}`;
-            item.innerHTML = `${todo.start && todo.end ? `<small class="day-todo-meta">${escapeHtml(todo.start)}&ndash;${escapeHtml(todo.end)}</small><br>` : ""}${todo.urgent ? "<strong>NUJNO</strong><br>" : ""}${escapeHtml(todo.title)}${todo.client ? `<br><small class="day-todo-client">${escapeHtml(todo.client)}</small>` : ""}<br><small class="day-todo-meta">Za: ${escapeHtml(todoAssigneeNames(todo))}</small><br><small class="day-todo-meta">${todoStatus(todo.status).label}</small>`;
+            const time = todo.start && todo.end ? `${escapeHtml(todo.start)}&ndash;${escapeHtml(todo.end)}` : "Brez ure";
+            const client = todo.client || "Brez stranke";
+            const title = `${todo.urgent ? "NUJNO · " : ""}${todo.title || "Brez naslova"}`;
+            item.innerHTML = `<span class="day-todo-time">${time}</span><span class="day-todo-client">${escapeHtml(client)}</span><span class="day-todo-title">${escapeHtml(title)}</span>`;
             item.addEventListener("click", () => openTodoDialog(todo));
             day.appendChild(item);
           });
@@ -5785,6 +5841,10 @@
       return (state.advances || []).filter((advance) => advance.person === workerId && advance.date >= range.from && advance.date <= range.to);
     }
 
+    function billingPersonalPurchases(workerId, range) {
+      return (state.personalPurchases || []).filter((purchase) => purchase.person === workerId && purchase.date >= range.from && purchase.date <= range.to);
+    }
+
     function billingDisplayActivities(workerId, range, billedLines) {
       return (billedLines || []).filter((line) => String(line.date || "") >= range.from && String(line.date || "") <= range.to).filter((line) => /^\d{2}:\d{2}$/.test(String(line.start || "")) && /^\d{2}:\d{2}$/.test(String(line.end || ""))).filter((line) => Number(line.minutes || 0) > 0).map((line) => ({ ...line, payable: true })).sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.start).localeCompare(String(b.start)) || String(a.end).localeCompare(String(b.end)));
     }    function billingGapMinutes(previous, next) {
@@ -5869,7 +5929,9 @@
       const baseTotals = useSnapshot ? { minutes: Number(payroll.minutes || 0), hours: Number(payroll.hours || 0), km: Number(payroll.km || 0), workAmount: Number(payroll.workAmount || 0), kmAmount: Number(payroll.kmAmount || 0), totalAmount: Number(payroll.totalAmount || 0) } : billingLineTotals(lines);
       const advances = useSnapshot ? (payroll.advanceIds || []).map((id) => (state.advances || []).find((item) => item.id === id)).filter(Boolean) : billingAdvances(workerId, range);
       const advanceAmount = useSnapshot ? Number(payroll.advanceAmount || 0) : Number(advances.reduce((sum, item) => sum + Number(item.amount || 0), 0).toFixed(2));
-      const payoutAmount = Number((baseTotals.totalAmount + advanceAmount).toFixed(2));
+      const purchases = useSnapshot ? (payroll.personalPurchaseIds || []).map((id) => (state.personalPurchases || []).find((item) => item.id === id)).filter(Boolean) : billingPersonalPurchases(workerId, range);
+      const personalPurchaseAmount = useSnapshot ? Number(payroll.personalPurchaseAmount || 0) : Number(purchases.reduce((sum, item) => sum + Number(item.amount || 0), 0).toFixed(2));
+      const payoutAmount = Math.max(0, Number((baseTotals.totalAmount + advanceAmount - personalPurchaseAmount).toFixed(2)));
       const paidAmount = payroll ? Number(payroll.paidAmount || 0) : 0;
       const remainingAmount = Number((payoutAmount - paidAmount).toFixed(2));
       const stateLabel = payrollStateLabel(payroll, admin);
@@ -5881,7 +5943,7 @@
       if (document.activeElement !== noteInput) noteInput.value = noteText;
       noteInput.disabled = Boolean(payroll && ["archiving", "confirmed", "paid"].includes(payroll.status));
       const noteRead = $("billingNoteRead"); noteRead.textContent = noteText ? `Opomba za delavca: ${noteText}` : ""; noteRead.classList.toggle("hidden", admin || !noteText);
-      $("billingSummary").innerHTML = [[`${baseTotals.hours.toLocaleString("sl-SI", { maximumFractionDigits: 2 })} h`, "Oddelane ure"], [`${money(baseTotals.workAmount)} EUR`, "Delo"], [`${baseTotals.km.toLocaleString("sl-SI", { maximumFractionDigits: 1 })} km · ${money(baseTotals.kmAmount)} EUR`, "Kilometrina"], [`${money(advanceAmount)} EUR`, "Založeno"], [`${money(payoutAmount)} EUR`, "Skupaj za izplačilo"], [`${money(paidAmount)} EUR`, "Že izplačano"], [`${money(remainingAmount)} EUR`, "Preostanek"]].map(([value, label]) => `<div class="billing-summary-card"><strong>${escapeHtml(value)}</strong><span>${escapeHtml(label)}</span></div>`).join("");
+      $("billingSummary").innerHTML = [[`${baseTotals.hours.toLocaleString("sl-SI", { maximumFractionDigits: 2 })} h`, "Oddelane ure"], [`${money(baseTotals.workAmount)} EUR`, "Delo"], [`${baseTotals.km.toLocaleString("sl-SI", { maximumFractionDigits: 1 })} km · ${money(baseTotals.kmAmount)} EUR`, "Kilometrina"], [`${money(advanceAmount)} EUR`, "Založeno"], [`-${money(personalPurchaseAmount)} EUR`, "Osebni nakupi"], [`${money(payoutAmount)} EUR`, "Skupaj za izplačilo"], [`${money(paidAmount)} EUR`, "Že izplačano"], [`${money(remainingAmount)} EUR`, "Preostanek"]].map(([value, label]) => `<div class="billing-summary-card"><strong>${escapeHtml(value)}</strong><span>${escapeHtml(label)}</span></div>`).join("");
       $("billingPayments").replaceChildren();
       const readyForConfirmation = !payroll || ["draft", "archiving"].includes(payroll.status);
       const periodEnded = payrollPeriodEnded(range);
@@ -5891,6 +5953,7 @@
       $("billingMarkPaid").classList.toggle("hidden", !admin || payroll?.status !== "confirmed");
       $("billingAddPayment").classList.toggle("hidden", !admin || !payroll || !["confirmed", "paid"].includes(payroll.status) || remainingAmount <= 0.005);
       $("billingAddAdvance").classList.toggle("hidden", Boolean(payroll && ["confirmed", "paid"].includes(payroll.status)));
+      $("billingAddPurchase").classList.toggle("hidden", Boolean(payroll && ["confirmed", "paid"].includes(payroll.status)));
 
       const list = $("billingDayList");
       const activities = billingDisplayActivities(workerId, range, lines);
@@ -5900,27 +5963,30 @@
       })).filter((payment) => payment.date >= range.from && payment.date <= range.to);
       const dayRows = new Map();
       const ensureDay = (date) => {
-        if (!dayRows.has(date)) dayRows.set(date, { work: [], advances: [], payments: [] });
+        if (!dayRows.has(date)) dayRows.set(date, { work: [], advances: [], purchases: [], payments: [] });
         return dayRows.get(date);
       };
       activities.forEach((activity) => ensureDay(activity.date).work.push(activity));
       advances.forEach((advance) => ensureDay(advance.date).advances.push(advance));
+      purchases.forEach((purchase) => ensureDay(purchase.date).purchases.push(purchase));
       paymentItems.forEach((payment) => ensureDay(payment.date).payments.push(payment));
       const isBoss = state.user?.role === "boss";
       const canDeleteAdvances = !useSnapshot;
-      if (!dayRows.size) list.innerHTML = `<div class="billing-empty">V tem obdobju ni zaključenih ur, založitev ali izplačil.</div>`;
+      if (!dayRows.size) list.innerHTML = `<div class="billing-empty">V tem obdobju ni zaključenih ur, založitev, osebnih nakupov ali izplačil.</div>`;
       else {
         list.innerHTML = [...dayRows.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([date, items]) => {
           const day = billingLineTotals(items.work);
           const hasGap = items.work.some((row, index) => index > 0 && billingGapMinutes(items.work[index - 1], row) > 0);
           const financialRows = [
             ...items.advances.map((advance) => `<div class="billing-financial-row advance"><span>Založeno${advance.reason ? ` · ${escapeHtml(advance.reason)}` : ""}</span><strong>${money(advance.amount)} EUR</strong>${canDeleteAdvances && (isBoss || advance.person === state.user?.id) ? `<button class="danger billing-financial-delete delete-billing-advance" type="button" data-advance-id="${escapeHtml(advance.id)}">Izbriši</button>` : ""}</div>`),
+            ...items.purchases.map((purchase) => `<div class="billing-financial-row purchase"><span>Osebni nakup${purchase.reason ? ` · ${escapeHtml(purchase.reason)}` : ""}</span><strong>-${money(purchase.amount)} EUR</strong>${canDeleteAdvances && (isBoss || purchase.person === state.user?.id) ? `<button class="danger billing-financial-delete delete-billing-purchase" type="button" data-purchase-id="${escapeHtml(purchase.id)}">Izbriši</button>` : ""}</div>`),
             ...items.payments.map((payment) => `<div class="billing-financial-row payment"><span>Izplačano${payment.note ? ` · ${escapeHtml(payment.note)}` : ""}</span><strong>${money(payment.amount)} EUR</strong>${isBoss ? `<button class="danger billing-financial-delete delete-billing-payment" type="button" data-payroll-id="${escapeHtml(payroll.id)}" data-payment-id="${escapeHtml(payment.id)}">Izbriši</button>` : ""}</div>`)
           ].join("");
           return `<div class="billing-day"><button class="billing-day-overview billing-open-day" type="button" data-date="${escapeHtml(date)}" data-worker-id="${escapeHtml(workerId)}"><strong>${escapeHtml(formatDate(date))}</strong><span class="billing-day-hours">${hasGap ? '<span class="billing-gap-alert" title="Ure niso v neprekinjenem kosu">!</span> ' : ""}${day.hours.toLocaleString("sl-SI", { maximumFractionDigits: 2 })} h</span><span class="billing-day-work">Delo: ${money(day.workAmount)} EUR</span><span class="billing-day-km">Kilometrina: ${money(day.kmAmount)} EUR</span></button>${financialRows}</div>`;
         }).join("");
         list.querySelectorAll(".billing-open-day").forEach((button) => button.addEventListener("click", () => openBillingDayTimeline(button.dataset.workerId, button.dataset.date)));
         list.querySelectorAll(".delete-billing-advance").forEach((button) => button.addEventListener("click", () => deleteAdvanceFromBilling(button.dataset.advanceId).catch((error) => alert(error.message))));
+        list.querySelectorAll(".delete-billing-purchase").forEach((button) => button.addEventListener("click", () => deletePersonalPurchaseFromBilling(button.dataset.purchaseId).catch((error) => alert(error.message))));
         list.querySelectorAll(".delete-billing-payment").forEach((button) => button.addEventListener("click", () => deletePayrollPaymentFromBilling(button.dataset.payrollId, button.dataset.paymentId).catch((error) => alert(error.message))));
       }
       renderBillingExplorer();
@@ -7026,21 +7092,19 @@
         todo.photos = [];
         todo.driveFiles = [];
       }
-      if (state.todoHoursSourceId && (!todo.start || !todo.end)) {
+      const isHoursEntry = Boolean(state.todoHoursSourceId || state.todoStandaloneHours);
+      if (isHoursEntry && (!todo.start || !todo.end)) {
         if (!todo.date) {
-          alert("Za popravljanje delovnih ur izberi datum.");
+          alert("Za vpis delovnih ur izberi datum.");
           return;
         }
-        alert("Popravi delovne ure: izbran je prvi prost enourni termin.");
+        alert("Za vpis ur nastavi uro od in do. Dodan je prvi prost enourni termin, ki ga lahko takoj popraviš v dnevnem pogledu.");
         const slot = firstFreeDayTimelineSlot(todo.date);
         const data = await saveTodoToServer({ ...todo, ...slot });
-        const saved = (data.todos || []).filter((item) => (
-          item.sourceProjectTodoId === state.todoHoursSourceId
-          && item.date === todo.date
-          && item.start === slot.start
-          && item.end === slot.end
-          && item.title === todo.title
-        )).sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")))[0];
+        const saved = (data.todos || []).filter((item) => {
+          const sameSlot = item.date === todo.date && item.start === slot.start && item.end === slot.end && item.title === todo.title;
+          return sameSlot && (!state.todoHoursSourceId || item.sourceProjectTodoId === state.todoHoursSourceId);
+        }).sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")))[0];
         state.dayTimelineHoursWarning = {
           todoId: saved?.id || "",
           assignmentGroupId: saved?.assignmentGroupId || "",
@@ -8440,6 +8504,7 @@
     $("billingMarkPaid").addEventListener("click", () => changePayroll("paid").catch((error) => alert(error.message)));
     $("billingAddPayment").addEventListener("click", openPaymentDialog);
     $("billingAddAdvance").addEventListener("click", openAdvanceDialog);
+    $("billingAddPurchase").addEventListener("click", () => openAdvanceDialog("purchase"));
     $("closePaymentDialog").addEventListener("click", () => $("paymentDialog").close());
     $("cancelPaymentDialog").addEventListener("click", () => $("paymentDialog").close());
     $("paymentForm").addEventListener("submit", (event) => { event.preventDefault(); savePaymentFromDialog().catch((error) => alert(error.message)); });
