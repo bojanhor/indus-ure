@@ -11,6 +11,7 @@ const {
   activeEntryEditLock,
   activeTodoEditLock,
   canManageEntry,
+  canManageFinancialEntry,
   canManageTodo,
   createSession,
   buildPayrollSnapshot,
@@ -419,4 +420,13 @@ test("obracun je mogoce potrditi sele po koncu izbranega meseca", () => {
   assert.equal(payrollPeriodEnded("2026-07", new Date("2026-07-31T12:00:00Z")), false);
   assert.equal(payrollPeriodEnded("2026-07", new Date("2026-08-01T12:00:00Z")), true);
   assert.equal(payrollPeriodEnded("2026-08", new Date("2026-08-01T12:00:00Z")), false);
+});
+test("delavec lahko zalozeni znesek ali osebni nakup ureja samo na dan vnosa, sef pa vedno", () => {
+  const entry = { person: "ibro", date: "2026-07-19" };
+  const sameDay = new Date("2026-07-19T12:00:00+02:00");
+  const nextDay = new Date("2026-07-20T12:00:00+02:00");
+  assert.equal(canManageFinancialEntry(worker, entry, sameDay), true);
+  assert.equal(canManageFinancialEntry(worker, entry, nextDay), false);
+  assert.equal(canManageFinancialEntry(worker, { ...entry, person: "bojan" }, sameDay), false);
+  assert.equal(canManageFinancialEntry(boss, { ...entry, date: "2020-01-01" }, nextDay), true);
 });

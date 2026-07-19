@@ -1268,6 +1268,24 @@ const PAYROLL_PAID_TODO_STATUSES = new Set(["execution", "meal"]);
 function isDateKey(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(value || ""));
 }
+function serverDateKey(now = new Date()) {
+  const fields = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Ljubljana", year: "numeric", month: "2-digit", day: "2-digit"
+  }).formatToParts(now).reduce((result, part) => ({ ...result, [part.type]: part.value }), {});
+  return `${fields.year}-${fields.month}-${fields.day}`;
+}
+
+function canManageFinancialEntry(user, entry, now = new Date()) {
+  if (!user || !entry) return false;
+  if (user.role === "boss") return true;
+  return entry.person === user.id && entry.date === serverDateKey(now);
+}
+
+function financialEntryAccessError(user, entry, label) {
+  if (user?.role === "boss") return "";
+  if (entry?.person !== user?.id) return `Lahko urejas samo svoj ${label}.`;
+  return `Delavec lahko ${label} popravi ali izbrise samo na dan vnosa.`;
+}
 
 function payrollRange(input = {}) {
   input = typeof input === "string" ? { month: input } : (input || {});
@@ -3355,6 +3373,32 @@ async function handleApi(req, res) {
       return;
     }
     const advanceMatch = url.pathname.match(/^\/api\/advances\/([^/]+)$/);
+    if (advanceMatch && req.method === "PUT") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      const id = decodeURIComponent(advanceMatch[1]);
+      const db = await readDbAsync();
+      const index = db.debts.findIndex((item) => item.id === id && item.type === "advance");
+      if (index < 0) { sendJson(res, 404, { error: "Zalozeni znesek ne obstaja." }); return; }
+      const existing = db.debts[index];
+      if (!canManageFinancialEntry(user, existing)) { sendJson(res, 403, { error: financialEntryAccessError(user, existing, "zalozeni znesek") }); return; }
+      const usedInConfirmedPayroll = (db.payrolls || []).some((payroll) => ["archiving", "confirmed", "paid"].includes(payroll.status) && (payroll.advanceIds || []).map(String).includes(id));
+      if (usedInConfirmedPayroll && user.role !== "boss") { sendJson(res, 409, { error: "Zalozeni znesek je ze del potrjenega obracuna." }); return; }
+      let advance = cleanAdvance(await readBody(req));
+      if (user.role !== "boss") advance.person = existing.person;
+      const validation = validateAdvance(advance, db);
+      if (validation) { sendJson(res, 400, { error: validation }); return; }
+      if (advance.projectTodoId) {
+        const project = db.todos.find((todo) => todo.id === advance.projectTodoId);
+        if (!project || !["execution", "open", "in_progress", "internal"].includes(project.status)) { sendJson(res, 400, { error: "Povezano opravilo ni vec odprto." }); return; }
+      }
+      advance = storeTodoAttachments(db, advance, user);
+      db.debts[index] = { ...existing, ...advance, id, type: "advance", updatedBy: user.id, updatedByName: user.name, updatedAt: new Date().toISOString() };
+      pruneUnusedTodoAttachments(db);
+      await writeDbAsync(db);
+      sendJson(res, 200, { advances: visibleAdvancesForUser(db, user) });
+      return;
+    }
     if (advanceMatch && req.method === "DELETE") {
       const user = await requireUser(req, res);
       if (!user) return;
@@ -3366,13 +3410,13 @@ async function handleApi(req, res) {
         return;
       }
       const advance = db.debts[index];
-      if (user.role !== "boss" && advance.person !== user.id) {
-        sendJson(res, 403, { error: "Lahko izbrišeš samo svoj založeni znesek." });
+      if (!canManageFinancialEntry(user, advance)) {
+        sendJson(res, 403, { error: financialEntryAccessError(user, advance, "zalozeni znesek") });
         return;
       }
       const usedInConfirmedPayroll = (db.payrolls || []).some((payroll) => ["archiving", "confirmed", "paid"].includes(payroll.status)
         && (payroll.advanceIds || []).map(String).includes(id));
-      if (usedInConfirmedPayroll) {
+      if (usedInConfirmedPayroll && user.role !== "boss") {
         sendJson(res, 409, { error: "Založeni znesek je že del potrjenega obračuna. Šef mora obračun najprej ponovno odpreti." });
         return;
       }
@@ -3419,6 +3463,28 @@ async function handleApi(req, res) {
     }
 
     const personalPurchaseMatch = url.pathname.match(/^\/api\/personal-purchases\/([^/]+)$/);
+    if (personalPurchaseMatch && req.method === "PUT") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      const id = decodeURIComponent(personalPurchaseMatch[1]);
+      const db = await readDbAsync();
+      const index = db.debts.findIndex((item) => item.id === id && item.type === "personal_purchase");
+      if (index < 0) { sendJson(res, 404, { error: "Osebni nakup ne obstaja." }); return; }
+      const existing = db.debts[index];
+      if (!canManageFinancialEntry(user, existing)) { sendJson(res, 403, { error: financialEntryAccessError(user, existing, "osebni nakup") }); return; }
+      const usedInConfirmedPayroll = (db.payrolls || []).some((payroll) => ["archiving", "confirmed", "paid"].includes(payroll.status) && (payroll.personalPurchaseIds || []).map(String).includes(id));
+      if (usedInConfirmedPayroll && user.role !== "boss") { sendJson(res, 409, { error: "Osebni nakup je ze del potrjenega obracuna." }); return; }
+      let purchase = cleanPersonalPurchase(await readBody(req));
+      if (user.role !== "boss") purchase.person = existing.person;
+      const validation = validatePersonalPurchase(purchase, db);
+      if (validation) { sendJson(res, 400, { error: validation }); return; }
+      purchase = storeTodoAttachments(db, purchase, user);
+      db.debts[index] = { ...existing, ...purchase, id, type: "personal_purchase", updatedBy: user.id, updatedByName: user.name, updatedAt: new Date().toISOString() };
+      pruneUnusedTodoAttachments(db);
+      await writeDbAsync(db);
+      sendJson(res, 200, { purchases: visiblePersonalPurchasesForUser(db, user) });
+      return;
+    }
     if (personalPurchaseMatch && req.method === "DELETE") {
       const user = await requireUser(req, res);
       if (!user) return;
@@ -3430,13 +3496,13 @@ async function handleApi(req, res) {
         return;
       }
       const purchase = db.debts[index];
-      if (user.role !== "boss" && purchase.person !== user.id) {
-        sendJson(res, 403, { error: "Lahko izbrišeš samo svoj osebni nakup." });
+      if (!canManageFinancialEntry(user, purchase)) {
+        sendJson(res, 403, { error: financialEntryAccessError(user, purchase, "osebni nakup") });
         return;
       }
       const usedInConfirmedPayroll = (db.payrolls || []).some((payroll) => ["archiving", "confirmed", "paid"].includes(payroll.status)
         && (payroll.personalPurchaseIds || []).map(String).includes(id));
-      if (usedInConfirmedPayroll) {
+      if (usedInConfirmedPayroll && user.role !== "boss") {
         sendJson(res, 409, { error: "Osebni nakup je že del potrjenega obračuna. Šef mora obračun najprej ponovno odpreti." });
         return;
       }
@@ -4221,6 +4287,7 @@ module.exports = {
   buildPayrollSnapshot,
   archivePayrollTodos,
   canManageEntry,
+  canManageFinancialEntry,
   canManageTodo,
   sourceTodoForNewEntry,
   defaultHourlyRateForUser,
