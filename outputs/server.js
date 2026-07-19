@@ -4,6 +4,7 @@ const fsp = fs.promises;
 const path = require("path");
 const crypto = require("crypto");
 const os = require("os");
+const PDFDocument = require("pdfkit");
 const { PostgresStore } = require("./postgres-store");
 const {
   isUsableTaxId,
@@ -28,8 +29,11 @@ const resetUserPasswords = process.env.RESET_USER_PASSWORDS === "true";
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || "";
 const GOOGLE_REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI || "";
-const GOOGLE_DRIVE_SCOPE_VERSION = 1;
+// Bump this whenever the Google Workspace consent set changes. A stale Drive-only
+// token must never be silently reused for creating Gmail drafts.
+const GOOGLE_DRIVE_SCOPE_VERSION = 2;
 const GOOGLE_DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file";
+const GOOGLE_GMAIL_COMPOSE_SCOPE = "https://www.googleapis.com/auth/gmail.compose";
 const GOOGLE_DRIVE_TASKS_FOLDER_ID = String(process.env.GOOGLE_DRIVE_TASKS_FOLDER_ID || "").trim();
 const GOOGLE_DRIVE_OWNER_EMAIL = String(process.env.GOOGLE_DRIVE_OWNER_EMAIL || "bojan@indus.si").trim().toLowerCase();
 const INDUS_GOOGLE_APP_ID = "indus-ure-v1";
@@ -40,6 +44,9 @@ const ALERT_EMAIL_FROM = String(process.env.ALERT_EMAIL_FROM || "").trim();
 const ALERT_EMAIL_TO = String(process.env.ALERT_EMAIL_TO || "bojan@indus.si").trim();
 const MONITOR_INTERVAL_MS = Math.max(60_000, Number(process.env.MONITOR_INTERVAL_MS || 5 * 60_000));
 const MONITOR_MAX_RSS_MB = Math.max(256, Number(process.env.MONITOR_MAX_RSS_MB || 1_800));
+const REPORT_PDF_MAX_TOTAL_BYTES = 50 * 1024 * 1024;
+const REPORT_GMAIL_MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;
+const REPORT_GMAIL_MAX_TOTAL_BYTES = 8 * 1024 * 1024;
 let pgPool = null;
 let pgStore = null;
 let pgReady = null;
@@ -1593,13 +1600,14 @@ function normalizeClientBill(input, db) {
     };
   }).filter(Boolean);
   const createdAt = String(input?.createdAt || new Date().toISOString());
+  const status = String(input?.status || "") === "cancelled" ? "cancelled" : "confirmed";
   return {
     id: String(input?.id || crypto.randomUUID()),
     clientId,
     clientName,
     from: isDateKey(input?.from) ? String(input.from) : "",
     to: isDateKey(input?.to) ? String(input.to) : "",
-    status: clientBillIsConfirmed(input) ? "confirmed" : "confirmed",
+    status,
     eventIds,
     lines,
     createdBy: String(input?.createdBy || "system"),
@@ -1608,10 +1616,30 @@ function normalizeClientBill(input, db) {
     confirmedAt: String(input?.confirmedAt || createdAt),
     confirmedBy: String(input?.confirmedBy || input?.createdBy || "system"),
     confirmedByName: String(input?.confirmedByName || input?.createdByName || ""),
+    cancelledAt: status === "cancelled" ? String(input?.cancelledAt || createdAt) : "",
+    cancelledBy: status === "cancelled" ? String(input?.cancelledBy || "system") : "",
+    cancelledByName: status === "cancelled" ? String(input?.cancelledByName || "") : "",
     note: String(input?.note || "").trim().slice(0, 2_000)
   };
 }
 
+function cancelClientBill(db, billId, actor = null) {
+  const bill = (db.clientBills || []).find((item) => String(item?.id || "") === String(billId || ""));
+  if (!bill || !clientBillIsConfirmed(bill)) return null;
+  const auditActor = actor || { id: "system", name: "Sistem" };
+  const now = new Date().toISOString();
+  const eventIds = new Set(clientBillEventIds(bill));
+  bill.status = "cancelled";
+  bill.cancelledAt = now;
+  bill.cancelledBy = auditActor.id;
+  bill.cancelledByName = auditActor.name || "";
+  for (const todo of db.todos || []) {
+    if (!eventIds.has(todoBillingEventId(todo))) continue;
+    todo.history = [...(todo.history || []), audit(auditActor, `preklican obračun stranki ${bill.clientName}`)];
+  }
+  const archive = reconcileTodoArchives(db, auditActor);
+  return { clientBill: bill, archive };
+}
 function confirmedClientBillByEvent(db) {
   const byEvent = new Map();
   for (const bill of db.clientBills || []) {
@@ -1651,6 +1679,251 @@ function clientBillCandidates(db, input = {}) {
   return { client, groups: [...groups.entries()].map(([eventId, todos]) => ({ eventId, todos })), requestedEventIds };
 }
 
+function todoDurationHours(todo = {}) {
+  const start = /^(\d{2}):(\d{2})$/.exec(String(todo.start || ""));
+  const end = /^(\d{2}):(\d{2})$/.exec(String(todo.end || ""));
+  if (!start || !end) return 0;
+  const startMinutes = Number(start[1]) * 60 + Number(start[2]);
+  const endMinutes = Number(end[1]) * 60 + Number(end[2]);
+  return endMinutes > startMinutes ? (endMinutes - startMinutes) / 60 : 0;
+}
+function clientReportSelection(db, input = {}) {
+  const selection = clientBillCandidates(db, input);
+  if (!selection.client || !selection.groups.length) return null;
+  if (selection.requestedEventIds && selection.groups.length !== selection.requestedEventIds.size) return null;
+  const groups = selection.groups.map((group) => ({
+    eventId: group.eventId,
+    todos: [...group.todos].sort((left, right) => String(left.date || "").localeCompare(String(right.date || ""))
+      || String(left.start || "").localeCompare(String(right.start || ""))
+      || String(left.id || "").localeCompare(String(right.id || "")))
+  })).sort((left, right) => {
+    const leftTodo = left.todos[0] || {};
+    const rightTodo = right.todos[0] || {};
+    return String(leftTodo.date || "").localeCompare(String(rightTodo.date || ""))
+      || String(leftTodo.start || "").localeCompare(String(rightTodo.start || ""))
+      || String(leftTodo.title || "").localeCompare(String(rightTodo.title || ""));
+  });
+  return {
+    client: selection.client,
+    from: isDateKey(input?.from) ? String(input.from) : "",
+    to: isDateKey(input?.to) ? String(input.to) : "",
+    groups
+  };
+}
+
+function safeReportFileName(value, fallback = "priloga") {
+  const cleaned = String(value || "").trim()
+    .replace(/[\\/:*?"<>|\u0000-\u001f]+/g, "-")
+    .replace(/\s+/g, " ")
+    .slice(0, 120);
+  return cleaned || fallback;
+}
+
+function attachmentMimeExtension(mimeType) {
+  const type = String(mimeType || "").toLowerCase();
+  if (type === "application/pdf") return ".pdf";
+  if (type === "image/jpeg") return ".jpg";
+  if (type === "image/png") return ".png";
+  if (type === "image/webp") return ".webp";
+  if (type === "text/plain") return ".txt";
+  return "";
+}
+
+function clientReportAttachmentSelection(report, attachmentIds) {
+  const available = new Map();
+  for (const group of report.groups || []) {
+    for (const todo of group.todos || []) {
+      for (const photo of todo.photos || []) {
+        const attachmentId = String(photo?.attachmentId || "");
+        if (!validTodoAttachmentId(attachmentId) || available.has(attachmentId)) continue;
+        available.set(attachmentId, {
+          id: attachmentId,
+          name: safeReportFileName(photo.name || "priloga"),
+          eventId: group.eventId
+        });
+      }
+    }
+  }
+  const requested = Array.isArray(attachmentIds)
+    ? [...new Set(attachmentIds.map((id) => String(id || "").trim()).filter(Boolean))]
+    : [...available.keys()];
+  if (requested.length > 1_000) throw new Error("Za en izvoz lahko izberes najvec 1000 prilog.");
+  if (requested.some((id) => !validTodoAttachmentId(id) || !available.has(id))) {
+    throw new Error("Izbrana priloga ne pripada oznacenim vpisom porocila.");
+  }
+  return requested.map((id) => available.get(id));
+}
+
+function dataUrlAttachmentBytes(value) {
+  const match = String(value || "").match(/^data:([^;,]+);base64,([A-Za-z0-9+/]+={0,2})$/);
+  return match ? { mimeType: match[1], bytes: Buffer.from(match[2], "base64") } : null;
+}
+
+async function loadClientReportAttachments(db, selected = [], { maxAttachmentBytes = REPORT_PDF_MAX_TOTAL_BYTES, maxTotalBytes = REPORT_PDF_MAX_TOTAL_BYTES, destination = "PDF" } = {}) {
+  const attachments = [];
+  let totalBytes = 0;
+  for (const selectedAttachment of selected) {
+    let mimeType = "application/octet-stream";
+    let bytes = null;
+    if (DATABASE_URL) {
+      const stored = await getPgStore().getAttachment(selectedAttachment.id, false);
+      if (stored) {
+        mimeType = String(stored.mimeType || mimeType);
+        bytes = await fsp.readFile(stored.filePath);
+      }
+    } else {
+      const parsed = dataUrlAttachmentBytes(db.attachments?.[selectedAttachment.id]?.data);
+      if (parsed) {
+        mimeType = parsed.mimeType || mimeType;
+        bytes = parsed.bytes;
+      }
+    }
+    if (!bytes?.length) throw new Error(`Priloge \"${selectedAttachment.name}\" ni mogoce prebrati.`);
+    if (bytes.length > maxAttachmentBytes) {
+      throw new Error(`Priloga \"${selectedAttachment.name}\" je prevelika za ${destination} izvoz.`);
+    }
+    totalBytes += bytes.length;
+    if (totalBytes > maxTotalBytes) {
+      throw new Error(`Izbrane priloge so skupaj prevelike za ${destination} izvoz. Izberi manj prilog.`);
+    }
+    const extension = attachmentMimeExtension(mimeType);
+    const baseName = safeReportFileName(selectedAttachment.name || "priloga");
+    const filename = extension && !baseName.toLowerCase().endsWith(extension) ? `${baseName}${extension}` : baseName;
+    attachments.push({ ...selectedAttachment, mimeType, bytes, filename });
+  }
+  return attachments;
+}
+
+function reportPdfFontPath(weight = "regular") {
+  return path.resolve(root, "..", "node_modules", "pdfjs-dist", "standard_fonts", weight === "bold" ? "LiberationSans-Bold.ttf" : "LiberationSans-Regular.ttf");
+}
+
+function reportPdfDate(date) {
+  if (!isDateKey(date)) return "Brez datuma";
+  const [year, month, day] = String(date).split("-");
+  return `${day}. ${month}. ${year}`;
+}
+
+function reportPdfAssignees(db, todos) {
+  const names = [...new Set((todos || []).map((todo) => db.users?.[todo.syncUser || todo.createdBy]?.name || todo.syncUser || todo.createdBy).filter(Boolean))];
+  return names.join(", ") || "Ni navedeno";
+}
+
+function reportPdfVehicleLabel(vehicle) {
+  return vehicle === "van" ? "kombi" : "osebni avto";
+}
+
+function reportPdfLine(doc, label, value) {
+  if (!value) return;
+  doc.font(reportPdfFontPath("bold")).fillColor("#1e3430").text(`${label}: `, { continued: true });
+  doc.font(reportPdfFontPath()).fillColor("#263634").text(String(value));
+}
+
+function buildClientReportPdf(db, report, attachments = []) {
+  const title = `Obračun - ${safeReportFileName(report.client?.name || "stranka")}`;
+  return new Promise((resolve, reject) => {
+    const doc = new PDFDocument({
+      size: "A4",
+      margin: 46,
+      info: { Title: title, Author: "INDUS URE", Subject: "Obračun opravljenih storitev" }
+    });
+    const chunks = [];
+    doc.on("data", (chunk) => chunks.push(chunk));
+    doc.once("error", reject);
+    doc.once("end", () => resolve(Buffer.concat(chunks)));
+    try {
+      doc.font(reportPdfFontPath("bold")).fontSize(21).fillColor("#0d536b").text("Obracun opravljenih storitev");
+      doc.moveDown(0.3);
+      doc.font(reportPdfFontPath()).fontSize(11).fillColor("#263634");
+      reportPdfLine(doc, "Stranka", report.client?.name || "");
+      if (report.client?.email) reportPdfLine(doc, "E-posta", report.client.email);
+      reportPdfLine(doc, "Obdobje", report.from || report.to ? `${report.from ? reportPdfDate(report.from) : "-"} - ${report.to ? reportPdfDate(report.to) : "-"}` : "Celotna evidenca");
+      doc.moveDown(0.8);
+
+      for (const group of report.groups || []) {
+        const todo = group.todos?.[0] || {};
+        const hours = group.todos.reduce((sum, item) => sum + todoDurationHours(item), 0);
+        const clientKm = Math.max(0, Number(todo.clientKm || 0));
+        const clientKmRate = clientKmRateForTodo(db, todo);
+        const time = todo.start && todo.end ? `${todo.start}-${todo.end}` : "brez vpisane ure";
+        doc.font(reportPdfFontPath("bold")).fontSize(13).fillColor("#143b34").text(`${reportPdfDate(todo.date)}  ${time}`);
+        doc.font(reportPdfFontPath("bold")).fontSize(12).fillColor("#161f20").text(String(todo.title || "Brez naziva"));
+        doc.font(reportPdfFontPath()).fontSize(10).fillColor("#263634");
+        reportPdfLine(doc, "Izvajalec", reportPdfAssignees(db, group.todos));
+        if (hours) reportPdfLine(doc, "Izvedeno", `${hours.toLocaleString("sl-SI", { maximumFractionDigits: 2 })} h`);
+        if (clientKm) reportPdfLine(doc, "Stroski prevoza (obe smeri)", `${reportPdfVehicleLabel(todo.clientVehicle)} - ${clientKm.toLocaleString("sl-SI", { maximumFractionDigits: 1 })} km - ${(clientKm * clientKmRate).toLocaleString("sl-SI", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR`);
+        if (todo.notes) reportPdfLine(doc, "Opis del", todo.notes);
+        if (todo.material) reportPdfLine(doc, "Material", todo.material);
+        const driveFiles = [...new Map(group.todos.flatMap((item) => item.driveFiles || []).filter((file) => file?.url).map((file) => [file.url, file])).values()];
+        for (const file of driveFiles) reportPdfLine(doc, "Google dokument", `${file.name || "Dokument"}: ${file.url}`);
+        const groupAttachmentNames = attachments.filter((attachment) => attachment.eventId === group.eventId).map((attachment) => attachment.name);
+        if (groupAttachmentNames.length) reportPdfLine(doc, "Vkljucene priloge", groupAttachmentNames.join(", "));
+        doc.moveDown(0.75);
+        doc.strokeColor("#c8d9d5").lineWidth(1).moveTo(doc.page.margins.left, doc.y).lineTo(doc.page.width - doc.page.margins.right, doc.y).stroke();
+        doc.moveDown(0.75);
+      }
+      if (attachments.length) {
+        doc.font(reportPdfFontPath("bold")).fontSize(11).fillColor("#143b34").text("Priloge so dodane v PDF kot datoteke.");
+        for (const attachment of attachments) {
+          doc.file(attachment.bytes, {
+            name: attachment.filename,
+            type: attachment.mimeType,
+            description: `Priloga: ${attachment.name}`,
+            relationship: "Supplement"
+          });
+        }
+      }
+      doc.end();
+    } catch (error) {
+      reject(error);
+    }
+  });
+}
+
+function mimeBase64(value) {
+  return Buffer.from(value).toString("base64").replace(/.{1,76}/g, "$&\r\n");
+}
+
+function gmailDraftRaw({ to, pdf, pdfFilename, attachments = [] }) {
+  const boundary = `indus-ure-${crypto.randomBytes(18).toString("hex")}`;
+  const text = "Pozdravljeni, v prilogi vam pošiljam obračun opravljenih storitev in porabljenega materiala.\n\nZa pojasnila sem seveda na voljo.";
+  const subject = `=?UTF-8?B?${Buffer.from("Obračun", "utf8").toString("base64")}?=`;
+  const parts = [
+    `To: ${to}`,
+    `Subject: ${subject}`,
+    "MIME-Version: 1.0",
+    `Content-Type: multipart/mixed; boundary=\"${boundary}\"`,
+    "",
+    `--${boundary}`,
+    "Content-Type: text/plain; charset=utf-8",
+    "Content-Transfer-Encoding: base64",
+    "",
+    mimeBase64(text),
+    `--${boundary}`,
+    `Content-Type: application/pdf; name=\"${pdfFilename}\"`,
+    "Content-Transfer-Encoding: base64",
+    `Content-Disposition: attachment; filename=\"${pdfFilename}\"`,
+    "",
+    mimeBase64(pdf)
+  ];
+  for (const attachment of attachments) {
+    parts.push(
+      `--${boundary}`,
+      `Content-Type: ${attachment.mimeType}; name=\"${attachment.filename}\"`,
+      "Content-Transfer-Encoding: base64",
+      `Content-Disposition: attachment; filename=\"${attachment.filename}\"`,
+      "",
+      mimeBase64(attachment.bytes)
+    );
+  }
+  parts.push(`--${boundary}--`, "");
+  return Buffer.from(parts.join("\r\n")).toString("base64url");
+}
+
+function clientReportFilename(client) {
+  const suffix = safeReportFileName(client?.name || "stranka").replace(/\s+/g, "-");
+  return `obracun-${suffix || "stranka"}.pdf`;
+}
 function buildClientBillSnapshot(db, input, actor) {
   const selection = clientBillCandidates(db, input);
   if (!selection.client || !selection.groups.length) return null;
@@ -1675,7 +1948,7 @@ function buildClientBillSnapshot(db, input, actor) {
         title: representative.title,
         clientKm: representative.clientKm,
         clientVehicle: representative.clientVehicle,
-        clientKmRate: representative.clientKmRate
+        clientKmRate: clientKmRateForTodo(db, representative)
       };
     }),
     createdBy: actor?.id || "system",
@@ -1763,8 +2036,19 @@ function defaultHourlyRateForUser(db, userId) {
 
 function clientKmRateForVehicle(db, vehicle) {
   const billing = db.settings?.billing || {};
-  const fallback = nonnegativeNumber(billing.kmRate, 0.22, 1_000);
-  return nonnegativeNumber(vehicle === "van" ? billing.clientVanKmRate : billing.clientPersonalKmRate, fallback, 1_000);
+  // A zero used to be written for older completed entries before vehicle rates
+  // existed. Treat it as missing instead of silently creating a free journey.
+  const legacyRate = nonnegativeNumber(billing.kmRate, 0.22, 1_000);
+  const fallback = legacyRate > 0 ? legacyRate : 0.22;
+  const configured = nonnegativeNumber(vehicle === "van" ? billing.clientVanKmRate : billing.clientPersonalKmRate, null, 1_000);
+  return configured !== null && configured > 0 ? configured : fallback;
+}
+
+function clientKmRateForTodo(db, todo = {}) {
+  const stored = nonnegativeNumber(todo.clientKmRate, null, 1_000);
+  return stored !== null && stored > 0
+    ? stored
+    : clientKmRateForVehicle(db, todoVehicle(todo.clientVehicle));
 }
 
 function todoForUserRole(user, db, previous, todo) {
@@ -2701,6 +2985,28 @@ async function sendOperationalAlertEmail(notification) {
   }
 }
 
+async function collapseUnreadOperationalAlerts() {
+  if (!DATABASE_URL) return 0;
+  const result = await getPgPool().query(
+    `delete from indus_notifications
+     where id in (
+       select id from (
+         select id, row_number() over (
+           partition by data ->> 'code'
+           order by created_at desc, id desc
+         ) as row_number
+         from indus_notifications
+         where user_id = $1
+           and read_at is null
+           and coalesce(data ->> 'code', '') <> ''
+       ) duplicates
+       where row_number > 1
+     )`,
+    ["bojan"]
+  );
+  return result.rowCount || 0;
+}
+
 async function recordOperationalAlert({ code, severity = "warning", title, message }) {
   const last = Number(monitorAlertCooldowns.get(code) || 0);
   if (Date.now() - last < 6 * 60 * 60 * 1000) return false;
@@ -2708,6 +3014,18 @@ async function recordOperationalAlert({ code, severity = "warning", title, messa
   const notification = { id: crypto.randomUUID(), code, severity, title, message, createdAt: new Date().toISOString() };
   if (DATABASE_URL) {
     try {
+      // This check survives an application restart. An unresolved alert is one
+      // condition, not a new notification every time the monitoring job runs.
+      const existing = await getPgPool().query(
+        `select id from indus_notifications
+         where user_id = $1 and read_at is null and data ->> 'code' = $2
+         order by created_at desc limit 1`,
+        ["bojan", code]
+      );
+      if (existing.rowCount) {
+        await collapseUnreadOperationalAlerts();
+        return false;
+      }
       await getPgPool().query(
         `insert into indus_notifications (id, user_id, severity, data)
          values ($1, $2, $3, $4::jsonb)`,
@@ -2726,6 +3044,9 @@ async function listOperationalNotifications() {
   // Read operational alerts are transient: keep the acknowledgement visible in
   // the current dialog, then remove it on the next application refresh.
   await getPgPool().query("delete from indus_notifications where user_id = $1 and read_at is not null", ["bojan"]);
+  // Older application restarts may already have produced duplicates. Keep the
+  // newest occurrence of each still-active code before showing the list.
+  await collapseUnreadOperationalAlerts();
   const result = await getPgPool().query(
     `select id, severity, read_at, data, created_at
      from indus_notifications where user_id = $1 and read_at is null order by created_at desc limit 40`,
@@ -2733,7 +3054,6 @@ async function listOperationalNotifications() {
   );
   return result.rows.map((row) => ({ ...row.data, id: row.id, severity: row.severity, readAt: row.read_at, createdAt: row.created_at }));
 }
-
 async function markOperationalNotificationRead(id) {
   if (!DATABASE_URL) return;
   await getPgPool().query("update indus_notifications set read_at = now() where id = $1 and user_id = $2", [id, "bojan"]);
@@ -2952,7 +3272,7 @@ async function handleApi(req, res) {
       const authUrl = auth.generateAuthUrl({
         access_type: "offline",
         state,
-        scope: [GOOGLE_DRIVE_FILE_SCOPE],
+        scope: [GOOGLE_DRIVE_FILE_SCOPE, GOOGLE_GMAIL_COMPOSE_SCOPE],
 
         include_granted_scopes: true,
         prompt: "consent",
@@ -3038,7 +3358,7 @@ async function handleApi(req, res) {
         driveScopeVersion: GOOGLE_DRIVE_SCOPE_VERSION
       };
       await writeDbAsync(db);
-      sendText(res, 200, "Google Dokumenti, preglednice in backup so povezani. Lahko zapres to okno in se vrnes v INDUS URE.", "text/plain");
+      sendText(res, 200, "Google Dokumenti, preglednice, Gmail osnutki in backup so povezani. Lahko zapres to okno in se vrnes v INDUS URE.", "text/plain");
       return;
     }
 
@@ -3113,6 +3433,88 @@ async function handleApi(req, res) {
       return;
     }
 
+    if (url.pathname === "/api/client-report/pdf" && req.method === "POST") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      if (user.role !== "boss") {
+        sendJson(res, 403, { error: "PDF porocilo za stranko lahko pripravi samo sef." });
+        return;
+      }
+      const body = await readBody(req);
+      if (body.eventIds !== undefined && !Array.isArray(body.eventIds)) {
+        sendJson(res, 400, { error: "Izbrani vpisi za porocilo niso pravilni." });
+        return;
+      }
+      const db = await readDbAsync();
+      const report = clientReportSelection(db, body);
+      if (!report) {
+        sendJson(res, 409, { error: "Izbrani vpisi niso vec na voljo za porocilo. Osvezi pogled in preveri izbor." });
+        return;
+      }
+      const requestedAttachments = clientReportAttachmentSelection(report, body.attachmentIds);
+      const attachments = await loadClientReportAttachments(db, requestedAttachments, { destination: "PDF" });
+      const pdf = await buildClientReportPdf(db, report, attachments);
+      const filename = clientReportFilename(report.client);
+      res.writeHead(200, securityHeaders({
+        "Content-Type": "application/pdf",
+        "Content-Length": pdf.length,
+        "Content-Disposition": `attachment; filename="${filename}"`,
+        "Cache-Control": "no-store"
+      }));
+      res.end(pdf);
+      return;
+    }
+
+    if (url.pathname === "/api/client-report/gmail-draft" && req.method === "POST") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      if (user.role !== "boss" || String(user.email || "").toLowerCase() !== GOOGLE_DRIVE_OWNER_EMAIL) {
+        sendJson(res, 403, { error: "Gmail osnutek lahko ustvari samo Bojanov racun." });
+        return;
+      }
+      const body = await readBody(req);
+      if (body.eventIds !== undefined && !Array.isArray(body.eventIds)) {
+        sendJson(res, 400, { error: "Izbrani vpisi za porocilo niso pravilni." });
+        return;
+      }
+      const db = await readDbAsync();
+      const owner = googleDriveOwner(db);
+      if (!googleReady() || !owner || Number(owner.google?.driveScopeVersion || 0) !== GOOGLE_DRIVE_SCOPE_VERSION || !owner.google?.tokens) {
+        sendJson(res, 409, { error: "V Nastavitvah kot Bojan najprej ponovno povezi Google Dokumente, preglednice in Gmail." });
+        return;
+      }
+      const report = clientReportSelection(db, body);
+      if (!report) {
+        sendJson(res, 409, { error: "Izbrani vpisi niso vec na voljo za porocilo. Osvezi pogled in preveri izbor." });
+        return;
+      }
+      const email = String(report.client?.email || "").trim();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        sendJson(res, 409, { error: "V bazi za izbrano stranko ni veljavnega e-postnega naslova." });
+        return;
+      }
+      const requestedAttachments = clientReportAttachmentSelection(report, body.attachmentIds);
+      const attachments = await loadClientReportAttachments(db, requestedAttachments, {
+        maxAttachmentBytes: REPORT_GMAIL_MAX_ATTACHMENT_BYTES,
+        maxTotalBytes: REPORT_GMAIL_MAX_TOTAL_BYTES,
+        destination: "Gmail"
+      });
+      const pdf = await buildClientReportPdf(db, report, attachments);
+      const filename = clientReportFilename(report.client);
+      try {
+        const { google } = require("googleapis");
+        const gmail = google.gmail({ version: "v1", auth: googleClient(req, owner.google.tokens) });
+        const draft = await gmail.users.drafts.create({
+          userId: "me",
+          requestBody: { message: { raw: gmailDraftRaw({ to: email, pdf, pdfFilename: filename, attachments }) } }
+        });
+        sendJson(res, 201, { ok: true, draftId: String(draft.data?.id || ""), email });
+      } catch (error) {
+        console.error("Gmail osnutka ni bilo mogoce ustvariti:", error.message || error);
+        sendJson(res, 502, { error: "Gmail osnutka ni bilo mogoce ustvariti. V Nastavitvah ponovno povezi Google racun in poskusi znova." });
+      }
+      return;
+    }
     if (url.pathname === "/api/client-bills" && req.method === "GET") {
       const user = await requireUser(req, res);
       if (!user) return;
@@ -3170,6 +3572,24 @@ async function handleApi(req, res) {
       return;
     }
 
+    const clientBillDeleteMatch = /^\/api\/client-bills\/([^/]+)$/.exec(url.pathname);
+    if (clientBillDeleteMatch && req.method === "DELETE") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      if (user.role !== "boss") {
+        sendJson(res, 403, { error: "Obracun stranki lahko preklice samo sef." });
+        return;
+      }
+      const db = await readDbAsync();
+      const result = cancelClientBill(db, clientBillDeleteMatch[1], user);
+      if (!result) {
+        sendJson(res, 404, { error: "Potrjenega obracuna stranki ni bilo mogoce najti." });
+        return;
+      }
+      await writeDbAsync(db);
+      sendJson(res, 200, { clientBill: result.clientBill, clientBills: db.clientBills || [], archive: result.archive, todos: visibleTodosForUser(db, user) });
+      return;
+    }
     if (url.pathname === "/api/payrolls" && req.method === "POST") {
       const user = await requireUser(req, res);
       if (!user) return;
@@ -4633,7 +5053,12 @@ module.exports = {
   buildCalendarIcs,
   buildPayrollSnapshot,
   buildClientBillSnapshot,
+  clientReportSelection,
+  clientReportAttachmentSelection,
+  buildClientReportPdf,
+  gmailDraftRaw,
   archivePayrollTodos,
+  cancelClientBill,
   clientBillLockForTodos,
   reconcileTodoArchives,
   canManageEntry,

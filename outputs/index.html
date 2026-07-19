@@ -697,7 +697,21 @@
     .billing-financial-actions { display: flex; gap: 5px; align-items: center; }
     .billing-financial-actions button, .billing-financial-delete { display: inline-grid; place-items: center; min-width: 32px; min-height: 30px; padding: 3px 7px; font-size: 15px; }
     .billing-financial-lock { grid-column: 1 / -1; color: var(--muted); font-size: 11px; line-height: 1.25; }
-    .billing-gap-alert { color: var(--red); font-weight: 900; }
+    .billing-gap-alert,
+    .day-work-gap-icon {
+      display: inline-grid;
+      place-items: center;
+      width: 18px;
+      height: 18px;
+      border: 1px solid #bdd7ce;
+      border-radius: 5px;
+      background: #e8f2ee;
+      color: var(--accent-dark);
+      font-size: 15px;
+      font-weight: 900;
+      line-height: 1;
+      vertical-align: -3px;
+    }
     .billing-day-work, .billing-day-km { color: var(--accent-dark); font-size: 13px; font-weight: 900; white-space: normal; }
     .billing-task-row { display: grid; grid-template-columns: 92px minmax(0, 1fr) 64px 92px; gap: 10px; align-items: center; padding: 10px 12px; border-top: 1px solid var(--line); }
     .billing-task-row small { color: var(--muted); }
@@ -1931,6 +1945,16 @@
       text-align: center;
       line-height: 1.1;
     }
+    .day-work-gap {
+      position: absolute;
+      left: 7px;
+      right: 0;
+      display: grid;
+      place-items: center;
+      overflow: hidden;
+      pointer-events: auto;
+    }
+    .day-work-gap-icon { flex: 0 0 auto; }
 
     .day-timeline-event {
       position: absolute;
@@ -2574,6 +2598,31 @@
     }
 
     .client-billing-row:last-child { margin-bottom: 0; border-bottom: 0; }
+    .client-billing-settled-divider {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 20px 0 4px;
+      padding-top: 18px;
+      border-top: 3px solid #78938c;
+      color: #395b54;
+      font-size: 13px;
+      font-weight: 900;
+    }
+
+    .client-billing-settled-divider::after {
+      content: "";
+      flex: 1;
+      height: 1px;
+      background: #c8d9d5;
+    }
+
+    .client-billing-settled-divider small {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
 
     .client-billing-when {
       display: grid;
@@ -2613,7 +2662,8 @@
     }
 
     .client-billing-select.is-selected { border-color: #197e68; color: #075a4b; background: #dcf1e9; }
-    .client-billing-select.is-billed { border-color: #5b9b83; color: #075a4b; background: #e0f2ec; cursor: default; }
+    .client-billing-select.is-billed { border-color: #0d5b4b; color: #063f34; background: #d7f0e7; cursor: pointer; font: inherit; }
+    .client-billing-select.is-billed:hover, .client-billing-select.is-billed:focus-visible { border-color: #9a2f35; color: #7c1620; background: #fff1f1; }
     .client-billing-select input { width: 16px; height: 16px; margin: 0; accent-color: #197e68; }
     .client-billing-select input:disabled { opacity: 1; cursor: default; }
     .client-billing-client-name {
@@ -2682,6 +2732,31 @@
       cursor: pointer;
     }
 
+    .client-billing-attachment-wrap {
+      min-width: 0;
+      display: grid;
+      gap: 5px;
+    }
+
+    .client-billing-attachment-export {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      min-height: 26px;
+      padding: 3px 5px;
+      border-radius: 6px;
+      color: #365b54;
+      font-size: 11px;
+      font-weight: 800;
+      cursor: pointer;
+    }
+
+    .client-billing-attachment-export input {
+      width: 16px;
+      height: 16px;
+      margin: 0;
+      accent-color: #197e68;
+    }
     .client-billing-attachment img {
       display: block;
       width: 100%;
@@ -3205,7 +3280,7 @@
               <button class="menu-action view-menu-action admin-only" id="clientBillingMenuBtn" type="button">Obra&#269;un strank</button>
               <button class="menu-action view-menu-action" id="clientsMenuBtn" type="button">Stranke</button>
               <span class="tools-menu-label">Podatki in sinhronizacija</span>
-              <button class="menu-action hidden" id="googleDrive" type="button">Google Dokumenti in preglednice</button>
+              <button class="menu-action hidden" id="googleDrive" type="button">Google Dokumenti, preglednice in Gmail</button>
               <button class="menu-action admin-only" id="notificationsBtn" type="button">Sistemska opozorila <span id="notificationsCount"></span></button>
               <span class="tools-menu-label admin-only">Napredno</span>
               <button class="menu-action admin-only" id="workerBillingBtn" type="button">Privzete urne postavke</button>
@@ -3361,6 +3436,8 @@
           <div class="client-billing-intro-actions">
             <button class="secondary hidden" id="reportBackToClients" type="button">&larr; Vse stranke</button>
             <button class="primary hidden" id="confirmClientBill" type="button">Potrdi obračun stranki</button>
+            <button class="secondary hidden" id="exportReportPdf" type="button">Prenesi PDF</button>
+            <button class="secondary hidden" id="createReportGmailDraft" type="button">Gmail osnutek</button>
             <button class="secondary" id="exportReportExcel" type="button">Izvozi Excel</button>
           </div>
         </div>
@@ -3982,6 +4059,8 @@
       reportClientSort: "recent",
       clientBillSelectionKey: "",
       clientBillSelectedEventIds: new Set(),
+      reportAttachmentSelectionKey: "",
+      reportIncludedAttachmentIds: new Set(),
       offlineTodoSyncing: false,
       attachmentPreview: null,
       reportClientId: "",
@@ -5852,7 +5931,8 @@
       timeline.appendChild(eventsLayer);
       const workBlocksLayer = document.createElement("div");
       workBlocksLayer.className = "day-work-blocks";
-      dayWorkBlocks(todos).forEach((block) => {
+      const workBlocks = dayWorkBlocks(todos);
+      workBlocks.forEach((block) => {
         const element = document.createElement("div");
         const duration = block.end - block.start;
         element.className = "day-work-block";
@@ -5861,6 +5941,24 @@
         element.textContent = (duration / 60).toLocaleString("sl-SI", { maximumFractionDigits: 2 }) + " h";
         element.title = dayTimelineTime(block.start) + "-" + dayTimelineTime(block.end) + ": " + element.textContent;
         workBlocksLayer.appendChild(element);
+      });
+      workBlocks.slice(1).forEach((block, index) => {
+        const previous = workBlocks[index];
+        const gapMinutes = block.start - previous.end;
+        const gapHeight = Math.round(gapMinutes * minuteHeight);
+        if (gapMinutes <= 0 || gapHeight < 14) return;
+        const gap = document.createElement("div");
+        const gapLabel = `Razmak med vnosi: ${billingGapLabel(gapMinutes)}`;
+        gap.className = "day-work-gap";
+        gap.style.top = Math.round(previous.end * minuteHeight) + "px";
+        gap.style.height = gapHeight + "px";
+        gap.title = gapLabel;
+        gap.setAttribute("aria-label", gapLabel);
+        const icon = document.createElement("span");
+        icon.className = "day-work-gap-icon";
+        icon.textContent = "↕";
+        gap.appendChild(icon);
+        workBlocksLayer.appendChild(gap);
       });
       timeline.appendChild(workBlocksLayer);
 
@@ -6554,7 +6652,7 @@
           const hoursLabel = `${day.hours.toLocaleString("sl-SI", { maximumFractionDigits: 2 })} h po ${money(hourlyRate)} EUR/h`;
           const kmLabel = `${day.km.toLocaleString("sl-SI", { maximumFractionDigits: 1 })} km po ${money(kmRate)} EUR/km`;
           if (!items.work.length) return `<div class="billing-day billing-financial-only">${financialRows}</div>`;
-          return `<div class="billing-day"><button class="billing-day-overview billing-open-day" type="button" data-date="${escapeHtml(date)}" data-worker-id="${escapeHtml(workerId)}"><strong>${escapeHtml(formatDate(date))}</strong><span class="billing-day-hours">${hasGap ? '<span class="billing-gap-alert" title="Ure niso v neprekinjenem kosu">!</span> ' : ""}${escapeHtml(hoursLabel)}</span><span class="billing-day-work">Delo: ${money(day.workAmount)} EUR</span><span class="billing-day-km">${escapeHtml(kmLabel)}</span></button>${financialRows}</div>`;
+          return `<div class="billing-day"><button class="billing-day-overview billing-open-day" type="button" data-date="${escapeHtml(date)}" data-worker-id="${escapeHtml(workerId)}"><strong>${escapeHtml(formatDate(date))}</strong><span class="billing-day-hours">${hasGap ? '<span class="billing-gap-alert" title="Ure niso v neprekinjenem kosu" aria-label="Ure niso v neprekinjenem kosu">↕</span> ' : ""}${escapeHtml(hoursLabel)}</span><span class="billing-day-work">Delo: ${money(day.workAmount)} EUR</span><span class="billing-day-km">${escapeHtml(kmLabel)}</span></button>${financialRows}</div>`;
         }).join("");
         list.querySelectorAll(".billing-open-day").forEach((button) => button.addEventListener("click", () => openBillingDayTimeline(button.dataset.workerId, button.dataset.date)));
         list.querySelectorAll(".edit-billing-advance").forEach((button) => button.addEventListener("click", () => {
@@ -7540,7 +7638,7 @@
       $("todoFormNotesLabel").textContent = logisticsStatus ? "Opis" : "Opis del";
       $("todoFormNotes").placeholder = logisticsStatus ? "Vpi\u0161i opis" : "Opi\u0161i, kaj se bo delalo";
       const showWorkerMileage = completed && !meal;
-      const showHourlyRate = state.user?.role === "boss" && completed && !meal;
+      const showHourlyRate = isAdminView() && completed && !meal;
       const showClientMileage = !meal && (isAdminView() || Boolean(state.todoHoursSourceId) || state.todoStandaloneHours);
       $("todoFormClientBilling").classList.toggle("hidden", !showClientMileage);
       $("todoFormBilling").classList.toggle("hidden", !showWorkerMileage);
@@ -7553,8 +7651,9 @@
     function todoClientKmRate(vehicle) {
       const billing = state.settings?.billing || {};
       const legacy = Number(billing.kmRate || 0);
-      const value = vehicle === "van" ? billing.clientVanKmRate : billing.clientPersonalKmRate;
-      return Number.isFinite(Number(value)) ? Number(value) : legacy;
+      const fallback = Number.isFinite(legacy) && legacy > 0 ? legacy : 0.22;
+      const value = Number(vehicle === "van" ? billing.clientVanKmRate : billing.clientPersonalKmRate);
+      return Number.isFinite(value) && value > 0 ? value : fallback;
     }
 
     function updateTodoClientKmRateNote() {
@@ -7887,6 +7986,68 @@
       }
       return pending.filter((line) => state.clientBillSelectedEventIds.has(todoEventId(line.todo)));
     }
+    function reportAttachmentSelectionKey(lines, selection) {
+      return [reportClientBillSelectionKey(selection), ...lines.map((line) => todoEventId(line.todo)).filter(Boolean).sort()].join("|");
+    }
+
+    function reportAttachmentItems(lines) {
+      const attachments = new Map();
+      lines.forEach((line) => {
+        (line.todo.photos || []).forEach((photo) => {
+          const id = String(photo?.attachmentId || "");
+          if (!/^[a-f0-9]{64}$/.test(id) || attachments.has(id)) return;
+          attachments.set(id, { id, eventId: todoEventId(line.todo), photo, todo: line.todo });
+        });
+      });
+      return [...attachments.values()];
+    }
+
+    function syncReportAttachmentSelection(lines, selection) {
+      const items = reportAttachmentItems(lines);
+      const availableIds = new Set(items.map((item) => item.id));
+      const key = reportAttachmentSelectionKey(lines, selection);
+      if (state.reportAttachmentSelectionKey !== key) {
+        state.reportAttachmentSelectionKey = key;
+        state.reportIncludedAttachmentIds = new Set(availableIds);
+      } else {
+        state.reportIncludedAttachmentIds = new Set([...state.reportIncludedAttachmentIds].filter((id) => availableIds.has(id)));
+      }
+      return items;
+    }
+
+    function reportExportPayload() {
+      const selection = reportClientSelection();
+      if (!selection.id && !selection.name) throw new Error("Najprej izberi stranko.");
+      const pending = reportTodos().map(reportTodoLine).filter((line) => !line.clientBill);
+      const selectedLines = syncClientBillSelection(pending, selection);
+      const eventIds = [...new Set(selectedLines.map((line) => todoEventId(line.todo)).filter(Boolean))];
+      if (!eventIds.length) throw new Error("Označi vsaj en vpis za poročilo.");
+      const attachmentItems = syncReportAttachmentSelection(selectedLines, selection);
+      const attachmentIds = attachmentItems
+        .filter((item) => state.reportIncludedAttachmentIds.has(item.id))
+        .map((item) => item.id);
+      return {
+        clientId: selection.id,
+        clientName: selection.name,
+        from: $("reportFrom").value,
+        to: $("reportTo").value,
+        eventIds,
+        attachmentIds
+      };
+    }
+    function reportClientBillHistoryCutoff() {
+      const cutoff = new Date();
+      cutoff.setFullYear(cutoff.getFullYear() - 1);
+      return dateKey(cutoff);
+    }
+
+    function reportTodoVisibleInClientBilling(todo) {
+      const clientBill = reportClientBill(todo);
+      if (!clientBill) return true;
+      const source = String(clientBill.confirmedAt || todo.archivedAt || todo.date || "");
+      const confirmedDate = (/^\d{4}-\d{2}-\d{2}/.exec(source) || [""])[0];
+      return !confirmedDate || confirmedDate >= reportClientBillHistoryCutoff();
+    }
     function reportTodoSort(left, right) {
       const leftKey = left.date ? `${left.date} ${left.start || "99:99"}` : "9999-99-99 99:99";
       const rightKey = right.date ? `${right.date} ${right.start || "99:99"}` : "9999-99-99 99:99";
@@ -7899,6 +8060,7 @@
       return uniqueTodosByEventId(state.todos)
         .filter(reportTodoIsCompleted)
         .filter((todo) => Boolean(todo.clientId || todo.client))
+        .filter(reportTodoVisibleInClientBilling)
         .filter((todo) => (!from && !to) ? true : inDateRange(todo.date, from, to))
         .sort(reportTodoSort);
     }
@@ -7916,7 +8078,7 @@
 
     function reportClientKmRate(todo) {
       const stored = Number(todo.clientKmRate);
-      return Number.isFinite(stored) && stored >= 0 ? stored : todoClientKmRate(todo.clientVehicle);
+      return Number.isFinite(stored) && stored > 0 ? stored : todoClientKmRate(todo.clientVehicle);
     }
 
     function reportVehicleId(todo) {
@@ -7929,12 +8091,13 @@
 
     function reportClientBill(todo) {
       const billId = String(todo?.clientBillId || "");
-      return (state.clientBills || []).find((bill) => bill.id === billId)
-        || (state.clientBills || []).find((bill) => String(bill.status || "") === "confirmed"
-          && (bill.eventIds || []).map(String).includes(todoEventId(todo)))
+      const direct = (state.clientBills || []).find((bill) => bill.id === billId);
+      if (direct && String(direct.status || "") === "confirmed") return direct;
+      const eventId = todoEventId(todo);
+      return (state.clientBills || []).find((bill) => String(bill.status || "") === "confirmed"
+        && (bill.eventIds || []).map(String).includes(eventId))
         || null;
     }
-
     function reportTodoLine(todo) {
       const hours = Number(duration(todo).toFixed(2));
       const clientKm = Math.max(0, Number(todo.clientKm || 0));
@@ -8046,30 +8209,37 @@
       return `${reportNumber(km, 1)} km · ${money(amount)} EUR`;
     }
 
-    function renderReportAttachments(todo) {
+    function renderReportAttachments(todo, { exportable = false } = {}) {
       const photos = todo.photos || [];
       const driveFiles = todo.driveFiles || [];
       if (!photos.length && !driveFiles.length) return "";
       const attachmentCards = photos.map((photo) => {
         const title = escapeHtml(photo.name || "Priloga");
-        if (isPdfAttachment(photo)) {
-          return `<a class="client-billing-attachment" href="${escapeHtml(attachmentSource(photo))}" target="_blank" rel="noopener noreferrer"><span>${pdfThumbnailMarkup(photo)}</span><span>${title}</span></a>`;
-        }
-        return `<button class="client-billing-attachment report-image-preview" type="button" data-report-todo-id="${escapeHtml(todo.id)}" data-photo-id="${escapeHtml(photo.id)}"><img src="${escapeHtml(attachmentThumbnailSource(photo))}" alt="${title}"><span>${title}</span></button>`;
+        const attachmentId = String(photo.attachmentId || "");
+        const canChooseForExport = exportable && /^[a-f0-9]{64}$/.test(attachmentId);
+        const includeInExport = canChooseForExport && state.reportIncludedAttachmentIds.has(attachmentId);
+        const exportToggle = canChooseForExport
+          ? `<label class="client-billing-attachment-export"><input type="checkbox" data-report-export-attachment-id="${escapeHtml(attachmentId)}" ${includeInExport ? "checked" : ""}><span>Vključi v izvoz</span></label>`
+          : "";
+        const media = isPdfAttachment(photo)
+          ? `<a class="client-billing-attachment" href="${escapeHtml(attachmentSource(photo))}" target="_blank" rel="noopener noreferrer"><span>${pdfThumbnailMarkup(photo)}</span><span>${title}</span></a>`
+          : `<button class="client-billing-attachment report-image-preview" type="button" data-report-todo-id="${escapeHtml(todo.id)}" data-photo-id="${escapeHtml(photo.id)}"><img src="${escapeHtml(attachmentThumbnailSource(photo))}" alt="${title}"><span>${title}</span></button>`;
+        return `<div class="client-billing-attachment-wrap">${media}${exportToggle}</div>`;
       }).join("");
       return `<section class="client-billing-section"><strong>Priloge in dokumenti</strong>${attachmentCards ? `<div class="client-billing-attachments">${attachmentCards}</div>` : ""}${driveFiles.length ? `<div class="todo-drive-files">${renderTodoDriveFilesHtml(driveFiles)}</div>` : ""}</section>`;
     }
-
     function renderClientBillingRow(line) {
       const { todo, hours, clientKm, clientKmRate, clientKmAmount, vehicle, clientBill } = line;
       const time = todo.start && todo.end ? `${todo.start}–${todo.end}` : "Brez vpisane ure";
       const eventId = todoEventId(todo);
       const selectedForClientBill = !clientBill && state.clientBillSelectedEventIds.has(eventId);
-      const billSelection = `<label class="client-billing-select ${clientBill ? "is-billed" : selectedForClientBill ? "is-selected" : ""}"><input type="checkbox" data-client-bill-event-id="${escapeHtml(eventId)}" ${clientBill || selectedForClientBill ? "checked" : ""}${clientBill ? " disabled" : ""}><span>${clientBill ? "Obra\u010dunano" : "Za obra\u010dun"}</span></label>`;
+      const billSelection = clientBill
+        ? `<button class="client-billing-select is-billed" type="button" data-cancel-client-bill-id="${escapeHtml(clientBill.id)}" title="Prekliči obračun stranki"><span>Obračunano</span></button>`
+        : `<label class="client-billing-select ${selectedForClientBill ? "is-selected" : ""}"><input type="checkbox" data-client-bill-event-id="${escapeHtml(eventId)}" ${selectedForClientBill ? "checked" : ""}><span>Za obračun</span></label>`;
       const details = [
         todo.notes ? `<section class="client-billing-section"><strong>Opis del</strong><div class="report-todo-description">${linkifyText(todo.notes)}</div></section>` : "",
         todo.material ? `<section class="client-billing-section"><strong>Material</strong><div class="report-todo-description">${linkifyText(todo.material)}</div></section>` : "",
-        renderReportAttachments(todo)
+        renderReportAttachments(todo, { exportable: selectedForClientBill })
       ].filter(Boolean).join("");
       const charges = [
         hours ? `<span>Izvedeno: ${reportNumber(hours)} h</span>` : "<span>Ura ni vpisana</span>",
@@ -8105,13 +8275,15 @@
       $("reportClientSort").value = reportClientSortMode();
       const summaries = detail ? [] : reportClientSummaries();
       const lines = detail ? reportTodos().map(reportTodoLine) : reportOverviewLines();
-      const totals = reportTotals(lines);
       const pendingClientBillLines = detail ? lines.filter((line) => !line.clientBill) : [];
       const selectedClientBillLines = detail ? syncClientBillSelection(lines, selection) : [];
+      if (detail) syncReportAttachmentSelection(selectedClientBillLines, selection);
+      // In the client bill detail, the summary is the amount currently being confirmed.
+      const totals = reportTotals(detail ? selectedClientBillLines : lines);
       $("clientDetailTitle").textContent = detail ? `Poročilo: ${selection.name}` : "Povzetek po strankah";
       $("clientDetailRange").textContent = reportRangeLabel();
       $("reportLineCount").textContent = detail
-        ? `${totals.count} ${totals.count === 1 ? "vpis" : "vpisov"}`
+        ? `${totals.count} ${totals.count === 1 ? "označen vpis" : "označenih vpisov"}`
         : `${summaries.length} ${summaries.length === 1 ? "stranka" : "strank"}`;
       const reportNotice = detail ? "" : `Izberi stranko za njen podroben kronolo\u0161ki pregled izvedenih storitev. Seznam je razvr\u0161\u010den po ${reportClientSortLabel()}.`;
       $("reportBillingNotice").textContent = reportNotice;
@@ -8121,6 +8293,13 @@
       $("confirmClientBill").disabled = !detail || !selectedClientBillLines.length;
       $("confirmClientBill").title = selectedClientBillLines.length ? "" : "Označi vsaj en vpis za obračun stranki.";
       $("confirmClientBill").textContent = `Potrdi izbrane vpise${pendingClientBillLines.length ? ` (${selectedClientBillLines.length})` : ""}`;
+      $("exportReportPdf").classList.toggle("hidden", !detail);
+      $("createReportGmailDraft").classList.toggle("hidden", !detail);
+      $("exportReportPdf").disabled = !selectedClientBillLines.length;
+      const reportClient = findClient(selection.id) || findClient(selection.name);
+      const hasClientEmail = Boolean(String(reportClient?.email || "").trim());
+      $("createReportGmailDraft").disabled = !selectedClientBillLines.length || !hasClientEmail;
+      $("createReportGmailDraft").title = !selectedClientBillLines.length ? "Označi vsaj en vpis za poročilo." : (hasClientEmail ? "Ustvari Gmail osnutek brez pošiljanja." : "Za stranko v bazi ni e-poštnega naslova.");
       $("clearReportClient").textContent = detail ? "Počisti izbor" : "Počisti iskanje";
       $("exportReportExcel").textContent = detail ? "Izvozi poročilo" : "Izvozi evidenco";
       const summaryRows = detail ? [
@@ -8137,9 +8316,18 @@
       ];
       $("reportSummary").innerHTML = `<dl class="client-billing-summary-list">${summaryRows.map(([label, value]) => `<div class="${label.endsWith("skupaj") ? "is-total" : ""}"><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join("")}</dl>`;
       $("clientDetailList").classList.toggle("client-billing-client-overview", !detail);
-      $("clientDetailList").innerHTML = detail
-        ? lines.map(renderClientBillingRow).join("") || `<p class="todo-meta">Za ta izbor ni zaključenih storitev.</p>`
-        : summaries.map(renderReportClientCard).join("") || `<p class="todo-meta">Za ta izbor ni zaključenih storitev.</p>`;
+      if (detail) {
+        const pendingLines = lines.filter((line) => !line.clientBill);
+        const billedLines = lines.filter((line) => line.clientBill);
+        const billedDivider = billedLines.length
+          ? `<div class="client-billing-settled-divider"><span>Obračunano</span><small>Prikaz zadnjih 12 mesecev</small></div>`
+          : "";
+        $("clientDetailList").innerHTML = [...pendingLines.map(renderClientBillingRow), billedDivider, ...billedLines.map(renderClientBillingRow)].join("")
+          || `<p class="todo-meta">Za ta izbor ni zaključenih storitev.</p>`;
+      } else {
+        $("clientDetailList").innerHTML = summaries.map(renderReportClientCard).join("")
+          || `<p class="todo-meta">Za ta izbor ni zaključenih storitev.</p>`;
+      }
     }
 
     function openClientReport(client, clientId = "") {
@@ -8150,11 +8338,27 @@
       renderReport();
     }
 
+    async function cancelClientBillFromReport(billId) {
+      const bill = (state.clientBills || []).find((item) => item.id === billId && String(item.status || "") === "confirmed");
+      if (!bill) return;
+      if (!confirm(`Prekličem obračun stranki ${bill.clientName}?\n\nPovezani zaključeni vnosi se vrnejo med neobračunane. Če so že v arhivu, jih sistem varno vrne iz arhiva; obračun delavca ostane nespremenjen.`)) return;
+      const data = await api(`/api/client-bills/${encodeURIComponent(billId)}`, { method: "DELETE" });
+      state.clientBills = data.clientBills || state.clientBills;
+      state.todos = data.todos || state.todos;
+      state.clientBillSelectionKey = "";
+      state.clientBillSelectedEventIds = new Set();
+      state.reportAttachmentSelectionKey = "";
+      state.reportIncludedAttachmentIds = new Set();
+      await loadAll();
+      renderReport();
+    }
     function clearClientReportSelection() {
       state.reportClient = "";
       state.reportClientId = "";
       state.clientBillSelectionKey = "";
       state.clientBillSelectedEventIds = new Set();
+      state.reportAttachmentSelectionKey = "";
+      state.reportIncludedAttachmentIds = new Set();
       $("reportClient").value = "";
       renderReport();
     }
@@ -8178,6 +8382,8 @@
       });
       state.clientBillSelectionKey = "";
       state.clientBillSelectedEventIds = new Set();
+      state.reportAttachmentSelectionKey = "";
+      state.reportIncludedAttachmentIds = new Set();
       await loadAll();
       setView("report");
       renderReport();
@@ -8220,6 +8426,58 @@
       const html = `<html><head><meta charset="utf-8"></head><body><table>${rows.map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`).join("")}</table></body></html>`;
       const slug = (selection.name || "vse-stranke").replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase() || "stranka";
       downloadText(html, `indus-porocilo-${slug}.xls`, "application/vnd.ms-excel;charset=utf-8");
+    }
+    async function fetchClientReportPdf(payload, retried = false) {
+      let response;
+      try {
+        response = await fetch("/api/client-report/pdf", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json", "X-CSRF-Token": state.csrfToken || "" },
+          body: JSON.stringify(payload)
+        });
+      } catch (cause) {
+        throw new Error("Povezava s strežnikom ni uspela.");
+      }
+      if (response.status === 403 && !retried) {
+        const failure = await response.clone().json().catch(() => null);
+        if (/varnostna potrditev seje manjka/i.test(String(failure?.error || ""))) {
+          await refreshSessionSecurityContext();
+          return fetchClientReportPdf(payload, true);
+        }
+      }
+      if (!response.ok) {
+        const failure = await response.json().catch(() => null);
+        throw new Error(failure?.error || "PDF poročila ni bilo mogoče pripraviti.");
+      }
+      return response;
+    }
+
+    function reportDownloadFileName(response, fallback = "obracun.pdf") {
+      const header = String(response.headers.get("content-disposition") || "");
+      const match = /filename="?([^";]+)"?/i.exec(header);
+      return (match?.[1] || fallback).replace(/[\\/:*?"<>|]/g, "-");
+    }
+
+    async function downloadClientReportPdf() {
+      const payload = reportExportPayload();
+      const response = await fetchClientReportPdf(payload);
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = reportDownloadFileName(response);
+      document.body.append(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+
+    async function createClientReportGmailDraft() {
+      const payload = reportExportPayload();
+      const result = await api("/api/client-report/gmail-draft", { method: "POST", body: JSON.stringify(payload) });
+      alert(`Gmail osnutek za ${result.email} je pripravljen. Sporočilo ni bilo poslano.`);
+      window.open("https://mail.google.com/mail/u/0/#drafts", "_blank", "noopener");
     }
     function todosCanReorderTogether(sourceId, targetId) {
       const todos = contextTodos();
@@ -8822,7 +9080,7 @@
         return;
       }
       if (status.connected) {
-        alert("Google Dokumenti in preglednice so že povezani.");
+        alert("Google Dokumenti, preglednice in Gmail so že povezani.");
         return;
       }
       const data = await api("/api/google/drive-auth-url");
@@ -9142,8 +9400,8 @@
       const billing = state.settings.billing || {};
       const legacyRate = Number(billing.kmRate || 0);
       $("workerOwnVehicleKmRate").value = Number(billing.workerOwnVehicleKmRate ?? legacyRate);
-      $("clientPersonalKmRate").value = Number(billing.clientPersonalKmRate ?? legacyRate);
-      $("clientVanKmRate").value = Number(billing.clientVanKmRate ?? legacyRate);
+      $("clientPersonalKmRate").value = todoClientKmRate("personal");
+      $("clientVanKmRate").value = todoClientKmRate("van");
       $("kmRatesDialog").showModal();
     });
     ["closeKmRates", "cancelKmRates"].forEach((id) => $(id).addEventListener("click", () => $("kmRatesDialog").close()));
@@ -9481,6 +9739,8 @@
     $("reportBackToClients").addEventListener("click", clearClientReportSelection);
     $("confirmClientBill").addEventListener("click", () => confirmClientBillFromReport().catch((error) => alert(error.message)));
     $("exportReportExcel").addEventListener("click", exportReportExcel);
+    $("exportReportPdf").addEventListener("click", () => downloadClientReportPdf().catch((error) => alert(error.message)));
+    $("createReportGmailDraft").addEventListener("click", () => createClientReportGmailDraft().catch((error) => alert(error.message)));
     $("addClientBtn").addEventListener("click", () => addClientFromForm().catch((error) => alert(error.message)));
 
     document.querySelectorAll(".report-setting").forEach((button) => {
@@ -9519,6 +9779,13 @@
     });
 
     $("clientDetailList").addEventListener("click", (event) => {
+      const cancelBill = event.target.closest("[data-cancel-client-bill-id]");
+      if (cancelBill) {
+        event.preventDefault();
+        event.stopPropagation();
+        cancelClientBillFromReport(cancelBill.dataset.cancelClientBillId).catch((error) => alert(error.message));
+        return;
+      }
       const clientButton = event.target.closest(".open-client-report");
       if (clientButton) {
         openClientReport(clientButton.dataset.clientName || "", clientButton.dataset.clientId || "");
@@ -9539,6 +9806,15 @@
       }
     });
     $("clientDetailList").addEventListener("change", (event) => {
+      const exportAttachment = event.target.closest("[data-report-export-attachment-id]");
+      if (exportAttachment && !exportAttachment.disabled) {
+        const attachmentId = String(exportAttachment.dataset.reportExportAttachmentId || "");
+        if (attachmentId) {
+          if (exportAttachment.checked) state.reportIncludedAttachmentIds.add(attachmentId);
+          else state.reportIncludedAttachmentIds.delete(attachmentId);
+        }
+        return;
+      }
       const checkbox = event.target.closest("[data-client-bill-event-id]");
       if (!checkbox || checkbox.disabled) return;
       const eventId = String(checkbox.dataset.clientBillEventId || "");

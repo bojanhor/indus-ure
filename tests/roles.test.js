@@ -16,6 +16,11 @@ const {
   createSession,
   buildPayrollSnapshot,
   buildClientBillSnapshot,
+  clientReportSelection,
+  clientReportAttachmentSelection,
+  buildClientReportPdf,
+  gmailDraftRaw,
+  cancelClientBill,
   clientBillLockForTodos,
   reconcileTodoArchives,
   entryEditLockConflict,
@@ -489,6 +494,74 @@ test("obračun stranki vsebuje samo označene dogodke", () => {
   assert.ok(selected);
   assert.deepEqual(selected.eventIds, ["project-b"]);
   assert.equal(buildClientBillSnapshot(db, { clientId: "jerin", eventIds: ["ne-obstaja"] }, boss), null);
+});
+test("stara nicelna tarifa kombija uporabi trenutno nastavljeno tarifo za stranko", () => {
+  const billingDb = {
+    users: { bojan: { id: "bojan", name: "Bojan", role: "boss" } },
+    clients: [{ clientId: "jerin", name: "Jerin", search: "jerin" }],
+    settings: { billing: { kmRate: 0.42, clientVanKmRate: 0, clientPersonalKmRate: 0 } },
+    payrolls: [],
+    clientBills: [],
+    todos: [{
+      id: "work-km", assignmentGroupId: "project-km", syncUser: "bojan", status: "execution",
+      date: "2026-07-15", start: "08:00", end: "09:00", title: "Servis", clientId: "jerin", client: "Jerin",
+      clientKm: 20, clientVehicle: "van", clientKmRate: 0
+    }]
+  };
+  const bill = buildClientBillSnapshot(billingDb, { clientId: "jerin", eventIds: ["project-km"] }, boss);
+  assert.equal(bill.lines[0].clientKmRate, 0.42);
+});
+test("izvoz porocila sprejme samo izbrane dogodke in njihove priloge", async () => {
+  const attachmentId = "a".repeat(64);
+  const db = {
+    users: { bojan: { id: "bojan", name: "Bojan", role: "boss" } },
+    clients: [{ clientId: "jerin", name: "Jerin", email: "stranka@example.com", search: "jerin" }],
+    payrolls: [],
+    clientBills: [],
+    todos: [{
+      id: "work-a", assignmentGroupId: "project-a", syncUser: "bojan", status: "execution",
+      date: "2026-07-15", start: "08:00", end: "10:00", title: "Montaža", clientId: "jerin", client: "Jerin",
+      photos: [{ id: "photo-a", attachmentId, name: "dokaz.jpg" }]
+    }]
+  };
+  const report = clientReportSelection(db, { clientId: "jerin", eventIds: ["project-a"] });
+  assert.equal(report.groups.length, 1);
+  const attachments = clientReportAttachmentSelection(report, [attachmentId]);
+  assert.equal(attachments.length, 1);
+  assert.throws(() => clientReportAttachmentSelection(report, ["b".repeat(64)]), /ne pripada/);
+  const pdf = await buildClientReportPdf(db, report, []);
+  assert.equal(pdf.subarray(0, 4).toString(), "%PDF");
+  const raw = Buffer.from(gmailDraftRaw({
+    to: "stranka@example.com",
+    pdf,
+    pdfFilename: "obracun.pdf",
+    attachments: []
+  }), "base64url").toString("utf8");
+  assert.match(raw, /Subject: =\?UTF-8\?B\?/);
+  assert.match(raw, /Content-Type: application\/pdf/);
+});
+test("preklic obračuna stranki odklene in vrne arhiviran dogodek", () => {
+  const db = {
+    users: { bojan: { id: "bojan", name: "Bojan", role: "boss" }, ibro: { id: "ibro", name: "Ibro", role: "worker" } },
+    clients: [{ clientId: "jerin", name: "Jerin", search: "jerin" }],
+    payrolls: [{ id: "payroll-ibro", workerId: "ibro", status: "confirmed", month: "2026-07", lines: [{ todoId: "work-1" }] }],
+    clientBills: [],
+    todos: [{ id: "work-1", assignmentGroupId: "project-1", syncUser: "ibro", status: "execution", date: "2026-07-15", start: "08:00", end: "10:00", title: "Montaža", clientId: "jerin", client: "Jerin" }]
+  };
+  const bill = buildClientBillSnapshot(db, { clientId: "jerin", eventIds: ["project-1"] }, boss);
+  db.clientBills.push(bill);
+  reconcileTodoArchives(db, boss);
+  assert.ok(db.todos[0].archivedAt);
+
+  const result = cancelClientBill(db, bill.id, boss);
+  assert.ok(result);
+  assert.equal(result.clientBill.status, "cancelled");
+  normalizeDb(db);
+  assert.equal(db.clientBills[0].status, "cancelled");
+  assert.equal(result.archive.restored, 1);
+  assert.equal(db.todos[0].archivedAt, "");
+  assert.equal(db.todos[0].clientBillId, "");
+  assert.equal(clientBillLockForTodos(db, db.todos), null);
 });
 test("skupni dogodek ostane aktiven, dokler obračun ni potrjen za vsakega izvajalca", () => {
   const db = {

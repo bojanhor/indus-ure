@@ -23,6 +23,8 @@ test("Google Calendar in Sheets nista vec delovni integraciji", () => {
   assert.doesNotMatch(source, /GOOGLE_SHEETS_ID/);
   assert.match(source, /Google Calendar sinhronizacija je bila odstranjena/);
   assert.match(source, /function buildCalendarIcs/);
+  assert.match(source, /GOOGLE_GMAIL_COMPOSE_SCOPE/);
+  assert.match(source, /gmail\.compose/);
 });
 
 test("stari Calendar OAuth token se odstrani, Drive token pa potrebuje trenutni scope", () => {
