@@ -56,6 +56,17 @@ test("ICS ostane samo za branje in ne zahteva Google Calendar", () => {
   assert.doesNotMatch(ics, /googleapis/i);
 });
 
+test("skupni koledar ohrani dogodek, dokler ima vsaj en izvajalec neobračunan vnos", () => {
+  const ics = buildCalendarIcs({
+    users: { ibro: { name: "Ibro" }, maja: { name: "Maja" } },
+    entries: [],
+    todos: [
+      { id: "a", assignmentGroupId: "shared", title: "Montaža", date: "2026-07-20", start: "08:00", end: "09:00", status: "execution", syncUser: "ibro", archivedAt: "2026-07-21T12:00:00.000Z" },
+      { id: "b", assignmentGroupId: "shared", title: "Montaža", date: "2026-07-20", start: "08:00", end: "09:00", status: "execution", syncUser: "maja", archivedAt: "" }
+    ]
+  }, { combined: true });
+  assert.match(ics, /TODO: Montaža/);
+});
 test("Drive priponke ostanejo omejene na Dokumente in Preglednice", () => {
   const id = "1_z_1I_wX8-VR0K9rXj7BHRFwc--00Ul5";
   const files = cleanTodoDriveFiles([

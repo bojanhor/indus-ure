@@ -552,6 +552,11 @@ function normalizeDb(db = {}) {
     changed = true;
   }
 
+  if (!Array.isArray(db.clientBills)) {
+    db.clientBills = [];
+    changed = true;
+  }
+
   if (!db.settings || typeof db.settings !== "object") {
     db.settings = {};
     changed = true;
@@ -720,6 +725,10 @@ function normalizeDb(db = {}) {
   db.payrolls = db.payrolls.map((payroll) => normalizePayroll(payroll, db)).filter(Boolean);
   if (JSON.stringify(db.payrolls) !== payrollsBeforeNormalization) changed = true;
 
+  const clientBillsBeforeNormalization = JSON.stringify(db.clientBills);
+  db.clientBills = db.clientBills.map((bill) => normalizeClientBill(bill, db)).filter(Boolean);
+  if (JSON.stringify(db.clientBills) !== clientBillsBeforeNormalization) changed = true;
+
   db.todos = db.todos.map((todo, index) => {
     const next = { ...todo };
     const assignmentGroupId = String(next.assignmentGroupId || next.id || crypto.randomUUID()).trim();
@@ -801,7 +810,7 @@ function normalizeDb(db = {}) {
       next.googleStatusLabel = "";
       changed = true;
     }
-    for (const field of ["archiveGoogleEventId", "archivedAt", "archivedPayrollId"]) {
+    for (const field of ["archiveGoogleEventId", "archivedAt", "archivedPayrollId", "archivedClientBillId", "clientBillId", "clientBilledAt"]) {
       if (typeof next[field] !== "string") {
         next[field] = "";
         changed = true;
@@ -878,13 +887,14 @@ function normalizeDb(db = {}) {
     return next;
   }).filter((debt) => debt.amount || debt.reason);
 
+  if (reconcileTodoArchives(db).changed) changed = true;
   return { db, changed };
 }
 
 function ensureDb() {
   if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
   if (!fs.existsSync(dbFile)) {
-    fs.writeFileSync(dbFile, JSON.stringify({ users: defaultUsers, sessions: {}, entries: [], todos: [], attachments: {}, debts: [], clients: [] }, null, 2), "utf8");
+    fs.writeFileSync(dbFile, JSON.stringify({ users: defaultUsers, sessions: {}, entries: [], todos: [], attachments: {}, debts: [], clients: [], clientBills: [] }, null, 2), "utf8");
     return;
   }
 
@@ -928,6 +938,7 @@ function initialDatabaseState() {
     clients: [],
     billingLocks: [],
     payrolls: [],
+    clientBills: [],
     settings: {},
     calendarToken: crypto.randomBytes(24).toString("hex"),
     syncRevision: 0
@@ -1264,6 +1275,7 @@ function nonnegativeNumber(value, fallback = null, maximum = Number.MAX_SAFE_INT
 
 const PAYROLL_STATUSES = new Set(["draft", "archiving", "confirmed", "paid"]);
 const PAYROLL_PAID_TODO_STATUSES = new Set(["execution", "meal"]);
+const CLIENT_BILL_STATUSES = new Set(["confirmed"]);
 
 function isDateKey(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(value || ""));
@@ -1531,6 +1543,210 @@ function payrollLockForTodos(db, todos = []) {
   if (!ids.size) return null;
   return (db.payrolls || []).find((payroll) => ["archiving", "confirmed", "paid"].includes(payroll.status)
     && (payroll.lines || []).some((line) => ids.has(String(line.todoId || "")))) || null;
+}
+
+function todoBillingEventId(todo) {
+  return String(todo?.assignmentGroupId || todo?.id || "").trim();
+}
+
+function todoRequiresClientBilling(todo) {
+  return Boolean(todo && todo.status === "execution" && String(todo.clientId || todo.client || "").trim());
+}
+
+function clientBillIsConfirmed(bill) {
+  return CLIENT_BILL_STATUSES.has(String(bill?.status || ""));
+}
+
+function clientBillEventIds(bill) {
+  return [...new Set((Array.isArray(bill?.eventIds) ? bill.eventIds : []).map((id) => String(id || "").trim()).filter(Boolean))];
+}
+
+function clientForBilling(db, input = {}) {
+  const wanted = [input?.clientId, input?.clientName, input?.client]
+    .map((value) => String(value || "").trim().toLowerCase())
+    .filter(Boolean);
+  if (!wanted.length) return null;
+  return (db.clients || []).find((client) => [client.clientId, client.id, client.name, client.search, client.taxId]
+    .filter(Boolean)
+    .some((value) => wanted.includes(String(value).trim().toLowerCase()))) || null;
+}
+
+function normalizeClientBill(input, db) {
+  const client = clientForBilling(db, input || {});
+  const clientId = String(client?.clientId || input?.clientId || "").trim().slice(0, 160);
+  const clientName = String(client?.name || input?.clientName || input?.client || "").trim().slice(0, 240);
+  const eventIds = clientBillEventIds(input);
+  if (!clientName || !eventIds.length) return null;
+  const lines = (Array.isArray(input?.lines) ? input.lines : []).map((line) => {
+    const eventId = String(line?.eventId || line?.assignmentGroupId || "").trim();
+    if (!eventIds.includes(eventId)) return null;
+    return {
+      eventId,
+      todoIds: [...new Set((Array.isArray(line?.todoIds) ? line.todoIds : []).map((id) => String(id || "").trim()).filter(Boolean))],
+      date: isDateKey(line?.date) ? String(line.date) : "",
+      start: String(line?.start || "").slice(0, 5),
+      end: String(line?.end || "").slice(0, 5),
+      title: String(line?.title || "").trim().slice(0, 300),
+      clientKm: nonnegativeNumber(line?.clientKm, 0, 1_000_000),
+      clientVehicle: todoVehicle(line?.clientVehicle),
+      clientKmRate: nonnegativeNumber(line?.clientKmRate, 0, 1_000)
+    };
+  }).filter(Boolean);
+  const createdAt = String(input?.createdAt || new Date().toISOString());
+  return {
+    id: String(input?.id || crypto.randomUUID()),
+    clientId,
+    clientName,
+    from: isDateKey(input?.from) ? String(input.from) : "",
+    to: isDateKey(input?.to) ? String(input.to) : "",
+    status: clientBillIsConfirmed(input) ? "confirmed" : "confirmed",
+    eventIds,
+    lines,
+    createdBy: String(input?.createdBy || "system"),
+    createdByName: String(input?.createdByName || ""),
+    createdAt,
+    confirmedAt: String(input?.confirmedAt || createdAt),
+    confirmedBy: String(input?.confirmedBy || input?.createdBy || "system"),
+    confirmedByName: String(input?.confirmedByName || input?.createdByName || ""),
+    note: String(input?.note || "").trim().slice(0, 2_000)
+  };
+}
+
+function confirmedClientBillByEvent(db) {
+  const byEvent = new Map();
+  for (const bill of db.clientBills || []) {
+    if (!clientBillIsConfirmed(bill)) continue;
+    for (const eventId of clientBillEventIds(bill)) {
+      if (!byEvent.has(eventId)) byEvent.set(eventId, bill);
+    }
+  }
+  return byEvent;
+}
+
+function clientBillLockForTodos(db, todos = []) {
+  const bills = confirmedClientBillByEvent(db);
+  return todos.map((todo) => bills.get(todoBillingEventId(todo))).find(Boolean) || null;
+}
+
+function clientBillCandidates(db, input = {}) {
+  const client = clientForBilling(db, input);
+  if (!client) return { client: null, groups: [] };
+  const from = isDateKey(input.from) ? String(input.from) : "";
+  const to = isDateKey(input.to) ? String(input.to) : "";
+  const billed = confirmedClientBillByEvent(db);
+  const groups = new Map();
+  for (const todo of db.todos || []) {
+    if (!todoRequiresClientBilling(todo)) continue;
+    if (String(todo.clientId || "") !== String(client.clientId || "") && String(todo.client || "").trim().toLowerCase() !== String(client.name || "").trim().toLowerCase()) continue;
+    if ((from && String(todo.date || "") < from) || (to && String(todo.date || "") > to)) continue;
+    const eventId = todoBillingEventId(todo);
+    if (!eventId || billed.has(eventId)) continue;
+    if (!groups.has(eventId)) groups.set(eventId, []);
+    groups.get(eventId).push(todo);
+  }
+  return { client, groups: [...groups.entries()].map(([eventId, todos]) => ({ eventId, todos })) };
+}
+
+function buildClientBillSnapshot(db, input, actor) {
+  const selection = clientBillCandidates(db, input);
+  if (!selection.client || !selection.groups.length) return null;
+  const createdAt = new Date().toISOString();
+  return normalizeClientBill({
+    id: crypto.randomUUID(),
+    clientId: selection.client.clientId,
+    clientName: selection.client.name,
+    from: isDateKey(input?.from) ? String(input.from) : "",
+    to: isDateKey(input?.to) ? String(input.to) : "",
+    status: "confirmed",
+    eventIds: selection.groups.map((group) => group.eventId),
+    lines: selection.groups.map((group) => {
+      const representative = group.todos.slice().sort((left, right) => String(left.date || "").localeCompare(String(right.date || "")) || String(left.start || "").localeCompare(String(right.start || "")))[0];
+      return {
+        eventId: group.eventId,
+        todoIds: group.todos.map((todo) => todo.id),
+        date: representative.date,
+        start: representative.start,
+        end: representative.end,
+        title: representative.title,
+        clientKm: representative.clientKm,
+        clientVehicle: representative.clientVehicle,
+        clientKmRate: representative.clientKmRate
+      };
+    }),
+    createdBy: actor?.id || "system",
+    createdByName: actor?.name || "",
+    createdAt,
+    confirmedAt: createdAt,
+    confirmedBy: actor?.id || "system",
+    confirmedByName: actor?.name || ""
+  }, db);
+}
+
+function confirmedPayrollByTodo(db) {
+  const byTodo = new Map();
+  for (const payroll of db.payrolls || []) {
+    if (!["confirmed", "paid"].includes(payroll.status)) continue;
+    for (const line of payroll.lines || []) {
+      const todoId = String(line?.todoId || "");
+      if (todoId && !byTodo.has(todoId)) byTodo.set(todoId, payroll);
+    }
+  }
+  return byTodo;
+}
+
+function reconcileTodoArchives(db, actor = null) {
+  const payrolls = confirmedPayrollByTodo(db);
+  const bills = confirmedClientBillByEvent(db);
+  const now = new Date().toISOString();
+  const auditActor = actor || { id: "system", name: "Sistem" };
+  let archived = 0;
+  let restored = 0;
+  let changed = false;
+  for (const todo of db.todos || []) {
+    const payroll = payrolls.get(String(todo.id || ""));
+    const needsClientBill = todoRequiresClientBilling(todo);
+    const bill = needsClientBill ? bills.get(todoBillingEventId(todo)) : null;
+    const desiredClientBillId = bill?.id || "";
+    const readyForArchive = Boolean(payroll && (!needsClientBill || bill));
+    if (todo.clientBillId !== desiredClientBillId || todo.clientBilledAt !== (bill?.confirmedAt || "")) {
+      todo.clientBillId = desiredClientBillId;
+      todo.clientBilledAt = bill?.confirmedAt || "";
+      todo.updatedAt = now;
+      todo.updatedBy = auditActor.id;
+      todo.updatedByName = auditActor.name || "";
+      changed = true;
+    }
+    if (readyForArchive) {
+      if (!todo.archivedAt || todo.archivedPayrollId !== payroll.id || todo.archivedClientBillId !== desiredClientBillId) {
+        todo.archivedAt = todo.archivedAt || now;
+        todo.archivedPayrollId = payroll.id;
+        todo.archivedClientBillId = desiredClientBillId;
+        todo.updatedAt = now;
+        todo.updatedBy = auditActor.id;
+        todo.updatedByName = auditActor.name || "";
+        todo.history = [...(todo.history || []), audit(auditActor, needsClientBill
+          ? `arhivirano po potrjenem obračunu delavca in stranke ${bill.clientName}`
+          : `arhivirano po potrjenem obračunu delavca ${payroll.month}`)];
+        archived += 1;
+        changed = true;
+      }
+      continue;
+    }
+    if (todo.archivedAt || todo.archivedPayrollId || todo.archivedClientBillId) {
+      todo.archivedAt = "";
+      todo.archivedPayrollId = "";
+      todo.archivedClientBillId = "";
+      todo.updatedAt = now;
+      todo.updatedBy = auditActor.id;
+      todo.updatedByName = auditActor.name || "";
+      todo.history = [...(todo.history || []), audit(auditActor, needsClientBill
+        ? "vrnjeno iz arhiva: manjka potrjeni obračun stranki ali delavca"
+        : "vrnjeno iz arhiva: manjka potrjeni obračun delavca")];
+      restored += 1;
+      changed = true;
+    }
+  }
+  return { archived, restored, changed };
 }
 function defaultHourlyRateForUser(db, userId) {
   return nonnegativeNumber(
@@ -1962,7 +2178,10 @@ function buildCalendarIcs(db, { userId = "", combined = false } = {}) {
   const todos = combined
     ? [...assignedTodos.reduce((groups, todo) => {
       const key = todo.assignmentGroupId || todo.id;
-      if (!groups.has(key)) groups.set(key, todo);
+      const current = groups.get(key);
+      // A shared event remains active until every worker's own settlement is
+      // complete. Prefer its unarchived assignment for the combined calendar.
+      if (!current || (current.archivedAt && !todo.archivedAt)) groups.set(key, todo);
       return groups;
     }, new Map()).values()]
     : assignedTodos;
@@ -2128,22 +2347,14 @@ function payrollTodosForArchive(db, payroll) {
 }
 
 async function archivePayrollTodos(db, payroll, actor) {
-  const worker = db.users?.[payroll.workerId] || { id: payroll.workerId, name: payroll.workerId };
-  const todos = payrollTodosForArchive(db, payroll);
-  if (!todos.length) throw new Error("V obračunu ni vnosov ur za arhiv.");
-  const now = new Date().toISOString();
-  let archivedNow = 0;
-  for (const todo of todos) {
-    if (todo.archivedAt) continue;
-    todo.archivedAt = now;
-    todo.archivedPayrollId = payroll.id;
-    todo.updatedAt = now;
-    todo.updatedBy = actor?.id || payroll.confirmedBy || "system";
-    todo.updatedByName = actor?.name || payroll.confirmedByName || "";
-    todo.history = [...(todo.history || []), audit(actor || worker, `arhivirano v obračunu ${payroll.month}`)];
-    archivedNow += 1;
-  }
-  return { archived: archivedNow, archiveCalendarName: "interni arhiv" };
+  // A completed project entry is archived only after both sides are locked:
+  // the worker payroll and the client bill. Internal work and meals have no
+  // client side and therefore need only the worker payroll.
+  const result = reconcileTodoArchives(db, actor);
+  const awaitingClientBilling = payrollTodosForArchive(db, payroll)
+    .filter((todo) => todoRequiresClientBilling(todo) && !todo.clientBillId)
+    .length;
+  return { ...result, awaitingClientBilling, archiveCalendarName: "interni arhiv" };
 }
 const STATIC_TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -2308,6 +2519,7 @@ function browserBackupState(db) {
       clients: db.clients || [],
       billingLocks: db.billingLocks || [],
       payrolls: db.payrolls || [],
+      clientBills: db.clientBills || [],
       settings: db.settings || {}
     }
   };
@@ -2390,7 +2602,7 @@ async function extractBrowserRestoreZip(zipFile, directory) {
 
 function restoredBrowserState(current, metadata) {
   const snapshot = metadata.snapshot || {};
-  const arrays = ["entries", "todos", "debts", "clients", "billingLocks", "payrolls"];
+  const arrays = ["entries", "todos", "debts", "clients", "billingLocks", "payrolls", "clientBills"];
   for (const key of arrays) if (snapshot[key] !== undefined && !Array.isArray(snapshot[key])) throw new Error(`Neveljavni podatki: ${key}.`);
   if (snapshot.attachments !== undefined && (typeof snapshot.attachments !== "object" || Array.isArray(snapshot.attachments))) throw new Error("Neveljavni podatki prilog.");
   const importedUsers = snapshot.users && typeof snapshot.users === "object" ? snapshot.users : {};
@@ -2414,6 +2626,7 @@ function restoredBrowserState(current, metadata) {
     clients: snapshot.clients || [],
     billingLocks: snapshot.billingLocks || [],
     payrolls: snapshot.payrolls || [],
+    clientBills: snapshot.clientBills || [],
     settings: snapshot.settings && typeof snapshot.settings === "object" ? snapshot.settings : {},
     restoredAt: new Date().toISOString(),
     restoredFromBrowserBackupAt: String(metadata.exportedAt || "")
@@ -2895,6 +3108,48 @@ async function handleApi(req, res) {
       return;
     }
 
+    if (url.pathname === "/api/client-bills" && req.method === "GET") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      if (user.role !== "boss") {
+        sendJson(res, 403, { error: "Obracune strank vidi samo sef." });
+        return;
+      }
+      const db = await readDbAsync();
+      sendJson(res, 200, { clientBills: db.clientBills || [] });
+      return;
+    }
+
+    if (url.pathname === "/api/client-bills" && req.method === "POST") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      if (user.role !== "boss") {
+        sendJson(res, 403, { error: "Obracun stranki lahko potrdi samo sef." });
+        return;
+      }
+      const body = await readBody(req);
+      if ((body.from && !isDateKey(body.from)) || (body.to && !isDateKey(body.to)) || (body.from && body.to && body.from > body.to)) {
+        sendJson(res, 400, { error: "Obdobje obracuna stranki ni pravilno." });
+        return;
+      }
+      const db = await readDbAsync();
+      const client = clientForBilling(db, body);
+      if (!client) {
+        sendJson(res, 400, { error: "Stranke ni bilo mogoce prepoznati." });
+        return;
+      }
+      const clientBill = buildClientBillSnapshot(db, { ...body, clientId: client.clientId, clientName: client.name }, user);
+      if (!clientBill) {
+        sendJson(res, 409, { error: "Za to stranko v izbranem obdobju ni novih zakljucenih storitev za obracun." });
+        return;
+      }
+      db.clientBills.push(clientBill);
+      const archive = reconcileTodoArchives(db, user);
+      await writeDbAsync(db);
+      sendJson(res, 201, { clientBill, clientBills: db.clientBills, archive, todos: visibleTodosForUser(db, user) });
+      return;
+    }
+
     if (url.pathname === "/api/payrolls" && req.method === "POST") {
       const user = await requireUser(req, res);
       if (!user) return;
@@ -2958,9 +3213,8 @@ async function handleApi(req, res) {
       }
       if (existingIndex >= 0) db.payrolls[existingIndex] = payroll;
       else db.payrolls.push(payroll);
-      // Persist the locked snapshot before internal archival, so a retry can finish safely.
+      // Persist the locked snapshot before final confirmation, so a retry can finish safely.
       await writeDbAsync(db);
-      await archivePayrollTodos(db, payroll, user);
       payroll = normalizePayroll({
         ...payroll,
         status: "confirmed",
@@ -2974,8 +3228,9 @@ async function handleApi(req, res) {
       const finalIndex = db.payrolls.findIndex((item) => item.id === payroll.id);
       if (finalIndex >= 0) db.payrolls[finalIndex] = payroll;
       else db.payrolls.push(payroll);
+      const archive = await archivePayrollTodos(db, payroll, user);
       await writeDbAsync(db);
-      sendJson(res, 200, { payrolls: payrollForUser(db, user), payroll });
+      sendJson(res, 200, { payrolls: payrollForUser(db, user), payroll, archive });
       return;
     }
     const payrollPaymentMatch = url.pathname.match(/^\/api\/payrolls\/([^/]+)\/payments$/);
@@ -3125,7 +3380,6 @@ async function handleApi(req, res) {
         }
         db.payrolls[index] = payroll;
         await writeDbAsync(db);
-        await archivePayrollTodos(db, payroll, user);
         payroll = normalizePayroll({
           ...payroll,
           status: "confirmed",
@@ -3157,6 +3411,11 @@ async function handleApi(req, res) {
           sendJson(res, 409, { error: "Obracun je ze odprt za popravke." });
           return;
         }
+        const clientBill = clientBillLockForTodos(db, payrollTodosForArchive(db, current));
+        if (clientBill) {
+          sendJson(res, 409, { error: `Obracun vsebuje vnos, ki je ze v potrjenem obracunu stranki ${clientBill.clientName}. Najprej je potreben kontroliran popravek obracuna stranki.` });
+          return;
+        }
         payroll = buildPayrollSnapshot(db, current.workerId, current, {
           ...current,
           status: "draft",
@@ -3176,8 +3435,9 @@ async function handleApi(req, res) {
         return;
       }
       db.payrolls[index] = payroll;
+      const archive = ["confirm", "reopen"].includes(action) ? await archivePayrollTodos(db, payroll, user) : null;
       await writeDbAsync(db);
-      sendJson(res, 200, { payrolls: payrollForUser(db, user), payroll });
+      sendJson(res, 200, { payrolls: payrollForUser(db, user), payroll, archive });
       return;
     }
 
@@ -4003,6 +4263,11 @@ async function handleApi(req, res) {
         sendJson(res, 403, { error: `Opravilo je del potrjenega obracuna za ${db.users?.[payrollLock.workerId]?.name || payrollLock.workerId} (${payrollLock.month}). Sef ga mora najprej ponovno odpreti.` });
         return;
       }
+      const clientBillLock = clientBillLockForTodos(db, assignmentItems);
+      if (clientBillLock) {
+        sendJson(res, 403, { error: `Opravilo je ze v potrjenem obracunu stranki ${clientBillLock.clientName} in ga ni vec mogoce spreminjati.` });
+        return;
+      }
       const now = new Date().toISOString();
       const assignmentIds = new Set(assignmentItems.map((item) => item.id));
       db.todos = db.todos.map((item) => assignmentIds.has(item.id) ? {
@@ -4066,6 +4331,11 @@ async function handleApi(req, res) {
       const payrollLock = payrollLockForTodos(db, assignmentItems);
       if (payrollLock) {
         sendJson(res, 403, { error: `Opravilo je del potrjenega obracuna za ${db.users?.[payrollLock.workerId]?.name || payrollLock.workerId} (${payrollLock.month}). Sef ga mora najprej ponovno odpreti.` });
+        return;
+      }
+      const clientBillLock = clientBillLockForTodos(db, assignmentItems);
+      if (clientBillLock) {
+        sendJson(res, 403, { error: `Opravilo je ze v potrjenem obracunu stranki ${clientBillLock.clientName} in ga ni vec mogoce spreminjati.` });
         return;
       }
       const currentAssigneeIds = todoAssignmentAssigneeIds(db, previousTodo);
@@ -4198,6 +4468,11 @@ releaseTodoAssignmentEditLock(db, previousTodo, user, editLockToken);
       const payrollLock = payrollLockForTodos(db, assignmentItems);
       if (payrollLock) {
         sendJson(res, 403, { error: `Opravilo je del potrjenega obracuna za ${db.users?.[payrollLock.workerId]?.name || payrollLock.workerId} (${payrollLock.month}). Sef ga mora najprej ponovno odpreti.` });
+        return;
+      }
+      const clientBillLock = clientBillLockForTodos(db, assignmentItems);
+      if (clientBillLock) {
+        sendJson(res, 403, { error: `Opravilo je ze v potrjenem obracunu stranki ${clientBillLock.clientName} in ga ni vec mogoce izbrisati.` });
         return;
       }
 releaseTodoAssignmentEditLock(db, todo, user, editLockToken);
@@ -4337,7 +4612,10 @@ module.exports = {
   entryEditLockConflict,
   buildCalendarIcs,
   buildPayrollSnapshot,
+  buildClientBillSnapshot,
   archivePayrollTodos,
+  clientBillLockForTodos,
+  reconcileTodoArchives,
   canManageEntry,
   canManageFinancialEntry,
   canManageTodo,

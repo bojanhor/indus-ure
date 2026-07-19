@@ -17,7 +17,7 @@ if (!sourceArg || !databaseUrl) {
 const source = path.resolve(sourceArg);
 const raw = fs.readFileSync(source, "utf8").replace(/^\uFEFF/, "");
 const data = JSON.parse(raw);
-const recognized = ["users", "entries", "todos", "clients", "debts", "settings", "billingLocks"];
+const recognized = ["users", "entries", "todos", "clients", "debts", "settings", "billingLocks", "payrolls", "clientBills"];
 
 if (!data || Array.isArray(data) || typeof data !== "object" || !recognized.some((key) => key in data)) {
   throw new Error("Datoteka ni prepoznana kot celoten INDUS URE db.json.");

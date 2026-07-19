@@ -15,6 +15,9 @@ const {
   canManageTodo,
   createSession,
   buildPayrollSnapshot,
+  buildClientBillSnapshot,
+  clientBillLockForTodos,
+  reconcileTodoArchives,
   entryEditLockConflict,
   sourceTodoForNewEntry,
   entryForUserRole,
@@ -442,4 +445,65 @@ test("delavec lahko zalozeni znesek ali osebni nakup ureja samo na dan vnosa, se
   assert.equal(canManageFinancialEntry(worker, entry, nextDay), false);
   assert.equal(canManageFinancialEntry(worker, { ...entry, person: "bojan" }, sameDay), false);
   assert.equal(canManageFinancialEntry(boss, { ...entry, date: "2020-01-01" }, nextDay), true);
+});
+test("zaključeno projektno opravilo se arhivira šele po obračunu delavca in stranke", () => {
+  const db = {
+    users: { bojan: { id: "bojan", name: "Bojan", role: "boss" }, ibro: { id: "ibro", name: "Ibro", role: "worker" } },
+    clients: [{ clientId: "jerin", name: "Jerin", search: "jerin" }],
+    payrolls: [{ id: "payroll-ibro", workerId: "ibro", status: "confirmed", month: "2026-07", lines: [{ todoId: "work-1" }] }],
+    clientBills: [],
+    todos: [{ id: "work-1", assignmentGroupId: "project-1", syncUser: "ibro", status: "execution", date: "2026-07-15", start: "08:00", end: "10:00", title: "Montaža", clientId: "jerin", client: "Jerin" }]
+  };
+
+  const beforeClientBill = reconcileTodoArchives(db, boss);
+  assert.equal(beforeClientBill.archived, 0);
+  assert.equal(db.todos[0].archivedAt, undefined);
+
+  const clientBill = buildClientBillSnapshot(db, { clientId: "jerin", from: "2026-07-01", to: "2026-07-31" }, boss);
+  assert.ok(clientBill);
+  assert.deepEqual(clientBill.eventIds, ["project-1"]);
+  db.clientBills.push(clientBill);
+
+  const afterBoth = reconcileTodoArchives(db, boss);
+  assert.equal(afterBoth.archived, 1);
+  assert.ok(db.todos[0].archivedAt);
+  assert.equal(db.todos[0].archivedPayrollId, "payroll-ibro");
+  assert.equal(db.todos[0].archivedClientBillId, clientBill.id);
+  assert.equal(clientBillLockForTodos(db, db.todos)?.id, clientBill.id);
+  assert.equal(buildClientBillSnapshot(db, { clientId: "jerin" }, boss), null);
+});
+
+test("skupni dogodek ostane aktiven, dokler obračun ni potrjen za vsakega izvajalca", () => {
+  const db = {
+    users: {
+      bojan: { id: "bojan", name: "Bojan", role: "boss" },
+      ibro: { id: "ibro", name: "Ibro", role: "worker" },
+      maja: { id: "maja", name: "Maja", role: "worker" }
+    },
+    clients: [{ clientId: "jerin", name: "Jerin", search: "jerin" }],
+    payrolls: [{ id: "payroll-ibro", workerId: "ibro", status: "confirmed", month: "2026-07", lines: [{ todoId: "work-ibro" }] }],
+    clientBills: [],
+    todos: [
+      { id: "work-ibro", assignmentGroupId: "project-shared", syncUser: "ibro", status: "execution", date: "2026-07-15", start: "08:00", end: "10:00", title: "Montaža", clientId: "jerin", client: "Jerin" },
+      { id: "work-maja", assignmentGroupId: "project-shared", syncUser: "maja", status: "execution", date: "2026-07-15", start: "08:00", end: "10:00", title: "Montaža", clientId: "jerin", client: "Jerin" }
+    ]
+  };
+  db.clientBills.push(buildClientBillSnapshot(db, { clientId: "jerin" }, boss));
+  reconcileTodoArchives(db, boss);
+  assert.ok(db.todos[0].archivedAt);
+  assert.equal(db.todos[1].archivedAt, undefined);
+  assert.equal(db.todos[1].clientBillId, db.clientBills[0].id);
+});
+
+test("migracija vrne prezgodaj arhivirano projektno opravilo, dokler obračun stranki ne obstaja", () => {
+  const db = {
+    users: { ibro: { id: "ibro", name: "Ibro", role: "worker" } },
+    clients: [{ clientId: "jerin", name: "Jerin", search: "jerin" }],
+    payrolls: [{ id: "payroll-ibro", workerId: "ibro", status: "confirmed", month: "2026-07", lines: [{ todoId: "legacy-work" }] }],
+    todos: [{ id: "legacy-work", assignmentGroupId: "legacy-project", syncUser: "ibro", status: "execution", done: true, date: "2026-07-15", start: "08:00", end: "10:00", title: "Montaža", clientId: "jerin", client: "Jerin", archivedAt: "2026-07-31T10:00:00.000Z", archivedPayrollId: "payroll-ibro" }]
+  };
+  const normalized = normalizeDb(db);
+  assert.equal(normalized.changed, true);
+  assert.equal(db.todos[0].archivedAt, "");
+  assert.equal(db.todos[0].archivedPayrollId, "");
 });

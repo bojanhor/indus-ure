@@ -16,12 +16,13 @@ const STATE_TABLES = [
   ["indus_entries", "id", "entries", false],
   ["indus_debts", "id", "debts", false],
   ["indus_payrolls", "id", "payrolls", false],
+  ["indus_client_bills", "id", "clientBills", false],
   ["indus_billing_locks", "id", "billingLocks", false]
 ];
 
 const META_EXCLUDED_KEYS = new Set([
   "users", "sessions", "clients", "entries", "todos", "attachments",
-  "debts", "payrolls", "billingLocks"
+  "debts", "payrolls", "clientBills", "billingLocks"
 ]);
 
 function json(value) {
@@ -67,6 +68,9 @@ function splitTodo(todo) {
     billingClientKm: source.billingClientKm ?? null,
     billingVehicle: source.billingVehicle || "",
     billingWorkerKm: source.billingWorkerKm ?? null,
+    archivedAt: source.archivedAt || "",
+    archivedPayrollId: source.archivedPayrollId || "",
+    archivedClientBillId: source.archivedClientBillId || "",
     createdAt: source.createdAt || "",
     updatedAt: source.updatedAt || "",
     updatedBy: source.updatedBy || "",
@@ -90,6 +94,9 @@ function joinTodo(task, assignment) {
     billingKm: assignment.billingKm,
     billingClientKm: assignment.billingClientKm,
     billingVehicle: assignment.billingVehicle,
+    archivedAt: assignment.archivedAt || "",
+    archivedPayrollId: assignment.archivedPayrollId || "",
+    archivedClientBillId: assignment.archivedClientBillId || "",
     createdAt: assignment.createdAt || task.createdAt || "",
     updatedAt: assignment.updatedAt || task.updatedAt || "",
     updatedBy: assignment.updatedBy || task.updatedBy || "",
@@ -196,6 +203,14 @@ class PostgresStore {
         updated_at timestamptz not null default now()
       );
       create index if not exists indus_payrolls_worker_month_idx on indus_payrolls (worker_id, month);
+      create table if not exists indus_client_bills (
+        id text primary key,
+        client_id text not null default '',
+        status text not null default 'confirmed',
+        data jsonb not null,
+        updated_at timestamptz not null default now()
+      );
+      create index if not exists indus_client_bills_client_idx on indus_client_bills (client_id, updated_at desc);
       create table if not exists indus_billing_locks (
         id text primary key,
         data jsonb not null,
@@ -241,7 +256,7 @@ class PostgresStore {
   }
 
   async load() {
-    const [meta, users, sessions, clients, tasks, assignments, entries, attachments, debts, payrolls, locks] = await Promise.all([
+    const [meta, users, sessions, clients, tasks, assignments, entries, attachments, debts, payrolls, clientBills, locks] = await Promise.all([
       this.pool.query("select data from indus_meta where key = $1", ["application"]),
       this.pool.query("select id, data from indus_users"),
       this.pool.query("select token_hash, data from indus_sessions where expires_at > now()"),
@@ -252,6 +267,7 @@ class PostgresStore {
       this.pool.query("select id, mime_type, byte_size, storage_key, thumbnail_key, data from indus_attachments"),
       this.pool.query("select id, data from indus_debts"),
       this.pool.query("select id, data from indus_payrolls"),
+      this.pool.query("select id, data from indus_client_bills"),
       this.pool.query("select id, data from indus_billing_locks")
     ]);
 
@@ -284,6 +300,7 @@ class PostgresStore {
       attachments: attachmentMap,
       debts: debts.rows.map((row) => row.data),
       payrolls: payrolls.rows.map((row) => row.data),
+      clientBills: clientBills.rows.map((row) => row.data),
       billingLocks: locks.rows.map((row) => row.data)
     };
   }
@@ -325,6 +342,7 @@ class PostgresStore {
       await this.#replaceRows(client, "indus_entries", "id", (db.entries || []).map((item) => [String(item.id), item]));
       await this.#replaceRows(client, "indus_debts", "id", (db.debts || []).map((item) => [String(item.id), item]));
       await this.#replacePayrolls(client, db.payrolls || []);
+      await this.#replaceClientBills(client, db.clientBills || []);
       await this.#replaceRows(client, "indus_billing_locks", "id", (db.billingLocks || []).map((item, index) => [String(item.id || `${item.workerId || "worker"}:${item.month || index}`), item]));
       filesToDelete.push(...await this.#replaceAttachments(client, db.attachments || {}));
       await client.query("commit");
@@ -417,11 +435,22 @@ class PostgresStore {
     for (const todo of todos) {
       if (!todo?.id) continue;
       const split = splitTodo(todo);
-      if (!taskMap.has(split.taskId)) taskMap.set(split.taskId, split.task);
+      const existing = taskMap.get(split.taskId);
+      if (!existing) {
+        taskMap.set(split.taskId, {
+          task: split.task,
+          allArchived: Boolean(split.assignment.archivedAt),
+          archivedAt: String(split.assignment.archivedAt || "")
+        });
+      } else {
+        existing.allArchived = existing.allArchived && Boolean(split.assignment.archivedAt);
+        if (!existing.archivedAt && split.assignment.archivedAt) existing.archivedAt = String(split.assignment.archivedAt);
+      }
       assignments.push(split.assignment);
     }
     const taskIds = [];
-    for (const [id, task] of taskMap) {
+    for (const [id, record] of taskMap) {
+      const { task } = record;
       taskIds.push(id);
       await client.query(
         `insert into indus_tasks (id, client_id, status, scheduled_date, archived_at, revision, data)
@@ -429,7 +458,7 @@ class PostgresStore {
          on conflict (id) do update set client_id = excluded.client_id, status = excluded.status,
          scheduled_date = excluded.scheduled_date, archived_at = excluded.archived_at, revision = excluded.revision,
          data = excluded.data, updated_at = now()`,
-        [id, String(task.clientId || ""), String(task.status || ""), String(task.date || ""), String(task.archivedAt || ""), Number(task.revision || 1), json(task)]
+        [id, String(task.clientId || ""), String(task.status || ""), String(task.date || ""), record.allArchived ? record.archivedAt : "", Number(task.revision || 1), json(task)]
       );
     }
     if (taskIds.length) await client.query("delete from indus_tasks where id <> all($1::text[])", [taskIds]);
@@ -464,6 +493,22 @@ class PostgresStore {
     }
     if (ids.length) await client.query("delete from indus_payrolls where id <> all($1::text[])", [ids]);
     else await client.query("delete from indus_payrolls");
+  }
+
+  async #replaceClientBills(client, clientBills) {
+    const ids = [];
+    for (const item of clientBills) {
+      const id = String(item.id || "");
+      if (!id) continue;
+      ids.push(id);
+      await client.query(
+        `insert into indus_client_bills (id, client_id, status, data) values ($1, $2, $3, $4::jsonb)
+         on conflict (id) do update set client_id = excluded.client_id, status = excluded.status, data = excluded.data, updated_at = now()`,
+        [id, String(item.clientId || ""), String(item.status || "confirmed"), json(item)]
+      );
+    }
+    if (ids.length) await client.query("delete from indus_client_bills where id <> all($1::text[])", [ids]);
+    else await client.query("delete from indus_client_bills");
   }
 
   async #replaceAttachments(client, attachments) {

@@ -1540,7 +1540,8 @@
       font-weight: 700;
     }
 
-    .report-controls input {
+    .report-controls input,
+    .report-controls select {
       width: 100%;
       border: 1px solid var(--line);
       border-radius: 8px;
@@ -1723,6 +1724,34 @@
       font-weight: 800;
     }
 
+    .day-todo-settlements {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      margin-top: 5px;
+      min-height: 16px;
+    }
+
+    .day-todo-settlement {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 16px;
+      height: 16px;
+      padding: 0;
+      border: 1px solid color-mix(in srgb, currentColor 40%, transparent);
+      border-radius: 999px;
+      color: color-mix(in srgb, var(--todo-fg) 72%, #42525b);
+      background: color-mix(in srgb, #fff 64%, transparent);
+    }
+
+    .day-todo-settlement.is-settled {
+      color: #126b58;
+      border-color: #126b58;
+      background: #e0f2ec;
+    }
+
+    .day-todo-settlement svg { width: 10px; height: 10px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
     .calendar-shell {
       overflow: hidden;
       min-height: 620px;
@@ -2494,7 +2523,7 @@
     }
 
     .client-billing-controls {
-      grid-template-columns: minmax(130px, .7fr) minmax(130px, .7fr) minmax(210px, 1.6fr) auto;
+      grid-template-columns: minmax(120px, .65fr) minmax(120px, .65fr) minmax(180px, 1.25fr) minmax(155px, .9fr) auto;
     }
 
     .client-billing-controls > button { min-height: 42px; }
@@ -3052,6 +3081,7 @@
       .client-billing-intro-actions .secondary { width: auto; flex: 1 1 140px; }
       .client-billing-controls { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
       .client-billing-controls .client-billing-client,
+      .client-billing-controls .client-billing-sort-control,
       .client-billing-controls > button { grid-column: 1 / -1; }
       .client-billing-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .client-billing-client-card-head { display: grid; gap: 3px; }
@@ -3286,6 +3316,7 @@
           </div>
           <div class="client-billing-intro-actions">
             <button class="secondary hidden" id="reportBackToClients" type="button">&larr; Vse stranke</button>
+            <button class="primary hidden" id="confirmClientBill" type="button">Potrdi obračun stranki</button>
             <button class="secondary" id="exportReportExcel" type="button">Izvozi Excel</button>
           </div>
         </div>
@@ -3298,6 +3329,16 @@
           </label>
           <label class="client-billing-client">I&#353;&#269;i stranko
             <input id="reportClient" list="clientList" placeholder="Vse stranke">
+          </label>
+          <label class="client-billing-sort-control" id="reportClientSortControl">Razvrsti stranke
+            <select id="reportClientSort">
+              <option value="recent">Najnovej&#353;a opravila</option>
+              <option value="hours_desc">Najve&#269; ur</option>
+              <option value="oldest">Najstarej&#353;a opravila</option>
+              <option value="count_desc">Najve&#269; dogodkov</option>
+              <option value="name_asc">A&#8211;&#381;</option>
+              <option value="name_desc">&#381;&#8211;A</option>
+            </select>
           </label>
           <button class="secondary" id="clearReportClient" type="button">Po&#269;isti iskanje</button>
         </div>
@@ -3894,12 +3935,14 @@
       todoDialogDriveFiles: [],
       photoEditor: null,
       reportClient: "",
+      reportClientSort: "recent",
       offlineTodoSyncing: false,
       attachmentPreview: null,
       reportClientId: "",
       settings: { billing: { hourlyRate: 15, kmRate: 0.22, workerOwnVehicleKmRate: 0.22, clientPersonalKmRate: 0.22, clientVanKmRate: 0.22, commuteKmPerDay: 28 } },
       billingLocks: [],
       payrolls: [],
+      clientBills: [],
       billingWorkerId: "",
       user: null,
       users: [],
@@ -4096,6 +4139,7 @@
         settings: JSON.parse(JSON.stringify(state.settings || {})),
         billingLocks: JSON.parse(JSON.stringify(state.billingLocks || [])),
         payrolls: JSON.parse(JSON.stringify(state.payrolls || [])),
+        clientBills: JSON.parse(JSON.stringify(state.clientBills || [])),
         workerBilling: JSON.parse(JSON.stringify(state.workerBilling || [])),
         syncRevision: Number(state.syncRevision || 0)
       };
@@ -4135,6 +4179,7 @@
       state.settings = snapshot.settings || state.settings;
       state.billingLocks = snapshot.billingLocks || [];
       state.payrolls = snapshot.payrolls || [];
+      state.clientBills = snapshot.clientBills || [];
       state.workerBilling = snapshot.workerBilling || [];
       state.sessionExpiresAt = Number(snapshot.sessionExpiresAt || 0);
       state.syncRevision = Number(snapshot.syncRevision || 0);
@@ -4523,6 +4568,28 @@
       return String(todo.assignmentGroupId || todo.id || "");
     }
 
+    function todoHasConfirmedWorkerPayroll(todo) {
+      const todoId = String(todo?.id || "");
+      if (!todoId) return false;
+      return (state.payrolls || []).some((payroll) => ["confirmed", "paid"].includes(String(payroll?.status || ""))
+        && (payroll.lines || []).some((line) => String(line?.todoId || "") === todoId));
+    }
+
+    function todoHasConfirmedClientBill(todo) {
+      if (todo?.clientBillId) return true;
+      const eventId = todoEventId(todo);
+      return (state.clientBills || []).some((bill) => String(bill?.status || "") === "confirmed"
+        && (bill.eventIds || []).map(String).includes(eventId));
+    }
+
+    function dayTodoSettlementIndicators(todo) {
+      if (String(todo?.status || "") !== "execution") return "";
+      const workerSettled = todoHasConfirmedWorkerPayroll(todo);
+      const clientSettled = todoHasConfirmedClientBill(todo);
+      const workerLabel = workerSettled ? "Obračun izvajalca potrjen" : "Obračun izvajalca še ni potrjen";
+      const clientLabel = clientSettled ? "Obračun stranki potrjen" : "Obračun stranki še ni potrjen";
+      return `<span class="day-todo-settlements" aria-label="Stanje obračunov"><span class="day-todo-settlement ${workerSettled ? "is-settled" : ""}" role="img" aria-label="${workerLabel}" title="${workerLabel}"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="4.4" r="2.4"></circle><path d="M3.5 13c.5-2.5 2.2-3.8 4.5-3.8S12 10.5 12.5 13"></path>${workerSettled ? "<path d=\"m10.5 11.5 1.2 1.2 2.2-2.5\"></path>" : ""}</svg></span><span class="day-todo-settlement ${clientSettled ? "is-settled" : ""}" role="img" aria-label="${clientLabel}" title="${clientLabel}"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 13V4h10v9"></path><path d="M6 4V2.5h4V4M5.5 7h1M9.5 7h1M5.5 9.5h1M9.5 9.5h1M7 13v-2h2v2"></path>${clientSettled ? "<path d=\"m10.2 12 1 1 2-2.3\"></path>" : ""}</svg></span></span>`;
+    }
     function uniqueTodosByEventId(todos = []) {
       const groups = new Map();
       todos.forEach((todo) => {
@@ -4537,7 +4604,14 @@
           });
           return;
         }
-        existing.assigneeIds = [...new Set([...todoAssigneeIds(existing), ...todoAssigneeIds(todo)])];
+        const assigneeIds = [...new Set([...todoAssigneeIds(existing), ...todoAssigneeIds(todo)])];
+        // When the workers settle at different times, one assignment can be
+        // archived while the shared event is still active for another worker.
+        if (existing.archivedAt && !todo.archivedAt) {
+          groups.set(eventId, { ...todo, assignmentGroupId: eventId, assigneeIds });
+          return;
+        }
+        existing.assigneeIds = assigneeIds;
       });
       return [...groups.values()];
     }
@@ -4624,7 +4698,10 @@
       const workerBillingRequest = state.user?.role === "boss"
         ? api("/api/workers/billing")
         : Promise.resolve({ workers: [] });
-      const [entries, todos, debts, advances, personalPurchases, clients, settings, workerBilling, payrolls] = await Promise.all([
+      const clientBillsRequest = state.user?.role === "boss"
+        ? api("/api/client-bills")
+        : Promise.resolve({ clientBills: [] });
+      const [entries, todos, debts, advances, personalPurchases, clients, settings, workerBilling, payrolls, clientBills] = await Promise.all([
         api("/api/entries"),
         api("/api/todos"),
         api("/api/debts"),
@@ -4633,7 +4710,8 @@
         api("/api/clients"),
         api("/api/settings"),
         workerBillingRequest,
-        api("/api/payrolls")
+        api("/api/payrolls"),
+        clientBillsRequest
       ]);
       state.entries = entries.entries || [];
       if (canApplyTodoSnapshot(todoRevision, todoSnapshotWasStable)) state.todos = todos.todos || [];
@@ -4645,6 +4723,7 @@
       state.billingLocks = settings.billingLocks || [];
       state.workerBilling = workerBilling.workers || [];
       state.payrolls = payrolls.payrolls || [];
+      state.clientBills = clientBills.clientBills || [];
       state.offlineMode = false;
       refreshClientList();
       render();
@@ -5441,7 +5520,7 @@
             const time = todo.start && todo.end ? `${escapeHtml(todo.start)}&ndash;${escapeHtml(todo.end)}` : "Brez ure";
             const client = todo.client || "Brez stranke";
             const title = `${todo.urgent ? "NUJNO · " : ""}${todo.title || "Brez naslova"}`;
-            item.innerHTML = `<span class="day-todo-time">${time}</span><span class="day-todo-client">${escapeHtml(client)}</span><span class="day-todo-title">${escapeHtml(title)}</span>`;
+            item.innerHTML = `<span class="day-todo-time">${time}</span><span class="day-todo-client">${escapeHtml(client)}</span><span class="day-todo-title">${escapeHtml(title)}</span>${dayTodoSettlementIndicators(todo)}`;
             item.addEventListener("click", () => openTodoDialog(todo));
             day.appendChild(item);
           });
@@ -6446,7 +6525,7 @@
       const payroll = payrollForBilling(workerId, range);
       const note = billingNoteValue(workerId, range, payroll);
       if (payroll && !["draft", "archiving"].includes(payroll.status)) return;
-      if (!confirm("Potrdim obračun? Zaključeni vnosi ur se zaklenejo, varno premaknejo v interni arhiv in izginejo iz aktivnega koledarja.")) return;
+      if (!confirm("Potrdim obračun delavca? Zaključeni vnosi ur se zaklenejo. Projektni vnosi ostanejo aktivni, dokler ni potrjen tudi obračun stranki.")) return;
       if (payroll) { await changePayroll("confirm", true, note); return; }
       const data = await api("/api/payrolls", { method: "POST", body: JSON.stringify({ workerId, from: range.from, to: range.to, note }) });
       state.payrolls = data.payrolls || state.payrolls;
@@ -6457,7 +6536,7 @@
     async function changePayroll(action, skipConfirmation = false, note = undefined) {
       const payroll = payrollForBilling(billingWorkerId(), billingRange());
       if (!payroll) return;
-      const messages = { confirm: "Potrdim obračun? Ure in postavke se zaklenejo, dogodki pa se premaknejo v interni arhiv delavca.", paid: "Označim obračun kot plačan?", reopen: "Ponovno odprem obračun? Ure bo mogoče znova popravljati.", delete: "Izbrišem osnutek obračuna? Opravljenih ur ne bom izbrisal." };
+      const messages = { confirm: "Potrdim obračun delavca? Ure in postavke se zaklenejo. Projektni vnosi se premaknejo v arhiv šele, ko je potrjen tudi obračun stranki.", paid: "Označim obračun kot plačan?", reopen: "Ponovno odprem obračun? Ure bo mogoče znova popravljati.", delete: "Izbrišem osnutek obračuna? Opravljenih ur ne bom izbrisal." };
       if (!skipConfirmation && messages[action] && !confirm(messages[action])) return;
       const data = action === "delete" ? await api(`/api/payrolls/${encodeURIComponent(payroll.id)}`, { method: "DELETE" }) : await api(`/api/payrolls/${encodeURIComponent(payroll.id)}`, { method: "PUT", body: JSON.stringify({ action, ...(note === undefined ? {} : { note }) }) });
       state.payrolls = data.payrolls || state.payrolls;
@@ -7776,12 +7855,20 @@
       return vehicle === "van" ? "Kombi" : "Osebni avto";
     }
 
+    function reportClientBill(todo) {
+      const billId = String(todo?.clientBillId || "");
+      return (state.clientBills || []).find((bill) => bill.id === billId)
+        || (state.clientBills || []).find((bill) => String(bill.status || "") === "confirmed"
+          && (bill.eventIds || []).map(String).includes(todoEventId(todo)))
+        || null;
+    }
+
     function reportTodoLine(todo) {
       const hours = Number(duration(todo).toFixed(2));
       const clientKm = Math.max(0, Number(todo.clientKm || 0));
       const clientKmRate = reportClientKmRate(todo);
       const clientKmAmount = Number((clientKm * clientKmRate).toFixed(2));
-      return { todo, hours, clientKm, clientKmRate, clientKmAmount, vehicle: reportVehicleId(todo) };
+      return { todo, hours, clientKm, clientKmRate, clientKmAmount, vehicle: reportVehicleId(todo), clientBill: reportClientBill(todo) };
     }
 
     function reportTotals(lines) {
@@ -7818,20 +7905,50 @@
       };
     }
 
+    function reportClientSortMode() {
+      const valid = new Set(["recent", "hours_desc", "oldest", "count_desc", "name_asc", "name_desc"]);
+      const value = String(state.reportClientSort || "recent");
+      return valid.has(value) ? value : "recent";
+    }
+
+    function reportClientSortLabel() {
+      return {
+        recent: "najnovej\u0161ih opravljenih storitvah",
+        hours_desc: "najve\u010d opravljenih urah",
+        oldest: "najstarej\u0161ih opravljenih storitvah",
+        count_desc: "najve\u010d zaklju\u010denih dogodkih",
+        name_asc: "imenu stranke A\u2013\u017d",
+        name_desc: "imenu stranke \u017d\u2013A"
+      }[reportClientSortMode()];
+    }
+
+    function reportClientSummarySort(left, right) {
+      const byName = left.name.localeCompare(right.name, "sl");
+      const mode = reportClientSortMode();
+      if (mode === "hours_desc") return Number(right.totals.hours || 0) - Number(left.totals.hours || 0) || byName;
+      if (mode === "count_desc") return Number(right.totals.count || 0) - Number(left.totals.count || 0) || byName;
+      if (mode === "oldest") return String(left.oldestDate || "9999-99-99").localeCompare(String(right.oldestDate || "9999-99-99")) || byName;
+      if (mode === "name_asc") return byName;
+      if (mode === "name_desc") return right.name.localeCompare(left.name, "sl");
+      return String(right.lastDate || "").localeCompare(String(left.lastDate || "")) || byName;
+    }
+
     function reportClientSummaries() {
       const query = normalizeText($("reportClient").value);
       const groups = new Map();
       reportBaseTodos().forEach((todo) => {
         const client = reportClientDescriptor(todo);
-        if (!groups.has(client.key)) groups.set(client.key, { ...client, lines: [], lastDate: "" });
+        if (!groups.has(client.key)) groups.set(client.key, { ...client, lines: [], lastDate: "", oldestDate: "" });
         const group = groups.get(client.key);
         group.lines.push(reportTodoLine(todo));
-        group.lastDate = [group.lastDate, todo.date || ""].sort().pop();
+        const todoDate = String(todo.date || "");
+        if (todoDate && (!group.oldestDate || todoDate < group.oldestDate)) group.oldestDate = todoDate;
+        if (todoDate && (!group.lastDate || todoDate > group.lastDate)) group.lastDate = todoDate;
       });
       return [...groups.values()]
         .map((group) => ({ ...group, totals: reportTotals(group.lines) }))
         .filter((group) => !query || normalizeText(`${group.name} ${group.search}`).includes(query))
-        .sort((left, right) => String(right.lastDate).localeCompare(String(left.lastDate)) || left.name.localeCompare(right.name, "sl"));
+        .sort(reportClientSummarySort);
     }
 
     function reportOverviewLines() {
@@ -7872,7 +7989,7 @@
     }
 
     function renderClientBillingRow(line) {
-      const { todo, hours, clientKm, clientKmRate, clientKmAmount, vehicle } = line;
+      const { todo, hours, clientKm, clientKmRate, clientKmAmount, vehicle, clientBill } = line;
       const time = todo.start && todo.end ? `${todo.start}–${todo.end}` : "Brez vpisane ure";
       const details = [
         todo.notes ? `<section class="client-billing-section"><strong>Opis del</strong><div class="report-todo-description">${linkifyText(todo.notes)}</div></section>` : "",
@@ -7887,7 +8004,7 @@
         <div class="client-billing-when"><strong>${todo.date ? formatDate(todo.date) : "Brez datuma"}</strong><span>${escapeHtml(time)}</span></div>
         <div class="client-billing-main">
           <div class="client-billing-title-row"><span class="client-billing-client-name">${escapeHtml(todo.client || "Brez stranke")}</span><h3>${escapeHtml(todo.title || "Brez naziva")}</h3></div>
-          <div class="client-billing-meta"><span>Izvajalec: ${escapeHtml(todoAssigneeNames(todo))}</span>${todo.sourceProjectTodoId ? "<span>Vpis ur na projekt</span>" : ""}</div>
+          <div class="client-billing-meta"><span>Izvajalec: ${escapeHtml(todoAssigneeNames(todo))}</span>${todo.sourceProjectTodoId ? "<span>Vpis ur na projekt</span>" : ""}${clientBill ? `<span>Obračun stranki potrjen ${escapeHtml(formatDateTime(clientBill.confirmedAt))}</span>` : ""}</div>
           <div class="client-billing-charges">${charges}</div>
           ${details}
         </div>
@@ -7897,9 +8014,10 @@
 
     function renderReportClientCard(summary) {
       const { name, id, totals, lastDate } = summary;
+      const pending = summary.lines.filter((line) => !line.clientBill).length;
       return `<button class="client-billing-client-card open-client-report" type="button" data-client-id="${escapeHtml(id)}" data-client-name="${escapeHtml(name)}">
         <span class="client-billing-client-card-head"><strong>${escapeHtml(name)}</strong><span>${lastDate ? `Nazadnje: ${escapeHtml(formatDate(lastDate))}` : ""}</span></span>
-        <span class="client-billing-client-card-meta"><span>${totals.count} ${totals.count === 1 ? "zaključena storitev" : "zaključenih storitev"}</span><span>${reportNumber(totals.hours)} h</span></span>
+        <span class="client-billing-client-card-meta"><span>${totals.count} ${totals.count === 1 ? "zaključena storitev" : "zaključenih storitev"}</span><span>${reportNumber(totals.hours)} h</span><span>${pending ? `${pending} za obračun` : "obračunano"}</span></span>
         <span class="client-billing-client-travel"><span>Osebni avto: ${escapeHtml(reportTransportText(totals.personalKm, totals.personalAmount))}</span><span>Kombi: ${escapeHtml(reportTransportText(totals.vanKm, totals.vanAmount))}</span></span>
         <span class="client-billing-client-open">Odpri poročilo ›</span>
       </button>`;
@@ -7908,18 +8026,26 @@
     function renderReport() {
       const selection = reportClientSelection();
       const detail = Boolean(selection.id || selection.name);
+      $("reportClientSortControl").classList.toggle("hidden", detail);
+      $("reportClientSort").value = reportClientSortMode();
       const summaries = detail ? [] : reportClientSummaries();
       const lines = detail ? reportTodos().map(reportTodoLine) : reportOverviewLines();
       const totals = reportTotals(lines);
+      const pendingClientBillLines = detail ? lines.filter((line) => !line.clientBill) : [];
       $("clientDetailTitle").textContent = detail ? `Poročilo: ${selection.name}` : "Povzetek po strankah";
       $("clientDetailRange").textContent = reportRangeLabel();
       $("reportLineCount").textContent = detail
         ? `${totals.count} ${totals.count === 1 ? "vpis" : "vpisov"}`
         : `${summaries.length} ${summaries.length === 1 ? "stranka" : "strank"}`;
       $("reportBillingNotice").textContent = detail
-        ? "Poročilo prikazuje samo zaključene storitve izbranega obdobja. Stroški prevoza so ločeni po vozilu in obračunani po tarifi, shranjeni pri posameznem vpisu."
-        : "Izberi stranko za njen podroben kronološki pregled izvedenih storitev. Seznam je urejen po zadnji izvedeni storitvi.";
+        ? (pendingClientBillLines.length
+          ? `${pendingClientBillLines.length} ${pendingClientBillLines.length === 1 ? "vpis čaka" : "vpisov čaka"} na potrditev obračuna stranki. V aktivni arhiv se premaknejo šele, ko je potrjen tudi obračun posameznega delavca.`
+          : "Vsi prikazani vpisi so že vključeni v potrjen obračun stranki. Arhiviranje je odvisno še od potrditve obračuna posameznega delavca.")
+        : `Izberi stranko za njen podroben kronolo\u0161ki pregled izvedenih storitev. Seznam je razvr\u0161\u010den po ${reportClientSortLabel()}.`;
       $("reportBackToClients").classList.toggle("hidden", !detail);
+      $("confirmClientBill").classList.toggle("hidden", !detail || !pendingClientBillLines.length);
+      $("confirmClientBill").disabled = !detail || !pendingClientBillLines.length;
+      $("confirmClientBill").textContent = `Potrdi obračun stranki${pendingClientBillLines.length ? ` (${pendingClientBillLines.length})` : ""}`;
       $("clearReportClient").textContent = detail ? "Počisti izbor" : "Počisti iskanje";
       $("exportReportExcel").textContent = detail ? "Izvozi poročilo" : "Izvozi evidenco";
       $("reportSummary").innerHTML = detail ? [
@@ -7952,6 +8078,23 @@
       state.reportClient = "";
       state.reportClientId = "";
       $("reportClient").value = "";
+      renderReport();
+    }
+
+    async function confirmClientBillFromReport() {
+      const selection = reportClientSelection();
+      if (!selection.id && !selection.name) return;
+      const pending = reportTodos().map(reportTodoLine).filter((line) => !line.clientBill);
+      if (!pending.length) return;
+      const range = reportRangeLabel();
+      const label = `${pending.length} ${pending.length === 1 ? "izveden vpis" : "izvedenih vpisov"}`;
+      if (!confirm(`Potrdim obračun stranki ${selection.name} za ${label} (${range})?\n\nVpis se ne izbriše. V arhiv se premakne šele, ko bo potrjen tudi obračun delavca.`)) return;
+      await api("/api/client-bills", {
+        method: "POST",
+        body: JSON.stringify({ clientId: selection.id, clientName: selection.name, from: $("reportFrom").value, to: $("reportTo").value })
+      });
+      await loadAll();
+      setView("report");
       renderReport();
     }
 
@@ -9118,6 +9261,7 @@
     $("reportViewBtn").addEventListener("click", () => setView("report"));
     $("reportFrom").addEventListener("change", renderReport);
     $("reportTo").addEventListener("change", renderReport);
+    $("reportClientSort").addEventListener("change", () => { state.reportClientSort = $("reportClientSort").value; renderReport(); });
 
     $("closeTodoDialog").addEventListener("click", () => $("todoDialog").close());
     $("cancelTodoDialog").addEventListener("click", () => $("todoDialog").close());
@@ -9250,6 +9394,7 @@
     });
     $("clearReportClient").addEventListener("click", clearClientReportSelection);
     $("reportBackToClients").addEventListener("click", clearClientReportSelection);
+    $("confirmClientBill").addEventListener("click", () => confirmClientBillFromReport().catch((error) => alert(error.message)));
     $("exportReportExcel").addEventListener("click", exportReportExcel);
     $("addClientBtn").addEventListener("click", () => addClientFromForm().catch((error) => alert(error.message)));
 
