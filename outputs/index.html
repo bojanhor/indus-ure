@@ -2777,9 +2777,10 @@
       .billing-state { flex: 0 0 auto; }
       .billing-controls { display: grid; grid-template-columns: minmax(0, 1fr); align-items: stretch; }
       .billing-worker-control, .billing-worker-control select { width: 100%; min-width: 0; }
-      .billing-period { display: grid; grid-template-columns: 40px minmax(0, 1fr) minmax(0, 1fr) 40px; width: 100%; }
+      .billing-period { display: grid; grid-template-columns: 30px minmax(0, 1fr) minmax(0, 1fr) 30px; gap: 5px; width: 100%; }
       .billing-period label, .billing-period input { width: 100%; min-width: 0; }
-      .billing-range-picker { grid-column: 1 / -1; width: 100%; }
+      .billing-period input { min-height: 36px; padding: 5px 3px; font-size: clamp(12px, 3.4vw, 15px); letter-spacing: 0; }
+      .billing-period .billing-month-step { min-width: 30px; min-height: 36px; padding: 0; font-size: 22px; }
       .billing-summary-row { grid-template-columns: minmax(0, 1fr) minmax(0, auto) minmax(92px, auto); gap: 7px; padding: 9px 10px; }
       .billing-summary-formula { font-size: 12px; }
       .billing-summary-value { min-width: 92px; font-size: 15px; }
@@ -2921,7 +2922,6 @@
             <select id="billingWorker"></select>
           </label>
           <div class="billing-period">
-            <button class="secondary billing-range-picker" id="billingRangePicker" type="button" aria-label="Izberi obračunsko obdobje v koledarju">Koledar obdobja</button>
             <button class="secondary billing-month-step" id="billingPrevMonth" type="button" aria-label="Prejšnje obdobje">&lsaquo;</button>
             <label>Od
               <input id="billingFrom" type="date">
@@ -6035,7 +6035,12 @@
     function renderBillingExplorer() {
       const box = $("billingExplorer");
       if (!isAdminView()) { box.replaceChildren(); return; }
-      const rows = state.payrolls.slice().sort((a, b) => String(b.to || b.month || "").localeCompare(String(a.to || a.month || "")) || String(a.updatedAt || "").localeCompare(String(b.updatedAt || "")));
+      const oldestVisible = new Date();
+      oldestVisible.setFullYear(oldestVisible.getFullYear() - 1);
+      const oldestVisibleKey = dateKey(oldestVisible);
+      const rows = state.payrolls
+        .filter((payroll) => String(payroll.to || `${payroll.month || ""}-31`) >= oldestVisibleKey)
+        .sort((a, b) => String(b.to || b.month || "").localeCompare(String(a.to || a.month || "")) || String(a.updatedAt || "").localeCompare(String(b.updatedAt || "")));
       box.innerHTML = `<div class="todo-head"><strong>Vsi obračuni</strong><span class="todo-meta">${rows.length}</span></div>${rows.length ? rows.map((payroll) => `<button class="billing-explorer-row" type="button" data-worker-id="${escapeHtml(payroll.workerId)}" data-from="${escapeHtml(payroll.from || `${payroll.month}-01`)}" data-to="${escapeHtml(payroll.to || `${payroll.month}-31`)}"><strong>${escapeHtml(userDisplayName(payroll.workerId))}</strong><span>${escapeHtml(billingRangeLabel(payroll))}</span><span>${money(payroll.payoutAmount ?? payroll.totalAmount)} EUR · ${escapeHtml(payrollStateLabel(payroll, true))}</span></button>`).join("") : `<p class="todo-meta">Še ni shranjenih obračunov.</p>`}`;
       box.querySelectorAll(".billing-explorer-row").forEach((button) => button.addEventListener("click", () => {
         state.billingWorkerId = button.dataset.workerId;
@@ -6072,10 +6077,10 @@
       noteInput.disabled = Boolean(payroll && ["archiving", "confirmed", "paid"].includes(payroll.status));
       const noteRead = $("billingNoteRead"); noteRead.textContent = noteText ? `Opomba za delavca: ${noteText}` : ""; noteRead.classList.toggle("hidden", admin || !noteText);
             const baseAmount = Number((baseTotals.workAmount + baseTotals.kmAmount).toFixed(2));
-      const differenceAmount = Number((baseAmount + advanceAmount - personalPurchaseAmount).toFixed(2));
+      const differenceAmount = Number((advanceAmount - personalPurchaseAmount - paidAmount).toFixed(2));
       const summaryRows = [
-        { label: "Ure", formula: `${baseTotals.hours.toLocaleString("sl-SI", { maximumFractionDigits: 2 })} h ×`, value: `${money(baseTotals.workAmount)} EUR` },
-        { label: "Kilometrina", formula: `${baseTotals.km.toLocaleString("sl-SI", { maximumFractionDigits: 1 })} km ×`, value: `${money(baseTotals.kmAmount)} EUR` },
+        { label: "Ure", formula: `${baseTotals.hours.toLocaleString("sl-SI", { maximumFractionDigits: 2 })} h`, value: `${money(baseTotals.workAmount)} EUR` },
+        { label: "Kilometrina", formula: `${baseTotals.km.toLocaleString("sl-SI", { maximumFractionDigits: 1 })} km`, value: `${money(baseTotals.kmAmount)} EUR` },
         { label: "Znesek skupaj", value: `${money(baseAmount)} EUR`, emphasis: true },
         { label: "Založeno", value: `${money(advanceAmount)} EUR` },
         { label: "Osebni nakupi", value: `-${money(personalPurchaseAmount)} EUR` },
@@ -8656,7 +8661,6 @@
       $("toolsMenu").open = false;
     });
     ["billingFrom", "billingTo"].forEach((id) => $(id).addEventListener("change", renderBillingView));
-    $("billingRangePicker").addEventListener("click", openBillingRangePicker);
     $("billingRangePrev").addEventListener("click", () => shiftBillingRangePickerMonth(-1));
     $("billingRangeNext").addEventListener("click", () => shiftBillingRangePickerMonth(1));
     $("closeBillingRangeDialog").addEventListener("click", () => $("billingRangeDialog").close());
