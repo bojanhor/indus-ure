@@ -22,6 +22,7 @@ const {
   normalizeDb,
   normalizePayroll,
   payrollForUser,
+  payrollSequenceError,
   payrollLockForTodos,
   payrollPeriodEnded,
   releaseEntryEditLock,
@@ -421,6 +422,18 @@ test("obracun je mogoce potrditi sele po koncu izbranega meseca", () => {
   assert.equal(payrollPeriodEnded("2026-07", new Date("2026-08-01T12:00:00Z")), true);
   assert.equal(payrollPeriodEnded("2026-08", new Date("2026-08-01T12:00:00Z")), false);
 });
+test("obracunska obdobja delavca morajo biti neprekinjena", () => {
+  const payrollDb = {
+    payrolls: [
+      { id: "june", workerId: "ibro", from: "2026-06-01", to: "2026-06-30", status: "confirmed" }
+    ]
+  };
+  assert.equal(payrollSequenceError(payrollDb, "ibro", { from: "2026-07-01", to: "2026-07-31" }), "");
+  assert.match(payrollSequenceError(payrollDb, "ibro", { from: "2026-08-01", to: "2026-08-31" }), /Zacetek obracuna mora biti 2026-07-01/);
+  assert.match(payrollSequenceError(payrollDb, "ibro", { from: "2026-05-01", to: "2026-05-31" }), /Starejsega obracuna/);
+  assert.match(payrollSequenceError(payrollDb, "ibro", { from: "2026-06-15", to: "2026-07-15" }), /prekrivata/);
+});
+
 test("delavec lahko zalozeni znesek ali osebni nakup ureja samo na dan vnosa, sef pa vedno", () => {
   const entry = { person: "ibro", date: "2026-07-19" };
   const sameDay = new Date("2026-07-19T12:00:00+02:00");

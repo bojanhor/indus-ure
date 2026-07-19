@@ -1298,6 +1298,37 @@ function payrollRange(input = {}) {
   return from && to && from <= to ? { from, to, month: legacyMonth || from.slice(0, 7) } : null;
 }
 
+function payrollNextDate(key) {
+  const date = new Date(`${key}T00:00:00`);
+  date.setDate(date.getDate() + 1);
+  return [date.getFullYear(), String(date.getMonth() + 1).padStart(2, "0"), String(date.getDate()).padStart(2, "0")].join("-");
+}
+
+// A worker's payroll periods form one uninterrupted timeline. This prevents
+// duplicate, overlapping or skipped periods even if a client bypasses the UI.
+function payrollSequenceError(db, workerId, rangeInput, excludeId = "") {
+  const range = payrollRange(rangeInput);
+  if (!range) return "Obracunsko obdobje ni pravilno.";
+  const records = (db.payrolls || [])
+    .filter((payroll) => payroll.workerId === workerId && payroll.id !== excludeId)
+    .map((payroll) => ({ ...payroll, range: payrollRange(payroll) }))
+    .filter((payroll) => payroll.range)
+    .map((payroll) => ({ id: payroll.id, from: payroll.range.from, to: payroll.range.to }));
+  if (!records.length) return "";
+  const earliest = records.slice().sort((left, right) => left.from.localeCompare(right.from))[0];
+  if (range.to < earliest.from) return "Starejsega obracuna pred prvim obstojecim obracunom ni mogoce dodati.";
+  records.push({ id: excludeId || "candidate", from: range.from, to: range.to });
+  records.sort((left, right) => left.from.localeCompare(right.from) || left.to.localeCompare(right.to));
+  for (let index = 1; index < records.length; index += 1) {
+    const previous = records[index - 1];
+    const current = records[index];
+    const expectedFrom = payrollNextDate(previous.to);
+    if (current.from < expectedFrom) return "Obracunski obdobji se prekrivata.";
+    if (current.from > expectedFrom) return `Zacetek obracuna mora biti ${expectedFrom}, neposredno po prejsnjem obracunu.`;
+  }
+  return "";
+}
+
 function isPayrollMonth(value) {
   const match = /^(\d{4})-(\d{2})$/.exec(String(value || ""));
   return Boolean(match && Number(match[2]) >= 1 && Number(match[2]) <= 12);
@@ -2474,9 +2505,12 @@ async function recordOperationalAlert({ code, severity = "warning", title, messa
 
 async function listOperationalNotifications() {
   if (!DATABASE_URL) return [];
+  // Read operational alerts are transient: keep the acknowledgement visible in
+  // the current dialog, then remove it on the next application refresh.
+  await getPgPool().query("delete from indus_notifications where user_id = $1 and read_at is not null", ["bojan"]);
   const result = await getPgPool().query(
     `select id, severity, read_at, data, created_at
-     from indus_notifications where user_id = $1 order by created_at desc limit 40`,
+     from indus_notifications where user_id = $1 and read_at is null order by created_at desc limit 40`,
     ["bojan"]
   );
   return result.rows.map((row) => ({ ...row.data, id: row.id, severity: row.severity, readAt: row.read_at, createdAt: row.created_at }));
@@ -2886,6 +2920,11 @@ async function handleApi(req, res) {
       }
       const existingIndex = db.payrolls.findIndex((payroll) => payroll.workerId === workerId && payroll.from === range.from && payroll.to === range.to);
       const previous = existingIndex >= 0 ? db.payrolls[existingIndex] : {};
+      const sequenceError = payrollSequenceError(db, workerId, range, previous.id || "");
+      if (sequenceError) {
+        sendJson(res, 409, { error: sequenceError });
+        return;
+      }
       if (previous.status && !["draft", "archiving"].includes(previous.status)) {
         sendJson(res, 409, { error: "Ta obracun je ze potrjen ali placan." });
         return;
@@ -3047,6 +3086,13 @@ async function handleApi(req, res) {
         sendJson(res, 409, { error: "Obracun lahko potrdis sele po koncu izbranega obracunskega meseca." });
         return;
       }
+      if (action === "confirm") {
+        const sequenceError = payrollSequenceError(db, current.workerId, current, current.id);
+        if (sequenceError) {
+          sendJson(res, 409, { error: sequenceError });
+          return;
+        }
+      }
       let payroll;
       if (action === "refresh") {
         if (current.status !== "draft") {
@@ -3150,6 +3196,12 @@ async function handleApi(req, res) {
       }
       if (db.payrolls[index].status !== "draft") {
         sendJson(res, 409, { error: "Potrjenega obracuna ni mogoce izbrisati; najprej ga ponovno odpri." });
+        return;
+      }
+      const deleting = db.payrolls[index];
+      const laterPayroll = db.payrolls.some((payroll) => payroll.workerId === deleting.workerId && payroll.from > deleting.to);
+      if (laterPayroll) {
+        sendJson(res, 409, { error: "Osnutka ne moreš izbrisati, ker bi med obračuni nastala luknja." });
         return;
       }
       db.payrolls.splice(index, 1);
@@ -4296,6 +4348,7 @@ module.exports = {
   normalizeDb,
   normalizePayroll,
   payrollForUser,
+  payrollSequenceError,
   payrollLockForTodos,
   payrollTotals,
   payrollPeriodEnded,

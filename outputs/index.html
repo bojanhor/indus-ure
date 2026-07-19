@@ -635,6 +635,7 @@
     .legacy-report-button { display: none !important; }
     .billing-screen { display: grid; gap: 14px; padding: 12px; }
     .billing-title-row, .billing-controls, .billing-actions { display: flex; align-items: end; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+    .billing-entry-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
     .billing-title-row strong { display: block; font-size: 19px; }
     .billing-title-row .todo-meta { display: block; margin-top: 3px; }
     .billing-state { border-radius: 999px; padding: 6px 10px; font-size: 12px; font-weight: 900; background: #edf1ee; color: var(--muted); }
@@ -688,7 +689,9 @@
     .billing-day-overview { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; gap: 10px; align-items: center; padding: 12px; border: 0; background: #fff; color: var(--ink); text-align: left; font: inherit; font-weight: 800; cursor: pointer; }
     .billing-day-overview:hover, .billing-day-overview:focus-visible { background: #f4f8f5; }
     .billing-day-hours { color: var(--muted); font-size: 13px; white-space: nowrap; }
-    .billing-financial-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 9px; align-items: center; padding: 8px 12px; border-top: 1px solid var(--line); background: #fbfdfb; color: var(--muted); font-size: 13px; }
+    .billing-financial-row { display: grid; grid-template-columns: 104px minmax(0, 1fr) auto auto; gap: 9px; align-items: center; padding: 8px 12px; border-top: 1px solid var(--line); background: #fbfdfb; color: var(--muted); font-size: 13px; }
+    .billing-financial-date { color: var(--ink); font-weight: 800; white-space: nowrap; }
+    .billing-financial-only .billing-financial-row:first-child { border-top: 0; }
     .billing-financial-row.advance strong { color: #8a5b00; }
     .billing-financial-row.payment strong { color: var(--accent-dark); }
     .billing-financial-actions { display: flex; gap: 5px; align-items: center; }
@@ -2470,6 +2473,159 @@
       font-size: 14px;
     }
 
+    .client-billing-intro {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 2px 2px 0;
+    }
+
+    .client-billing-intro h2 {
+      margin: 0;
+      font-size: 22px;
+    }
+
+    .client-billing-intro p {
+      max-width: 780px;
+      margin: 5px 0 0;
+      color: var(--muted);
+      line-height: 1.45;
+    }
+
+    .client-billing-controls {
+      grid-template-columns: minmax(130px, .7fr) minmax(130px, .7fr) minmax(210px, 1.6fr) auto;
+    }
+
+    .client-billing-controls > button { min-height: 42px; }
+
+    .client-billing-notice {
+      margin: -5px 2px 0;
+      line-height: 1.4;
+    }
+
+    .client-billing-summary { grid-template-columns: repeat(4, minmax(150px, 1fr)); }
+
+    .client-billing-detail { display: grid; gap: 0; }
+
+    .client-billing-row {
+      display: grid;
+      grid-template-columns: minmax(116px, auto) minmax(0, 1fr) auto;
+      gap: 12px;
+      align-items: start;
+      padding: 14px 0;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .client-billing-row:last-child { border-bottom: 0; }
+
+    .client-billing-when {
+      display: grid;
+      gap: 3px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.25;
+    }
+
+    .client-billing-when strong { color: var(--ink); font-size: 14px; }
+
+    .client-billing-main { min-width: 0; display: grid; gap: 8px; }
+
+    .client-billing-title-row {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .client-billing-title-row h3 { margin: 0; font-size: 16px; overflow-wrap: anywhere; }
+
+    .client-billing-client-name {
+      color: #0d536b;
+      font-size: 12px;
+      font-weight: 900;
+      letter-spacing: .01em;
+      overflow-wrap: anywhere;
+    }
+
+    .client-billing-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px 10px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .client-billing-section {
+      display: grid;
+      gap: 4px;
+      padding: 8px 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #f8faf7;
+    }
+
+    .client-billing-section > strong {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 900;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+    }
+
+    .client-billing-charges {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px 12px;
+      padding: 7px 9px;
+      border-radius: 7px;
+      background: #edf5f2;
+      color: #174f45;
+      font-size: 13px;
+      font-weight: 750;
+    }
+
+    .client-billing-attachments {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(116px, 1fr));
+      gap: 8px;
+    }
+
+    .client-billing-attachment {
+      min-width: 0;
+      display: grid;
+      gap: 5px;
+      padding: 6px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #fff;
+      color: var(--ink);
+      text-align: left;
+      text-decoration: none;
+      font: inherit;
+      cursor: pointer;
+    }
+
+    .client-billing-attachment img {
+      display: block;
+      width: 100%;
+      height: 82px;
+      object-fit: cover;
+      border-radius: 5px;
+      background: #eef3ef;
+    }
+
+    .client-billing-attachment span {
+      overflow-wrap: anywhere;
+      font-size: 12px;
+      line-height: 1.25;
+    }
+
+    .client-billing-attachment:hover { border-color: #4e8ea0; }
+
+    .client-billing-open { align-self: center; white-space: nowrap; }
+
+    .client-row-actions { display: flex; gap: 7px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
     @media (max-width: 1350px) {
       .topbar {
         display: grid;
@@ -2791,7 +2947,7 @@
       .billing-day-hours { grid-area: hours; }
       .billing-day-work { grid-area: work; }
       .billing-day-km { grid-area: km; }
-      .billing-financial-row { grid-template-columns: minmax(0, 1fr) auto auto; }
+      .billing-financial-row { grid-template-columns: 82px minmax(0, 1fr) auto auto; gap: 6px; padding: 8px 9px; }
       .billing-task-row { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "time hours" "info pay"; gap: 4px 8px; align-items: start; }
       .billing-task-time { grid-area: time; }
       .billing-task-info { grid-area: info; }
@@ -2811,6 +2967,19 @@
       #photoEditorDialog .photo-editor-text-tools { width: 100%; }
       #photoEditorDialog .photo-editor-canvas-shell { min-height: 0; max-height: none; padding: 6px; }
       #photoEditorDialog .actions.modal-body { padding: 10px 12px; }
+      .client-billing-intro { display: grid; gap: 10px; }
+      .client-billing-intro .secondary { width: 100%; }
+      .client-billing-controls { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+      .client-billing-controls .client-billing-client,
+      .client-billing-controls > button { grid-column: 1 / -1; }
+      .client-billing-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .client-billing-row { grid-template-columns: 1fr; gap: 8px; padding: 12px 0; }
+      .client-billing-when { grid-template-columns: auto 1fr; align-items: baseline; }
+      .client-billing-when strong { grid-row: 1 / span 2; }
+      .client-billing-open { width: 100%; }
+      .client-billing-attachments { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .client-row-actions { justify-content: stretch; }
+      .client-row-actions > button { flex: 1 1 0; }
       #workerBillingDialog { width: min(calc(100vw - 20px), 520px); max-height: calc(100dvh - 20px); overflow-y: auto; }
       #workerBillingDialog .modal-head { padding: 13px 14px; }
       #workerBillingDialog .modal-body { padding: 12px; }
@@ -2875,6 +3044,7 @@
               <button class="menu-action" id="accountBtn" type="button">Ra&#269;un in profil</button>
               <span class="tools-menu-label">Delo</span>
               <button class="menu-action view-menu-action" id="billingMenuBtn" type="button">Obra&#269;uni</button>
+              <button class="menu-action view-menu-action admin-only" id="clientBillingMenuBtn" type="button">Obra&#269;un strank</button>
               <button class="menu-action view-menu-action" id="clientsMenuBtn" type="button">Stranke</button>
               <span class="tools-menu-label">Podatki in sinhronizacija</span>
               <button class="menu-action hidden" id="googleDrive" type="button">Google Dokumenti in preglednice</button>
@@ -2941,7 +3111,7 @@
           <p class="todo-meta hidden" id="billingNoteRead"></p>
         </div>
         <div class="billing-actions" id="billingActions">
-                    <button class="secondary" id="billingAddAdvance" type="button">Založil denar</button><button class="secondary" id="billingAddPurchase" type="button">Osebni nakup</button>
+          <div class="billing-entry-actions"><button class="secondary" id="billingAddAdvance" type="button">Založil denar</button><button class="secondary" id="billingAddPurchase" type="button">Osebni nakup</button></div>
           <button class="secondary hidden" id="billingAddPayment" type="button">Delno izplačilo</button>
 <button class="primary hidden" id="billingConfirm" type="button">Potrdi obra&#269;un</button>
           <button class="primary hidden" id="billingMarkPaid" type="button">Ozna&#269;i pla&#269;ano</button>
@@ -3026,46 +3196,34 @@
       </section>
 
       <section class="panel report-view report-screen view-hidden">
-        <div class="report-controls admin-only">
+        <div class="client-billing-intro">
+          <div>
+            <h2>Obra&#269;un stranke</h2>
+            <p>Pregled zaklju&#269;enih storitev je podlaga za pripravo ra&#269;una. Cena dela se zaenkrat ne obra&#269;unava samodejno, ker je urna postavka delavca lo&#269;ena od cene za stranko.</p>
+          </div>
+          <button class="secondary" id="exportReportExcel" type="button">Izvozi Excel</button>
+        </div>
+        <div class="report-controls client-billing-controls admin-only">
           <label>Od
             <input id="reportFrom" type="date">
           </label>
           <label>Do
             <input id="reportTo" type="date">
           </label>
-          <label>Stranka
+          <label class="client-billing-client">Stranka
             <input id="reportClient" list="clientList" placeholder="Vse stranke">
           </label>
-          <button class="secondary" id="clearReportClient" type="button">Vse stranke</button>
-          <button class="primary" id="exportReportExcel" type="button">Izvoz Excel</button>
-          <button class="secondary hidden" id="lockReportRange" type="button">Zakleni kot obra&#269;unano</button>
+          <button class="secondary" id="clearReportClient" type="button">Po&#269;isti izbor</button>
         </div>
-        <div class="report-controls compact-report-controls">
-          <button class="secondary report-setting" data-setting="hourlyRate" type="button">Urna postavka: <strong id="hourlyRateLabel">15 EUR</strong></button>
-
-          <button class="secondary report-setting" data-setting="commuteKmPerDay" type="button">Dom-slu&#382;ba: <strong id="commuteKmLabel">28 km/dan</strong></button>
-        </div>
-        <div class="report-grid" id="reportSummary"></div>
-        <div class="client-detail">
+        <p class="todo-meta client-billing-notice" id="reportBillingNotice"></p>
+        <div class="report-grid client-billing-summary" id="reportSummary"></div>
+        <div class="client-detail client-billing-detail">
           <div class="todo-head">
-            <strong id="clientDetailTitle">Vsa dela in opravila</strong>
-            <div class="client-detail-head-tools">
+            <div>
+              <strong id="clientDetailTitle">Zaklju&#269;ene storitve</strong>
               <span class="todo-meta" id="clientDetailRange"></span>
-              <button class="primary" id="newReportTodo" type="button">Novo opravilo</button>
-              <label class="report-todo-filter">Prikaz opravil
-                <select id="reportTodoCompletionFilter">
-                  <option value="completed" selected>Zaklju&#269;ena</option>
-                  <option value="open">Odprta</option>
-                  <option value="all">Vsa</option>
-                </select>
-              </label>
-              <label class="report-todo-filter">Grupiranje
-                <select id="reportClientGrouping">
-                  <option value="none" selected>Brez grupiranja</option>
-                  <option value="client">Po strankah</option>
-                </select>
-              </label>
             </div>
+            <span class="todo-meta" id="reportLineCount"></span>
           </div>
           <div id="clientDetailList"></div>
         </div>
@@ -4984,6 +5142,7 @@
       $("calendarViewBtn").classList.toggle("active", view === "calendar");
       $("todosViewBtn").classList.toggle("active", view === "todos");
       $("billingMenuBtn").classList.toggle("active", view === "billing");
+      $("clientBillingMenuBtn").classList.toggle("active", view === "report");
       $("clientsMenuBtn").classList.toggle("active", view === "clients");
       $("reportViewBtn").classList.toggle("active", view === "report");
       if (view === "calendar") renderMonth();
@@ -5877,6 +6036,35 @@
         .sort((left, right) => String(right.to).localeCompare(String(left.to)))[0] || null;
     }
 
+    function billingPayrollsForWorker(workerId) {
+      return state.payrolls
+        .filter((payroll) => payroll.workerId === workerId
+          && /^\d{4}-\d{2}-\d{2}$/.test(String(payroll.from || ""))
+          && /^\d{4}-\d{2}-\d{2}$/.test(String(payroll.to || "")))
+        .slice()
+        .sort((left, right) => String(left.from).localeCompare(String(right.from)) || String(left.to).localeCompare(String(right.to)));
+    }
+
+    function earliestBillingPayroll(workerId) {
+      return billingPayrollsForWorker(workerId)[0] || null;
+    }
+
+    function latestOpenBillingPayroll(workerId) {
+      return billingPayrollsForWorker(workerId)
+        .filter((payroll) => ["draft", "archiving"].includes(payroll.status))
+        .sort((left, right) => String(right.to).localeCompare(String(left.to)))[0] || null;
+    }
+
+    function billingPreviousPayroll(workerId, beforeDate) {
+      return billingPayrollsForWorker(workerId)
+        .filter((payroll) => payroll.to < beforeDate)
+        .sort((left, right) => String(right.to).localeCompare(String(left.to)))[0] || null;
+    }
+
+    function billingNextPayroll(workerId, afterDate) {
+      return billingPayrollsForWorker(workerId).find((payroll) => payroll.from > afterDate) || null;
+    }
+
     // The newest open period starts immediately after the latest completed payroll.
     // It ends at that month's end, unless the month is still in progress.
     function latestBillingPeriod(workerId, now = new Date()) {
@@ -5890,12 +6078,22 @@
     function updateBillingRangeControls(range = null) {
       const workerId = billingWorkerId();
       const latest = latestBillingPeriod(workerId);
+      const earliest = earliestBillingPayroll(workerId);
       const current = range || { from: $("billingFrom").value, to: $("billingTo").value };
-      const maxDate = latest?.to || billingYesterdayKey();
+      const selectedPayroll = billingPayrollsForWorker(workerId).find((payroll) => payroll.from === current?.from && payroll.to === current?.to);
+      const normalMaxDate = latest?.to || billingYesterdayKey();
+      const maxDate = selectedPayroll?.to > normalMaxDate ? selectedPayroll.to : normalMaxDate;
+      $("billingFrom").min = earliest?.from || "";
+      $("billingTo").min = earliest?.from || "";
       $("billingFrom").max = maxDate;
       $("billingTo").max = maxDate;
+      const previous = $("billingPrevMonth");
+      const previousPayroll = billingPreviousPayroll(workerId, current?.from || "");
+      previous.disabled = !previousPayroll;
+      previous.title = previous.disabled ? "Starejšega obračuna ni." : "Prejšnji obračun";
       const next = $("billingNextMonth");
-      next.disabled = !latest || !current?.to || current.to >= latest.to;
+      const nextPayroll = billingNextPayroll(workerId, current?.to || "");
+      next.disabled = !nextPayroll && (!latest || !current?.to || current.to >= latest.to);
       next.title = next.disabled ? "Novejše obračunsko obdobje še ni na voljo." : "Naslednje obdobje";
     }
 
@@ -5903,7 +6101,9 @@
       const monthInput = $("billingMonth");
       const workerId = billingWorkerId();
       const latest = latestBillingPeriod(workerId);
-      const fallback = latest || (() => {
+      const earliest = earliestBillingPayroll(workerId);
+      const openPayroll = latestOpenBillingPayroll(workerId);
+      const fallback = openPayroll || latest || (() => {
         const yesterday = billingYesterdayKey();
         return { from: `${yesterday.slice(0, 7)}-01`, to: yesterday };
       })();
@@ -5911,9 +6111,14 @@
       const toInput = $("billingTo");
       if (!/^\d{4}-\d{2}-\d{2}$/.test(fromInput.value)) fromInput.value = fallback.from;
       if (!/^\d{4}-\d{2}-\d{2}$/.test(toInput.value) || toInput.value < fromInput.value) toInput.value = fallback.to;
-      if (latest && (fromInput.value > latest.to || toInput.value > latest.to)) {
+      const selectedPayroll = billingPayrollsForWorker(workerId).find((payroll) => payroll.from === fromInput.value && payroll.to === toInput.value);
+      if (latest && !selectedPayroll && (fromInput.value > latest.to || toInput.value > latest.to)) {
         fromInput.value = fallback.from;
         toInput.value = fallback.to;
+      }
+      if (earliest && fromInput.value < earliest.from) {
+        fromInput.value = earliest.from;
+        toInput.value = earliest.to;
       }
       monthInput.value = fromInput.value.slice(0, 7);
       const range = { from: fromInput.value, to: toInput.value };
@@ -6121,15 +6326,17 @@
         list.innerHTML = [...dayRows.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([date, items]) => {
           const day = billingLineTotals(items.work);
           const hasGap = items.work.some((row, index) => index > 0 && billingGapMinutes(items.work[index - 1], row) > 0);
+          const financialDate = `<time class="billing-financial-date" datetime="${escapeHtml(date)}">${escapeHtml(formatDate(date))}</time>`;
           const financialRows = [
-            ...items.advances.map((advance) => `<div class="billing-financial-row advance"><span>Zalozeno${advance.reason ? ` · ${escapeHtml(advance.reason)}` : ""}</span><strong>${money(advance.amount)} EUR</strong>${financialEntryActions(advance, "advance")}</div>`),
-            ...items.purchases.map((purchase) => `<div class="billing-financial-row purchase"><span>Osebni nakup${purchase.reason ? ` · ${escapeHtml(purchase.reason)}` : ""}</span><strong>-${money(purchase.amount)} EUR</strong>${financialEntryActions(purchase, "purchase")}</div>`),
-            ...items.payments.map((payment) => `<div class="billing-financial-row payment"><span>Izplacano${payment.note ? ` · ${escapeHtml(payment.note)}` : ""}</span><strong>${money(payment.amount)} EUR</strong>${isBoss ? `<button class="danger billing-financial-delete delete-billing-payment" type="button" data-payroll-id="${escapeHtml(payroll.id)}" data-payment-id="${escapeHtml(payment.id)}">Izbrisi</button>` : ""}</div>`)
+            ...items.advances.map((advance) => `<div class="billing-financial-row advance">${financialDate}<span>Zalozeno${advance.reason ? ` · ${escapeHtml(advance.reason)}` : ""}</span><strong>${money(advance.amount)} EUR</strong>${financialEntryActions(advance, "advance")}</div>`),
+            ...items.purchases.map((purchase) => `<div class="billing-financial-row purchase">${financialDate}<span>Osebni nakup${purchase.reason ? ` · ${escapeHtml(purchase.reason)}` : ""}</span><strong>-${money(purchase.amount)} EUR</strong>${financialEntryActions(purchase, "purchase")}</div>`),
+            ...items.payments.map((payment) => `<div class="billing-financial-row payment">${financialDate}<span>Izplacano${payment.note ? ` · ${escapeHtml(payment.note)}` : ""}</span><strong>${money(payment.amount)} EUR</strong>${isBoss ? `<button class="danger billing-financial-delete delete-billing-payment" type="button" data-payroll-id="${escapeHtml(payroll.id)}" data-payment-id="${escapeHtml(payment.id)}">Izbrisi</button>` : ""}</div>`)
           ].join("");
           const hourlyRate = day.hours > 0 ? Number((day.workAmount / day.hours).toFixed(2)) : 0;
           const kmRate = day.km > 0 ? Number((day.kmAmount / day.km).toFixed(3)) : Number(items.work.find((row) => Number.isFinite(Number(row.kmRate)))?.kmRate || state.settings.billing?.workerOwnVehicleKmRate || state.settings.billing?.kmRate || 0);
           const hoursLabel = `${day.hours.toLocaleString("sl-SI", { maximumFractionDigits: 2 })} h po ${money(hourlyRate)} EUR/h`;
           const kmLabel = `${day.km.toLocaleString("sl-SI", { maximumFractionDigits: 1 })} km po ${money(kmRate)} EUR/km`;
+          if (!items.work.length) return `<div class="billing-day billing-financial-only">${financialRows}</div>`;
           return `<div class="billing-day"><button class="billing-day-overview billing-open-day" type="button" data-date="${escapeHtml(date)}" data-worker-id="${escapeHtml(workerId)}"><strong>${escapeHtml(formatDate(date))}</strong><span class="billing-day-hours">${hasGap ? '<span class="billing-gap-alert" title="Ure niso v neprekinjenem kosu">!</span> ' : ""}${escapeHtml(hoursLabel)}</span><span class="billing-day-work">Delo: ${money(day.workAmount)} EUR</span><span class="billing-day-km">${escapeHtml(kmLabel)}</span></button>${financialRows}</div>`;
         }).join("");
         list.querySelectorAll(".billing-open-day").forEach((button) => button.addEventListener("click", () => openBillingDayTimeline(button.dataset.workerId, button.dataset.date)));
@@ -6235,7 +6442,10 @@
             <span class="todo-meta">Dav&#269;na / ID: ${escapeHtml(client.clientId || "MANJKA ALI JE PODVOJENA")}</span>
             ${client.syncError ? `<span class="todo-meta error">${escapeHtml(client.syncError)}</span>` : ""}
           </div>
-          <button class="secondary open-client" type="button" data-client-id="${escapeHtml(client.clientId || "")}" data-client-name="${escapeHtml(client.name)}" ${client.clientId ? "" : "disabled"}>Uredi</button>
+          <div class="client-row-actions">
+            ${isAdminView() ? `<button class="secondary open-client-billing" type="button" data-client-id="${escapeHtml(client.clientId || "")}" data-client-name="${escapeHtml(client.name)}">Obra&#269;un</button>` : ""}
+            <button class="secondary open-client" type="button" data-client-id="${escapeHtml(client.clientId || "")}" data-client-name="${escapeHtml(client.name)}" ${client.clientId ? "" : "disabled"}>Uredi</button>
+          </div>
         </div>
       `).join("") || "<p>Ni strank za to iskanje.</p>";
     }
@@ -7104,7 +7314,7 @@
       $("todoFormTitle").textContent = state.todoHoursSourceId || state.todoStandaloneHours
         ? "Pi\u0161i ure na projekt"
         : completed
-          ? ($("todoFormId").value ? "Uredi zaključeno opravilo" : "Novo zaključeno opravilo")
+          ? ($("todoFormId").value ? "Uredi vpis ur" : "Novo zaključeno opravilo")
           : $("todoFormId").value ? "Uredi opravilo" : "Novo opravilo";
       ["todoFormClientField", "todoFormAssigneeField", "todoFormAttachments"].forEach((id) => $(id).classList.toggle("hidden", meal));
       ["todoFormTask", "todoFormNotes", "todoFormMaterial"].forEach((id) => $(id).closest("label").classList.toggle("hidden", meal));
@@ -7414,9 +7624,9 @@
     }
 
     function setDefaultReportRange() {
-      const now = state.current || new Date();
-      $("reportFrom").value = dateKey(new Date(now.getFullYear(), now.getMonth(), 1));
-      $("reportTo").value = dateKey(new Date(now.getFullYear(), now.getMonth() + 1, 0));
+      // Prazen razpon pomeni celotno zgodovino zakljucenih storitev.
+      $("reportFrom").value = "";
+      $("reportTo").value = "";
     }
 
     function inDateRange(date, from, to) {
@@ -7426,155 +7636,132 @@
       return true;
     }
 
-    function reportEntries() {
-      const from = $("reportFrom").value;
-      const to = $("reportTo").value;
-      const client = findClient(state.reportClientId || $("reportClient").value || state.reportClient || "");
-      const clientName = normalizeClientName($("reportClient").value || state.reportClient || "");
-      return state.entries
-        .filter((entry) => inDateRange(entry.date, from, to))
-        .filter((entry) => !clientName || entry.clientId === (client?.clientId || client?.id) || normalizeText(entry.client) === normalizeText(clientName))
-        .sort((a, b) => `${a.date} ${a.start}`.localeCompare(`${b.date} ${b.start}`));
+    function reportTodoIsCompleted(todo) {
+      return Boolean(todo.done || todo.status === "execution");
+    }
+
+    function reportClientSelection() {
+      const input = $("reportClient").value.trim();
+      const stableId = String(state.reportClientId || "").trim();
+      const client = findClient(stableId) || findClient(input) || null;
+      return {
+        id: String(client?.clientId || client?.id || stableId || "").trim(),
+        name: String(client?.name || normalizeClientName(input || state.reportClient || "") || "").trim()
+      };
+    }
+
+    function todoMatchesReportClient(todo, selection) {
+      if (!selection.id && !selection.name) return Boolean(todo.clientId || todo.client);
+      if (selection.id && String(todo.clientId || "") === selection.id) return true;
+      return Boolean(selection.name) && normalizeText(todo.client) === normalizeText(selection.name);
     }
 
     function reportTodos() {
       const from = $("reportFrom").value;
       const to = $("reportTo").value;
-      const client = findClient(state.reportClientId || $("reportClient").value || state.reportClient || "");
-      const clientName = normalizeClientName($("reportClient").value || state.reportClient || "");
-      return contextTodos()
-        .filter((todo) => !todo.date || inDateRange(todo.date, from, to))
-        .filter((todo) => !clientName || todo.clientId === (client?.clientId || client?.id) || normalizeText(todo.client) === normalizeText(clientName))
-        .sort(todoSort);
+      const selection = reportClientSelection();
+      return uniqueTodosByEventId(state.todos)
+        .filter(reportTodoIsCompleted)
+        .filter((todo) => todoMatchesReportClient(todo, selection))
+        .filter((todo) => (!from && !to) ? true : inDateRange(todo.date, from, to))
+        .sort((left, right) => {
+          const leftKey = left.date ? `${left.date} ${left.start || "99:99"}` : "9999-99-99 99:99";
+          const rightKey = right.date ? `${right.date} ${right.start || "99:99"}` : "9999-99-99 99:99";
+          return leftKey.localeCompare(rightKey) || String(left.title || "").localeCompare(String(right.title || ""), "sl");
+        });
     }
 
-    function reportTodoIsCompleted(todo) {
-      return Boolean(todo.done || todo.status === "execution");
+    function reportClientKmRate(todo) {
+      const stored = Number(todo.clientKmRate);
+      return Number.isFinite(stored) && stored >= 0 ? stored : todoClientKmRate(todo.clientVehicle);
     }
 
-    function filterReportTodos(todos) {
-      const filter = $("reportTodoCompletionFilter").value || "completed";
-      if (filter === "completed") return todos.filter(reportTodoIsCompleted);
-      if (filter === "all") return todos;
-      return todos.filter((todo) => !reportTodoIsCompleted(todo));
+    function reportTodoLine(todo) {
+      const hours = Number(duration(todo).toFixed(2));
+      const clientKm = Math.max(0, Number(todo.clientKm || 0));
+      const clientKmRate = reportClientKmRate(todo);
+      const clientKmAmount = Number((clientKm * clientKmRate).toFixed(2));
+      return { todo, hours, clientKm, clientKmRate, clientKmAmount };
     }
 
-    function renderReportDetailRows(rows) {
-      if ($("reportClientGrouping").value !== "client") {
-        return rows.map((row) => row.html).join("");
-      }
-      const groups = new Map();
-      rows.forEach((row) => {
-        const client = String(row.client || "").trim() || "Brez stranke";
-        if (!groups.has(client)) groups.set(client, []);
-        groups.get(client).push(row.html);
-      });
-      return [...groups.entries()]
-        .sort(([a], [b]) => a.localeCompare(b, "sl"))
-        .map(([client, groupRows]) => `
-          <section class="client-work-group">
-            <h3 class="client-work-group-title">${escapeHtml(client)}</h3>
-            ${groupRows.join("")}
-          </section>
-        `).join("");
+    function reportTotals(lines) {
+      return lines.reduce((totals, line) => ({
+        count: totals.count + 1,
+        hours: totals.hours + line.hours,
+        clientKm: totals.clientKm + line.clientKm,
+        clientKmAmount: totals.clientKmAmount + line.clientKmAmount
+      }), { count: 0, hours: 0, clientKm: 0, clientKmAmount: 0 });
     }
 
-    function reportMonthKeys(from, to) {
-      const keys = new Set();
-      if (!from || !to) return keys;
-      const cursor = parseDate(from);
-      const end = parseDate(to);
-      cursor.setDate(1);
-      while (cursor <= end) {
-        keys.add(`${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, "0")}`);
-        cursor.setMonth(cursor.getMonth() + 1);
-      }
-      return keys;
-    }
-
-    function reportTotals(entries) {
+    function reportRangeLabel() {
       const from = $("reportFrom").value;
       const to = $("reportTo").value;
-      const billing = state.settings.billing || { hourlyRate: 15, kmRate: 0.22, workerOwnVehicleKmRate: 0.22, clientPersonalKmRate: 0.22, clientVanKmRate: 0.22, commuteKmPerDay: 28 };
-      const counted = entries.filter((entry) => entry.status !== "vacation");
-      const ibroEntries = counted.filter((entry) => (entry.syncUser || entry.createdBy) === "ibro");
-      const workdayEntries = ibroEntries.filter((entry) => !["errand", "vacation"].includes(entry.status));
-      const fromHomeDays = new Set(workdayEntries.filter((entry) => entry.fromHome).map((entry) => entry.date));
-      const commuteDays = new Set(workdayEntries.map((entry) => entry.date).filter((date) => !fromHomeDays.has(date)));
-      const ibroWorkdays = new Set(workdayEntries.map((entry) => entry.date)).size;
-      const commuteKm = commuteDays.size * billing.commuteKmPerDay;
-      const enteredKm = ibroEntries.reduce((sum, entry) => sum + Number(entry.km || 0), 0);
-      const kmTotal = enteredKm + commuteKm;
-      const ibroHours = uniqueHours(ibroEntries);
-      const monthKeys = reportMonthKeys(from, to);
-      const ibroDebt = state.debts
-        .filter((debt) => monthKeys.has(debt.month) && debt.person === "ibro")
-        .reduce((sum, debt) => sum + Number(debt.amount || 0), 0);
-      const bojanDebt = state.debts
-        .filter((debt) => monthKeys.has(debt.month) && debt.person === "bojan")
-        .reduce((sum, debt) => sum + Number(debt.amount || 0), 0);
-      const hoursPay = ibroHours * billing.hourlyRate;
-      const kmRate = Number(billing.workerOwnVehicleKmRate ?? billing.kmRate ?? 0);
-      const kmPay = kmTotal * kmRate;
-      return {
-        ibroHours,
-        ibroWorkdays,
-        commuteDays: commuteDays.size,
-        enteredKm,
-        commuteKm,
-        kmTotal,
-        hoursPay,
-        kmPay,
-        ibroDebt,
-        bojanDebt,
-        payout: hoursPay + kmPay + bojanDebt - ibroDebt
-      };
+      if (from && to) return `${formatDate(from)} – ${formatDate(to)}`;
+      if (from) return `Od ${formatDate(from)}`;
+      if (to) return `Do ${formatDate(to)}`;
+      return "Celotna evidenca";
+    }
+
+    function reportNumber(value, maximumFractionDigits = 2) {
+      return Number(value || 0).toLocaleString("sl-SI", { maximumFractionDigits });
+    }
+
+    function renderReportAttachments(todo) {
+      const photos = todo.photos || [];
+      const driveFiles = todo.driveFiles || [];
+      if (!photos.length && !driveFiles.length) return "";
+      const attachmentCards = photos.map((photo) => {
+        const title = escapeHtml(photo.name || "Priloga");
+        if (isPdfAttachment(photo)) {
+          return `<a class="client-billing-attachment" href="${escapeHtml(attachmentSource(photo))}" target="_blank" rel="noopener noreferrer"><span>${pdfThumbnailMarkup(photo)}</span><span>${title}</span></a>`;
+        }
+        return `<button class="client-billing-attachment report-image-preview" type="button" data-report-todo-id="${escapeHtml(todo.id)}" data-photo-id="${escapeHtml(photo.id)}"><img src="${escapeHtml(attachmentThumbnailSource(photo))}" alt="${title}"><span>${title}</span></button>`;
+      }).join("");
+      return `<section class="client-billing-section"><strong>Priloge in dokumenti</strong>${attachmentCards ? `<div class="client-billing-attachments">${attachmentCards}</div>` : ""}${driveFiles.length ? `<div class="todo-drive-files">${renderTodoDriveFilesHtml(driveFiles)}</div>` : ""}</section>`;
+    }
+
+    function renderClientBillingRow(line) {
+      const { todo, hours, clientKm, clientKmRate, clientKmAmount } = line;
+      const time = todo.start && todo.end ? `${todo.start}–${todo.end}` : "Brez vpisane ure";
+      const details = [
+        todo.notes ? `<section class="client-billing-section"><strong>Opis del</strong><div class="report-todo-description">${linkifyText(todo.notes)}</div></section>` : "",
+        todo.material ? `<section class="client-billing-section"><strong>Material</strong><div class="report-todo-description">${linkifyText(todo.material)}</div></section>` : "",
+        renderReportAttachments(todo)
+      ].filter(Boolean).join("");
+      const charges = [
+        hours ? `<span>Izvedeno: ${reportNumber(hours)} h</span>` : "<span>Ura ni vpisana</span>",
+        clientKm ? `<span>Kilometrina za stranko: ${reportNumber(clientKm, 1)} km × ${money(clientKmRate)} EUR/km = ${money(clientKmAmount)} EUR</span>` : ""
+      ].filter(Boolean).join("");
+      return `<article class="client-billing-row">
+        <div class="client-billing-when"><strong>${todo.date ? formatDate(todo.date) : "Brez datuma"}</strong><span>${escapeHtml(time)}</span></div>
+        <div class="client-billing-main">
+          <div class="client-billing-title-row"><span class="client-billing-client-name">${escapeHtml(todo.client || "Brez stranke")}</span><h3>${escapeHtml(todo.title || "Brez naziva")}</h3></div>
+          <div class="client-billing-meta"><span>Za: ${escapeHtml(todoAssigneeNames(todo))}</span>${todo.sourceProjectTodoId ? "<span>Vpis ur na projekt</span>" : ""}</div>
+          <div class="client-billing-charges">${charges}</div>
+          ${details}
+        </div>
+        <button class="secondary client-billing-open open-report-todo" type="button" data-todo-id="${escapeHtml(todo.id)}">Odpri vpis</button>
+      </article>`;
     }
 
     function renderReport() {
-      const entries = reportEntries();
-      const todos = filterReportTodos(reportTodos());
-      const totals = reportTotals(entries);
-      const billing = state.settings.billing || { hourlyRate: 15, kmRate: 0.22, workerOwnVehicleKmRate: 0.22, clientPersonalKmRate: 0.22, clientVanKmRate: 0.22, commuteKmPerDay: 28 };
-      const client = normalizeClientName($("reportClient").value || state.reportClient || "");
-      $("hourlyRateLabel").textContent = `${money(billing.hourlyRate)} EUR`;
-
-      $("commuteKmLabel").textContent = `${billing.commuteKmPerDay.toLocaleString("sl-SI")} km/dan`;
-      $("lockReportRange").classList.toggle("hidden", state.user?.role !== "boss");
-      $("clientDetailTitle").textContent = client ? `Stranka: ${client}` : "Vsa dela in opravila";
-      $("clientDetailRange").textContent = `${formatDate($("reportFrom").value)} - ${formatDate($("reportTo").value)}`;
+      const selection = reportClientSelection();
+      const lines = reportTodos().map(reportTodoLine);
+      const totals = reportTotals(lines);
+      const selectedClient = selection.name;
+      $("clientDetailTitle").textContent = selectedClient ? `Poročilo: ${selectedClient}` : "Zaključene storitve vseh strank";
+      $("clientDetailRange").textContent = reportRangeLabel();
+      $("reportLineCount").textContent = `${totals.count} ${totals.count === 1 ? "vpis" : "vpisov"}`;
+      $("reportBillingNotice").textContent = selectedClient
+        ? "Poročilo prikazuje samo zaključene storitve izbranega obdobja. Kilometrina je obračunana po tarifi, shranjeni pri posameznem vpisu."
+        : "Izberi stranko za njen obračun. Brez izbire je prikazana kronološka evidenca vseh zaključenih storitev.";
       $("reportSummary").innerHTML = [
-        ["Ibro ure", `${totals.ibroHours.toLocaleString("sl-SI", { maximumFractionDigits: 1 })} h x ${money(billing.hourlyRate)} EUR = ${money(totals.hoursPay)} EUR`],
-        ["Dom-sluzba", `${totals.commuteDays} dni x ${billing.commuteKmPerDay.toLocaleString("sl-SI")} km = ${totals.commuteKm.toLocaleString("sl-SI")} km`],
-        ["Kilometrina delavca", `${totals.kmTotal.toLocaleString("sl-SI", { maximumFractionDigits: 1 })} km x ${money(billing.workerOwnVehicleKmRate ?? billing.kmRate ?? 0)} EUR = ${money(totals.kmPay)} EUR`],
-        ["Skupaj za izplacilo", `${money(totals.payout)} EUR`]
+        ["Zaključene storitve", `${totals.count}`],
+        ["Opravljene ure", `${reportNumber(totals.hours)} h`],
+        ["Kilometrina za stranko", `${reportNumber(totals.clientKm, 1)} km`],
+        ["Kilometrina za obračun", `${money(totals.clientKmAmount)} EUR`]
       ].map(([label, value]) => `<div class="stat"><strong>${escapeHtml(value)}</strong><span>${escapeHtml(label)}</span></div>`).join("");
-
-      const detail = $("clientDetailList");
-      const entryRows = entries.map((entry) => ({
-        client: entry.client,
-        html: `
-        <div class="client-work-row">
-          <strong>${formatDate(entry.date)}</strong>
-          <span>${escapeHtml(entry.client || statusLabels[entry.status])}<br><small>${entry.status === "vacation" ? "Dopust" : `${entry.start} - ${entry.end}, ${entry.status === "vacation" ? "0.00" : duration(entry).toFixed(2)} h`} | ${entry.fromHome ? "start od doma | " : ""}${escapeHtml(entry.work || entry.material || "")}</small></span>
-          <span class="report-entry-state">
-            <span class="report-state-chip">Ra&#269;un: ${entry.invoiceSent ? "poslan" : "ni poslan"}</span>
-            <span class="report-state-chip">${entry.invoiceSettled ? "pora&#269;unano" : "ni pora&#269;unano"}</span>
-            <span class="report-state-chip">${entry.invoicePaid ? "pla&#269;ano" : "ni pla&#269;ano"}</span>
-          </span>
-        </div>
-      ` }));
-      const todoRows = todos.map((todo) => ({
-        client: todo.client,
-        html: `
-        <div class="client-work-row">
-          <strong>${todo.date ? formatDate(todo.date) : "Brez datuma"}</strong>
-          <span><strong>${escapeHtml(todo.title)}</strong>${todo.notes ? `<span class="report-todo-description">${linkifyText(todo.notes)}</span>` : ""}<small>${escapeHtml(todo.client || "")} | ${todo.done ? "opravljeno" : todoStatus(todo.status).label} | ${(todo.photos || []).length} prilog</small></span>
-          <button class="secondary open-report-todo" type="button" data-todo-id="${escapeHtml(todo.id)}">Uredi opravilo</button>
-        </div>
-      ` }));
-      const detailRows = [...entryRows, ...todoRows];
-      detail.innerHTML = renderReportDetailRows(detailRows) || `<p class="todo-meta">Za ta izbor ni vnosov ali opravil.</p>`;
+      $("clientDetailList").innerHTML = lines.map(renderClientBillingRow).join("") || `<p class="todo-meta">Za ta izbor ni zaključenih storitev.</p>`;
     }
 
     function openClientReport(client, clientId = "") {
@@ -7586,43 +7773,40 @@
     }
 
     function exportReportExcel() {
-      const entries = reportEntries();
-      const todos = reportTodos();
-      const totals = reportTotals(entries);
-      const billing = state.settings.billing || { hourlyRate: 15, kmRate: 0.22, workerOwnVehicleKmRate: 0.22, clientPersonalKmRate: 0.22, clientVanKmRate: 0.22, commuteKmPerDay: 28 };
+      const selection = reportClientSelection();
+      const lines = reportTodos().map(reportTodoLine);
+      const totals = reportTotals(lines);
       const rows = [
-        ["INDUS URE obracun", "", "", ""],
-        ["Obdobje", $("reportFrom").value, $("reportTo").value, ""],
-        ["Stranka", $("reportClient").value || "Vse stranke", "", ""],
+        ["INDUS URE – poročilo izvedenih storitev"],
+        ["Obdobje", reportRangeLabel()],
+        ["Stranka", selection.name || "Vse stranke"],
         [],
-        ["Postavka", "Kolicina", "Cena", "Skupaj"],
-        ["Ibro ure", totals.ibroHours.toFixed(2), `${billing.hourlyRate} EUR`, totals.hoursPay.toFixed(2)],
-        ["Vpisani km", totals.enteredKm.toFixed(1), "", ""],
-        ["Pot dom-sluzba", `${totals.commuteDays} dni x ${billing.commuteKmPerDay} km`, "", totals.commuteKm.toFixed(1)],
-        ["Kilometrina delavca", totals.kmTotal.toFixed(1), `${billing.workerOwnVehicleKmRate ?? billing.kmRate ?? 0} EUR`, totals.kmPay.toFixed(2)],
-        ["Bojan dolg", "", "", totals.bojanDebt.toFixed(2)],
-        ["Ibro dolg", "", "", `-${totals.ibroDebt.toFixed(2)}`],
-        ["SKUPAJ", "", "", totals.payout.toFixed(2)],
+        ["Zaključene storitve", totals.count],
+        ["Opravljene ure", totals.hours.toFixed(2)],
+        ["Kilometrina za stranko", totals.clientKm.toFixed(1)],
+        ["Kilometrina za obračun", totals.clientKmAmount.toFixed(2)],
         [],
-        ["Datum", "Stranka", "Opis", "Ure", "Km", "Racun poslan", "Poracunano", "Placano", "Dodal"]
+        ["Datum", "Ura", "Stranka", "Opravilo", "Opis del", "Material", "Dodeljeno", "Ure", "Km za stranko", "Tarifa km", "Kilometrina EUR", "Priloge", "Google dokumenti"]
       ];
-      entries.forEach((entry) => rows.push([
-        entry.date,
-        entry.client,
-        entry.work || entry.material || statusLabels[entry.status],
-        entry.status === "vacation" ? "0.00" : duration(entry).toFixed(2),
-        entry.km || 0,
-        entry.invoiceSent ? "DA" : "NE",
-        entry.invoiceSettled ? "DA" : "NE",
-        entry.invoicePaid ? "DA" : "NE",
-        entry.createdByName || ""
+      lines.forEach(({ todo, hours, clientKm, clientKmRate, clientKmAmount }) => rows.push([
+        todo.date || "",
+        todo.start && todo.end ? `${todo.start}-${todo.end}` : "",
+        todo.client || "",
+        todo.title || "",
+        todo.notes || "",
+        todo.material || "",
+        todoAssigneeNames(todo),
+        hours.toFixed(2),
+        clientKm.toFixed(1),
+        clientKmRate.toFixed(2),
+        clientKmAmount.toFixed(2),
+        (todo.photos || []).map((photo) => photo.name || "Priloga").join("; "),
+        (todo.driveFiles || []).map((file) => `${file.name || "Google dokument"}: ${file.url || ""}`).join("; ")
       ]));
-      rows.push([], ["Opravila"], ["Datum", "Stranka", "Opravilo", "Status", "Foto"]);
-      todos.forEach((todo) => rows.push([todo.date || "", todo.client || "", todo.title, todo.done ? "opravljeno" : todoStatus(todo.status).label, (todo.photos || []).length]));
       const html = `<html><head><meta charset="utf-8"></head><body><table>${rows.map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`).join("")}</table></body></html>`;
-      downloadText(html, `indus-obracun-${$("reportFrom").value}-${$("reportTo").value}.xls`, "application/vnd.ms-excel;charset=utf-8");
+      const slug = (selection.name || "vse-stranke").replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase() || "stranka";
+      downloadText(html, `indus-porocilo-${slug}.xls`, "application/vnd.ms-excel;charset=utf-8");
     }
-
     function todosCanReorderTogether(sourceId, targetId) {
       const todos = contextTodos();
       const source = todos.find((todo) => todo.id === sourceId);
@@ -8660,6 +8844,10 @@
       setView("billing");
       $("toolsMenu").open = false;
     });
+    $("clientBillingMenuBtn").addEventListener("click", () => {
+      setView("report");
+      $("toolsMenu").open = false;
+    });
     ["billingFrom", "billingTo"].forEach((id) => $(id).addEventListener("change", renderBillingView));
     $("billingRangePrev").addEventListener("click", () => shiftBillingRangePickerMonth(-1));
     $("billingRangeNext").addEventListener("click", () => shiftBillingRangePickerMonth(1));
@@ -8678,17 +8866,33 @@
     $("paymentForm").addEventListener("submit", (event) => { event.preventDefault(); savePaymentFromDialog().catch((error) => alert(error.message)); });
     ["billingPrevMonth", "billingNextMonth"].forEach((id) => $(id).addEventListener("click", () => {
       const range = billingRange();
+      const workerId = billingWorkerId();
       const direction = id === "billingNextMonth" ? 1 : -1;
-      const latest = latestBillingPeriod(billingWorkerId());
-      if (direction > 0 && (!latest || range.to >= latest.to)) return;
+      const previousPayroll = billingPreviousPayroll(workerId, range.from);
+      const nextPayroll = billingNextPayroll(workerId, range.to);
+      if (direction < 0) {
+        if (!previousPayroll) return;
+        $("billingFrom").value = previousPayroll.from;
+        $("billingTo").value = previousPayroll.to;
+        renderBillingView();
+        return;
+      }
+      if (nextPayroll) {
+        $("billingFrom").value = nextPayroll.from;
+        $("billingTo").value = nextPayroll.to;
+        renderBillingView();
+        return;
+      }
+      const latest = latestBillingPeriod(workerId);
+      if (!latest || range.to >= latest.to) return;
       const start = parseDate(range.from);
       const end = parseDate(range.to);
       const span = Math.round((end - start) / 86400000) + 1;
-      start.setDate(start.getDate() + direction * span);
-      end.setDate(end.getDate() + direction * span);
+      start.setDate(start.getDate() + span);
+      end.setDate(end.getDate() + span);
       const nextFrom = dateKey(start);
-      const nextTo = direction > 0 && latest ? [dateKey(end), latest.to].sort()[0] : dateKey(end);
-      if (direction > 0 && latest && nextTo < nextFrom) {
+      const nextTo = [dateKey(end), latest.to].sort()[0];
+      if (nextTo < nextFrom) {
         $("billingFrom").value = latest.from;
         $("billingTo").value = latest.to;
       } else {
@@ -8725,9 +8929,7 @@
     $("reportViewBtn").addEventListener("click", () => setView("report"));
     $("reportFrom").addEventListener("change", renderReport);
     $("reportTo").addEventListener("change", renderReport);
-    $("reportTodoCompletionFilter").addEventListener("change", renderReport);
-    $("reportClientGrouping").addEventListener("change", renderReport);
-    $("newReportTodo").addEventListener("click", () => openTodoDialog());
+
     $("closeTodoDialog").addEventListener("click", () => $("todoDialog").close());
     $("cancelTodoDialog").addEventListener("click", () => $("todoDialog").close());
     ["todoFormStart", "todoFormEnd"].forEach((id) => $(id).addEventListener("change", normalizeTodoFormTimes));
@@ -8851,17 +9053,21 @@
       renderTodoFormPhotos();
     });
     $("reportClient").addEventListener("input", () => {
-      state.reportClient = $("reportClient").value;
+      const value = $("reportClient").value;
+      const client = findClient(value);
+      state.reportClient = client?.name || value;
+      state.reportClientId = client?.clientId || client?.id || "";
       renderReport();
     });
     $("clearReportClient").addEventListener("click", () => {
       state.reportClient = "";
+      state.reportClientId = "";
       $("reportClient").value = "";
       renderReport();
     });
     $("exportReportExcel").addEventListener("click", exportReportExcel);
     $("addClientBtn").addEventListener("click", () => addClientFromForm().catch((error) => alert(error.message)));
-    $("lockReportRange").addEventListener("click", () => lockCurrentReportRange().catch((error) => alert(error.message)));
+
     document.querySelectorAll(".report-setting").forEach((button) => {
       button.addEventListener("click", () => editBillingSetting(button.dataset.setting).catch((error) => alert(error.message)));
     });
@@ -8898,6 +9104,13 @@
     });
 
     $("clientDetailList").addEventListener("click", (event) => {
+      const preview = event.target.closest(".report-image-preview");
+      if (preview) {
+        const todo = state.todos.find((item) => item.id === preview.dataset.reportTodoId);
+        const photo = todo?.photos?.find((item) => item.id === preview.dataset.photoId);
+        if (photo) openAttachmentPreview(photo, { todoId: todo.id });
+        return;
+      }
       const todoButton = event.target.closest(".open-report-todo");
       if (todoButton) {
         const todo = state.todos.find((item) => item.id === todoButton.dataset.todoId);
@@ -8906,6 +9119,11 @@
       }
     });
     $("clientsList").addEventListener("click", (event) => {
+      const billingButton = event.target.closest(".open-client-billing");
+      if (billingButton) {
+        openClientReport(billingButton.dataset.clientName || "", billingButton.dataset.clientId || "");
+        return;
+      }
       const button = event.target.closest(".open-client");
       if (!button) return;
       openClientEditDialog(button.dataset.clientId);
