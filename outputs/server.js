@@ -1633,6 +1633,9 @@ function clientBillCandidates(db, input = {}) {
   if (!client) return { client: null, groups: [] };
   const from = isDateKey(input.from) ? String(input.from) : "";
   const to = isDateKey(input.to) ? String(input.to) : "";
+  const requestedEventIds = Array.isArray(input?.eventIds)
+    ? new Set(input.eventIds.map((id) => String(id || "").trim()).filter(Boolean))
+    : null;
   const billed = confirmedClientBillByEvent(db);
   const groups = new Map();
   for (const todo of db.todos || []) {
@@ -1641,15 +1644,17 @@ function clientBillCandidates(db, input = {}) {
     if ((from && String(todo.date || "") < from) || (to && String(todo.date || "") > to)) continue;
     const eventId = todoBillingEventId(todo);
     if (!eventId || billed.has(eventId)) continue;
+    if (requestedEventIds && !requestedEventIds.has(eventId)) continue;
     if (!groups.has(eventId)) groups.set(eventId, []);
     groups.get(eventId).push(todo);
   }
-  return { client, groups: [...groups.entries()].map(([eventId, todos]) => ({ eventId, todos })) };
+  return { client, groups: [...groups.entries()].map(([eventId, todos]) => ({ eventId, todos })), requestedEventIds };
 }
 
 function buildClientBillSnapshot(db, input, actor) {
   const selection = clientBillCandidates(db, input);
   if (!selection.client || !selection.groups.length) return null;
+  if (selection.requestedEventIds && selection.groups.length !== selection.requestedEventIds.size) return null;
   const createdAt = new Date().toISOString();
   return normalizeClientBill({
     id: crypto.randomUUID(),
@@ -3128,6 +3133,21 @@ async function handleApi(req, res) {
         return;
       }
       const body = await readBody(req);
+      if (body.eventIds !== undefined && !Array.isArray(body.eventIds)) {
+        sendJson(res, 400, { error: "Izbrani vpisi za obracun niso pravilni." });
+        return;
+      }
+      if (Array.isArray(body.eventIds)) {
+        body.eventIds = [...new Set(body.eventIds.map((id) => String(id || "").trim()).filter(Boolean))];
+        if (!body.eventIds.length) {
+          sendJson(res, 400, { error: "Oznaci vsaj en vpis za obracun stranki." });
+          return;
+        }
+        if (body.eventIds.length > 2_000) {
+          sendJson(res, 400, { error: "Za en obracun lahko izberes najvec 2000 vpisov." });
+          return;
+        }
+      }
       if ((body.from && !isDateKey(body.from)) || (body.to && !isDateKey(body.to)) || (body.from && body.to && body.from > body.to)) {
         sendJson(res, 400, { error: "Obdobje obracuna stranki ni pravilno." });
         return;
@@ -3140,7 +3160,7 @@ async function handleApi(req, res) {
       }
       const clientBill = buildClientBillSnapshot(db, { ...body, clientId: client.clientId, clientName: client.name }, user);
       if (!clientBill) {
-        sendJson(res, 409, { error: "Za to stranko v izbranem obdobju ni novih zakljucenih storitev za obracun." });
+        sendJson(res, 409, { error: Array.isArray(body.eventIds) ? "Eden ali vec oznacenih vpisov ni vec na voljo za obracun. Osvezi porocilo in preveri izbor." : "Za to stranko v izbranem obdobju ni novih zakljucenih storitev za obracun." });
         return;
       }
       db.clientBills.push(clientBill);

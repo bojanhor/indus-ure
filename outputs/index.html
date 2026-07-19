@@ -1681,6 +1681,7 @@
     }
 
     .day-todo {
+      position: relative;
       width: 100%;
       text-align: left;
       border-radius: 7px;
@@ -1724,34 +1725,33 @@
       font-weight: 800;
     }
 
+    .day-todo.has-settlements { padding-bottom: 31px; }
+
     .day-todo-settlements {
+      position: absolute;
+      right: 7px;
+      bottom: 6px;
       display: flex;
       align-items: center;
-      gap: 4px;
-      margin-top: 5px;
-      min-height: 16px;
+      gap: 5px;
+      min-height: 20px;
     }
 
     .day-todo-settlement {
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      width: 16px;
-      height: 16px;
+      width: 20px;
+      height: 20px;
       padding: 0;
-      border: 1px solid color-mix(in srgb, currentColor 40%, transparent);
+      border: 1px solid #073f55;
       border-radius: 999px;
-      color: color-mix(in srgb, var(--todo-fg) 72%, #42525b);
-      background: color-mix(in srgb, #fff 64%, transparent);
+      color: #073f55;
+      background: #f9fffd;
+      box-shadow: 0 1px 2px rgb(7 63 85 / 28%);
     }
 
-    .day-todo-settlement.is-settled {
-      color: #126b58;
-      border-color: #126b58;
-      background: #e0f2ec;
-    }
-
-    .day-todo-settlement svg { width: 10px; height: 10px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .day-todo-settlement svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 2.25; stroke-linecap: round; stroke-linejoin: round; }
     .calendar-shell {
       overflow: hidden;
       min-height: 620px;
@@ -2568,11 +2568,12 @@
       grid-template-columns: minmax(116px, auto) minmax(0, 1fr) auto;
       gap: 12px;
       align-items: start;
-      padding: 14px 0;
-      border-bottom: 1px solid var(--line);
+      margin-bottom: 14px;
+      padding: 18px 0 24px;
+      border-bottom: 2px solid #c8d9d5;
     }
 
-    .client-billing-row:last-child { border-bottom: 0; }
+    .client-billing-row:last-child { margin-bottom: 0; border-bottom: 0; }
 
     .client-billing-when {
       display: grid;
@@ -2595,6 +2596,26 @@
 
     .client-billing-title-row h3 { margin: 0; font-size: 16px; overflow-wrap: anywhere; }
 
+    .client-billing-select {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 28px;
+      padding: 4px 8px;
+      border: 1px solid #b9cdc8;
+      border-radius: 999px;
+      color: #52666a;
+      background: #f7fbfa;
+      font-size: 12px;
+      font-weight: 800;
+      white-space: nowrap;
+      cursor: pointer;
+    }
+
+    .client-billing-select.is-selected { border-color: #197e68; color: #075a4b; background: #dcf1e9; }
+    .client-billing-select.is-billed { border-color: #5b9b83; color: #075a4b; background: #e0f2ec; cursor: default; }
+    .client-billing-select input { width: 16px; height: 16px; margin: 0; accent-color: #197e68; }
+    .client-billing-select input:disabled { opacity: 1; cursor: default; }
     .client-billing-client-name {
       color: #0d536b;
       font-size: 12px;
@@ -3110,7 +3131,7 @@
       .client-billing-controls > button { grid-column: 1 / -1; }
       .client-billing-client-card-head { display: grid; gap: 3px; }
       .client-billing-client-travel { grid-template-columns: 1fr; }
-      .client-billing-row { grid-template-columns: 1fr; gap: 8px; padding: 12px 0; }
+      .client-billing-row { grid-template-columns: 1fr; gap: 10px; padding: 16px 0 22px; }
       .client-billing-when { grid-template-columns: auto 1fr; align-items: baseline; }
       .client-billing-when strong { grid-row: 1 / span 2; }
       .client-billing-open { width: 100%; }
@@ -3959,6 +3980,8 @@
       photoEditor: null,
       reportClient: "",
       reportClientSort: "recent",
+      clientBillSelectionKey: "",
+      clientBillSelectedEventIds: new Set(),
       offlineTodoSyncing: false,
       attachmentPreview: null,
       reportClientId: "",
@@ -4607,11 +4630,16 @@
 
     function dayTodoSettlementIndicators(todo) {
       if (String(todo?.status || "") !== "execution") return "";
-      const workerSettled = todoHasConfirmedWorkerPayroll(todo);
-      const clientSettled = todoHasConfirmedClientBill(todo);
-      const workerLabel = workerSettled ? "Obračun izvajalca potrjen" : "Obračun izvajalca še ni potrjen";
-      const clientLabel = clientSettled ? "Obračun stranki potrjen" : "Obračun stranki še ni potrjen";
-      return `<span class="day-todo-settlements" aria-label="Stanje obračunov"><span class="day-todo-settlement ${workerSettled ? "is-settled" : ""}" role="img" aria-label="${workerLabel}" title="${workerLabel}"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="4.4" r="2.4"></circle><path d="M3.5 13c.5-2.5 2.2-3.8 4.5-3.8S12 10.5 12.5 13"></path>${workerSettled ? "<path d=\"m10.5 11.5 1.2 1.2 2.2-2.5\"></path>" : ""}</svg></span><span class="day-todo-settlement ${clientSettled ? "is-settled" : ""}" role="img" aria-label="${clientLabel}" title="${clientLabel}"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 13V4h10v9"></path><path d="M6 4V2.5h4V4M5.5 7h1M9.5 7h1M5.5 9.5h1M9.5 9.5h1M7 13v-2h2v2"></path>${clientSettled ? "<path d=\"m10.2 12 1 1 2-2.3\"></path>" : ""}</svg></span></span>`;
+      const indicators = [];
+      if (todoHasConfirmedWorkerPayroll(todo)) {
+        const label = "Obra\u010dun izvajalca potrjen";
+        indicators.push(`<span class="day-todo-settlement" role="img" aria-label="${label}" title="${label}"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="4.4" r="2.4"></circle><path d="M3.5 13c.5-2.5 2.2-3.8 4.5-3.8S12 10.5 12.5 13"></path><path d="m10.5 11.5 1.2 1.2 2.2-2.5"></path></svg></span>`);
+      }
+      if (todoHasConfirmedClientBill(todo)) {
+        const label = "Obra\u010dun stranki potrjen";
+        indicators.push(`<span class="day-todo-settlement" role="img" aria-label="${label}" title="${label}"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 13V4h10v9"></path><path d="M6 4V2.5h4V4M5.5 7h1M9.5 7h1M5.5 9.5h1M7 13v-2h2v2"></path><path d="m10.2 12 1 1 2-2.3"></path></svg></span>`);
+      }
+      return indicators.length ? `<span class="day-todo-settlements" aria-label="Potrjeni obra\u010duni">${indicators.join("")}</span>` : "";
     }
     function uniqueTodosByEventId(todos = []) {
       const groups = new Map();
@@ -5539,11 +5567,12 @@
           .forEach((todo) => {
             const item = document.createElement("button");
             item.type = "button";
-            item.className = `day-todo todo-status-color ${todoStatusClass(todo.status)} ${todo.done ? "done" : ""}`;
+            const settlementIndicators = dayTodoSettlementIndicators(todo);
+            item.className = `day-todo todo-status-color ${todoStatusClass(todo.status)} ${todo.done ? "done" : ""} ${settlementIndicators ? "has-settlements" : ""}`;
             const time = todo.start && todo.end ? `${escapeHtml(todo.start)}&ndash;${escapeHtml(todo.end)}` : "Brez ure";
             const client = todo.client || "Brez stranke";
-            const title = `${todo.urgent ? "NUJNO · " : ""}${todo.title || "Brez naslova"}`;
-            item.innerHTML = `<span class="day-todo-time">${time}</span><span class="day-todo-client">${escapeHtml(client)}</span><span class="day-todo-title">${escapeHtml(title)}</span>${dayTodoSettlementIndicators(todo)}`;
+            const title = `${todo.urgent ? "NUJNO \u00b7 " : ""}${todo.title || "Brez naslova"}`;
+            item.innerHTML = `<span class="day-todo-time">${time}</span><span class="day-todo-client">${escapeHtml(client)}</span><span class="day-todo-title">${escapeHtml(title)}</span>${settlementIndicators}`;
             item.addEventListener("click", () => openTodoDialog(todo));
             day.appendChild(item);
           });
@@ -7842,6 +7871,22 @@
       };
     }
 
+    function reportClientBillSelectionKey(selection) {
+      return [selection?.id || normalizeText(selection?.name || ""), $("reportFrom").value, $("reportTo").value].join("|");
+    }
+
+    function syncClientBillSelection(lines, selection) {
+      const pending = lines.filter((line) => !line.clientBill);
+      const availableEventIds = new Set(pending.map((line) => todoEventId(line.todo)).filter(Boolean));
+      const key = reportClientBillSelectionKey(selection);
+      if (state.clientBillSelectionKey !== key) {
+        state.clientBillSelectionKey = key;
+        state.clientBillSelectedEventIds = new Set(availableEventIds);
+      } else {
+        state.clientBillSelectedEventIds = new Set([...state.clientBillSelectedEventIds].filter((eventId) => availableEventIds.has(eventId)));
+      }
+      return pending.filter((line) => state.clientBillSelectedEventIds.has(todoEventId(line.todo)));
+    }
     function reportTodoSort(left, right) {
       const leftKey = left.date ? `${left.date} ${left.start || "99:99"}` : "9999-99-99 99:99";
       const rightKey = right.date ? `${right.date} ${right.start || "99:99"}` : "9999-99-99 99:99";
@@ -8018,6 +8063,9 @@
     function renderClientBillingRow(line) {
       const { todo, hours, clientKm, clientKmRate, clientKmAmount, vehicle, clientBill } = line;
       const time = todo.start && todo.end ? `${todo.start}–${todo.end}` : "Brez vpisane ure";
+      const eventId = todoEventId(todo);
+      const selectedForClientBill = !clientBill && state.clientBillSelectedEventIds.has(eventId);
+      const billSelection = `<label class="client-billing-select ${clientBill ? "is-billed" : selectedForClientBill ? "is-selected" : ""}"><input type="checkbox" data-client-bill-event-id="${escapeHtml(eventId)}" ${clientBill || selectedForClientBill ? "checked" : ""}${clientBill ? " disabled" : ""}><span>${clientBill ? "Obra\u010dunano" : "Za obra\u010dun"}</span></label>`;
       const details = [
         todo.notes ? `<section class="client-billing-section"><strong>Opis del</strong><div class="report-todo-description">${linkifyText(todo.notes)}</div></section>` : "",
         todo.material ? `<section class="client-billing-section"><strong>Material</strong><div class="report-todo-description">${linkifyText(todo.material)}</div></section>` : "",
@@ -8030,7 +8078,7 @@
       return `<article class="client-billing-row">
         <div class="client-billing-when"><strong>${todo.date ? formatDate(todo.date) : "Brez datuma"}</strong><span>${escapeHtml(time)}</span></div>
         <div class="client-billing-main">
-          <div class="client-billing-title-row"><h3>${escapeHtml(todo.title || "Brez naziva")}</h3></div>
+          <div class="client-billing-title-row"><h3>${escapeHtml(todo.title || "Brez naziva")}</h3>${billSelection}</div>
           <div class="client-billing-meta"><span>Izvajalec: ${escapeHtml(todoAssigneeNames(todo))}</span>${clientBill ? `<span>Obračun stranki potrjen ${escapeHtml(formatDateTime(clientBill.confirmedAt))}</span>` : ""}</div>
           <div class="client-billing-charges">${charges}</div>
           ${details}
@@ -8059,21 +8107,20 @@
       const lines = detail ? reportTodos().map(reportTodoLine) : reportOverviewLines();
       const totals = reportTotals(lines);
       const pendingClientBillLines = detail ? lines.filter((line) => !line.clientBill) : [];
+      const selectedClientBillLines = detail ? syncClientBillSelection(lines, selection) : [];
       $("clientDetailTitle").textContent = detail ? `Poročilo: ${selection.name}` : "Povzetek po strankah";
       $("clientDetailRange").textContent = reportRangeLabel();
       $("reportLineCount").textContent = detail
         ? `${totals.count} ${totals.count === 1 ? "vpis" : "vpisov"}`
         : `${summaries.length} ${summaries.length === 1 ? "stranka" : "strank"}`;
-      const reportNotice = detail
-        ? (pendingClientBillLines.length
-          ? `\u010caka na obra\u010dun stranki: ${pendingClientBillLines.length} ${pendingClientBillLines.length === 1 ? "vpis" : "vpisov"}. Arhiviranje se izvede po obeh obra\u010dunih.`
-          : "Obra\u010dun stranki je potrjen. Vpis se arhivira po potrditvi obra\u010duna izvajalca.")
-        : `Izberi stranko za njen podroben kronolo\u0161ki pregled izvedenih storitev. Seznam je razvr\u0161\u010den po ${reportClientSortLabel()}.`;
+      const reportNotice = detail ? "" : `Izberi stranko za njen podroben kronolo\u0161ki pregled izvedenih storitev. Seznam je razvr\u0161\u010den po ${reportClientSortLabel()}.`;
       $("reportBillingNotice").textContent = reportNotice;
+      $("reportBillingNotice").classList.toggle("hidden", !reportNotice);
       $("reportBackToClients").classList.toggle("hidden", !detail);
       $("confirmClientBill").classList.toggle("hidden", !detail || !pendingClientBillLines.length);
-      $("confirmClientBill").disabled = !detail || !pendingClientBillLines.length;
-      $("confirmClientBill").textContent = `Potrdi obračun stranki${pendingClientBillLines.length ? ` (${pendingClientBillLines.length})` : ""}`;
+      $("confirmClientBill").disabled = !detail || !selectedClientBillLines.length;
+      $("confirmClientBill").title = selectedClientBillLines.length ? "" : "Označi vsaj en vpis za obračun stranki.";
+      $("confirmClientBill").textContent = `Potrdi izbrane vpise${pendingClientBillLines.length ? ` (${selectedClientBillLines.length})` : ""}`;
       $("clearReportClient").textContent = detail ? "Počisti izbor" : "Počisti iskanje";
       $("exportReportExcel").textContent = detail ? "Izvozi poročilo" : "Izvozi evidenco";
       const summaryRows = detail ? [
@@ -8106,6 +8153,8 @@
     function clearClientReportSelection() {
       state.reportClient = "";
       state.reportClientId = "";
+      state.clientBillSelectionKey = "";
+      state.clientBillSelectedEventIds = new Set();
       $("reportClient").value = "";
       renderReport();
     }
@@ -8114,14 +8163,21 @@
       const selection = reportClientSelection();
       if (!selection.id && !selection.name) return;
       const pending = reportTodos().map(reportTodoLine).filter((line) => !line.clientBill);
-      if (!pending.length) return;
+      const selected = syncClientBillSelection(pending, selection);
+      const eventIds = [...new Set(selected.map((line) => todoEventId(line.todo)).filter(Boolean))];
+      if (!eventIds.length) {
+        alert("Označi vsaj en vpis za obračun stranki.");
+        return;
+      }
       const range = reportRangeLabel();
-      const label = `${pending.length} ${pending.length === 1 ? "izveden vpis" : "izvedenih vpisov"}`;
-      if (!confirm(`Potrdim obračun stranki ${selection.name} za ${label} (${range})?\n\nVpis se ne izbriše. V arhiv se premakne šele, ko bo potrjen tudi obračun delavca.`)) return;
+      const label = `${eventIds.length} ${eventIds.length === 1 ? "izbran vpis" : "izbranih vpisov"}`;
+      if (!confirm(`Potrdim obračun stranki ${selection.name} za ${label} (${range})?`)) return;
       await api("/api/client-bills", {
         method: "POST",
-        body: JSON.stringify({ clientId: selection.id, clientName: selection.name, from: $("reportFrom").value, to: $("reportTo").value })
+        body: JSON.stringify({ clientId: selection.id, clientName: selection.name, from: $("reportFrom").value, to: $("reportTo").value, eventIds })
       });
+      state.clientBillSelectionKey = "";
+      state.clientBillSelectedEventIds = new Set();
       await loadAll();
       setView("report");
       renderReport();
@@ -9481,6 +9537,15 @@
         if (!todo) return;
         openTodoDialog(todo);
       }
+    });
+    $("clientDetailList").addEventListener("change", (event) => {
+      const checkbox = event.target.closest("[data-client-bill-event-id]");
+      if (!checkbox || checkbox.disabled) return;
+      const eventId = String(checkbox.dataset.clientBillEventId || "");
+      if (!eventId) return;
+      if (checkbox.checked) state.clientBillSelectedEventIds.add(eventId);
+      else state.clientBillSelectedEventIds.delete(eventId);
+      renderReport();
     });
     $("clientsList").addEventListener("click", (event) => {
       const billingButton = event.target.closest(".open-client-billing");

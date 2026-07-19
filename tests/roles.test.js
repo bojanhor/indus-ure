@@ -473,6 +473,23 @@ test("zaključeno projektno opravilo se arhivira šele po obračunu delavca in s
   assert.equal(buildClientBillSnapshot(db, { clientId: "jerin" }, boss), null);
 });
 
+test("obračun stranki vsebuje samo označene dogodke", () => {
+  const db = {
+    users: { bojan: { id: "bojan", name: "Bojan", role: "boss" } },
+    clients: [{ clientId: "jerin", name: "Jerin", search: "jerin" }],
+    payrolls: [],
+    clientBills: [],
+    todos: [
+      { id: "work-a", assignmentGroupId: "project-a", syncUser: "bojan", status: "execution", date: "2026-07-15", start: "08:00", end: "09:00", title: "A", clientId: "jerin", client: "Jerin" },
+      { id: "work-b", assignmentGroupId: "project-b", syncUser: "bojan", status: "execution", date: "2026-07-16", start: "08:00", end: "09:00", title: "B", clientId: "jerin", client: "Jerin" }
+    ]
+  };
+
+  const selected = buildClientBillSnapshot(db, { clientId: "jerin", eventIds: ["project-b"] }, boss);
+  assert.ok(selected);
+  assert.deepEqual(selected.eventIds, ["project-b"]);
+  assert.equal(buildClientBillSnapshot(db, { clientId: "jerin", eventIds: ["ne-obstaja"] }, boss), null);
+});
 test("skupni dogodek ostane aktiven, dokler obračun ni potrjen za vsakega izvajalca", () => {
   const db = {
     users: {
