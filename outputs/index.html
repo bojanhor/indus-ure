@@ -2626,6 +2626,85 @@
     .client-billing-open { align-self: center; white-space: nowrap; }
 
     .client-row-actions { display: flex; gap: 7px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+
+    .client-billing-intro-actions {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .client-billing-summary { grid-template-columns: repeat(5, minmax(145px, 1fr)); }
+
+    .client-billing-client-overview {
+      display: grid;
+      gap: 10px;
+      padding-top: 10px;
+    }
+
+    .client-billing-client-card {
+      width: 100%;
+      display: grid;
+      gap: 9px;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #f8faf7;
+      color: var(--ink);
+      text-align: left;
+      font: inherit;
+      cursor: pointer;
+    }
+
+    .client-billing-client-card:hover,
+    .client-billing-client-card:focus-visible {
+      border-color: #287b96;
+      background: #f1f8f6;
+      outline: none;
+    }
+
+    .client-billing-client-card-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 12px;
+    }
+
+    .client-billing-client-card-head strong {
+      font-size: 17px;
+      overflow-wrap: anywhere;
+    }
+
+    .client-billing-client-card-head span,
+    .client-billing-client-card-meta,
+    .client-billing-client-travel {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .client-billing-client-card-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px 12px;
+    }
+
+    .client-billing-client-travel {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 7px;
+      padding: 8px 9px;
+      border-radius: 7px;
+      background: #eaf2ef;
+    }
+
+    .client-billing-client-travel span { overflow-wrap: anywhere; }
+
+    .client-billing-client-open {
+      color: #0d5d75;
+      font-size: 12px;
+      font-weight: 900;
+    }
     @media (max-width: 1350px) {
       .topbar {
         display: grid;
@@ -2968,11 +3047,15 @@
       #photoEditorDialog .photo-editor-canvas-shell { min-height: 0; max-height: none; padding: 6px; }
       #photoEditorDialog .actions.modal-body { padding: 10px 12px; }
       .client-billing-intro { display: grid; gap: 10px; }
+      .client-billing-intro-actions { display: flex; flex-wrap: wrap; gap: 8px; }
       .client-billing-intro .secondary { width: 100%; }
+      .client-billing-intro-actions .secondary { width: auto; flex: 1 1 140px; }
       .client-billing-controls { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
       .client-billing-controls .client-billing-client,
       .client-billing-controls > button { grid-column: 1 / -1; }
       .client-billing-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .client-billing-client-card-head { display: grid; gap: 3px; }
+      .client-billing-client-travel { grid-template-columns: 1fr; }
       .client-billing-row { grid-template-columns: 1fr; gap: 8px; padding: 12px 0; }
       .client-billing-when { grid-template-columns: auto 1fr; align-items: baseline; }
       .client-billing-when strong { grid-row: 1 / span 2; }
@@ -3198,10 +3281,13 @@
       <section class="panel report-view report-screen view-hidden">
         <div class="client-billing-intro">
           <div>
-            <h2>Obra&#269;un stranke</h2>
-            <p>Pregled zaklju&#269;enih storitev je podlaga za pripravo ra&#269;una. Cena dela se zaenkrat ne obra&#269;unava samodejno, ker je urna postavka delavca lo&#269;ena od cene za stranko.</p>
+            <h2>Obra&#269;un strank</h2>
+            <p>Najprej izberi stranko, nato odpri njeno kronolo&#353;ko poro&#269;ilo izvedenih storitev. Cena dela se zaenkrat ne obra&#269;unava samodejno, ker je urna postavka delavca lo&#269;ena od cene za stranko.</p>
           </div>
-          <button class="secondary" id="exportReportExcel" type="button">Izvozi Excel</button>
+          <div class="client-billing-intro-actions">
+            <button class="secondary hidden" id="reportBackToClients" type="button">&larr; Vse stranke</button>
+            <button class="secondary" id="exportReportExcel" type="button">Izvozi Excel</button>
+          </div>
         </div>
         <div class="report-controls client-billing-controls admin-only">
           <label>Od
@@ -3210,10 +3296,10 @@
           <label>Do
             <input id="reportTo" type="date">
           </label>
-          <label class="client-billing-client">Stranka
+          <label class="client-billing-client">I&#353;&#269;i stranko
             <input id="reportClient" list="clientList" placeholder="Vse stranke">
           </label>
-          <button class="secondary" id="clearReportClient" type="button">Po&#269;isti izbor</button>
+          <button class="secondary" id="clearReportClient" type="button">Po&#269;isti iskanje</button>
         </div>
         <p class="todo-meta client-billing-notice" id="reportBillingNotice"></p>
         <div class="report-grid client-billing-summary" id="reportSummary"></div>
@@ -7646,29 +7732,35 @@
       const client = findClient(stableId) || findClient(input) || null;
       return {
         id: String(client?.clientId || client?.id || stableId || "").trim(),
-        name: String(client?.name || normalizeClientName(input || state.reportClient || "") || "").trim()
+        name: String(client?.name || (stableId ? state.reportClient : "") || "").trim()
       };
     }
 
+    function reportTodoSort(left, right) {
+      const leftKey = left.date ? `${left.date} ${left.start || "99:99"}` : "9999-99-99 99:99";
+      const rightKey = right.date ? `${right.date} ${right.start || "99:99"}` : "9999-99-99 99:99";
+      return leftKey.localeCompare(rightKey) || String(left.title || "").localeCompare(String(right.title || ""), "sl");
+    }
+
+    function reportBaseTodos() {
+      const from = $("reportFrom").value;
+      const to = $("reportTo").value;
+      return uniqueTodosByEventId(state.todos)
+        .filter(reportTodoIsCompleted)
+        .filter((todo) => Boolean(todo.clientId || todo.client))
+        .filter((todo) => (!from && !to) ? true : inDateRange(todo.date, from, to))
+        .sort(reportTodoSort);
+    }
+
     function todoMatchesReportClient(todo, selection) {
-      if (!selection.id && !selection.name) return Boolean(todo.clientId || todo.client);
+      if (!selection.id && !selection.name) return true;
       if (selection.id && String(todo.clientId || "") === selection.id) return true;
       return Boolean(selection.name) && normalizeText(todo.client) === normalizeText(selection.name);
     }
 
     function reportTodos() {
-      const from = $("reportFrom").value;
-      const to = $("reportTo").value;
       const selection = reportClientSelection();
-      return uniqueTodosByEventId(state.todos)
-        .filter(reportTodoIsCompleted)
-        .filter((todo) => todoMatchesReportClient(todo, selection))
-        .filter((todo) => (!from && !to) ? true : inDateRange(todo.date, from, to))
-        .sort((left, right) => {
-          const leftKey = left.date ? `${left.date} ${left.start || "99:99"}` : "9999-99-99 99:99";
-          const rightKey = right.date ? `${right.date} ${right.start || "99:99"}` : "9999-99-99 99:99";
-          return leftKey.localeCompare(rightKey) || String(left.title || "").localeCompare(String(right.title || ""), "sl");
-        });
+      return reportBaseTodos().filter((todo) => todoMatchesReportClient(todo, selection));
     }
 
     function reportClientKmRate(todo) {
@@ -7676,21 +7768,76 @@
       return Number.isFinite(stored) && stored >= 0 ? stored : todoClientKmRate(todo.clientVehicle);
     }
 
+    function reportVehicleId(todo) {
+      return todo.clientVehicle === "van" ? "van" : "personal";
+    }
+
+    function reportVehicleLabel(vehicle) {
+      return vehicle === "van" ? "Kombi" : "Osebni avto";
+    }
+
     function reportTodoLine(todo) {
       const hours = Number(duration(todo).toFixed(2));
       const clientKm = Math.max(0, Number(todo.clientKm || 0));
       const clientKmRate = reportClientKmRate(todo);
       const clientKmAmount = Number((clientKm * clientKmRate).toFixed(2));
-      return { todo, hours, clientKm, clientKmRate, clientKmAmount };
+      return { todo, hours, clientKm, clientKmRate, clientKmAmount, vehicle: reportVehicleId(todo) };
     }
 
     function reportTotals(lines) {
-      return lines.reduce((totals, line) => ({
-        count: totals.count + 1,
-        hours: totals.hours + line.hours,
-        clientKm: totals.clientKm + line.clientKm,
-        clientKmAmount: totals.clientKmAmount + line.clientKmAmount
-      }), { count: 0, hours: 0, clientKm: 0, clientKmAmount: 0 });
+      return lines.reduce((totals, line) => {
+        const vehicle = line.vehicle === "van" ? "van" : "personal";
+        totals.count += 1;
+        totals.hours += line.hours;
+        totals.clientKm += line.clientKm;
+        totals.clientKmAmount += line.clientKmAmount;
+        totals[`${vehicle}Km`] += line.clientKm;
+        totals[`${vehicle}Amount`] += line.clientKmAmount;
+        return totals;
+      }, {
+        count: 0,
+        hours: 0,
+        clientKm: 0,
+        clientKmAmount: 0,
+        personalKm: 0,
+        personalAmount: 0,
+        vanKm: 0,
+        vanAmount: 0
+      });
+    }
+
+    function reportClientDescriptor(todo) {
+      const client = findClient(todo.clientId) || findClient(todo.client) || null;
+      const id = String(client?.clientId || client?.id || todo.clientId || "").trim();
+      const name = String(client?.name || todo.client || "Brez stranke").trim();
+      return {
+        id,
+        name,
+        search: String(client?.search || name).trim(),
+        key: id ? `id:${id}` : `name:${normalizeText(name)}`
+      };
+    }
+
+    function reportClientSummaries() {
+      const query = normalizeText($("reportClient").value);
+      const groups = new Map();
+      reportBaseTodos().forEach((todo) => {
+        const client = reportClientDescriptor(todo);
+        if (!groups.has(client.key)) groups.set(client.key, { ...client, lines: [], lastDate: "" });
+        const group = groups.get(client.key);
+        group.lines.push(reportTodoLine(todo));
+        group.lastDate = [group.lastDate, todo.date || ""].sort().pop();
+      });
+      return [...groups.values()]
+        .map((group) => ({ ...group, totals: reportTotals(group.lines) }))
+        .filter((group) => !query || normalizeText(`${group.name} ${group.search}`).includes(query))
+        .sort((left, right) => String(right.lastDate).localeCompare(String(left.lastDate)) || left.name.localeCompare(right.name, "sl"));
+    }
+
+    function reportOverviewLines() {
+      return reportClientSummaries()
+        .flatMap((summary) => summary.lines)
+        .sort((left, right) => reportTodoSort(left.todo, right.todo));
     }
 
     function reportRangeLabel() {
@@ -7704,6 +7851,10 @@
 
     function reportNumber(value, maximumFractionDigits = 2) {
       return Number(value || 0).toLocaleString("sl-SI", { maximumFractionDigits });
+    }
+
+    function reportTransportText(km, amount) {
+      return `${reportNumber(km, 1)} km · ${money(amount)} EUR`;
     }
 
     function renderReportAttachments(todo) {
@@ -7721,7 +7872,7 @@
     }
 
     function renderClientBillingRow(line) {
-      const { todo, hours, clientKm, clientKmRate, clientKmAmount } = line;
+      const { todo, hours, clientKm, clientKmRate, clientKmAmount, vehicle } = line;
       const time = todo.start && todo.end ? `${todo.start}–${todo.end}` : "Brez vpisane ure";
       const details = [
         todo.notes ? `<section class="client-billing-section"><strong>Opis del</strong><div class="report-todo-description">${linkifyText(todo.notes)}</div></section>` : "",
@@ -7730,13 +7881,13 @@
       ].filter(Boolean).join("");
       const charges = [
         hours ? `<span>Izvedeno: ${reportNumber(hours)} h</span>` : "<span>Ura ni vpisana</span>",
-        clientKm ? `<span>Kilometrina za stranko: ${reportNumber(clientKm, 1)} km × ${money(clientKmRate)} EUR/km = ${money(clientKmAmount)} EUR</span>` : ""
+        clientKm ? `<span>Stroški prevoza (obe smeri): ${reportVehicleLabel(vehicle)} · ${reportNumber(clientKm, 1)} km × ${money(clientKmRate)} EUR/km = ${money(clientKmAmount)} EUR</span>` : ""
       ].filter(Boolean).join("");
       return `<article class="client-billing-row">
         <div class="client-billing-when"><strong>${todo.date ? formatDate(todo.date) : "Brez datuma"}</strong><span>${escapeHtml(time)}</span></div>
         <div class="client-billing-main">
           <div class="client-billing-title-row"><span class="client-billing-client-name">${escapeHtml(todo.client || "Brez stranke")}</span><h3>${escapeHtml(todo.title || "Brez naziva")}</h3></div>
-          <div class="client-billing-meta"><span>Za: ${escapeHtml(todoAssigneeNames(todo))}</span>${todo.sourceProjectTodoId ? "<span>Vpis ur na projekt</span>" : ""}</div>
+          <div class="client-billing-meta"><span>Izvajalec: ${escapeHtml(todoAssigneeNames(todo))}</span>${todo.sourceProjectTodoId ? "<span>Vpis ur na projekt</span>" : ""}</div>
           <div class="client-billing-charges">${charges}</div>
           ${details}
         </div>
@@ -7744,24 +7895,49 @@
       </article>`;
     }
 
+    function renderReportClientCard(summary) {
+      const { name, id, totals, lastDate } = summary;
+      return `<button class="client-billing-client-card open-client-report" type="button" data-client-id="${escapeHtml(id)}" data-client-name="${escapeHtml(name)}">
+        <span class="client-billing-client-card-head"><strong>${escapeHtml(name)}</strong><span>${lastDate ? `Nazadnje: ${escapeHtml(formatDate(lastDate))}` : ""}</span></span>
+        <span class="client-billing-client-card-meta"><span>${totals.count} ${totals.count === 1 ? "zaključena storitev" : "zaključenih storitev"}</span><span>${reportNumber(totals.hours)} h</span></span>
+        <span class="client-billing-client-travel"><span>Osebni avto: ${escapeHtml(reportTransportText(totals.personalKm, totals.personalAmount))}</span><span>Kombi: ${escapeHtml(reportTransportText(totals.vanKm, totals.vanAmount))}</span></span>
+        <span class="client-billing-client-open">Odpri poročilo ›</span>
+      </button>`;
+    }
+
     function renderReport() {
       const selection = reportClientSelection();
-      const lines = reportTodos().map(reportTodoLine);
+      const detail = Boolean(selection.id || selection.name);
+      const summaries = detail ? [] : reportClientSummaries();
+      const lines = detail ? reportTodos().map(reportTodoLine) : reportOverviewLines();
       const totals = reportTotals(lines);
-      const selectedClient = selection.name;
-      $("clientDetailTitle").textContent = selectedClient ? `Poročilo: ${selectedClient}` : "Zaključene storitve vseh strank";
+      $("clientDetailTitle").textContent = detail ? `Poročilo: ${selection.name}` : "Povzetek po strankah";
       $("clientDetailRange").textContent = reportRangeLabel();
-      $("reportLineCount").textContent = `${totals.count} ${totals.count === 1 ? "vpis" : "vpisov"}`;
-      $("reportBillingNotice").textContent = selectedClient
-        ? "Poročilo prikazuje samo zaključene storitve izbranega obdobja. Kilometrina je obračunana po tarifi, shranjeni pri posameznem vpisu."
-        : "Izberi stranko za njen obračun. Brez izbire je prikazana kronološka evidenca vseh zaključenih storitev.";
-      $("reportSummary").innerHTML = [
+      $("reportLineCount").textContent = detail
+        ? `${totals.count} ${totals.count === 1 ? "vpis" : "vpisov"}`
+        : `${summaries.length} ${summaries.length === 1 ? "stranka" : "strank"}`;
+      $("reportBillingNotice").textContent = detail
+        ? "Poročilo prikazuje samo zaključene storitve izbranega obdobja. Stroški prevoza so ločeni po vozilu in obračunani po tarifi, shranjeni pri posameznem vpisu."
+        : "Izberi stranko za njen podroben kronološki pregled izvedenih storitev. Seznam je urejen po zadnji izvedeni storitvi.";
+      $("reportBackToClients").classList.toggle("hidden", !detail);
+      $("clearReportClient").textContent = detail ? "Počisti izbor" : "Počisti iskanje";
+      $("exportReportExcel").textContent = detail ? "Izvozi poročilo" : "Izvozi evidenco";
+      $("reportSummary").innerHTML = detail ? [
         ["Zaključene storitve", `${totals.count}`],
         ["Opravljene ure", `${reportNumber(totals.hours)} h`],
-        ["Kilometrina za stranko", `${reportNumber(totals.clientKm, 1)} km`],
-        ["Kilometrina za obračun", `${money(totals.clientKmAmount)} EUR`]
+        ["Stroški prevoza (obe smeri) – osebni avto", reportTransportText(totals.personalKm, totals.personalAmount)],
+        ["Stroški prevoza (obe smeri) – kombi", reportTransportText(totals.vanKm, totals.vanAmount)],
+        ["Stroški prevoza skupaj", `${money(totals.clientKmAmount)} EUR`]
+      ] : [
+        ["Stranke", `${summaries.length}`],
+        ["Zaključene storitve", `${totals.count}`],
+        ["Opravljene ure", `${reportNumber(totals.hours)} h`],
+        ["Stroški prevoza skupaj", `${money(totals.clientKmAmount)} EUR`]
       ].map(([label, value]) => `<div class="stat"><strong>${escapeHtml(value)}</strong><span>${escapeHtml(label)}</span></div>`).join("");
-      $("clientDetailList").innerHTML = lines.map(renderClientBillingRow).join("") || `<p class="todo-meta">Za ta izbor ni zaključenih storitev.</p>`;
+      $("clientDetailList").classList.toggle("client-billing-client-overview", !detail);
+      $("clientDetailList").innerHTML = detail
+        ? lines.map(renderClientBillingRow).join("") || `<p class="todo-meta">Za ta izbor ni zaključenih storitev.</p>`
+        : summaries.map(renderReportClientCard).join("") || `<p class="todo-meta">Za ta izbor ni zaključenih storitev.</p>`;
     }
 
     function openClientReport(client, clientId = "") {
@@ -7772,9 +7948,17 @@
       renderReport();
     }
 
+    function clearClientReportSelection() {
+      state.reportClient = "";
+      state.reportClientId = "";
+      $("reportClient").value = "";
+      renderReport();
+    }
+
     function exportReportExcel() {
       const selection = reportClientSelection();
-      const lines = reportTodos().map(reportTodoLine);
+      const detail = Boolean(selection.id || selection.name);
+      const lines = detail ? reportTodos().map(reportTodoLine) : reportOverviewLines();
       const totals = reportTotals(lines);
       const rows = [
         ["INDUS URE – poročilo izvedenih storitev"],
@@ -7783,12 +7967,13 @@
         [],
         ["Zaključene storitve", totals.count],
         ["Opravljene ure", totals.hours.toFixed(2)],
-        ["Kilometrina za stranko", totals.clientKm.toFixed(1)],
-        ["Kilometrina za obračun", totals.clientKmAmount.toFixed(2)],
+        ["Stroški prevoza (obe smeri) – osebni avto", `${totals.personalKm.toFixed(1)} km · ${totals.personalAmount.toFixed(2)} EUR`],
+        ["Stroški prevoza (obe smeri) – kombi", `${totals.vanKm.toFixed(1)} km · ${totals.vanAmount.toFixed(2)} EUR`],
+        ["Stroški prevoza skupaj", totals.clientKmAmount.toFixed(2)],
         [],
-        ["Datum", "Ura", "Stranka", "Opravilo", "Opis del", "Material", "Dodeljeno", "Ure", "Km za stranko", "Tarifa km", "Kilometrina EUR", "Priloge", "Google dokumenti"]
+        ["Datum", "Ura", "Stranka", "Opravilo", "Opis del", "Material", "Izvajalec", "Ure", "Vozilo", "Stroški prevoza (obe smeri) km", "Tarifa prevoza", "Stroški prevoza EUR", "Priloge", "Google dokumenti"]
       ];
-      lines.forEach(({ todo, hours, clientKm, clientKmRate, clientKmAmount }) => rows.push([
+      lines.forEach(({ todo, hours, clientKm, clientKmRate, clientKmAmount, vehicle }) => rows.push([
         todo.date || "",
         todo.start && todo.end ? `${todo.start}-${todo.end}` : "",
         todo.client || "",
@@ -7797,6 +7982,7 @@
         todo.material || "",
         todoAssigneeNames(todo),
         hours.toFixed(2),
+        reportVehicleLabel(vehicle),
         clientKm.toFixed(1),
         clientKmRate.toFixed(2),
         clientKmAmount.toFixed(2),
@@ -8845,6 +9031,9 @@
       $("toolsMenu").open = false;
     });
     $("clientBillingMenuBtn").addEventListener("click", () => {
+      state.reportClient = "";
+      state.reportClientId = "";
+      $("reportClient").value = "";
       setView("report");
       $("toolsMenu").open = false;
     });
@@ -9055,16 +9244,12 @@
     $("reportClient").addEventListener("input", () => {
       const value = $("reportClient").value;
       const client = findClient(value);
-      state.reportClient = client?.name || value;
+      state.reportClient = client?.name || "";
       state.reportClientId = client?.clientId || client?.id || "";
       renderReport();
     });
-    $("clearReportClient").addEventListener("click", () => {
-      state.reportClient = "";
-      state.reportClientId = "";
-      $("reportClient").value = "";
-      renderReport();
-    });
+    $("clearReportClient").addEventListener("click", clearClientReportSelection);
+    $("reportBackToClients").addEventListener("click", clearClientReportSelection);
     $("exportReportExcel").addEventListener("click", exportReportExcel);
     $("addClientBtn").addEventListener("click", () => addClientFromForm().catch((error) => alert(error.message)));
 
@@ -9104,6 +9289,11 @@
     });
 
     $("clientDetailList").addEventListener("click", (event) => {
+      const clientButton = event.target.closest(".open-client-report");
+      if (clientButton) {
+        openClientReport(clientButton.dataset.clientName || "", clientButton.dataset.clientId || "");
+        return;
+      }
       const preview = event.target.closest(".report-image-preview");
       if (preview) {
         const todo = state.todos.find((item) => item.id === preview.dataset.reportTodoId);
