@@ -2197,7 +2197,48 @@
       min-width: 0;
     }
 
-    .client-autocomplete {
+    .todo-client-input-row {
+      display: flex;
+      align-items: stretch;
+      gap: 6px;
+    }
+
+    .todo-client-input-row input { min-width: 0; }
+
+    .quick-client-button {
+      width: 42px;
+      min-width: 42px;
+      min-height: 42px;
+      padding: 0;
+      border-radius: 8px;
+      font-size: 22px;
+      line-height: 1;
+    }
+
+    .app-notice {
+      position: fixed;
+      z-index: 260;
+      left: 50%;
+      bottom: max(18px, env(safe-area-inset-bottom));
+      width: min(560px, calc(100vw - 28px));
+      transform: translateX(-50%);
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 12px 14px;
+      border: 1px solid #a9c2bb;
+      border-radius: 12px;
+      background: #173e4a;
+      color: #fff;
+      box-shadow: 0 14px 34px rgba(14, 30, 36, 0.26);
+      font-weight: 700;
+    }
+
+    .app-notice[hidden] { display: none; }
+    .app-notice-message { flex: 1; line-height: 1.4; }
+    .app-notice-close { min-width: 34px; min-height: 34px; padding: 0; color: #173e4a; background: #f4fbf7; }
+    #appConfirmDialog, #appPromptDialog, #quickClientDialog { width: min(460px, calc(100vw - 26px)); }
+    .app-dialog-message { margin: 0; color: var(--ink); line-height: 1.5; white-space: pre-line; }    .client-autocomplete {
       position: relative;
       min-width: 0;
     }
@@ -2778,6 +2819,8 @@
 
     .client-row-actions { display: flex; gap: 7px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
 
+    .report-export-option { display: inline-grid; gap: 2px; color: var(--muted); font-size: 12px; font-weight: 800; }
+    .report-export-option select { min-height: 34px; font: inherit; color: var(--ink); }
     .client-billing-intro-actions {
       display: flex;
       align-items: center;
@@ -3226,7 +3269,10 @@
       #workerBillingDialog .worker-billing td:nth-child(2) { align-self: center; color: var(--muted); font-size: 12px; text-align: right; }
       #workerBillingDialog .worker-billing td:nth-child(3) { grid-column: 1 / -1; display: grid; gap: 4px; font-size: 0; }
       #workerBillingDialog .worker-billing td:nth-child(3)::before { content: "Privzeta urna postavka"; color: var(--muted); font-size: 12px; font-weight: 800; }
-      #workerBillingDialog .worker-billing td:nth-child(4) { grid-column: 1 / -1; }
+      #workerBillingDialog .worker-billing td:nth-child(4) { grid-column: 1 / -1; display: grid; gap: 4px; font-size: 0; }
+      #workerBillingDialog .worker-billing td:nth-child(4)::before { content: "Naziv izvajalca v izvozu"; color: var(--muted); font-size: 12px; font-weight: 800; }
+      #workerBillingDialog .worker-billing td:nth-child(5) { grid-column: 1 / -1; }
+      #workerBillingDialog .worker-export-title-input { width: 100%; }
       #workerBillingDialog .worker-rate-input { width: calc(100% - 52px); max-width: calc(100% - 52px); }
     }
   </style>
@@ -3438,6 +3484,12 @@
             <button class="primary hidden" id="confirmClientBill" type="button">Potrdi obračun stranki</button>
             <button class="secondary hidden" id="exportReportPdf" type="button">Prenesi PDF</button>
             <button class="secondary hidden" id="createReportGmailDraft" type="button">Gmail osnutek</button>
+            <label class="hidden report-export-option" id="reportExportWorkerOption">Izvajalec
+              <select id="reportExportWorker"><option value="hidden">Skrij</option><option value="title">Prikaži naziv</option></select>
+            </label>
+            <label class="hidden report-export-option" id="reportExportTimeOption">Točen čas
+              <select id="reportExportTime"><option value="hidden">Skrij</option><option value="shown">Prikaži</option></select>
+            </label>
             <button class="secondary" id="exportReportExcel" type="button">Izvozi Excel</button>
           </div>
         </div>
@@ -3542,7 +3594,10 @@
           <div class="todo-client-field" id="todoFormClientField">
             <label for="todoFormClient">Stranka</label>
             <div class="client-autocomplete" id="todoFormClientAutocomplete">
-              <input id="todoFormClient" type="text" placeholder="Alias ali naziv stranke" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="todoFormClientSuggestions">
+              <div class="todo-client-input-row">
+                <input id="todoFormClient" type="text" placeholder="Alias ali naziv stranke" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="todoFormClientSuggestions">
+                <button class="secondary quick-client-button" id="quickAddClientBtn" type="button" title="Hitro dodaj stranko" aria-label="Hitro dodaj stranko">+</button>
+              </div>
               <div class="client-autocomplete-list hidden" id="todoFormClientSuggestions" role="listbox"></div>
             </div>
           </div>          <label>Datum
@@ -3565,7 +3620,7 @@
           <div class="todo-status-mobile-options" id="todoFormStatusChoices" aria-label="Status opravila"></div>
         </div>
         <div id="todoFormAssigneeField">
-          <label>Dodeljeno delavcem</label>
+          <label>Delo opravil</label>
           <div class="todo-form-assignees" id="todoFormAssignees"></div>
         </div>
         <label>Ime opravila
@@ -3582,19 +3637,18 @@
           <input id="todoFormUrgent" type="checkbox">
           NUJNO
         </label>
-        <div class="todo-form-billing admin-entry-field" id="todoFormClientBilling">
+        <div class="todo-form-billing" id="todoFormClientBilling">
           <div class="modal-grid">
             <label>Kilometrina, ki se zaračuna stranki (obe smeri vožnje)
               <input id="todoFormClientKm" type="number" min="0" max="1000000" step="0.1">
             </label>
-            <label>Vozilo
+            <label>Vozilo za stranko
               <select id="todoFormClientVehicle">
                 <option value="personal">Osebni</option>
                 <option value="van">Kombi</option>
               </select>
             </label>
           </div>
-          <p class="todo-meta" id="todoFormClientKmRateNote"></p>
         </div>
         <div class="todo-form-billing" id="todoFormBilling">
           <div class="modal-grid">
@@ -3607,6 +3661,11 @@
             </label>
           </div>
         </div>
+        <label class="todo-form-warranty" id="todoFormWarrantyField">
+          <input id="todoFormWarranty" type="checkbox">
+          <span>Garancija</span>
+          <small>Delavcu se vpis normalno obračuna, stranki pa je prikazan brez obračunanih ur in kilometrine.</small>
+        </label>
         <div class="todo-form-attachments" id="todoFormAttachments">
           <strong>Priloge</strong>
           <div id="todoFormPhotoList"></div>
@@ -3631,6 +3690,10 @@
             <label class="secondary add-photo">PDF / datoteka
               <input class="hidden-file" id="todoFormPdfInput" type="file" accept="application/pdf,.pdf" multiple>
               <span class="sr-only">Izberi PDF v upravljalniku datotek</span>
+            </label>
+            <label class="secondary add-photo" id="todoFormVideoLabel">Video (do 200 MB)
+              <input class="hidden-file" id="todoFormVideoInput" type="file" accept="video/*" multiple>
+              <span class="sr-only">Izberi video; shrani se neposredno v Google Drive</span>
             </label>
           </div>
         </div>
@@ -3839,7 +3902,7 @@
           <div class="worker-billing-scroll">
             <table>
               <thead>
-                <tr><th>Delavec</th><th>Vloga</th><th>Privzeta urna postavka</th><th></th></tr>
+                <tr><th>Delavec</th><th>Vloga</th><th>Privzeta urna postavka</th><th>Naziv v izvozu</th><th></th></tr>
               </thead>
               <tbody id="workerBillingRows"></tbody>
             </table>
@@ -3861,15 +3924,7 @@
             <input id="workerOwnVehicleKmRate" type="number" min="0" max="1000" step="0.01">
           </label>
         </div>
-        <p class="todo-meta">Ta tarifa se uporabi samo pri obračunu kilometrine delavca.</p>
-        <div class="modal-grid">
-          <label>Stranki: osebni avto (EUR/km)
-            <input id="clientPersonalKmRate" type="number" min="0" max="1000" step="0.01">
-          </label>
-          <label>Stranki: kombi (EUR/km)
-            <input id="clientVanKmRate" type="number" min="0" max="1000" step="0.01">
-          </label>
-        </div>
+        <p class="todo-meta">Ta tarifa se uporabi samo pri obračunu kilometrine delavca. Prevoz za stranko se vodi samo v kilometrih in po vozilu.</p>
         <div class="actions">
           <button class="secondary" id="cancelKmRates" type="button">Prekliči</button>
           <button class="primary" id="saveKmRates" type="button">Shrani tarife</button>
@@ -3917,7 +3972,28 @@
       </div>
     </form>
   </dialog>
-  <dialog id="debtDialog">
+  <div class="app-notice" id="appNotice" role="status" aria-live="polite" hidden>
+    <span class="app-notice-message" id="appNoticeMessage"></span>
+    <button class="app-notice-close" id="closeAppNotice" type="button" aria-label="Zapri obvestilo">&times;</button>
+  </div>
+  <dialog id="appConfirmDialog">
+    <form method="dialog">
+      <div class="modal-head"><h3 id="appConfirmTitle">Potrditev</h3><button class="icon-btn" id="appConfirmClose" type="button" title="Zapri">&times;</button></div>
+      <div class="modal-body"><p class="app-dialog-message" id="appConfirmMessage"></p><div class="actions"><button class="secondary" id="appConfirmCancel" type="button">Prekliči</button><button class="primary" id="appConfirmAccept" type="button">Potrdi</button></div></div>
+    </form>
+  </dialog>
+  <dialog id="appPromptDialog">
+    <form method="dialog">
+      <div class="modal-head"><h3 id="appPromptTitle">Vnos</h3><button class="icon-btn" id="appPromptClose" type="button" title="Zapri">&times;</button></div>
+      <div class="modal-body"><p class="app-dialog-message" id="appPromptMessage"></p><label id="appPromptLabel">Vrednost<input id="appPromptInput" type="text" autocomplete="off"></label><div class="actions"><button class="secondary" id="appPromptCancel" type="button">Prekliči</button><button class="primary" id="appPromptAccept" type="button">Potrdi</button></div></div>
+    </form>
+  </dialog>
+  <dialog id="quickClientDialog">
+    <form method="dialog" id="quickClientForm">
+      <div class="modal-head"><h3>Hitra nova stranka</h3><button class="icon-btn" id="closeQuickClientDialog" type="button" title="Zapri">&times;</button></div>
+      <div class="modal-body"><label>Vzdevek / naziv stranke<input id="quickClientName" type="text" maxlength="240" placeholder="npr. Jerin" required></label><p class="todo-meta">Doda se samo vzdevek; podatke lahko pozneje dopolniš v bazi strank.</p><div class="actions"><button class="secondary" id="cancelQuickClientDialog" type="button">Prekliči</button><button class="primary" type="submit">Dodaj stranko</button></div></div>
+    </form>
+  </dialog>  <dialog id="debtDialog">
     <form method="dialog" id="debtForm">
       <div class="modal-head">
         <h3>Dolgovi za mesec</h3>
@@ -4064,7 +4140,7 @@
       offlineTodoSyncing: false,
       attachmentPreview: null,
       reportClientId: "",
-      settings: { billing: { hourlyRate: 15, kmRate: 0.22, workerOwnVehicleKmRate: 0.22, clientPersonalKmRate: 0.22, clientVanKmRate: 0.22, commuteKmPerDay: 28 } },
+      settings: { billing: { hourlyRate: 15, kmRate: 0.22, workerOwnVehicleKmRate: 0.22, commuteKmPerDay: 28 } },
       billingLocks: [],
       payrolls: [],
       clientBills: [],
@@ -4603,6 +4679,72 @@
       syncModalPageScrollLock();
     }
 
+    let appNoticeTimer = 0;
+    function closeAppNotice() {
+      clearTimeout(appNoticeTimer);
+      $("appNotice").hidden = true;
+    }
+
+    function showNotice(message) {
+      const text = String(message || "").trim();
+      if (!text) return;
+      $("appNoticeMessage").textContent = text;
+      $("appNotice").hidden = false;
+      clearTimeout(appNoticeTimer);
+      appNoticeTimer = window.setTimeout(closeAppNotice, 8_000);
+    }
+
+    function showAppConfirm(message, options = {}) {
+      const dialog = $("appConfirmDialog");
+      $("appConfirmTitle").textContent = options.title || "Potrditev";
+      $("appConfirmMessage").textContent = String(message || "");
+      $("appConfirmAccept").textContent = options.confirmLabel || "Potrdi";
+      $("appConfirmAccept").classList.toggle("danger", Boolean(options.danger));
+      $("appConfirmAccept").classList.toggle("primary", !options.danger);
+      return new Promise((resolve) => {
+        let settled = false;
+        const finish = (answer) => {
+          if (settled) return;
+          settled = true;
+          if (dialog.open) dialog.close();
+          resolve(answer);
+        };
+        const closed = () => finish(false);
+        dialog.addEventListener("close", closed, { once: true });
+        $("appConfirmAccept").onclick = () => finish(true);
+        $("appConfirmCancel").onclick = () => finish(false);
+        $("appConfirmClose").onclick = () => finish(false);
+        dialog.showModal();
+        requestAnimationFrame(() => $("appConfirmAccept").focus());
+      });
+    }
+
+    function showAppPrompt(message, initialValue = "", options = {}) {
+      const dialog = $("appPromptDialog");
+      const form = dialog.querySelector("form");
+      const input = $("appPromptInput");
+      $("appPromptTitle").textContent = options.title || "Vnos";
+      $("appPromptMessage").textContent = String(message || "");
+      $("appPromptLabel").firstChild.textContent = options.label || "Vrednost";
+      input.value = initialValue === undefined || initialValue === null ? "" : String(initialValue);
+      return new Promise((resolve) => {
+        let settled = false;
+        const finish = (value) => {
+          if (settled) return;
+          settled = true;
+          if (dialog.open) dialog.close();
+          resolve(value);
+        };
+        const closed = () => finish(null);
+        dialog.addEventListener("close", closed, { once: true });
+        $("appPromptAccept").onclick = () => finish(input.value);
+        $("appPromptCancel").onclick = () => finish(null);
+        $("appPromptClose").onclick = () => finish(null);
+        form.onsubmit = (event) => { event.preventDefault(); finish(input.value); };
+        dialog.showModal();
+        requestAnimationFrame(() => { input.focus(); input.select(); });
+      });
+    }
     function showApp() {
       protectLoggedInHistory();
       $("loginScreen").classList.add("hidden");
@@ -4908,27 +5050,27 @@
       renderBillingView();
     }
     async function lockCurrentReportRange() {
-      if (!confirm(`Zaklenem obdobje ${$("reportFrom").value} - ${$("reportTo").value} kot obracunano? Ibro potem ne bo mogel spreminjati ur in kilometrov v tem obdobju.`)) return;
+      if (!await showAppConfirm(`Zaklenem obdobje ${$("reportFrom").value} - ${$("reportTo").value} kot obracunano? Ibro potem ne bo mogel spreminjati ur in kilometrov v tem obdobju.`)) return;
       const data = await api("/api/billing-locks", {
         method: "POST",
         body: JSON.stringify({ from: $("reportFrom").value, to: $("reportTo").value, note: "Obracunano" })
       });
       state.billingLocks = data.billingLocks || [];
-      alert("Obdobje je zaklenjeno kot obracunano.");
+      showNotice("Obdobje je zaklenjeno kot obracunano.");
     }
 
     async function editBillingSetting(key) {
-      const billing = state.settings.billing || { hourlyRate: 15, kmRate: 0.22, workerOwnVehicleKmRate: 0.22, clientPersonalKmRate: 0.22, clientVanKmRate: 0.22, commuteKmPerDay: 28 };
+      const billing = state.settings.billing || { hourlyRate: 15, kmRate: 0.22, workerOwnVehicleKmRate: 0.22, commuteKmPerDay: 28 };
       const labels = {
         hourlyRate: "urna postavka EUR",
 
         commuteKmPerDay: "kilometri dom-sluzba na dan"
       };
-      const next = prompt(`Vpisi ${labels[key]}:`, billing[key]);
+      const next = await showAppPrompt(`Vpisi ${labels[key]}:`, billing[key]);
       if (next === null) return;
       const value = Number(String(next).replace(",", "."));
       if (!Number.isFinite(value) || value < 0) {
-        alert("Vnesi pravilno stevilko.");
+        showNotice("Vnesi pravilno stevilko.");
         return;
       }
       await saveBillingSettings({ ...billing, [key]: value });
@@ -4966,26 +5108,28 @@
             <td><strong>${escapeHtml(worker.name || worker.id)}</strong></td>
             <td>${worker.role === "boss" ? "Sef in delavec" : "Delavec"}</td>
             <td><input class="worker-rate-input" type="number" min="0" max="10000" step="0.01" value="${Number(worker.hourlyRate || 0)}" aria-label="Urna postavka za ${escapeHtml(worker.name || worker.id)}"> EUR/h</td>
+            <td><input class="worker-export-title-input" type="text" maxlength="120" value="${escapeHtml(worker.exportTitle || "")}" placeholder="npr. monter" aria-label="Naziv izvajalca v izvozu za ${escapeHtml(worker.name || worker.id)}"></td>
             <td><button class="secondary save-worker-rate" type="button">Shrani</button></td>
           `;
           row.querySelector(".save-worker-rate").addEventListener("click", async (event) => {
             const input = row.querySelector(".worker-rate-input");
             const hourlyRate = parseBillingNumber(input.value, 10_000);
+            const exportTitle = row.querySelector(".worker-export-title-input").value.trim();
             if (hourlyRate === null) {
-              alert("Vnesi pravilno urno postavko.");
+              showNotice("Vnesi pravilno urno postavko.");
               return;
             }
             event.currentTarget.disabled = true;
             try {
               const data = await api("/api/workers/billing", {
                 method: "PUT",
-                body: JSON.stringify({ userId: worker.id, hourlyRate })
+                body: JSON.stringify({ userId: worker.id, hourlyRate, exportTitle })
               });
               state.workerBilling = data.workers || state.workerBilling;
               render();
             } catch (error) {
               event.currentTarget.disabled = false;
-              alert(error.message);
+              showNotice(error.message);
             }
           });
           body.appendChild(row);
@@ -5013,7 +5157,7 @@
       const payroll = payrollForBilling(billingWorkerId(), billingRange());
       if (!payroll) return;
       const remaining = Number(payroll.remainingAmount ?? (Number(payroll.payoutAmount || payroll.totalAmount || 0) - Number(payroll.paidAmount || 0)));
-      if (remaining <= 0.005) { alert("Ta obračun je že v celoti izplačan."); return; }
+      if (remaining <= 0.005) { showNotice("Ta obračun je že v celoti izplačan."); return; }
       $("paymentRemaining").textContent = `Preostanek za izplačilo: ${money(remaining)} EUR`;
       $("paymentAmount").value = "";
       $("paymentAmount").max = remaining.toFixed(2);
@@ -5103,7 +5247,7 @@
       $("advanceDialog").close(); await loadAll(); renderBillingView();
     }
     async function deleteAdvanceFromBilling(id) {
-      if (!confirm("Izbrišem založeni znesek?")) return;
+      if (!await showAppConfirm("Izbrišem založeni znesek?")) return;
       const data = await api(`/api/advances/${encodeURIComponent(id)}`, { method: "DELETE" });
       state.advances = data.advances || state.advances;
       await loadAll();
@@ -5111,14 +5255,14 @@
     }
 
     async function deletePersonalPurchaseFromBilling(id) {
-      if (!confirm("Izbrišem osebni nakup?")) return;
+      if (!await showAppConfirm("Izbrišem osebni nakup?")) return;
       const data = await api(`/api/personal-purchases/${encodeURIComponent(id)}`, { method: "DELETE" });
       state.personalPurchases = data.purchases || state.personalPurchases;
       await loadAll();
       renderBillingView();
     }
     async function deletePayrollPaymentFromBilling(payrollId, paymentId) {
-      if (!confirm("Izbrišem evidentirano izplačilo? Obračun bo znova odprt za preostanek izplačila.")) return;
+      if (!await showAppConfirm("Izbrišem evidentirano izplačilo? Obračun bo znova odprt za preostanek izplačila.")) return;
       const data = await api(`/api/payrolls/${encodeURIComponent(payrollId)}/payments/${encodeURIComponent(paymentId)}`, { method: "DELETE" });
       state.payrolls = data.payrolls || state.payrolls;
       await loadAll();
@@ -5390,34 +5534,34 @@
 
     function validateTodo(todo) {
       if ((!todo.id || Array.isArray(todo.assigneeIds)) && (!Array.isArray(todo.assigneeIds) || todo.assigneeIds.length === 0)) {
-        alert("Izberi vsaj enega delavca.");
+        showNotice("Izberi vsaj enega delavca.");
         return false;
       }
       if (!todo.title) {
-        alert("Vpiši ime opravila.");
+        showNotice("Vpiši ime opravila.");
         return false;
       }
       if (Boolean(todo.start) !== Boolean(todo.end)) {
-        alert("Vnesi obe uri: od in do.");
+        showNotice("Vnesi obe uri: od in do.");
         return false;
       }
       if ((todo.start || todo.end) && !todo.date) {
-        alert("Za opravilo z uro vnesi tudi datum.");
+        showNotice("Za opravilo z uro vnesi tudi datum.");
         return false;
       }
       if (todo.status === "execution" && (!todo.date || !todo.start || !todo.end)) {
-        alert("Za zakljuceno opravilo vnesi datum ter uro od in do.");
+        showNotice("Za zakljuceno opravilo vnesi datum ter uro od in do.");
         return false;
       }
       if (todo.start && todo.end <= todo.start) {
-        alert("Ura do mora biti kasneje kot ura od.");
+        showNotice("Ura do mora biti kasneje kot ura od.");
         return false;
       }
       return true;
     }
 
     function setView(view) {
-      if (!isAdminView() && ["report", "clients"].includes(view)) view = "todos";
+      if (!isAdminView() && view === "report") view = "todos";
       state.view = view;
       document.querySelectorAll(".calendar-view").forEach((element) => {
         element.classList.toggle("view-hidden", view !== "calendar");
@@ -5449,7 +5593,7 @@
 
     function startTodoForDate(date = "") {
       if (isAdminView()) {
-        alert("Za novo opravilo najprej izberi delavski pogled.");
+        showNotice("Za novo opravilo najprej izberi delavski pogled.");
         return;
       }
       openTodoDialog({ date });
@@ -5686,6 +5830,25 @@
       });
     }
 
+    function workerVehiclePreferenceKey() {
+      return `indus-ure:client-vehicle:${activeWorkerId() || state.user?.id || "default"}`;
+    }
+
+    function preferredClientVehicle() {
+      return localStorage.getItem(workerVehiclePreferenceKey()) === "van" ? "van" : "personal";
+    }
+
+    function rememberClientVehicle(vehicle) {
+      localStorage.setItem(workerVehiclePreferenceKey(), vehicle === "van" ? "van" : "personal");
+    }
+
+    function showDefaultTimePicker() {
+      const input = $("todoFormStart");
+      if (!input || input.value) return;
+      input.focus({ preventScroll: true });
+      try { input.showPicker?.(); } catch { /* Native wheel opens after the next tap where unavailable. */ }
+    }
+
     function dayTimelineLayouts(todos) {
       const layouts = new Map();
       let group = [];
@@ -5768,7 +5931,7 @@
     async function openTodoFromDayTimeline(todo) {
       if (!todo) return;
       if (state.dayTimelineDrafts.size) {
-        alert("Najprej shrani ali preklici spremembe dnevne casovnice.");
+        showNotice("Najprej shrani ali preklici spremembe dnevne casovnice.");
         return;
       }
       state.todoDialogReturnDayDate = state.dayTimelineDate;
@@ -5779,11 +5942,11 @@
 
     async function openNewTodoFromDayTimeline(clientY) {
       if (state.dayTimelineDrafts.size) {
-        alert("Najprej shrani ali preklici spremembe dnevne casovnice.");
+        showNotice("Najprej shrani ali preklici spremembe dnevne casovnice.");
         return;
       }
       if (isAdminView()) {
-        alert("Za novo opravilo najprej izberi delavski pogled.");
+        showNotice("Za novo opravilo najprej izberi delavski pogled.");
         return;
       }
       const timelineRect = $("dayTimeline").getBoundingClientRect();
@@ -5840,7 +6003,7 @@
         button.type = "button";
         button.className = "day-all-day-item todo-status-color " + todoStatusClass(todo.status);
         button.textContent = todo.title + (todo.client ? " - " + todo.client : "");
-        button.addEventListener("click", () => openTodoFromDayTimeline(todo).catch((error) => alert(error.message)));
+        button.addEventListener("click", () => openTodoFromDayTimeline(todo).catch((error) => showNotice(error.message)));
         allDayItems.appendChild(button);
       });
 
@@ -5913,7 +6076,7 @@
         event.addEventListener("pointerdown", (pointerEvent) => beginDayTimelineEventPointer(pointerEvent, todo), dayEventPointerOptions);
         event.addEventListener("pointermove", updateDayTimelineEventPointer, dayEventPointerOptions);
         event.addEventListener("pointerup", (pointerEvent) => {
-          finishDayTimelineEventPointer(pointerEvent).catch((error) => alert(error.message));
+          finishDayTimelineEventPointer(pointerEvent).catch((error) => showNotice(error.message));
         }, dayEventPointerOptions);
         event.addEventListener("pointercancel", (pointerEvent) => {
           finishDayTimelineEventPointer(pointerEvent, true).catch(() => {});
@@ -5924,7 +6087,7 @@
         event.addEventListener("keydown", (keyEvent) => {
           if (keyEvent.key !== "Enter" && keyEvent.key !== " ") return;
           keyEvent.preventDefault();
-          openTodoFromDayTimeline(todo).catch((error) => alert(error.message));
+          openTodoFromDayTimeline(todo).catch((error) => showNotice(error.message));
         });
         eventsLayer.appendChild(event);
       });
@@ -6246,7 +6409,7 @@
         date.setDate(date.getDate() + (event.clientX < gesture.startX ? 1 : -1));
         openDayTimeline(dateKey(date), { includeArchived: state.dayTimelineIncludeArchived });
       } else if (isEmptyTap && !remaining) {
-        openNewTodoFromDayTimeline(event.clientY).catch((error) => alert(error.message));
+        openNewTodoFromDayTimeline(event.clientY).catch((error) => showNotice(error.message));
       }
     }
 
@@ -6663,9 +6826,9 @@
           const purchase = state.personalPurchases.find((item) => item.id === button.dataset.entryId);
           if (purchase) openAdvanceDialog("purchase", purchase);
         }));
-        list.querySelectorAll(".delete-billing-advance").forEach((button) => button.addEventListener("click", () => deleteAdvanceFromBilling(button.dataset.entryId).catch((error) => alert(error.message))));
-        list.querySelectorAll(".delete-billing-purchase").forEach((button) => button.addEventListener("click", () => deletePersonalPurchaseFromBilling(button.dataset.entryId).catch((error) => alert(error.message))));
-        list.querySelectorAll(".delete-billing-payment").forEach((button) => button.addEventListener("click", () => deletePayrollPaymentFromBilling(button.dataset.payrollId, button.dataset.paymentId).catch((error) => alert(error.message))));
+        list.querySelectorAll(".delete-billing-advance").forEach((button) => button.addEventListener("click", () => deleteAdvanceFromBilling(button.dataset.entryId).catch((error) => showNotice(error.message))));
+        list.querySelectorAll(".delete-billing-purchase").forEach((button) => button.addEventListener("click", () => deletePersonalPurchaseFromBilling(button.dataset.entryId).catch((error) => showNotice(error.message))));
+        list.querySelectorAll(".delete-billing-payment").forEach((button) => button.addEventListener("click", () => deletePayrollPaymentFromBilling(button.dataset.payrollId, button.dataset.paymentId).catch((error) => showNotice(error.message))));
       }
       renderBillingExplorer();
     }    async function confirmPayroll() {
@@ -6675,7 +6838,7 @@
       const payroll = payrollForBilling(workerId, range);
       const note = billingNoteValue(workerId, range, payroll);
       if (payroll && !["draft", "archiving"].includes(payroll.status)) return;
-      if (!confirm("Potrdim obračun delavca? Zaključeni vnosi ur se zaklenejo. Projektni vnosi ostanejo aktivni, dokler ni potrjen tudi obračun stranki.")) return;
+      if (!await showAppConfirm("Potrdim obračun delavca? Zaključeni vnosi ur se zaklenejo. Projektni vnosi ostanejo aktivni, dokler ni potrjen tudi obračun stranki.")) return;
       if (payroll) { await changePayroll("confirm", true, note); return; }
       const data = await api("/api/payrolls", { method: "POST", body: JSON.stringify({ workerId, from: range.from, to: range.to, note }) });
       state.payrolls = data.payrolls || state.payrolls;
@@ -6687,7 +6850,7 @@
       const payroll = payrollForBilling(billingWorkerId(), billingRange());
       if (!payroll) return;
       const messages = { confirm: "Potrdim obračun delavca? Ure in postavke se zaklenejo. Projektni vnosi se premaknejo v arhiv šele, ko je potrjen tudi obračun stranki.", paid: "Označim obračun kot plačan?", reopen: "Ponovno odprem obračun? Ure bo mogoče znova popravljati.", delete: "Izbrišem osnutek obračuna? Opravljenih ur ne bom izbrisal." };
-      if (!skipConfirmation && messages[action] && !confirm(messages[action])) return;
+      if (!skipConfirmation && messages[action] && !await showAppConfirm(messages[action])) return;
       const data = action === "delete" ? await api(`/api/payrolls/${encodeURIComponent(payroll.id)}`, { method: "DELETE" }) : await api(`/api/payrolls/${encodeURIComponent(payroll.id)}`, { method: "PUT", body: JSON.stringify({ action, ...(note === undefined ? {} : { note }) }) });
       state.payrolls = data.payrolls || state.payrolls;
       await loadAll(); renderBillingView();
@@ -6741,6 +6904,12 @@
       });
     }
 
+    function clientHasEntries(client) {
+      const clientId = String(client?.clientId || client?.id || "").trim();
+      const clientName = normalizeText(client?.name || "");
+      return state.todos.some((todo) => String(todo.clientId || "").trim() === clientId
+        || (!todo.clientId && clientName && normalizeText(todo.client || "") === clientName));
+    }
     function renderClients() {
       const list = $("clientsList");
       if (!list) return;
@@ -6758,7 +6927,7 @@
             ${client.syncError ? `<span class="todo-meta error">${escapeHtml(client.syncError)}</span>` : ""}
           </div>
           <div class="client-row-actions">
-            ${isAdminView() ? `<button class="secondary open-client-billing" type="button" data-client-id="${escapeHtml(client.clientId || "")}" data-client-name="${escapeHtml(client.name)}">Obra&#269;un</button>` : ""}
+            ${isAdminView() && clientHasEntries(client) ? `<button class="secondary open-client-billing" type="button" data-client-id="${escapeHtml(client.clientId || "")}" data-client-name="${escapeHtml(client.name)}">Obra&#269;un</button>` : ""}
             <button class="secondary open-client" type="button" data-client-id="${escapeHtml(client.clientId || "")}" data-client-name="${escapeHtml(client.name)}" ${client.clientId ? "" : "disabled"}>Uredi</button>
           </div>
         </div>
@@ -6768,16 +6937,50 @@
       return String(value || "").trim().replace(/^tax:/i, "").replace(/[^A-Za-z0-9]/g, "").toUpperCase();
     }
 
+    function openQuickClientDialog() {
+      const current = $("todoFormClient").value.trim();
+      $("quickClientName").value = current;
+      $("quickClientDialog").showModal();
+      requestAnimationFrame(() => { $("quickClientName").focus(); $("quickClientName").select(); });
+    }
+
+    async function saveQuickClientFromDialog() {
+      const name = $("quickClientName").value.trim();
+      if (!name) {
+        showNotice("Vpiši vsaj vzdevek stranke.");
+        $("quickClientName").focus();
+        return;
+      }
+      const data = await saveClientToServer({
+        clientId: "",
+        name,
+        search: name,
+        taxId: "",
+        email: "",
+        phone: "",
+        address: "",
+        city: "",
+        postal: "",
+        country: "Slovenija",
+        vatPayer: false
+      });
+      const client = data.client || {};
+      $("todoFormClient").value = client.search || client.name || name;
+      hideTodoClientSuggestions();
+      $("quickClientDialog").close();
+      $("todoFormClient").focus();
+      showNotice("Stranka je dodana. Podatke lahko pozneje dopolniš v bazi strank.");
+    }
     async function addClientFromForm() {
       const alias = $("newClientSearch").value.trim();
       const name = $("newClientName").value.trim() || alias;
       if (!name && !alias) {
-        alert("Vpisi vsaj vzdevek stranke.");
+        showNotice("Vpisi vsaj vzdevek stranke.");
         return;
       }
       const taxId = normalizeTaxId($("newClientTax").value);
       if (taxId && !/^(?=.{8,20}$)(?=.*\d)[A-Z0-9]+$/.test(taxId)) {
-        alert("Vpisi veljavno davcno stevilko. Uporabi samo crke in stevilke, na primer SI12345678.");
+        showNotice("Vpisi veljavno davcno stevilko. Uporabi samo crke in stevilke, na primer SI12345678.");
         return;
       }
       const data = await saveClientToServer({
@@ -6797,14 +7000,14 @@
       $("newClientCountry").value = "Slovenija";
       $("newClientVatPayer").value = "false";
       renderClients();
-      alert("Stranka je shranjena v bazo INDUS URE. Tajnica jo lahko pozneje dopolni.");
+      showNotice("Stranka je shranjena v bazo INDUS URE. Tajnica jo lahko pozneje dopolni.");
 
     }
 
     function openClientEditDialog(clientId) {
       const client = allClientRecords().find((item) => item.clientId === clientId || item.id === clientId);
       if (!client) {
-        alert("Stranke ni bilo mogoče najti.");
+        showNotice("Stranke ni bilo mogoče najti.");
         return;
       }
       $("clientEditId").value = client.clientId || client.id || "";
@@ -6848,7 +7051,7 @@
         vatPayer: $("clientEditVatPayer").value === "true"
       });
       $("clientEditDialog").close();
-      alert("Spremembe stranke so shranjene v bazi INDUS URE.");
+      showNotice("Spremembe stranke so shranjene v bazi INDUS URE.");
 
     }
     function todoHasExpandedDetails(todo) {
@@ -6975,7 +7178,7 @@
         }
         item.querySelectorAll(".remove-photo").forEach((button) => {
           button.addEventListener("click", async () => {
-            if (!confirm("Izbrisem to prilogo?")) return;
+            if (!await showAppConfirm("Izbrisem to prilogo?")) return;
             await saveTodoToServer({
               ...todo,
               photos: (todo.photos || []).filter((photo) => photo.id !== button.dataset.photoId)
@@ -7327,7 +7530,7 @@
         $("photoEditorDialog").showModal();
         requestAnimationFrame(fitPhotoEditorZoom);
       };
-      image.onerror = () => alert("Slike ni bilo mogoce odpreti v urejevalniku.");
+      image.onerror = () => showNotice("Slike ni bilo mogoce odpreti v urejevalniku.");
       image.src = attachmentSource(photo);
     }
 
@@ -7344,7 +7547,7 @@
       const editor = state.photoEditor;
       const value = $("photoEditorText").value.trim();
       if (!editor || !value) {
-        alert("Najprej vpisi besedilo, ki ga zelis dodati na sliko.");
+        showNotice("Najprej vpisi besedilo, ki ga zelis dodati na sliko.");
         return;
       }
       const point = photoEditorVisiblePoint();
@@ -7405,7 +7608,7 @@
       const nextPhotos = state.todoDialogPhotos.map((photo) => photo.id === editor.photoId ? { ...photo, data } : photo);
       if (todoAttachmentsDataLength(nextPhotos) > 4_800_000) {
         redrawPhotoEditor();
-        alert("Priloge so skupaj prevelike. Odstrani katero od njih.");
+        showNotice("Priloge so skupaj prevelike. Odstrani katero od njih.");
         return;
       }
       state.todoDialogPhotos = nextPhotos;
@@ -7460,7 +7663,9 @@
     }
 
     function todoDriveFileLabel(file) {
-      return file?.kind === "spreadsheet" ? "Preglednica" : "Dokument";
+      if (file?.kind === "spreadsheet") return "Preglednica";
+      if (file?.kind === "video") return "Video";
+      return "Dokument";
     }
 
     function renderTodoDriveFilesHtml(files, { removable = false } = {}) {
@@ -7483,7 +7688,7 @@
       const title = $("todoFormTask").value.trim();
       if (!title) {
         $("todoFormTask").focus();
-        alert("Najprej vpiši ime opravila.");
+        showNotice("Najprej vpiši ime opravila.");
         return;
       }
       const client = findTodoClient($("todoFormClient").value);
@@ -7508,11 +7713,54 @@
       }
     }
 
+    async function uploadTodoVideoFiles(event) {
+      const input = event.currentTarget;
+      const files = [...(input.files || [])];
+      if (!files.length) return;
+      const maxBytes = 200 * 1024 * 1024;
+      const title = $("todoFormTask").value.trim();
+      if (!title) {
+        input.value = "";
+        $("todoFormTask").focus();
+        showNotice("Najprej vpiši ime opravila, nato dodaj video.");
+        return;
+      }
+      const client = findTodoClient($("todoFormClient").value);
+      input.disabled = true;
+      try {
+        for (const file of files) {
+          if (state.todoDialogDriveFiles.length >= 12) throw new Error("Največ je 12 Google prilog na opravilo.");
+          if (!String(file.type || "").toLowerCase().startsWith("video/")) throw new Error("Izberi video datoteko.");
+          if (!file.size) throw new Error("Praznega videa ni mogoče dodati.");
+          if (file.size > maxBytes) throw new Error("Video je prevelik. Največja dovoljena velikost je 200 MB.");
+          showNotice(`Nalagam video »${file.name}« v Google Drive. Ne zapiraj obrazca.`);
+          const data = await api("/api/todos/drive-video", {
+            method: "POST",
+            body: file,
+            headers: {
+              "Content-Type": file.type,
+              "X-Indus-File-Name": encodeURIComponent(file.name),
+              "X-Indus-Task-Title": encodeURIComponent(title),
+              "X-Indus-Client": encodeURIComponent(client?.name || normalizeClientName($("todoFormClient").value))
+            }
+          });
+          if (!data?.driveFile) throw new Error("Video datoteke ni bilo mogoče dodati v Google Drive.");
+          if (!state.todoDialogDriveFiles.some((item) => item.fileId === data.driveFile.fileId)) {
+            state.todoDialogDriveFiles.push(data.driveFile);
+            renderTodoFormDriveFiles();
+          }
+        }
+        showNotice("Video je dodan kot povezava do Google Drive.");
+      } finally {
+        input.disabled = false;
+        input.value = "";
+      }
+    }
     function addTodoDriveLink() {
       const input = $("todoFormDriveLink");
       const info = todoWorkspaceFileInfo(input.value);
       if (!info) {
-        alert("Prilepi povezavo do Google Dokumenta ali Google Preglednice.");
+        showNotice("Prilepi povezavo do Google Dokumenta ali Google Preglednice.");
         return;
       }
       if (state.todoDialogDriveFiles.some((file) => file.fileId === info.fileId)) {
@@ -7639,29 +7887,13 @@
       $("todoFormNotes").placeholder = logisticsStatus ? "Vpi\u0161i opis" : "Opi\u0161i, kaj se bo delalo";
       const showWorkerMileage = completed && !meal;
       const showHourlyRate = isAdminView() && completed && !meal;
-      const showClientMileage = !meal && (isAdminView() || Boolean(state.todoHoursSourceId) || state.todoStandaloneHours);
+      const showClientMileage = completed && !meal;
       $("todoFormClientBilling").classList.toggle("hidden", !showClientMileage);
       $("todoFormBilling").classList.toggle("hidden", !showWorkerMileage);
       $("todoFormHourlyRateField").classList.toggle("hidden", !showHourlyRate);
+      $("todoFormWarrantyField").classList.toggle("hidden", !showWorkerMileage);
       $("todoFormUrgentField").classList.toggle("hidden", completed || meal);
       if (completed) $("todoFormUrgent").checked = false;
-      updateTodoClientKmRateNote();
-    }
-
-    function todoClientKmRate(vehicle) {
-      const billing = state.settings?.billing || {};
-      const legacy = Number(billing.kmRate || 0);
-      const fallback = Number.isFinite(legacy) && legacy > 0 ? legacy : 0.22;
-      const value = Number(vehicle === "van" ? billing.clientVanKmRate : billing.clientPersonalKmRate);
-      return Number.isFinite(value) && value > 0 ? value : fallback;
-    }
-
-    function updateTodoClientKmRateNote() {
-      const note = $("todoFormClientKmRateNote");
-      const km = Number($("todoFormClientKm").value || 0);
-      const rate = todoClientKmRate($("todoFormClientVehicle").value);
-      const total = Number((km * rate).toFixed(2));
-      note.textContent = `Tarifa za stranko: ${money(rate)} EUR/km${km ? ` · skupaj ${money(total)} EUR` : ""}`;
     }
 
     function renderTodoTaskSuggestions() {
@@ -7703,6 +7935,7 @@
       $("todoFormStatus").value = todoStatus(todo.status || "open").id;
       renderTodoStatusChoices(todo.status || "open");
       $("todoFormUrgent").checked = Boolean(todo.urgent);
+      $("todoFormWarranty").checked = Boolean(todo.warranty);
       updateTodoFormStatus();
       const draftAssignees = todo._hoursAssigneeIds?.length
         ? todo._hoursAssigneeIds
@@ -7722,18 +7955,20 @@
       hourlyRateInput.dataset.autoRate = String(!editing && !Number.isFinite(requestedHourlyRate));
       $("todoFormBillingKm").value = Number(todo.billingKm || 0);
       $("todoFormClientKm").value = Number(todo.clientKm || 0);
-      $("todoFormClientVehicle").value = todo.clientVehicle === "van" ? "van" : "personal";
-      updateTodoClientKmRateNote();
+      $("todoFormClientVehicle").value = editing ? (todo.clientVehicle === "van" ? "van" : "personal") : (todo.clientVehicle === "van" ? "van" : preferredClientVehicle());
       $("deleteTodoFromDialog").classList.toggle("hidden", !editing);
       $("duplicateTodoFromDialog").classList.toggle("hidden", !editing || Boolean(state.todoHoursSourceId));
       $("writeHoursFromTodo").classList.toggle("hidden", !editing || Boolean(state.todoHoursSourceId) || !projectHoursSourceStatuses.has(todoStatus(todo.status).id));
       renderTodoFormAudit(todo);
       renderTodoFormSourceProject(todo);
-      ["todoFormPhotoInput", "todoFormCameraInput", "todoFormPdfInput"].forEach((id) => { $(id).value = ""; });
+      ["todoFormPhotoInput", "todoFormCameraInput", "todoFormPdfInput", "todoFormVideoInput"].forEach((id) => { $(id).value = ""; });
       $("todoFormDriveLink").value = "";
       if (editing && !(await acquireTodoEditLockForDialog(todo.id))) return;
       $("todoDialog").showModal();
-      requestAnimationFrame(() => $(editing ? "todoFormTask" : "todoFormClient").focus());
+      requestAnimationFrame(() => {
+        $(editing ? "todoFormTask" : "todoFormClient").focus();
+        if (!editing && (state.todoStandaloneHours || state.todoHoursSourceId)) showDefaultTimePicker();
+      });
       fillMissingPdfThumbnailsForDialog(state.todoDialogPhotos).catch((error) => console.warn(error));
     }
 
@@ -7765,6 +8000,7 @@
         assigneeIds,
         syncUser: existing?.syncUser || assigneeIds[0] || activeWorkerId(),
         urgent: $("todoFormStatus").value === "execution" ? false : $("todoFormUrgent").checked,
+        warranty: $("todoFormStatus").value === "execution" && Boolean($("todoFormWarranty").checked),
         sourceProjectTodoId: existing?.sourceProjectTodoId || state.todoHoursSourceId || state.todoDraftSourceProjectTodoId || "",
         done: $("todoFormStatus").value === "execution",
         billingHourlyRate: hourlyRate,
@@ -7781,12 +8017,13 @@
       const isHoursEntry = Boolean(state.todoHoursSourceId || state.todoStandaloneHours);
       if (isHoursEntry && (!todo.start || !todo.end)) {
         if (!todo.date) {
-          alert("Za vpis delovnih ur izberi datum.");
+          showNotice("Za vpis delovnih ur izberi datum.");
           return;
         }
-        alert("Za vpis ur nastavi uro od in do. Dodan je prvi prost enourni termin, ki ga lahko takoj popraviš v dnevnem pogledu.");
+        showNotice("Za vpis ur nastavi uro od in do. Dodan je prvi prost enourni termin, ki ga lahko takoj popraviš v dnevnem pogledu.");
         const slot = firstFreeDayTimelineSlot(todo.date);
         const data = await saveTodoToServer({ ...todo, ...slot });
+        if (todo.status === "execution" && !meal) rememberClientVehicle(clientVehicle);
         const saved = (data.todos || []).filter((item) => {
           const sameSlot = item.date === todo.date && item.start === slot.start && item.end === slot.end && item.title === todo.title;
           return sameSlot && (!state.todoHoursSourceId || item.sourceProjectTodoId === state.todoHoursSourceId);
@@ -7811,17 +8048,18 @@
             missingClientKm ? "Kilometrina za stranko je 0 km." : "",
             missingWorkerKm ? "Kilometrina za delavca je 0 km." : ""
           ].filter(Boolean).join("\n");
-          if (!confirm(`${missing}\n\nNadaljujem brez vpisane kilometrine?`)) return;
+          if (!await showAppConfirm(`${missing}\n\nNadaljujem brez vpisane kilometrine?`)) return;
         }
       }
       const activeAssignee = activeWorkerId();
       if (existing && !isAdminView()
           && todoAssigneeIds(existing).includes(activeAssignee)
           && !assigneeIds.includes(activeAssignee)
-          && !confirm("Odstranil si sebe iz opravila. Po shranjevanju ga v svojem delavskem pogledu ne bos vec videl ali mogel odpreti. Vseeno shranim?")) {
+          && !await showAppConfirm("Odstranil si sebe iz opravila. Po shranjevanju ga v svojem delavskem pogledu ne bos vec videl ali mogel odpreti. Vseeno shranim?")) {
         return;
       }
       await saveTodoToServer(todo);
+      if (todo.status === "execution" && !meal) rememberClientVehicle(clientVehicle);
       if (state.todoHoursSourceId) state.todoHoursSavedSourceId = state.todoHoursSourceId;
       $("todoDialog").close();
     }
@@ -7932,7 +8170,7 @@
     }
     async function deleteTodoFromDialog() {
       const id = $("todoFormId").value;
-      if (!id || !confirm("Izbrisem to opravilo?")) return;
+      if (!id || !await showAppConfirm("Izbrisem to opravilo?")) return;
       const returnDayDate = state.todoDialogReturnDayDate;
       state.todoDialogReturnDayDate = "";
       await deleteTodoFromServer(id);
@@ -8015,6 +8253,19 @@
       return items;
     }
 
+    function reportExportOptions() {
+      return {
+        worker: $("reportExportWorker").value === "title" ? "title" : "hidden",
+        time: $("reportExportTime").value === "shown" ? "shown" : "hidden"
+      };
+    }
+
+    function reportExportWorkerLabel(todo) {
+      if (reportExportOptions().worker !== "title") return "";
+      const ids = todoAssigneeIds(todo);
+      const titles = ids.map((id) => String(state.workerBilling.find((worker) => worker.id === id)?.exportTitle || "").trim()).filter(Boolean);
+      return [...new Set(titles)].join(", ") || "Izvajalec";
+    }
     function reportExportPayload() {
       const selection = reportClientSelection();
       if (!selection.id && !selection.name) throw new Error("Najprej izberi stranko.");
@@ -8032,7 +8283,8 @@
         from: $("reportFrom").value,
         to: $("reportTo").value,
         eventIds,
-        attachmentIds
+        attachmentIds,
+        exportOptions: reportExportOptions()
       };
     }
     function reportClientBillHistoryCutoff() {
@@ -8076,10 +8328,6 @@
       return reportBaseTodos().filter((todo) => todoMatchesReportClient(todo, selection));
     }
 
-    function reportClientKmRate(todo) {
-      const stored = Number(todo.clientKmRate);
-      return Number.isFinite(stored) && stored > 0 ? stored : todoClientKmRate(todo.clientVehicle);
-    }
 
     function reportVehicleId(todo) {
       return todo.clientVehicle === "van" ? "van" : "personal";
@@ -8099,11 +8347,10 @@
         || null;
     }
     function reportTodoLine(todo) {
-      const hours = Number(duration(todo).toFixed(2));
-      const clientKm = Math.max(0, Number(todo.clientKm || 0));
-      const clientKmRate = reportClientKmRate(todo);
-      const clientKmAmount = Number((clientKm * clientKmRate).toFixed(2));
-      return { todo, hours, clientKm, clientKmRate, clientKmAmount, vehicle: reportVehicleId(todo), clientBill: reportClientBill(todo) };
+      const warranty = Boolean(todo.warranty);
+      const hours = warranty ? 0 : Number(duration(todo).toFixed(2));
+      const clientKm = warranty ? 0 : Math.max(0, Number(todo.clientKm || 0));
+      return { todo, warranty, hours, clientKm, vehicle: reportVehicleId(todo), clientBill: reportClientBill(todo) };
     }
 
     function reportTotals(lines) {
@@ -8112,19 +8359,14 @@
         totals.count += 1;
         totals.hours += line.hours;
         totals.clientKm += line.clientKm;
-        totals.clientKmAmount += line.clientKmAmount;
         totals[`${vehicle}Km`] += line.clientKm;
-        totals[`${vehicle}Amount`] += line.clientKmAmount;
         return totals;
       }, {
         count: 0,
         hours: 0,
         clientKm: 0,
-        clientKmAmount: 0,
         personalKm: 0,
-        personalAmount: 0,
-        vanKm: 0,
-        vanAmount: 0
+        vanKm: 0
       });
     }
 
@@ -8205,8 +8447,8 @@
       return Number(value || 0).toLocaleString("sl-SI", { maximumFractionDigits });
     }
 
-    function reportTransportText(km, amount) {
-      return `${reportNumber(km, 1)} km · ${money(amount)} EUR`;
+    function reportTransportText(km) {
+      return `${reportNumber(km, 1)} km`;
     }
 
     function renderReportAttachments(todo, { exportable = false } = {}) {
@@ -8229,7 +8471,7 @@
       return `<section class="client-billing-section"><strong>Priloge in dokumenti</strong>${attachmentCards ? `<div class="client-billing-attachments">${attachmentCards}</div>` : ""}${driveFiles.length ? `<div class="todo-drive-files">${renderTodoDriveFilesHtml(driveFiles)}</div>` : ""}</section>`;
     }
     function renderClientBillingRow(line) {
-      const { todo, hours, clientKm, clientKmRate, clientKmAmount, vehicle, clientBill } = line;
+      const { todo, warranty, hours, clientKm, vehicle, clientBill } = line;
       const time = todo.start && todo.end ? `${todo.start}–${todo.end}` : "Brez vpisane ure";
       const eventId = todoEventId(todo);
       const selectedForClientBill = !clientBill && state.clientBillSelectedEventIds.has(eventId);
@@ -8241,10 +8483,12 @@
         todo.material ? `<section class="client-billing-section"><strong>Material</strong><div class="report-todo-description">${linkifyText(todo.material)}</div></section>` : "",
         renderReportAttachments(todo, { exportable: selectedForClientBill })
       ].filter(Boolean).join("");
-      const charges = [
-        hours ? `<span>Izvedeno: ${reportNumber(hours)} h</span>` : "<span>Ura ni vpisana</span>",
-        clientKm ? `<span>Stroški prevoza (obe smeri): ${reportVehicleLabel(vehicle)} · ${reportNumber(clientKm, 1)} km × ${money(clientKmRate)} EUR/km = ${money(clientKmAmount)} EUR</span>` : ""
-      ].filter(Boolean).join("");
+      const charges = warranty
+        ? `<span class="client-billing-warranty">Garancija – storitev se ne obračuna stranki.</span>`
+        : [
+          hours ? `<span>Izvedeno: ${reportNumber(hours)} h</span>` : "<span>Ura ni vpisana</span>",
+          clientKm ? `<span>Stroški prevoza (obe smeri): ${reportVehicleLabel(vehicle)} · ${reportNumber(clientKm, 1)} km</span>` : ""
+        ].filter(Boolean).join("");
       return `<article class="client-billing-row">
         <div class="client-billing-when"><strong>${todo.date ? formatDate(todo.date) : "Brez datuma"}</strong><span>${escapeHtml(time)}</span></div>
         <div class="client-billing-main">
@@ -8263,7 +8507,7 @@
       return `<button class="client-billing-client-card open-client-report" type="button" data-client-id="${escapeHtml(id)}" data-client-name="${escapeHtml(name)}">
         <span class="client-billing-client-card-head"><strong>${escapeHtml(name)}</strong><span>${lastDate ? `Nazadnje: ${escapeHtml(formatDate(lastDate))}` : ""}</span></span>
         <span class="client-billing-client-card-meta"><span>${totals.count} ${totals.count === 1 ? "zaključena storitev" : "zaključenih storitev"}</span><span>${reportNumber(totals.hours)} h</span><span>${pending ? `${pending} za obračun` : "obračunano"}</span></span>
-        <span class="client-billing-client-travel"><span>Osebni avto: ${escapeHtml(reportTransportText(totals.personalKm, totals.personalAmount))}</span><span>Kombi: ${escapeHtml(reportTransportText(totals.vanKm, totals.vanAmount))}</span></span>
+        <span class="client-billing-client-travel"><span>Osebni avto: ${escapeHtml(reportTransportText(totals.personalKm))}</span><span>Kombi: ${escapeHtml(reportTransportText(totals.vanKm))}</span></span>
         <span class="client-billing-client-open">Odpri poročilo ›</span>
       </button>`;
     }
@@ -8281,7 +8525,7 @@
       // In the client bill detail, the summary is the amount currently being confirmed.
       const totals = reportTotals(detail ? selectedClientBillLines : lines);
       $("clientDetailTitle").textContent = detail ? `Poročilo: ${selection.name}` : "Povzetek po strankah";
-      $("clientDetailRange").textContent = reportRangeLabel();
+      $("clientDetailRange").textContent = $("reportFrom").value || $("reportTo").value ? reportRangeLabel() : "";
       $("reportLineCount").textContent = detail
         ? `${totals.count} ${totals.count === 1 ? "označen vpis" : "označenih vpisov"}`
         : `${summaries.length} ${summaries.length === 1 ? "stranka" : "strank"}`;
@@ -8294,6 +8538,8 @@
       $("confirmClientBill").title = selectedClientBillLines.length ? "" : "Označi vsaj en vpis za obračun stranki.";
       $("confirmClientBill").textContent = `Potrdi izbrane vpise${pendingClientBillLines.length ? ` (${selectedClientBillLines.length})` : ""}`;
       $("exportReportPdf").classList.toggle("hidden", !detail);
+      $("reportExportWorkerOption").classList.toggle("hidden", !detail);
+      $("reportExportTimeOption").classList.toggle("hidden", !detail);
       $("createReportGmailDraft").classList.toggle("hidden", !detail);
       $("exportReportPdf").disabled = !selectedClientBillLines.length;
       const reportClient = findClient(selection.id) || findClient(selection.name);
@@ -8305,14 +8551,14 @@
       const summaryRows = detail ? [
         ["Zaklju\u010dene storitve", `${totals.count}`],
         ["Opravljene ure", `${reportNumber(totals.hours)} h`],
-        ["Stro\u0161ki prevoza (obe smeri) \u2013 osebni avto", reportTransportText(totals.personalKm, totals.personalAmount)],
-        ["Stro\u0161ki prevoza (obe smeri) \u2013 kombi", reportTransportText(totals.vanKm, totals.vanAmount)],
-        ["Stro\u0161ki prevoza skupaj", `${money(totals.clientKmAmount)} EUR`]
+        ["Stro\u0161ki prevoza (obe smeri) \u2013 osebni avto", reportTransportText(totals.personalKm)],
+        ["Stro\u0161ki prevoza (obe smeri) \u2013 kombi", reportTransportText(totals.vanKm)],
+        ["Stro\u0161ki prevoza skupaj", `${reportNumber(totals.clientKm, 1)} km`]
       ] : [
         ["Stranke", `${summaries.length}`],
         ["Zaklju\u010dene storitve", `${totals.count}`],
         ["Opravljene ure", `${reportNumber(totals.hours)} h`],
-        ["Stro\u0161ki prevoza skupaj", `${money(totals.clientKmAmount)} EUR`]
+        ["Stro\u0161ki prevoza skupaj", `${reportNumber(totals.clientKm, 1)} km`]
       ];
       $("reportSummary").innerHTML = `<dl class="client-billing-summary-list">${summaryRows.map(([label, value]) => `<div class="${label.endsWith("skupaj") ? "is-total" : ""}"><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join("")}</dl>`;
       $("clientDetailList").classList.toggle("client-billing-client-overview", !detail);
@@ -8341,7 +8587,7 @@
     async function cancelClientBillFromReport(billId) {
       const bill = (state.clientBills || []).find((item) => item.id === billId && String(item.status || "") === "confirmed");
       if (!bill) return;
-      if (!confirm(`Prekličem obračun stranki ${bill.clientName}?\n\nPovezani zaključeni vnosi se vrnejo med neobračunane. Če so že v arhivu, jih sistem varno vrne iz arhiva; obračun delavca ostane nespremenjen.`)) return;
+      if (!await showAppConfirm(`Prekličem obračun stranki ${bill.clientName}?\n\nPovezani zaključeni vnosi se vrnejo med neobračunane. Če so že v arhivu, jih sistem varno vrne iz arhiva; obračun delavca ostane nespremenjen.`)) return;
       const data = await api(`/api/client-bills/${encodeURIComponent(billId)}`, { method: "DELETE" });
       state.clientBills = data.clientBills || state.clientBills;
       state.todos = data.todos || state.todos;
@@ -8370,12 +8616,12 @@
       const selected = syncClientBillSelection(pending, selection);
       const eventIds = [...new Set(selected.map((line) => todoEventId(line.todo)).filter(Boolean))];
       if (!eventIds.length) {
-        alert("Označi vsaj en vpis za obračun stranki.");
+        showNotice("Označi vsaj en vpis za obračun stranki.");
         return;
       }
       const range = reportRangeLabel();
       const label = `${eventIds.length} ${eventIds.length === 1 ? "izbran vpis" : "izbranih vpisov"}`;
-      if (!confirm(`Potrdim obračun stranki ${selection.name} za ${label} (${range})?`)) return;
+      if (!await showAppConfirm(`Potrdim obračun stranki ${selection.name} za ${label} (${range})?`)) return;
       await api("/api/client-bills", {
         method: "POST",
         body: JSON.stringify({ clientId: selection.id, clientName: selection.name, from: $("reportFrom").value, to: $("reportTo").value, eventIds })
@@ -8394,6 +8640,7 @@
       const detail = Boolean(selection.id || selection.name);
       const lines = detail ? reportTodos().map(reportTodoLine) : reportOverviewLines();
       const totals = reportTotals(lines);
+      const exportOptions = reportExportOptions();
       const rows = [
         ["INDUS URE – poročilo izvedenih storitev"],
         ["Obdobje", reportRangeLabel()],
@@ -8401,25 +8648,24 @@
         [],
         ["Zaključene storitve", totals.count],
         ["Opravljene ure", totals.hours.toFixed(2)],
-        ["Stroški prevoza (obe smeri) – osebni avto", `${totals.personalKm.toFixed(1)} km · ${totals.personalAmount.toFixed(2)} EUR`],
-        ["Stroški prevoza (obe smeri) – kombi", `${totals.vanKm.toFixed(1)} km · ${totals.vanAmount.toFixed(2)} EUR`],
-        ["Stroški prevoza skupaj", totals.clientKmAmount.toFixed(2)],
+        ["Stroški prevoza (obe smeri) – osebni avto", `${totals.personalKm.toFixed(1)} km`],
+        ["Stroški prevoza (obe smeri) – kombi", `${totals.vanKm.toFixed(1)} km`],
+        ["Stroški prevoza skupaj", `${totals.clientKm.toFixed(1)} km`],
         [],
-        ["Datum", "Ura", "Stranka", "Opravilo", "Opis del", "Material", "Izvajalec", "Ure", "Vozilo", "Stroški prevoza (obe smeri) km", "Tarifa prevoza", "Stroški prevoza EUR", "Priloge", "Google dokumenti"]
+        ["Datum", "Ura", "Stranka", "Opravilo", "Opis del", "Material", "Izvajalec", "Ure", "Vozilo", "Stroški prevoza (obe smeri) km", "Garancija", "Priloge", "Google dokumenti"]
       ];
-      lines.forEach(({ todo, hours, clientKm, clientKmRate, clientKmAmount, vehicle }) => rows.push([
+      lines.forEach(({ todo, hours, clientKm, vehicle }) => rows.push([
         todo.date || "",
-        todo.start && todo.end ? `${todo.start}-${todo.end}` : "",
+        exportOptions.time === "shown" && todo.start && todo.end ? `${todo.start}-${todo.end}` : "",
         todo.client || "",
         todo.title || "",
         todo.notes || "",
         todo.material || "",
-        todoAssigneeNames(todo),
+        reportExportWorkerLabel(todo),
         hours.toFixed(2),
         reportVehicleLabel(vehicle),
         clientKm.toFixed(1),
-        clientKmRate.toFixed(2),
-        clientKmAmount.toFixed(2),
+        todo.warranty ? "Da" : "",
         (todo.photos || []).map((photo) => photo.name || "Priloga").join("; "),
         (todo.driveFiles || []).map((file) => `${file.name || "Google dokument"}: ${file.url || ""}`).join("; ")
       ]));
@@ -8476,7 +8722,7 @@
     async function createClientReportGmailDraft() {
       const payload = reportExportPayload();
       const result = await api("/api/client-report/gmail-draft", { method: "POST", body: JSON.stringify(payload) });
-      alert(`Gmail osnutek za ${result.email} je pripravljen. Sporočilo ni bilo poslano.`);
+      showNotice(`Gmail osnutek za ${result.email} je pripravljen. Sporočilo ni bilo poslano.`);
       window.open("https://mail.google.com/mail/u/0/#drafts", "_blank", "noopener");
     }
     function todosCanReorderTogether(sourceId, targetId) {
@@ -8673,7 +8919,7 @@
       event.preventDefault();
       const { sourceId, targetId, targetPlacement, active } = clearTodoPointerDrag();
       if (!active) return;
-      reorderTodos(sourceId, targetId, targetPlacement).catch((error) => alert(error.message));
+      reorderTodos(sourceId, targetId, targetPlacement).catch((error) => showNotice(error.message));
     }
     function cancelTodoPointerDrag(event) {
       if (!todoPointerDrag || todoPointerDrag.pointerId !== event.pointerId) return;
@@ -8937,7 +9183,7 @@
           if (state.todoEditLock?.todoId !== current.todoId || state.todoEditLock?.token !== current.token) return;
           clearTodoEditLockState();
           if ($("todoDialog").open) $("todoDialog").close();
-          alert(error.message);
+          showNotice(error.message);
         }
       })();
       state.todoLockRenewPromise = renewal;
@@ -8965,7 +9211,7 @@
         state.todoLockHeartbeat = setInterval(renewTodoEditLock, 20_000);
         return true;
       } catch (error) {
-        alert(error.message);
+        showNotice(error.message);
         return false;
       } finally {
         state.todoLockPending = false;
@@ -9051,7 +9297,7 @@
       if (!file) return;
       if (state.offlineMode || !navigator.onLine) throw new Error("Za obnovo potrebuješ povezavo.");
       if (!/\.zip$/i.test(file.name) && file.type !== "application/zip") throw new Error("Izberi ZIP varnostno kopijo INDUS URE.");
-      const answer = prompt("Obnova bo zamenjala podatke, nastavitve in priloge na strežniku. OAuth in strežniške skrivnosti ostanejo nespremenjene. Za nadaljevanje vpiši OBNOVI.");
+      const answer = await showAppPrompt("Obnova bo zamenjala podatke, nastavitve in priloge na strežniku. OAuth in strežniške skrivnosti ostanejo nespremenjene. Za nadaljevanje vpiši OBNOVI.");
       if (answer !== "OBNOVI") return;
       const response = await fetch("/api/backup/restore", {
         method: "POST",
@@ -9065,22 +9311,22 @@
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || "Obnova ni uspela.");
-      alert("Obnova je končana. Zaradi varnosti se moraš znova prijaviti.");
+      showNotice("Obnova je končana. Zaradi varnosti se moraš znova prijaviti.");
       location.reload();
     }
 
     async function connectGoogleDrive() {
       const status = await api("/api/google/drive-status");
       if (!status.configured) {
-        alert("Google Dokumenti niso nastavljeni na strežniku.");
+        showNotice("Google Dokumenti niso nastavljeni na strežniku.");
         return;
       }
       if (!status.owner) {
-        alert("Google Dokumente lahko poveže samo Bojanov račun.");
+        showNotice("Google Dokumente lahko poveže samo Bojanov račun.");
         return;
       }
       if (status.connected) {
-        alert("Google Dokumenti, preglednice in Gmail so že povezani.");
+        showNotice("Google Dokumenti, preglednice in Gmail so že povezani.");
         return;
       }
       const data = await api("/api/google/drive-auth-url");
@@ -9330,7 +9576,7 @@
       const url = combined ? data.combinedUrl : data.workerUrl;
       if (!url) throw new Error("Koledar za ta pogled ni na voljo.");
       await navigator.clipboard.writeText(url);
-      alert(combined
+      showNotice(combined
         ? "Povezava zdruzenega sefovskega koledarja je kopirana."
         : "Povezava tvojega delavskega koledarja je kopirana.");
     }
@@ -9345,19 +9591,19 @@
         location.replace(data.url);
       } catch (error) {
         $("googleLoginBtn").disabled = false;
-        alert(error.message);
+        showNotice(error.message);
       }
     });
 
     $("logoutBtn").addEventListener("click", async () => {
       if (!navigator.onLine || state.offlineMode) {
-        alert("Odjava potrebuje povezavo, da lahko strežnik varno prekliče sejo. Najprej vzpostavi povezavo in počakaj na prenos sprememb.");
+        showNotice("Odjava potrebuje povezavo, da lahko strežnik varno prekliče sejo. Najprej vzpostavi povezavo in počakaj na prenos sprememb.");
         return;
       }
       const userId = state.user?.id || "";
       await flushOfflineTodoQueue();
       const pending = (await offlineTodoOps()).filter((operation) => operation.userId === userId);
-      if (pending.length && !confirm(`${pending.length} lokalnih sprememb še ni bilo varno prenesenih. Z odjavo jih boš s te naprave odstranil. Nadaljujem?`)) return;
+      if (pending.length && !await showAppConfirm(`${pending.length} lokalnih sprememb še ni bilo varno prenesenih. Z odjavo jih boš s te naprave odstranil. Nadaljujem?`)) return;
       try {
         await api("/api/logout", { method: "POST", body: JSON.stringify({}), recoverSession: false });
       } catch {
@@ -9371,7 +9617,7 @@
     });
 
     $("accountBtn").addEventListener("click", openAccountDialog);
-    $("notificationsBtn").addEventListener("click", () => openNotifications().catch((error) => alert(error.message)));
+    $("notificationsBtn").addEventListener("click", () => openNotifications().catch((error) => showNotice(error.message)));
     $("closeNotifications").addEventListener("click", () => $("notificationsDialog").close());
     $("notificationsList").addEventListener("click", async (event) => {
       const button = event.target.closest(".read-notification");
@@ -9382,10 +9628,10 @@
         const notification = state.notifications.find((value) => value.id === item.dataset.notificationId);
         if (notification) notification.readAt = new Date().toISOString();
         renderNotifications();
-      } catch (error) { alert(error.message); }
+      } catch (error) { showNotice(error.message); }
     });
-    $("copyWorkerCalendar").addEventListener("click", () => copyCalendarFeed(false).catch((error) => alert(error.message)));
-    $("copyCombinedCalendar").addEventListener("click", () => copyCalendarFeed(true).catch((error) => alert(error.message)));
+    $("copyWorkerCalendar").addEventListener("click", () => copyCalendarFeed(false).catch((error) => showNotice(error.message)));
+    $("copyCombinedCalendar").addEventListener("click", () => copyCalendarFeed(true).catch((error) => showNotice(error.message)));
     $("toolsMenu").querySelectorAll("button").forEach((button) => {
       button.addEventListener("click", closeToolsMenu);
     });
@@ -9400,24 +9646,20 @@
       const billing = state.settings.billing || {};
       const legacyRate = Number(billing.kmRate || 0);
       $("workerOwnVehicleKmRate").value = Number(billing.workerOwnVehicleKmRate ?? legacyRate);
-      $("clientPersonalKmRate").value = todoClientKmRate("personal");
-      $("clientVanKmRate").value = todoClientKmRate("van");
       $("kmRatesDialog").showModal();
     });
     ["closeKmRates", "cancelKmRates"].forEach((id) => $(id).addEventListener("click", () => $("kmRatesDialog").close()));
     $("saveKmRates").addEventListener("click", async () => {
       const workerOwnVehicleKmRate = parseBillingNumber($("workerOwnVehicleKmRate").value, 1_000);
-      const clientPersonalKmRate = parseBillingNumber($("clientPersonalKmRate").value, 1_000);
-      const clientVanKmRate = parseBillingNumber($("clientVanKmRate").value, 1_000);
-      if (workerOwnVehicleKmRate === null || clientPersonalKmRate === null || clientVanKmRate === null) {
-        alert("Vnesi veljavni tarifi kilometrine.");
+      if (workerOwnVehicleKmRate === null) {
+        showNotice("Vnesi veljavni tarifi kilometrine.");
         return;
       }
       try {
-        await saveBillingSettings({ ...(state.settings.billing || {}), workerOwnVehicleKmRate, clientPersonalKmRate, clientVanKmRate });
+        await saveBillingSettings({ ...(state.settings.billing || {}), workerOwnVehicleKmRate });
         $("kmRatesDialog").close();
       } catch (error) {
-        alert(error.message);
+        showNotice(error.message);
       }
     });
     document.addEventListener("click", (event) => {
@@ -9442,13 +9684,13 @@
         const file = $("accountImage").files[0];
         if (file) avatar = await readImageAsDataUrl(file);
         await saveProfileToServer({ name: $("accountName").value, avatar });
-        alert("Profil je shranjen.");
+        showNotice("Profil je shranjen.");
       } catch (error) {
-        alert(error.message);
+        showNotice(error.message);
       }
     });
     $("newTodoButton").addEventListener("click", () => startTodoForDate());
-    $("writeHoursButton").addEventListener("click", () => openStandaloneHoursDialog().catch((error) => alert(error.message)));
+    $("writeHoursButton").addEventListener("click", () => openStandaloneHoursDialog().catch((error) => showNotice(error.message)));
     $("todoCreationTabs").addEventListener("click", (event) => {
       const tab = event.target.closest("[data-create-mode]");
       if (!tab) return;
@@ -9456,7 +9698,7 @@
       const wantsHours = tab.dataset.createMode === "hours";
       if (wantsHours === state.todoStandaloneHours) return;
       $("todoDialog").close();
-      (wantsHours ? openStandaloneHoursDialog(date) : openTodoDialog({ date })).catch((error) => alert(error.message));
+      (wantsHours ? openStandaloneHoursDialog(date) : openTodoDialog({ date })).catch((error) => showNotice(error.message));
     });
 
     document.querySelectorAll(".debt-stat").forEach((button) => {
@@ -9477,13 +9719,13 @@
         $("debtAmount").value = "";
         $("debtReason").value = "";
       } catch (error) {
-        alert(error.message);
+        showNotice(error.message);
       }
     });
     $("deleteDebt").addEventListener("click", async () => {
       const id = $("debtId").value;
       if (!id) return;
-      if (!confirm("Izbrisem ta dolg?")) return;
+      if (!await showAppConfirm("Izbrisem ta dolg?")) return;
       await deleteDebtFromServer(id);
       $("debtId").value = "";
       $("debtAmount").value = "";
@@ -9496,7 +9738,7 @@
       const debt = state.debts.find((row) => row.id === item.dataset.debtId);
       if (!debt) return;
       if (event.target.closest(".remove-debt")) {
-        if (!confirm("Izbrisem ta dolg?")) return;
+        if (!await showAppConfirm("Izbrisem ta dolg?")) return;
         await deleteDebtFromServer(debt.id);
         return;
       }
@@ -9531,14 +9773,14 @@
     $("applyBillingRangeDialog").addEventListener("click", applyBillingRangePicker);
     $("billingNote").addEventListener("input", () => localStorage.setItem(billingNoteStorageKey(billingWorkerId(), billingRange()), $("billingNote").value));
     $("billingWorker").addEventListener("change", () => { state.billingWorkerId = $("billingWorker").value; localStorage.setItem(billingWorkerKey, state.billingWorkerId); renderBillingView(); });
-    $("billingConfirm").addEventListener("click", () => confirmPayroll().catch((error) => alert(error.message)));
-    $("billingMarkPaid").addEventListener("click", () => changePayroll("paid").catch((error) => alert(error.message)));
+    $("billingConfirm").addEventListener("click", () => confirmPayroll().catch((error) => showNotice(error.message)));
+    $("billingMarkPaid").addEventListener("click", () => changePayroll("paid").catch((error) => showNotice(error.message)));
     $("billingAddPayment").addEventListener("click", openPaymentDialog);
     $("billingAddAdvance").addEventListener("click", openAdvanceDialog);
     $("billingAddPurchase").addEventListener("click", () => openAdvanceDialog("purchase"));
     $("closePaymentDialog").addEventListener("click", () => $("paymentDialog").close());
     $("cancelPaymentDialog").addEventListener("click", () => $("paymentDialog").close());
-    $("paymentForm").addEventListener("submit", (event) => { event.preventDefault(); savePaymentFromDialog().catch((error) => alert(error.message)); });
+    $("paymentForm").addEventListener("submit", (event) => { event.preventDefault(); savePaymentFromDialog().catch((error) => showNotice(error.message)); });
     ["billingPrevMonth", "billingNextMonth"].forEach((id) => $(id).addEventListener("click", () => {
       const range = billingRange();
       const workerId = billingWorkerId();
@@ -9579,7 +9821,7 @@
     $("closeAdvanceDialog").addEventListener("click", () => $("advanceDialog").close());
     $("cancelAdvanceDialog").addEventListener("click", () => $("advanceDialog").close());
     $("advanceProjectSearch").addEventListener("input", renderAdvanceProjects);
-    $("advanceForm").addEventListener("submit", (event) => { event.preventDefault(); saveAdvanceFromDialog().catch((error) => alert(error.message)); });
+    $("advanceForm").addEventListener("submit", (event) => { event.preventDefault(); saveAdvanceFromDialog().catch((error) => showNotice(error.message)); });
     async function handleAdvanceAttachments(event) {
       try {
         const files = [...event.target.files].slice(0, Math.max(0, 8 - state.advancePhotos.length));
@@ -9589,7 +9831,7 @@
           state.advancePhotos.push(attachment);
         }
         renderAdvancePhotos();
-      } catch (error) { alert(error.message); } finally { event.target.value = ""; }
+      } catch (error) { showNotice(error.message); } finally { event.target.value = ""; }
     }
     ["advancePhotoInput", "advanceCameraInput", "advancePdfInput"].forEach((id) => $(id).addEventListener("change", handleAdvanceAttachments));
     $("advancePhotoList").addEventListener("click", (event) => {
@@ -9626,8 +9868,6 @@
     $("todoFormHourlyRate").addEventListener("input", () => {
       $("todoFormHourlyRate").dataset.autoRate = "false";
     });
-    $("todoFormClientKm").addEventListener("input", updateTodoClientKmRateNote);
-    $("todoFormClientVehicle").addEventListener("change", updateTodoClientKmRateNote);
     $("todoFormAssignees").addEventListener("change", () => {
       const hourlyRate = $("todoFormHourlyRate");
       if (!isAdminView() || hourlyRate.dataset.autoRate !== "true" || $("todoFormStatus").value !== "execution") return;
@@ -9657,15 +9897,15 @@
     });
     $("todoForm").addEventListener("submit", (event) => {
       event.preventDefault();
-      saveTodoFromDialog().catch((error) => alert(error.message));
+      saveTodoFromDialog().catch((error) => showNotice(error.message));
     });
-    $("deleteTodoFromDialog").addEventListener("click", () => deleteTodoFromDialog().catch((error) => alert(error.message)));
-    $("duplicateTodoFromDialog").addEventListener("click", () => duplicateTodoFromCurrent().catch((error) => alert(error.message)));
+    $("deleteTodoFromDialog").addEventListener("click", () => deleteTodoFromDialog().catch((error) => showNotice(error.message)));
+    $("duplicateTodoFromDialog").addEventListener("click", () => duplicateTodoFromCurrent().catch((error) => showNotice(error.message)));
     $("openTodoSourceProject").addEventListener("click", async (event) => {
       const sourceId = event.currentTarget.dataset.sourceTodoId || "";
       const source = state.todos.find((todo) => todo.id === sourceId);
       if (!source) {
-        alert("Izvorno opravilo ni več na voljo.");
+        showNotice("Izvorno opravilo ni več na voljo.");
         return;
       }
       await releaseTodoEditLockForDialog();
@@ -9673,9 +9913,9 @@
       await new Promise((resolve) => setTimeout(resolve, 0));
       await openTodoDialog(source);
     });
-    $("writeHoursFromTodo").addEventListener("click", () => openHoursTodoFromCurrent().catch((error) => alert(error.message)));
+    $("writeHoursFromTodo").addEventListener("click", () => openHoursTodoFromCurrent().catch((error) => showNotice(error.message)));
     document.querySelectorAll("[data-create-drive]").forEach((button) => {
-      button.addEventListener("click", () => createTodoGoogleDriveFile(button.dataset.createDrive).catch((error) => alert(error.message)));
+      button.addEventListener("click", () => createTodoGoogleDriveFile(button.dataset.createDrive).catch((error) => showNotice(error.message)));
     });
     $("addTodoDriveLink").addEventListener("click", addTodoDriveLink);
     $("todoFormDriveLink").addEventListener("keydown", (event) => {
@@ -9689,8 +9929,8 @@
       state.todoDialogDriveFiles = state.todoDialogDriveFiles.filter((file) => file.id !== button.dataset.driveFileId);
       renderTodoFormDriveFiles();
     });
-    $("deleteCompletedProject").addEventListener("click", () => handleHoursProjectCompletion(true).catch((error) => alert(error.message)));
-    $("rescheduleProject").addEventListener("click", () => handleHoursProjectCompletion(false).catch((error) => alert(error.message)));
+    $("deleteCompletedProject").addEventListener("click", () => handleHoursProjectCompletion(true).catch((error) => showNotice(error.message)));
+    $("rescheduleProject").addEventListener("click", () => handleHoursProjectCompletion(false).catch((error) => showNotice(error.message)));
     async function handleTodoAttachmentsFromInput(event) {
       try {
         const remaining = Math.max(0, 8 - state.todoDialogPhotos.length);
@@ -9702,7 +9942,7 @@
         }
         renderTodoFormPhotos();
       } catch (error) {
-        alert(error.message);
+        showNotice(error.message);
       } finally {
         event.target.value = "";
       }
@@ -9710,6 +9950,7 @@
     ["todoFormPhotoInput", "todoFormCameraInput", "todoFormPdfInput"].forEach((id) => {
       $(id).addEventListener("change", handleTodoAttachmentsFromInput);
     });
+    $("todoFormVideoInput").addEventListener("change", (event) => uploadTodoVideoFiles(event).catch((error) => showNotice(error.message)));
     $("todoFormPhotoList").addEventListener("click", (event) => {
       const edit = event.target.closest(".edit-todo-form-photo");
       if (edit) {
@@ -9737,14 +9978,19 @@
     });
     $("clearReportClient").addEventListener("click", clearClientReportSelection);
     $("reportBackToClients").addEventListener("click", clearClientReportSelection);
-    $("confirmClientBill").addEventListener("click", () => confirmClientBillFromReport().catch((error) => alert(error.message)));
+    $("confirmClientBill").addEventListener("click", () => confirmClientBillFromReport().catch((error) => showNotice(error.message)));
     $("exportReportExcel").addEventListener("click", exportReportExcel);
-    $("exportReportPdf").addEventListener("click", () => downloadClientReportPdf().catch((error) => alert(error.message)));
-    $("createReportGmailDraft").addEventListener("click", () => createClientReportGmailDraft().catch((error) => alert(error.message)));
-    $("addClientBtn").addEventListener("click", () => addClientFromForm().catch((error) => alert(error.message)));
+    $("exportReportPdf").addEventListener("click", () => downloadClientReportPdf().catch((error) => showNotice(error.message)));
+    $("createReportGmailDraft").addEventListener("click", () => createClientReportGmailDraft().catch((error) => showNotice(error.message)));
+    $("addClientBtn").addEventListener("click", () => addClientFromForm().catch((error) => showNotice(error.message)));
+    $("closeAppNotice").addEventListener("click", closeAppNotice);
+    $("quickAddClientBtn").addEventListener("click", openQuickClientDialog);
+    $("quickClientForm").addEventListener("submit", (event) => { event.preventDefault(); saveQuickClientFromDialog().catch((error) => showNotice(error.message)); });
+    $("closeQuickClientDialog").addEventListener("click", () => $("quickClientDialog").close());
+    $("cancelQuickClientDialog").addEventListener("click", () => $("quickClientDialog").close());
 
     document.querySelectorAll(".report-setting").forEach((button) => {
-      button.addEventListener("click", () => editBillingSetting(button.dataset.setting).catch((error) => alert(error.message)));
+      button.addEventListener("click", () => editBillingSetting(button.dataset.setting).catch((error) => showNotice(error.message)));
     });
 
 
@@ -9766,7 +10012,7 @@
       const item = button.closest(".todo-item");
       const id = item?.dataset.todoId;
       if (!id) return;
-      if (!confirm("Izbrisem to opravilo?")) return;
+      if (!await showAppConfirm("Izbrisem to opravilo?")) return;
       button.disabled = true;
       button.setAttribute("aria-busy", "true");
       try {
@@ -9774,7 +10020,7 @@
       } catch (error) {
         button.disabled = false;
         button.removeAttribute("aria-busy");
-        alert(error.message);
+        showNotice(error.message);
       }
     });
 
@@ -9783,7 +10029,7 @@
       if (cancelBill) {
         event.preventDefault();
         event.stopPropagation();
-        cancelClientBillFromReport(cancelBill.dataset.cancelClientBillId).catch((error) => alert(error.message));
+        cancelClientBillFromReport(cancelBill.dataset.cancelClientBillId).catch((error) => showNotice(error.message));
         return;
       }
       const clientButton = event.target.closest(".open-client-report");
@@ -9839,7 +10085,7 @@
       event.preventDefault();
       const button = $("saveClientEdit");
       button.disabled = true;
-      saveClientFromDialog().catch((error) => alert(error.message)).finally(() => { button.disabled = false; });
+      saveClientFromDialog().catch((error) => showNotice(error.message)).finally(() => { button.disabled = false; });
     });
     $("clientEditDialog").addEventListener("click", (event) => {
       if (event.target === event.currentTarget) event.currentTarget.close();
@@ -9876,7 +10122,7 @@
     document.addEventListener("pointercancel", cancelTodoPointerDrag, { passive: false });
     document.addEventListener("pointermove", updateDayTimelineEventPointer, { passive: false });
     document.addEventListener("pointerup", (event) => {
-      finishDayTimelineEventPointer(event).catch((error) => alert(error.message));
+      finishDayTimelineEventPointer(event).catch((error) => showNotice(error.message));
     });
     document.addEventListener("pointercancel", (event) => {
       finishDayTimelineEventPointer(event, true).catch(() => {});
@@ -9902,13 +10148,13 @@
     $("clientsSearch").addEventListener("input", renderClients);
     $("clearClientSearch").addEventListener("click", clearClientSearchAndRestoreView);
     $("exportCsv").addEventListener("click", exportCsv);
-    $("googleDrive").addEventListener("click", () => connectGoogleDrive().catch((error) => alert(error.message)));
-    $("downloadBackup").addEventListener("click", () => downloadBackup().catch((error) => alert(error.message)));
+    $("googleDrive").addEventListener("click", () => connectGoogleDrive().catch((error) => showNotice(error.message)));
+    $("downloadBackup").addEventListener("click", () => downloadBackup().catch((error) => showNotice(error.message)));
     $("restoreBackup").addEventListener("click", () => $("restoreBackupFile").click());
     $("restoreBackupFile").addEventListener("change", (event) => {
       const [file] = event.currentTarget.files || [];
       event.currentTarget.value = "";
-      restoreBackupFromFile(file).catch((error) => alert(error.message));
+      restoreBackupFromFile(file).catch((error) => showNotice(error.message));
     });
     $("todoDialog").addEventListener("close", releaseTodoEditLockForDialog);
     $("todoDialog").addEventListener("close", () => { state.todoDialogReturnDayDate = ""; });
@@ -9929,7 +10175,7 @@
       setTimeout(() => {
         const source = state.todos.find((todo) => todo.id === sourceId);
         if (source && !$("todoDialog").open) {
-          openTodoDialog(source).catch((error) => alert(error.message));
+          openTodoDialog(source).catch((error) => showNotice(error.message));
         }
       }, 0);
     });
@@ -10177,7 +10423,7 @@
       try {
         savePhotoEditor();
       } catch (error) {
-        alert(error.message);
+        showNotice(error.message);
       }
     });
     $("photoEditorDialog").addEventListener("close", () => {
@@ -10276,7 +10522,7 @@
         const photo = state.todoDialogPhotos.find((item) => item.id === preview.photo.id);
         if (photo) openPhotoEditor(photo);
       } catch (error) {
-        alert(error.message);
+        showNotice(error.message);
       }
     });
 

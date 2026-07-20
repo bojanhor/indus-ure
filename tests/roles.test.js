@@ -199,13 +199,15 @@ test("delavec v zakljucenem vnosu ur lahko navede kilometrino za stranko", () =>
     billingHourlyRate: 999,
     billingKm: 999,
     clientKm: 999,
-    clientVehicle: "personal"
+    clientVehicle: "personal",
+    warranty: true
   });
   assert.equal(workerChange.billingHourlyRate, 22);
   assert.equal(workerChange.billingKm, 999);
   assert.equal(workerChange.clientKm, 999);
   assert.equal(workerChange.clientVehicle, "personal");
-  assert.equal(workerChange.clientKmRate, 0.34);
+  assert.equal(workerChange.clientKmRate, 0);
+  assert.equal(workerChange.warranty, true);
 
   const bossChange = todoForUserRole(boss, billingDb, previous, {
     ...previous,
@@ -218,7 +220,7 @@ test("delavec v zakljucenem vnosu ur lahko navede kilometrino za stranko", () =>
   assert.equal(bossChange.billingKm, 12.5);
   assert.equal(bossChange.clientKm, 24);
   assert.equal(bossChange.clientVehicle, "personal");
-  assert.equal(bossChange.clientKmRate, 0.34);
+  assert.equal(bossChange.clientKmRate, 0);
 
   const newlyCompleted = todoForUserRole(worker, billingDb, null, {
     syncUser: "ibro",
@@ -226,22 +228,26 @@ test("delavec v zakljucenem vnosu ur lahko navede kilometrino za stranko", () =>
     billingHourlyRate: 500,
     billingKm: 100,
     clientKm: 36,
-    clientVehicle: "van"
+    clientVehicle: "van",
+    warranty: true
   });
   assert.equal(newlyCompleted.billingHourlyRate, 18);
   assert.equal(newlyCompleted.billingKm, 100);
   assert.equal(newlyCompleted.clientKm, 36);
   assert.equal(newlyCompleted.clientVehicle, "van");
-  assert.equal(newlyCompleted.clientKmRate, 0.48);
+  assert.equal(newlyCompleted.clientKmRate, 0);
+  assert.equal(newlyCompleted.warranty, true);
 
   const ordinaryTask = todoForUserRole(worker, billingDb, previous, {
     ...previous,
     status: "open",
+    warranty: true,
     clientKm: 999,
     clientVehicle: "personal"
   });
   assert.equal(ordinaryTask.clientKm, 18);
   assert.equal(ordinaryTask.clientVehicle, "van");
+  assert.equal(ordinaryTask.warranty, false);
 });
 
 test("nov koledarski vnos mora izvirati iz lastnega opravila z istim datumom", () => {
@@ -486,16 +492,17 @@ test("obračun stranki vsebuje samo označene dogodke", () => {
     clientBills: [],
     todos: [
       { id: "work-a", assignmentGroupId: "project-a", syncUser: "bojan", status: "execution", date: "2026-07-15", start: "08:00", end: "09:00", title: "A", clientId: "jerin", client: "Jerin" },
-      { id: "work-b", assignmentGroupId: "project-b", syncUser: "bojan", status: "execution", date: "2026-07-16", start: "08:00", end: "09:00", title: "B", clientId: "jerin", client: "Jerin" }
+      { id: "work-b", assignmentGroupId: "project-b", syncUser: "bojan", status: "execution", warranty: true, date: "2026-07-16", start: "08:00", end: "09:00", title: "B", clientId: "jerin", client: "Jerin" }
     ]
   };
 
   const selected = buildClientBillSnapshot(db, { clientId: "jerin", eventIds: ["project-b"] }, boss);
   assert.ok(selected);
   assert.deepEqual(selected.eventIds, ["project-b"]);
+  assert.equal(selected.lines[0].warranty, true);
   assert.equal(buildClientBillSnapshot(db, { clientId: "jerin", eventIds: ["ne-obstaja"] }, boss), null);
 });
-test("stara nicelna tarifa kombija uporabi trenutno nastavljeno tarifo za stranko", () => {
+test("prevoz za stranko obdrži samo kilometre brez denarne tarife", () => {
   const billingDb = {
     users: { bojan: { id: "bojan", name: "Bojan", role: "boss" } },
     clients: [{ clientId: "jerin", name: "Jerin", search: "jerin" }],
@@ -509,7 +516,7 @@ test("stara nicelna tarifa kombija uporabi trenutno nastavljeno tarifo za strank
     }]
   };
   const bill = buildClientBillSnapshot(billingDb, { clientId: "jerin", eventIds: ["project-km"] }, boss);
-  assert.equal(bill.lines[0].clientKmRate, 0.42);
+  assert.equal(bill.lines[0].clientKmRate, 0);
 });
 test("izvoz porocila sprejme samo izbrane dogodke in njihove priloge", async () => {
   const attachmentId = "a".repeat(64);

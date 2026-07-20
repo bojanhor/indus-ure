@@ -35,6 +35,7 @@ const GOOGLE_DRIVE_SCOPE_VERSION = 2;
 const GOOGLE_DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file";
 const GOOGLE_GMAIL_COMPOSE_SCOPE = "https://www.googleapis.com/auth/gmail.compose";
 const GOOGLE_DRIVE_TASKS_FOLDER_ID = String(process.env.GOOGLE_DRIVE_TASKS_FOLDER_ID || "").trim();
+const GOOGLE_DRIVE_ATTACHMENTS_FOLDER_ID = String(process.env.GOOGLE_DRIVE_ATTACHMENTS_FOLDER_ID || "").trim();
 const GOOGLE_DRIVE_OWNER_EMAIL = String(process.env.GOOGLE_DRIVE_OWNER_EMAIL || "bojan@indus.si").trim().toLowerCase();
 const INDUS_GOOGLE_APP_ID = "indus-ure-v1";
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -88,6 +89,9 @@ const MAX_TODO_IMAGE_DATA_LENGTH = 700_000;
 const MAX_TODO_PDF_DATA_LENGTH = 2_100_000;
 const MAX_TODO_ATTACHMENTS_DATA_LENGTH = 5_000_000;
 const MAX_TODO_THUMBNAIL_DATA_LENGTH = 100_000;
+// Video is streamed through the application to Drive, never materialized in the
+// app database or media directory. Keep a finite limit to protect the upstream.
+const MAX_DRIVE_VIDEO_BYTES = Math.min(500 * 1024 * 1024, Math.max(20 * 1024 * 1024, Number(process.env.MAX_DRIVE_VIDEO_BYTES || 200 * 1024 * 1024)));
 
 
 function validImageDataUrl(value, maxEncodedLength) {
@@ -143,27 +147,49 @@ function validGoogleDriveId(value) {
   return /^[A-Za-z0-9_-]{10,200}$/.test(String(value || ""));
 }
 
-function googleWorkspaceFileInfo(value) {
+function googleDriveFileInfo(value) {
   try {
     const url = new URL(String(value || "").trim());
-    if (url.protocol !== "https:" || url.hostname !== "docs.google.com") return null;
-    const match = url.pathname.match(/^\/(document|spreadsheets)\/d\/([A-Za-z0-9_-]{10,200})(?:\/|$)/);
-    if (!match) return null;
-    return {
-      kind: match[1] === "document" ? "document" : "spreadsheet",
-      fileId: match[2],
-      url: url.toString()
-    };
+    if (url.protocol !== "https:") return null;
+    if (url.hostname === "docs.google.com") {
+      const match = url.pathname.match(/^\/(document|spreadsheets)\/d\/([A-Za-z0-9_-]{10,200})(?:\/|$)/);
+      if (!match) return null;
+      return {
+        kind: match[1] === "document" ? "document" : "spreadsheet",
+        fileId: match[2],
+        url: url.toString()
+      };
+    }
+    if (url.hostname === "drive.google.com") {
+      const direct = url.pathname.match(/^\/file\/d\/([A-Za-z0-9_-]{10,200})(?:\/|$)/);
+      const fileId = direct?.[1] || (url.pathname === "/open" ? url.searchParams.get("id") : "");
+      if (!validGoogleDriveId(fileId)) return null;
+      return { kind: "video", fileId, url: url.toString() };
+    }
+    return null;
   } catch {
     return null;
   }
 }
 
+// Kept for callers that deliberately accept only a Google Doc or Sheet pasted by a user.
+function googleWorkspaceFileInfo(value) {
+  const info = googleDriveFileInfo(value);
+  return info?.kind === "video" ? null : info;
+}
+
+function googleDriveDefaultName(kind) {
+  if (kind === "spreadsheet") return "Google Preglednica";
+  if (kind === "video") return "Video";
+  return "Google Dokument";
+}
+
 function cleanTodoDriveFiles(items) {
   const seen = new Set();
   return (Array.isArray(items) ? items : []).map((item) => {
-    const info = googleWorkspaceFileInfo(item?.url);
-    if (!info || seen.has(info.fileId)) return null;
+    const requestedKind = String(item?.kind || "");
+    const info = requestedKind === "video" ? googleDriveFileInfo(item?.url) : googleWorkspaceFileInfo(item?.url);
+    if (!info || (requestedKind && info.kind !== requestedKind) || seen.has(info.fileId)) return null;
     seen.add(info.fileId);
     const managed = Boolean(item?.managed) && String(item?.ownerEmail || "").trim().toLowerCase() === GOOGLE_DRIVE_OWNER_EMAIL;
     return {
@@ -171,7 +197,8 @@ function cleanTodoDriveFiles(items) {
       kind: info.kind,
       fileId: info.fileId,
       url: info.url,
-      name: String(item?.name || (info.kind === "document" ? "Google Dokument" : "Google Preglednica")).trim().slice(0, 180),
+      name: String(item?.name || googleDriveDefaultName(info.kind)).trim().slice(0, 180),
+      mimeType: info.kind === "video" && String(item?.mimeType || "").startsWith("video/") ? String(item.mimeType).slice(0, 100) : "",
       managed,
       ownerEmail: managed ? GOOGLE_DRIVE_OWNER_EMAIL : "",
       createdBy: String(item?.createdBy || "").slice(0, 100),
@@ -578,14 +605,13 @@ function normalizeDb(db = {}) {
     // Stara enotna tarifa se uporabi samo za prehod ob nadgradnji.
     kmRate: legacyKmRate,
     workerOwnVehicleKmRate: nonnegativeNumber(db.settings.billing?.workerOwnVehicleKmRate, legacyKmRate, 1_000),
-    clientPersonalKmRate: nonnegativeNumber(db.settings.billing?.clientPersonalKmRate, legacyKmRate, 1_000),
-    clientVanKmRate: nonnegativeNumber(db.settings.billing?.clientVanKmRate, legacyKmRate, 1_000),
     commuteKmPerDay: nonnegativeNumber(db.settings.billing?.commuteKmPerDay, 28, 1_000_000)
   };
   for (const user of Object.values(db.users)) {
     const currentRate = nonnegativeNumber(user.billing?.hourlyRate, null, 10_000);
-    if (!user.billing || currentRate === null) {
-      user.billing = { ...(user.billing || {}), hourlyRate: currentRate ?? db.settings.billing.hourlyRate };
+    const exportTitle = String(user.billing?.exportTitle || "").trim().slice(0, 120);
+    if (!user.billing || currentRate === null || user.billing.exportTitle !== exportTitle) {
+      user.billing = { ...(user.billing || {}), hourlyRate: currentRate ?? db.settings.billing.hourlyRate, exportTitle };
       changed = true;
     } else {
       user.billing.hourlyRate = currentRate;
@@ -843,9 +869,8 @@ function normalizeDb(db = {}) {
       next.clientVehicle = clientVehicle;
       changed = true;
     }
-    const clientKmRate = nonnegativeNumber(next.clientKmRate, null, 1_000);
-    if (next.clientKmRate !== clientKmRate) {
-      next.clientKmRate = clientKmRate;
+    if (next.clientKmRate !== 0) {
+      next.clientKmRate = 0;
       changed = true;
     }
     if (!Array.isArray(next.photos)) {
@@ -1052,7 +1077,8 @@ function publicDirectoryUser(user) {
   return {
     id: user.id,
     name: user.name,
-    role: user.role
+    role: user.role,
+    exportTitle: String(user.billing?.exportTitle || "")
   };
 }
 
@@ -1596,7 +1622,8 @@ function normalizeClientBill(input, db) {
       title: String(line?.title || "").trim().slice(0, 300),
       clientKm: nonnegativeNumber(line?.clientKm, 0, 1_000_000),
       clientVehicle: todoVehicle(line?.clientVehicle),
-      clientKmRate: nonnegativeNumber(line?.clientKmRate, 0, 1_000)
+      warranty: Boolean(line?.warranty),
+      clientKmRate: 0
     };
   }).filter(Boolean);
   const createdAt = String(input?.createdAt || new Date().toISOString());
@@ -1804,22 +1831,41 @@ function reportPdfDate(date) {
   return `${day}. ${month}. ${year}`;
 }
 
+function clientReportExportOptions(input = {}) {
+  return {
+    worker: input?.worker === "title" ? "title" : "hidden",
+    time: input?.time === "shown" ? "shown" : "hidden"
+  };
+}
+
+function reportPdfAssigneeTitle(db, todo) {
+  return String(db.users?.[todo?.syncUser || todo?.createdBy]?.billing?.exportTitle || "").trim() || "Izvajalec";
+}
+
 function reportPdfAssignees(db, todos) {
-  const names = [...new Set((todos || []).map((todo) => db.users?.[todo.syncUser || todo.createdBy]?.name || todo.syncUser || todo.createdBy).filter(Boolean))];
-  return names.join(", ") || "Ni navedeno";
+  return [...new Set((todos || []).map((todo) => reportPdfAssigneeTitle(db, todo)))].join(", ");
 }
 
 function reportPdfVehicleLabel(vehicle) {
   return vehicle === "van" ? "kombi" : "osebni avto";
 }
 
+function reportPdfDriveFileLink(doc, file) {
+  const url = String(file?.url || "").trim();
+  if (!url) return;
+  const label = file?.kind === "video" ? "Video" : "Dokument";
+  doc.font(reportPdfFontPath("bold")).fillColor("#1e3430").text(`${label}: `, { continued: true });
+  doc.font(reportPdfFontPath()).fillColor("#0d6d95").text(String(file?.name || "Priloga"), { link: url, underline: true });
+  doc.fillColor("#263634");
+}
 function reportPdfLine(doc, label, value) {
   if (!value) return;
   doc.font(reportPdfFontPath("bold")).fillColor("#1e3430").text(`${label}: `, { continued: true });
   doc.font(reportPdfFontPath()).fillColor("#263634").text(String(value));
 }
 
-function buildClientReportPdf(db, report, attachments = []) {
+function buildClientReportPdf(db, report, attachments = [], exportOptions = {}) {
+  const options = clientReportExportOptions(exportOptions);
   const title = `Obračun - ${safeReportFileName(report.client?.name || "stranka")}`;
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({
@@ -1842,36 +1888,74 @@ function buildClientReportPdf(db, report, attachments = []) {
 
       for (const group of report.groups || []) {
         const todo = group.todos?.[0] || {};
-        const hours = group.todos.reduce((sum, item) => sum + todoDurationHours(item), 0);
-        const clientKm = Math.max(0, Number(todo.clientKm || 0));
-        const clientKmRate = clientKmRateForTodo(db, todo);
-        const time = todo.start && todo.end ? `${todo.start}-${todo.end}` : "brez vpisane ure";
-        doc.font(reportPdfFontPath("bold")).fontSize(13).fillColor("#143b34").text(`${reportPdfDate(todo.date)}  ${time}`);
+        const warranty = Boolean(todo.warranty);
+        const hours = warranty ? 0 : group.todos.reduce((sum, item) => sum + todoDurationHours(item), 0);
+        const clientKm = warranty ? 0 : Math.max(0, Number(todo.clientKm || 0));
+        const time = options.time === "shown" && todo.start && todo.end ? `  ${todo.start}-${todo.end}` : "";
+        doc.font(reportPdfFontPath("bold")).fontSize(13).fillColor("#143b34").text(`${reportPdfDate(todo.date)}${time}`);
         doc.font(reportPdfFontPath("bold")).fontSize(12).fillColor("#161f20").text(String(todo.title || "Brez naziva"));
         doc.font(reportPdfFontPath()).fontSize(10).fillColor("#263634");
-        reportPdfLine(doc, "Izvajalec", reportPdfAssignees(db, group.todos));
+        if (options.worker === "title") reportPdfLine(doc, "Izvajalec", reportPdfAssignees(db, group.todos));
+        if (warranty) reportPdfLine(doc, "Garancija", "Storitev se ne obračunava stranki.");
         if (hours) reportPdfLine(doc, "Izvedeno", `${hours.toLocaleString("sl-SI", { maximumFractionDigits: 2 })} h`);
-        if (clientKm) reportPdfLine(doc, "Stroski prevoza (obe smeri)", `${reportPdfVehicleLabel(todo.clientVehicle)} - ${clientKm.toLocaleString("sl-SI", { maximumFractionDigits: 1 })} km - ${(clientKm * clientKmRate).toLocaleString("sl-SI", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR`);
+        if (clientKm) reportPdfLine(doc, "Stroski prevoza (obe smeri)", `${reportPdfVehicleLabel(todo.clientVehicle)} - ${clientKm.toLocaleString("sl-SI", { maximumFractionDigits: 1 })} km`);
         if (todo.notes) reportPdfLine(doc, "Opis del", todo.notes);
         if (todo.material) reportPdfLine(doc, "Material", todo.material);
         const driveFiles = [...new Map(group.todos.flatMap((item) => item.driveFiles || []).filter((file) => file?.url).map((file) => [file.url, file])).values()];
-        for (const file of driveFiles) reportPdfLine(doc, "Google dokument", `${file.name || "Dokument"}: ${file.url}`);
+        for (const file of driveFiles) reportPdfDriveFileLink(doc, file);
         const groupAttachmentNames = attachments.filter((attachment) => attachment.eventId === group.eventId).map((attachment) => attachment.name);
         if (groupAttachmentNames.length) reportPdfLine(doc, "Vkljucene priloge", groupAttachmentNames.join(", "));
         doc.moveDown(0.75);
         doc.strokeColor("#c8d9d5").lineWidth(1).moveTo(doc.page.margins.left, doc.y).lineTo(doc.page.width - doc.page.margins.right, doc.y).stroke();
         doc.moveDown(0.75);
       }
-      if (attachments.length) {
-        doc.font(reportPdfFontPath("bold")).fontSize(11).fillColor("#143b34").text("Priloge so dodane v PDF kot datoteke.");
-        for (const attachment of attachments) {
-          doc.file(attachment.bytes, {
-            name: attachment.filename,
-            type: attachment.mimeType,
-            description: `Priloga: ${attachment.name}`,
-            relationship: "Supplement"
-          });
+      const clientHoursByWorker = new Map();
+      const totalClientHours = (report.groups || []).reduce((sum, group) => {
+        const representative = group.todos?.[0] || {};
+        if (representative.warranty) return sum;
+        return sum + (group.todos || []).reduce((hours, item) => {
+          const duration = todoDurationHours(item);
+          if (options.worker === "title") {
+            const label = reportPdfAssigneeTitle(db, item);
+            clientHoursByWorker.set(label, (clientHoursByWorker.get(label) || 0) + duration);
+          }
+          return hours + duration;
+        }, 0);
+      }, 0);
+      doc.moveDown(0.4);
+      doc.font(reportPdfFontPath("bold")).fontSize(13).fillColor("#0d536b").text("Izvedeno vseh ur");
+      if (options.worker === "title" && clientHoursByWorker.size) {
+        [...clientHoursByWorker.entries()].sort(([left], [right]) => left.localeCompare(right, "sl")).forEach(([label, hours]) => {
+          reportPdfLine(doc, label, `${hours.toLocaleString("sl-SI", { maximumFractionDigits: 2 })} h`);
+        });
+        reportPdfLine(doc, "Skupaj", `${totalClientHours.toLocaleString("sl-SI", { maximumFractionDigits: 2 })} h`);
+      } else {
+        reportPdfLine(doc, "Skupaj", `${totalClientHours.toLocaleString("sl-SI", { maximumFractionDigits: 2 })} h`);
+      }
+      doc.moveDown(0.5);
+
+      for (const attachment of attachments) {
+        const image = /^image\/(jpeg|png)$/i.test(String(attachment.mimeType || ""));
+        if (image) {
+          doc.addPage();
+          doc.font(reportPdfFontPath("bold")).fontSize(14).fillColor("#143b34").text(`Priloga: ${attachment.name}`);
+          doc.moveDown(0.5);
+          try {
+            doc.image(attachment.bytes, {
+              fit: [doc.page.width - doc.page.margins.left - doc.page.margins.right, doc.page.height - doc.page.margins.top - doc.page.margins.bottom - 42],
+              align: "center",
+              valign: "center"
+            });
+          } catch {
+            reportPdfLine(doc, "Priloga", "Slike ni bilo mogoče vgraditi; priložen je izvirnik.");
+          }
         }
+        doc.file(attachment.bytes, {
+          name: attachment.filename,
+          type: attachment.mimeType,
+          description: `Priloga: ${attachment.name}`,
+          relationship: "Supplement"
+        });
       }
       doc.end();
     } catch (error) {
@@ -1948,7 +2032,8 @@ function buildClientBillSnapshot(db, input, actor) {
         title: representative.title,
         clientKm: representative.clientKm,
         clientVehicle: representative.clientVehicle,
-        clientKmRate: clientKmRateForTodo(db, representative)
+        warranty: Boolean(representative.warranty),
+        clientKmRate: 0
       };
     }),
     createdBy: actor?.id || "system",
@@ -2034,25 +2119,9 @@ function defaultHourlyRateForUser(db, userId) {
   );
 }
 
-function clientKmRateForVehicle(db, vehicle) {
-  const billing = db.settings?.billing || {};
-  // A zero used to be written for older completed entries before vehicle rates
-  // existed. Treat it as missing instead of silently creating a free journey.
-  const legacyRate = nonnegativeNumber(billing.kmRate, 0.22, 1_000);
-  const fallback = legacyRate > 0 ? legacyRate : 0.22;
-  const configured = nonnegativeNumber(vehicle === "van" ? billing.clientVanKmRate : billing.clientPersonalKmRate, null, 1_000);
-  return configured !== null && configured > 0 ? configured : fallback;
-}
-
-function clientKmRateForTodo(db, todo = {}) {
-  const stored = nonnegativeNumber(todo.clientKmRate, null, 1_000);
-  return stored !== null && stored > 0
-    ? stored
-    : clientKmRateForVehicle(db, todoVehicle(todo.clientVehicle));
-}
-
 function todoForUserRole(user, db, previous, todo) {
   const previousRate = nonnegativeNumber(previous?.billingHourlyRate, null, 10_000);
+  const previousWarranty = Boolean(previous?.warranty);
   const previousKm = nonnegativeNumber(previous?.billingKm, 0, 1_000_000);
   const previousClientKm = nonnegativeNumber(previous?.clientKm, 0, 1_000_000);
   const previousClientVehicle = todoVehicle(previous?.clientVehicle);
@@ -2060,25 +2129,26 @@ function todoForUserRole(user, db, previous, todo) {
   const isCompleted = todo.status === "execution";
   const canSetClientMileage = isCompleted;
   const defaultRate = defaultHourlyRateForUser(db, todo.syncUser || previous?.syncUser || user.id);
-  const clientKmRate = clientKmRateForVehicle(db, requestedClientVehicle);
   if (user.role !== "boss") {
     const clientVehicle = canSetClientMileage ? requestedClientVehicle : previousClientVehicle;
     return {
       ...todo,
       billingHourlyRate: isCompleted ? previousRate ?? defaultRate : previousRate,
       billingKm: isCompleted ? nonnegativeNumber(todo.billingKm, previousKm, 1_000_000) : previousKm,
+      warranty: isCompleted ? Boolean(todo.warranty) : previousWarranty,
       clientKm: canSetClientMileage ? nonnegativeNumber(todo.clientKm, previousClientKm, 1_000_000) : previousClientKm,
       clientVehicle,
-      clientKmRate: canSetClientMileage ? clientKmRateForVehicle(db, clientVehicle) : nonnegativeNumber(previous?.clientKmRate, clientKmRateForVehicle(db, clientVehicle), 1_000)
+      clientKmRate: 0
     };
   }
   return {
     ...todo,
     billingHourlyRate: isCompleted ? nonnegativeNumber(todo.billingHourlyRate, previousRate ?? defaultRate, 10_000) : previousRate,
     billingKm: isCompleted ? nonnegativeNumber(todo.billingKm, previousKm, 1_000_000) : previousKm,
+    warranty: isCompleted ? Boolean(todo.warranty) : previousWarranty,
     clientKm: nonnegativeNumber(todo.clientKm, previousClientKm, 1_000_000),
     clientVehicle: requestedClientVehicle,
-    clientKmRate
+    clientKmRate: 0
   };
 }
 
@@ -2286,6 +2356,7 @@ function cleanTodo(input) {
     status: input.status === "billing" ? "execution" : TODO_STATUSES.has(input.status) ? input.status : "open",
     order: Number.isFinite(Number(input.order)) ? Number(input.order) : 0,
     urgent: ["execution", "billing"].includes(input.status) ? false : Boolean(input.urgent),
+    warranty: input.status === "execution" && Boolean(input.warranty),
     syncUser: cleanUserId(input.syncUser),
     sourceProjectTodoId: String(input.sourceProjectTodoId || "").trim().slice(0, 100),
     done: input.status === "execution",
@@ -2293,7 +2364,7 @@ function cleanTodo(input) {
     billingKm: nonnegativeNumber(input.billingKm, null, 1_000_000),
     clientKm: nonnegativeNumber(input.clientKm, null, 1_000_000),
     clientVehicle: todoVehicle(input.clientVehicle),
-    clientKmRate: nonnegativeNumber(input.clientKmRate, null, 1_000),
+    clientKmRate: 0,
     driveFiles: cleanTodoDriveFiles(input.driveFiles),
     photos: limitTodoAttachmentsData(photos
       .map((photo) => ({
@@ -2408,8 +2479,11 @@ function validateTodo(todo, { requireClientId = false } = {}) {
   if ((todo.photos || []).some((photo) => !validTodoAttachmentDataUrl(photo.data) && !validTodoAttachmentId(photo.attachmentId))) return "Priloga ni veljavna slika ali PDF.";
   if ((todo.photos || []).reduce((total, photo) => total + String(photo.data || "").length, 0) > MAX_TODO_ATTACHMENTS_DATA_LENGTH) return "Priloge so skupaj prevelike.";
   if ((todo.photos || []).some((photo) => photo.thumbnailData && !validTodoThumbnailDataUrl(photo.thumbnailData))) return "Predogled PDF priloge ni veljaven.";
-  if ((todo.driveFiles || []).length > 12) return "Najvec je 12 Google dokumentov ali preglednic na opravilo.";
-  if ((todo.driveFiles || []).some((file) => !validGoogleDriveId(file.fileId) || !googleWorkspaceFileInfo(file.url))) return "Google priponka ni veljaven Dokument ali Preglednica.";
+  if ((todo.driveFiles || []).length > 12) return "Najvec je 12 Google dokumentov, preglednic ali videov na opravilo.";
+  if ((todo.driveFiles || []).some((file) => {
+    const info = googleDriveFileInfo(file?.url);
+    return !validGoogleDriveId(file?.fileId) || !info || info.fileId !== file.fileId || (file.kind && info.kind !== file.kind);
+  })) return "Google priponka ni veljaven Dokument, Preglednica ali Video.";
   return "";
 }
 
@@ -2549,8 +2623,16 @@ function googleClient(req, tokens) {
   return client;
 }
 
+function googleDriveFolderReady(folderId) {
+  return googleReady() && validGoogleDriveId(folderId) && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(GOOGLE_DRIVE_OWNER_EMAIL);
+}
+
 function googleDriveTasksReady() {
-  return googleReady() && validGoogleDriveId(GOOGLE_DRIVE_TASKS_FOLDER_ID) && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(GOOGLE_DRIVE_OWNER_EMAIL);
+  return googleDriveFolderReady(GOOGLE_DRIVE_TASKS_FOLDER_ID);
+}
+
+function googleDriveAttachmentsReady() {
+  return googleDriveFolderReady(GOOGLE_DRIVE_ATTACHMENTS_FOLDER_ID);
 }
 
 function googleDriveOwner(db) {
@@ -2591,6 +2673,11 @@ async function createManagedGoogleDriveFile(req, db, actor, input = {}) {
       fields: "id,name,mimeType,webViewLink,parents,owners(emailAddress),driveId"
     });
     created = response.data;
+    await drive.permissions.create({
+      fileId: created.id,
+      requestBody: { type: "anyone", role: "reader", allowFileDiscovery: false },
+      fields: "id,type,role"
+    });
     const ownedByBojan = (created.owners || []).some((item) => String(item.emailAddress || "").toLowerCase() === GOOGLE_DRIVE_OWNER_EMAIL);
     const inConfiguredFolder = (created.parents || []).includes(GOOGLE_DRIVE_TASKS_FOLDER_ID);
     if (!created.id || !created.webViewLink || created.driveId || !ownedByBojan || !inConfiguredFolder) {
@@ -2620,6 +2707,82 @@ async function createManagedGoogleDriveFile(req, db, actor, input = {}) {
   }
 }
 
+function cleanDriveUploadName(value) {
+  return String(value || "video")
+    .replace(/[\u0000-\u001f<>:"\\/|?*]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 180) || "video";
+}
+
+async function createManagedGoogleDriveVideo(req, db, actor, input = {}) {
+  if (!googleDriveAttachmentsReady()) {
+    throw new Error("Video priloge niso nastavljene: manjka Drive mapa v okolju strežnika.");
+  }
+  const owner = googleDriveOwner(db);
+  if (!owner || Number(owner.google?.driveScopeVersion || 0) !== GOOGLE_DRIVE_SCOPE_VERSION || !owner.google?.tokens) {
+    throw new Error("Bojan mora najprej v Nastavitvah povezati Google Drive.");
+  }
+  const mimeType = String(input.mimeType || "").split(";", 1)[0].trim().toLowerCase();
+  if (!mimeType.startsWith("video/")) throw new Error("Izberi veljavno video datoteko.");
+  const bytes = Number(input.contentLength);
+  if (!Number.isSafeInteger(bytes) || bytes <= 0) throw new Error("Velikosti video datoteke ni bilo mogoče preveriti.");
+  if (bytes > MAX_DRIVE_VIDEO_BYTES) throw new Error(`Video je prevelik. Največja dovoljena velikost je ${Math.round(MAX_DRIVE_VIDEO_BYTES / 1024 / 1024)} MB.`);
+  const title = cleanDriveUploadName(input.title || "opravilo");
+  const client = cleanDriveUploadName(input.client || "");
+  const originalName = cleanDriveUploadName(input.name || "video");
+  const name = [client, title, originalName].filter(Boolean).join(" - ").slice(0, 180);
+  const { google } = require("googleapis");
+  const drive = google.drive({ version: "v3", auth: googleClient(req, owner.google.tokens) });
+  let created = null;
+  try {
+    const response = await drive.files.create({
+      requestBody: {
+        name,
+        parents: [GOOGLE_DRIVE_ATTACHMENTS_FOLDER_ID],
+        appProperties: {
+          indusApp: INDUS_GOOGLE_APP_ID,
+          indusResource: "task-video-attachment"
+        }
+      },
+      media: { mimeType, body: input.stream },
+      fields: "id,name,mimeType,webViewLink,parents,owners(emailAddress),driveId,size"
+    });
+    created = response.data;
+    await drive.permissions.create({
+      fileId: created.id,
+      requestBody: { type: "anyone", role: "reader", allowFileDiscovery: false },
+      fields: "id,type,role,allowFileDiscovery"
+    });
+    const ownedByBojan = (created.owners || []).some((item) => String(item.emailAddress || "").toLowerCase() === GOOGLE_DRIVE_OWNER_EMAIL);
+    const inConfiguredFolder = (created.parents || []).includes(GOOGLE_DRIVE_ATTACHMENTS_FOLDER_ID);
+    if (!created.id || !created.webViewLink || created.driveId || !ownedByBojan || !inConfiguredFolder) {
+      throw new Error("Video datoteke ni bilo mogoče ustvariti kot Bojanove priloge v izbrani Drive mapi.");
+    }
+    return {
+      id: crypto.randomUUID(),
+      kind: "video",
+      fileId: created.id,
+      url: created.webViewLink,
+      name: String(created.name || name).slice(0, 180),
+      mimeType: String(created.mimeType || mimeType).slice(0, 100),
+      managed: true,
+      ownerEmail: GOOGLE_DRIVE_OWNER_EMAIL,
+      createdBy: actor.id,
+      createdByName: actor.name,
+      createdAt: new Date().toISOString()
+    };
+  } catch (error) {
+    if (created?.id) {
+      try {
+        await drive.files.delete({ fileId: created.id });
+      } catch (cleanupError) {
+        console.warn(`Google videa ${created.id} ni bilo mogoče odstraniti: ${cleanupError.message || cleanupError}`);
+      }
+    }
+    throw error;
+  }
+}
 function todoStatusDefinition(status) {
   return TODO_STATUS_DEFINITIONS[status] || TODO_STATUS_DEFINITIONS.open;
 }
@@ -3068,10 +3231,16 @@ async function runOperationalMonitor() {
       issues.push({ code: "database-unreachable", severity: "critical", title: "PostgreSQL ni dosegljiv", message: "Aplikacija se ne more povezati z bazo podatkov." });
     }
     try {
+      const latestRun = await getPgPool().query("select status, data, created_at, finished_at from indus_backup_runs order by created_at desc limit 1");
+      const recent = latestRun.rows[0];
+      if (recent?.status === "failed") {
+        const detail = String(recent.data?.error || "Neznana napaka pri nocnem backupu.").slice(0, 600);
+        issues.push({ code: "backup-failed", severity: "critical", title: "Varnostna kopija ni uspela", message: `Zadnji samodejni recovery backup ni uspel: ${detail}` });
+      }
       const backup = await getPgPool().query("select finished_at from indus_backup_runs where status = 'success' order by finished_at desc limit 1");
       const latest = new Date(backup.rows[0]?.finished_at || 0).getTime();
-      if (!latest || Date.now() - latest > 36 * 60 * 60 * 1000) {
-        issues.push({ code: "backup-stale", severity: "warning", title: "Varnostna kopija je zastarela", message: "Ni potrjene šifrirane varnostne kopije v zadnjih 36 urah." });
+      if (recent?.status !== "failed" && (!latest || Date.now() - latest > 36 * 60 * 60 * 1000)) {
+        issues.push({ code: "backup-stale", severity: "warning", title: "Varnostna kopija je zastarela", message: "Ni preverjene recovery varnostne kopije v zadnjih 36 urah." });
       }
     } catch {
       // Database availability alert above contains the useful information.
@@ -3453,7 +3622,7 @@ async function handleApi(req, res) {
       }
       const requestedAttachments = clientReportAttachmentSelection(report, body.attachmentIds);
       const attachments = await loadClientReportAttachments(db, requestedAttachments, { destination: "PDF" });
-      const pdf = await buildClientReportPdf(db, report, attachments);
+      const pdf = await buildClientReportPdf(db, report, attachments, body.exportOptions);
       const filename = clientReportFilename(report.client);
       res.writeHead(200, securityHeaders({
         "Content-Type": "application/pdf",
@@ -3499,7 +3668,7 @@ async function handleApi(req, res) {
         maxTotalBytes: REPORT_GMAIL_MAX_TOTAL_BYTES,
         destination: "Gmail"
       });
-      const pdf = await buildClientReportPdf(db, report, attachments);
+      const pdf = await buildClientReportPdf(db, report, attachments, body.exportOptions);
       const filename = clientReportFilename(report.client);
       try {
         const { google } = require("googleapis");
@@ -3921,7 +4090,8 @@ async function handleApi(req, res) {
         id: worker.id,
         name: worker.name,
         role: worker.role,
-        hourlyRate: defaultHourlyRateForUser(db, worker.id)
+        hourlyRate: defaultHourlyRateForUser(db, worker.id),
+        exportTitle: String(worker.billing?.exportTitle || "")
       }));
       sendJson(res, 200, { workers });
       return;
@@ -3938,17 +4108,19 @@ async function handleApi(req, res) {
       const db = await readDbAsync();
       const workerId = cleanUserId(body.userId);
       const hourlyRate = nonnegativeNumber(body.hourlyRate, null, 10_000);
+      const exportTitle = String(body.exportTitle || "").trim().slice(0, 120);
       if (!db.users?.[workerId] || hourlyRate === null) {
         sendJson(res, 400, { error: "Delavec ali urna postavka ni pravilna." });
         return;
       }
-      db.users[workerId].billing = { ...(db.users[workerId].billing || {}), hourlyRate };
+      db.users[workerId].billing = { ...(db.users[workerId].billing || {}), hourlyRate, exportTitle };
       await writeDbAsync(db);
       const workers = Object.values(db.users).map((worker) => ({
         id: worker.id,
         name: worker.name,
         role: worker.role,
-        hourlyRate: defaultHourlyRateForUser(db, worker.id)
+        hourlyRate: defaultHourlyRateForUser(db, worker.id),
+        exportTitle: String(worker.billing?.exportTitle || "")
       }));
       sendJson(res, 200, { workers });
       return;
@@ -4070,11 +4242,9 @@ async function handleApi(req, res) {
       const legacyKmRate = nonnegativeNumber(body.kmRate, nonnegativeNumber(previousBilling.kmRate, 0.22, 1_000), 1_000);
       db.settings.billing = {
         hourlyRate: nonnegativeNumber(body.hourlyRate, nonnegativeNumber(previousBilling.hourlyRate, 15, 10_000), 10_000),
-        // Ohranjeno samo zaradi starih podatkov; UI uporablja tri ločene tarife spodaj.
+        // Stara enotna tarifa ostane le za pretekle podatke in kilometrino delavca.
         kmRate: legacyKmRate,
         workerOwnVehicleKmRate: nonnegativeNumber(body.workerOwnVehicleKmRate, nonnegativeNumber(previousBilling.workerOwnVehicleKmRate, legacyKmRate, 1_000), 1_000),
-        clientPersonalKmRate: nonnegativeNumber(body.clientPersonalKmRate, nonnegativeNumber(previousBilling.clientPersonalKmRate, legacyKmRate, 1_000), 1_000),
-        clientVanKmRate: nonnegativeNumber(body.clientVanKmRate, nonnegativeNumber(previousBilling.clientVanKmRate, legacyKmRate, 1_000), 1_000),
         commuteKmPerDay: nonnegativeNumber(body.commuteKmPerDay, nonnegativeNumber(previousBilling.commuteKmPerDay, 28, 1_000_000), 1_000_000)
       };
       await writeDbAsync(db);
@@ -4471,6 +4641,28 @@ async function handleApi(req, res) {
       const body = await readBody(req);
       const db = await readDbAsync();
       const driveFile = await createManagedGoogleDriveFile(req, db, user, body);
+      sendJson(res, 201, { driveFile });
+      return;
+    }
+
+    if (url.pathname === "/api/todos/drive-video" && req.method === "POST") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      const db = await readDbAsync();
+      let name = String(req.headers["x-indus-file-name"] || "video");
+      let title = String(req.headers["x-indus-task-title"] || "opravilo");
+      let client = String(req.headers["x-indus-client"] || "");
+      try { name = decodeURIComponent(name); } catch { /* keep encoded value */ }
+      try { title = decodeURIComponent(title); } catch { /* keep encoded value */ }
+      try { client = decodeURIComponent(client); } catch { /* keep encoded value */ }
+      const driveFile = await createManagedGoogleDriveVideo(req, db, user, {
+        stream: req,
+        name,
+        title,
+        client,
+        mimeType: req.headers["content-type"],
+        contentLength: req.headers["content-length"]
+      });
       sendJson(res, 201, { driveFile });
       return;
     }
@@ -4998,7 +5190,12 @@ async function start() {
 
   const server = http.createServer((req, res) => {
     if (req.url.startsWith("/api/")) {
-      if (req.method !== "GET" || req.url.startsWith("/api/google/callback")) {
+      // A video upload only creates a Drive file; it does not alter app state. Do
+      // not hold the global mutation queue while a large body is streaming.
+      const streamedVideoUpload = req.method === "POST" && req.url.startsWith("/api/todos/drive-video");
+      if (streamedVideoUpload) {
+        handleApi(req, res).catch((error) => handleUnexpectedRequestError(error, res));
+      } else if (req.method !== "GET" || req.url.startsWith("/api/google/callback")) {
         runSerializedMutation(req, res);
       } else {
         handleApi(req, res).catch((error) => handleUnexpectedRequestError(error, res));
@@ -5088,6 +5285,7 @@ module.exports = {
   sessionTokenHash,
   validTodoAttachmentDataUrl,
   validGoogleDriveId,
+  googleDriveFileInfo,
   googleWorkspaceFileInfo,
   cleanTodoDriveFiles,
   validateTodo,

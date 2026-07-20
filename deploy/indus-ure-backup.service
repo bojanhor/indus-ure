@@ -1,5 +1,5 @@
 [Unit]
-Description=Encrypted PostgreSQL and media backup for INDUS URE
+Description=Verified PostgreSQL, media and application recovery backup for INDUS URE
 After=network-online.target postgresql.service indus-ure.service
 Wants=network-online.target
 Requires=postgresql.service

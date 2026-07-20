@@ -69,14 +69,18 @@ test("skupni koledar ohrani dogodek, dokler ima vsaj en izvajalec neobračunan v
   }, { combined: true });
   assert.match(ics, /TODO: Montaža/);
 });
-test("Drive priponke ostanejo omejene na Dokumente in Preglednice", () => {
+test("Drive priponke sprejmejo Dokumente, Preglednice in upravljane videe", () => {
   const id = "1_z_1I_wX8-VR0K9rXj7BHRFwc--00Ul5";
+  const videoId = "1wsPGlRaN2M7biJK4zq3KnLSYRXzJX6S1";
   const files = cleanTodoDriveFiles([
     { url: `https://docs.google.com/document/d/${id}/edit`, name: "Dokument" },
+    { kind: "video", url: `https://drive.google.com/file/d/${videoId}/view`, name: "Video", mimeType: "video/mp4" },
     { url: "https://example.com/foreign", name: "Neveljavno" }
   ]);
-  assert.equal(files.length, 1);
+  assert.equal(files.length, 2);
   assert.equal(files[0].kind, "document");
+  assert.equal(files[1].kind, "video");
+  assert.equal(files[1].mimeType, "video/mp4");
 });
 
 test("zakljuceno opravilo se brez datuma in ur zavrne", () => {

@@ -20,21 +20,11 @@ sudo -u postgres pg_dump -Fc indus_ure > /var/backups/indus-ure/pre-v2.dump
 sudo sha256sum /var/backups/indus-ure/pre-v2.dump
 ```
 
-3. Zasebni `age` ključ naredi **na Bojanovem računalniku**, ne na strežniku:
-
-```bash
-age-keygen -o indus-ure-recovery.agekey
-age-keygen -y indus-ure-recovery.agekey > indus-ure-recovery.agepub
-```
-
-V `/etc/indus-ure.env` pride samo vsebina javnega ključa (`age1...`). Zasebni
-`.agekey` shrani v dva ločena varna prostora.
-
 ## 1. Sistemske zahteve in uporabnik
 
 ```bash
 sudo apt update
-sudo apt install -y git nginx postgresql postgresql-contrib age tar certbot python3-certbot-nginx
+sudo apt install -y git nginx postgresql postgresql-contrib tar certbot python3-certbot-nginx
 sudo useradd --system --home /var/lib/indus-ure --create-home --shell /usr/sbin/nologin indus-ure || true
 sudo install -d -o indus-ure -g indus-ure -m 0700 /var/lib/indus-ure/media
 sudo install -d -o indus-ure -g indus-ure -m 0700 /var/backups/indus-ure
@@ -86,10 +76,11 @@ GOOGLE_CLIENT_ID=...
 GOOGLE_CLIENT_SECRET=...
 GOOGLE_REDIRECT_URI=https://ure.indus.si/api/google/callback
 GOOGLE_DRIVE_TASKS_FOLDER_ID=1_z_1I_wX8-VR0K9rXj7BHRFwc--00Ul5
+GOOGLE_DRIVE_ATTACHMENTS_FOLDER_ID=1wsPGlRaN2M7biJK4zq3KnLSYRXzJX6S1
+MAX_DRIVE_VIDEO_BYTES=209715200
 GOOGLE_DRIVE_BACKUP_PARENT_FOLDER_ID=1_z_1I_wX8-VR0K9rXj7BHRFwc--00Ul5
 GOOGLE_DRIVE_OWNER_EMAIL=bojan@indus.si
 
-AGE_RECIPIENT=age1...
 BACKUP_DIR=/var/backups/indus-ure
 ```
 
@@ -97,7 +88,11 @@ Google OAuth client potrebuje redirect URL natanko
 `https://ure.indus.si/api/google/callback`. Google Drive API naj bo omogočen.
 Bojanova potrjena Drive mapa ostane v njegovem My Drive; aplikacija lahko v
 njej ustvarja Dokumente in Preglednice, katerih lastnik je Bojan. Zunanje
-Google datoteke se samo pripnejo kot povezave.
+Google datoteke se samo pripnejo kot povezave. Video priloge se pretocno
+shranijo v GOOGLE_DRIVE_ATTACHMENTS_FOLDER_ID, zato ne zasedajo diska ali
+pomnilnika streznika. Vsaka nova aplikacijsko ustvarjena Drive priloga dobi
+dovoljenje **anyone with the link / viewer** (ni iskalna po Drive); lokalne slike
+in PDF-ji pa ostanejo zasebne priloge aplikacije.
 
 Google Sheets in Google Calendar spremenljivk **ne dodajaj**. ICS povezava je
 samo bralni izvoz.
@@ -193,16 +188,9 @@ sudo systemctl start indus-ure-backup.service
 sudo systemctl status indus-ure-backup.service --no-pager
 ```
 
-Backup naredi PostgreSQL dump, kopijo prilog in manifest SHA-256, vse zapakira
-ter šifrira z javnim `age` ključem. Paketa se ne da obnoviti brez Bojanovega
-zasebnega ključa. Šifrirana kopija se naloži v namensko podmapo znotraj
-potrjene Google Drive mape in se preveri po velikosti. Ob neuspehu gre
-opozorilo v aplikacijo in po SMTP, če je SMTP nastavljen.
+Nocni backup naredi obnovljiv paket PostgreSQL baze, prilog in kode aplikacije. Pred nalaganjem preveri vsebino arhiva; po nalaganju Google Drive ponovno preveri velikost in MD5 ter sveze prebere metapodatke. Ob neuspehu se takoj ustvari sistemsko opozorilo v aplikaciji in po SMTP, ce je nastavljen.
 
-Za obnovo na čistem testnem strežniku: dešifriraj paket z zasebnim ključem,
-`pg_restore` uporabi za `database.dump`, nato kopiraj `media/` v `MEDIA_DIR`.
-Strežniške okoljske skrivnosti niso v paketu; obnovi jih iz ločenega varnega
-zapisa in nato ponovno poveži Google Drive.
+Paket ne vsebuje OAuth zetona, aktivnih sej, hashov gesel, ICS povezav ali /etc/indus-ure.env. V isti Drive mapi je vedno datoteka `RESTORE-INDUS-URE.txt` s hitrim postopkom za IT obnovo. Ob obnovi se okoljske skrivnosti vnesejo iz locenega varnega zapisa in Google Drive se ponovno poveze.
 
 ## 8. Preverjanje po preklopu
 
@@ -228,3 +216,13 @@ sudo ln -sfn /opt/indus-ure/releases/PREJSNJI_COMMIT /opt/indus-ure/current
 # po potrebi obnovi /var/backups/indus-ure/pre-v2.dump
 sudo systemctl start indus-ure.service
 ```
+
+## Vzdrzevanje recovery navodil
+
+Ob vsaki spremembi postopka varnostne kopije, obnove, lokacije datotek ali zahtevanih okolijskih nastavitev je treba v isti izdaji:
+
+1. posodobiti ta dokument in `RESTORE-INDUS-URE.txt`;
+2. ob naslednjem uspesnem backupu objaviti novo `RESTORE-INDUS-URE.txt` v Drive recovery mapi;
+3. lastnika posebej opozoriti, da so se navodila spremenila.
+
+Sprememba postopka brez posodobljenih navodil ni zakljucena izdaja.
