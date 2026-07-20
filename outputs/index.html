@@ -9666,8 +9666,13 @@
     });
     $("copyWorkerCalendar").addEventListener("click", () => copyCalendarFeed(false).catch((error) => showNotice(error.message)));
     $("copyCombinedCalendar").addEventListener("click", () => copyCalendarFeed(true).catch((error) => showNotice(error.message)));
-    $("toolsMenu").querySelectorAll("button").forEach((button) => {
-      button.addEventListener("click", closeToolsMenu);
+    // Zapri glavni meni po vsakem dejanju, tudi ce je gumb dodan pozneje
+    // ali njegov lastni handler ustavi nadaljnje sirjenje dogodka.
+    $("toolsMenu").addEventListener("click", (event) => {
+      if (event.target.closest(".tools-menu-panel button, .tools-menu-panel a")) closeToolsMenu();
+    }, true);
+    $("toolsMenu").addEventListener("change", (event) => {
+      if (event.target.closest(".tools-menu-panel select")) closeToolsMenu();
     });
     $("toolsMenu").addEventListener("toggle", keepToolsMenuInViewport);
     window.addEventListener("resize", keepToolsMenuInViewport);
