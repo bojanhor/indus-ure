@@ -4925,7 +4925,9 @@
       state.todoStandaloneHours = false;
       if ($("todoDialog").open) $("todoDialog").close();
       if ($("debtDialog").open) $("debtDialog").close();
-      if (!isAdminView() && ["clients", "report"].includes(state.view)) state.view = "todos";
+      // Baza strank je skupna delovna evidenca: dostopna je tudi v delavskem
+      // pogledu. Samo poročila/obračun strank ostanejo šefovska funkcija.
+      if (!isAdminView() && state.view === "report") state.view = "todos";
       applyWorkContextUi();
       setView(state.view);
       render();
