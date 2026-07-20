@@ -1078,6 +1078,38 @@
       font-weight: 900;
     }
 
+    .modal-body label.todo-form-warranty {
+      display: grid;
+      grid-template-columns: 20px minmax(0, 1fr);
+      column-gap: 8px;
+      row-gap: 4px;
+      align-items: center;
+      color: var(--ink);
+    }
+
+    .modal-body label.todo-form-warranty input[type="checkbox"] {
+      grid-column: 1;
+      grid-row: 1;
+      width: 18px;
+      height: 18px;
+      min-height: 0;
+      margin: 0;
+      padding: 0;
+      accent-color: var(--accent-dark);
+    }
+
+    .todo-form-warranty > span {
+      grid-column: 2;
+      grid-row: 1;
+      font-weight: 800;
+    }
+
+    .todo-form-warranty > small {
+      grid-column: 1 / -1;
+      color: var(--muted);
+      line-height: 1.35;
+    }
+
     .todo-item.urgent { border-left: 4px solid #d93025; }
     .todo-urgent-chip { background: #d93025; color: #fff; white-space: nowrap; }
     .todo-status-chip { min-width: max-content !important; width: max-content !important; white-space: nowrap !important; }
