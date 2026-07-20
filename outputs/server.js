@@ -1858,6 +1858,29 @@ function reportPdfDriveFileLink(doc, file) {
   doc.font(reportPdfFontPath()).fillColor("#0d6d95").text(String(file?.name || "Priloga"), { link: url, underline: true });
   doc.fillColor("#263634");
 }
+function reportPdfAttachmentSummary(attachments = []) {
+  const counts = attachments.reduce((summary, attachment) => {
+    const type = String(attachment?.mimeType || "").toLowerCase();
+    if (type.startsWith("image/")) summary.photos += 1;
+    else if (type === "application/pdf") summary.pdfs += 1;
+    else summary.files += 1;
+    return summary;
+  }, { photos: 0, pdfs: 0, files: 0 });
+  const plural = (count, one, two, few, many) => count === 1 ? one : count === 2 ? two : count < 5 ? few : many;
+  return [
+    counts.photos && `${counts.photos} ${plural(counts.photos, "fotografija", "fotografiji", "fotografije", "fotografij")}`,
+    counts.pdfs && `${counts.pdfs} ${plural(counts.pdfs, "PDF dokument", "PDF dokumenta", "PDF dokumenti", "PDF dokumentov")}`,
+    counts.files && `${counts.files} ${plural(counts.files, "datoteka", "datoteki", "datoteke", "datotek")}`
+  ].filter(Boolean).join(", ");
+}
+
+function reportPdfAttachmentTitle(attachment, index) {
+  const type = String(attachment?.mimeType || "").toLowerCase();
+  if (type.startsWith("image/")) return `Fotografija ${index}`;
+  if (type === "application/pdf") return `PDF dokument ${index}`;
+  return `Priloga ${index}`;
+}
+
 function reportPdfLine(doc, label, value) {
   if (!value) return;
   doc.font(reportPdfFontPath("bold")).fillColor("#1e3430").text(`${label}: `, { continued: true });
@@ -1903,8 +1926,8 @@ function buildClientReportPdf(db, report, attachments = [], exportOptions = {}) 
         if (todo.material) reportPdfLine(doc, "Material", todo.material);
         const driveFiles = [...new Map(group.todos.flatMap((item) => item.driveFiles || []).filter((file) => file?.url).map((file) => [file.url, file])).values()];
         for (const file of driveFiles) reportPdfDriveFileLink(doc, file);
-        const groupAttachmentNames = attachments.filter((attachment) => attachment.eventId === group.eventId).map((attachment) => attachment.name);
-        if (groupAttachmentNames.length) reportPdfLine(doc, "Vkljucene priloge", groupAttachmentNames.join(", "));
+        const groupAttachments = attachments.filter((attachment) => attachment.eventId === group.eventId);
+        if (groupAttachments.length) reportPdfLine(doc, "Vkljucene priloge", reportPdfAttachmentSummary(groupAttachments));
         doc.moveDown(0.75);
         doc.strokeColor("#c8d9d5").lineWidth(1).moveTo(doc.page.margins.left, doc.y).lineTo(doc.page.width - doc.page.margins.right, doc.y).stroke();
         doc.moveDown(0.75);
@@ -1934,11 +1957,11 @@ function buildClientReportPdf(db, report, attachments = [], exportOptions = {}) 
       }
       doc.moveDown(0.5);
 
-      for (const attachment of attachments) {
+      for (const [attachmentIndex, attachment] of attachments.entries()) {
         const image = /^image\/(jpeg|png)$/i.test(String(attachment.mimeType || ""));
         if (image) {
           doc.addPage();
-          doc.font(reportPdfFontPath("bold")).fontSize(14).fillColor("#143b34").text(`Priloga: ${attachment.name}`);
+          doc.font(reportPdfFontPath("bold")).fontSize(14).fillColor("#143b34").text(reportPdfAttachmentTitle(attachment, attachmentIndex + 1));
           doc.moveDown(0.5);
           try {
             doc.image(attachment.bytes, {
