@@ -538,6 +538,8 @@ test("izvoz porocila sprejme samo izbrane dogodke in njihove priloge", async () 
   assert.throws(() => clientReportAttachmentSelection(report, ["b".repeat(64)]), /ne pripada/);
   const pdf = await buildClientReportPdf(db, report, []);
   assert.equal(pdf.subarray(0, 4).toString(), "%PDF");
+  const linkedPdf = await buildClientReportPdf(db, report, [{ ...attachments[0], mimeType: "image/jpeg", bytes: Buffer.from([0xff, 0xd8, 0xff]), filename: "dokaz.jpg", driveUrl: "https://drive.google.com/file/d/test-photo/view" }]);
+  assert.match(linkedPdf.toString("latin1"), /drive\.google\.com/);
   const raw = Buffer.from(gmailDraftRaw({
     to: "stranka@example.com",
     pdf,

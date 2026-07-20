@@ -4,6 +4,7 @@ const fsp = fs.promises;
 const path = require("path");
 const crypto = require("crypto");
 const os = require("os");
+const { Readable } = require("stream");
 const PDFDocument = require("pdfkit");
 const { PostgresStore } = require("./postgres-store");
 const {
@@ -1816,8 +1817,97 @@ async function loadClientReportAttachments(db, selected = [], { maxAttachmentByt
     const extension = attachmentMimeExtension(mimeType);
     const baseName = safeReportFileName(selectedAttachment.name || "priloga");
     const filename = extension && !baseName.toLowerCase().endsWith(extension) ? `${baseName}${extension}` : baseName;
-    attachments.push({ ...selectedAttachment, mimeType, bytes, filename });
+    const storedMetadata = db.attachments?.[selectedAttachment.id] || {};
+    attachments.push({
+      ...selectedAttachment,
+      mimeType,
+      bytes,
+      filename,
+      driveFileId: String(storedMetadata.driveFileId || ""),
+      driveUrl: String(storedMetadata.driveUrl || "")
+    });
   }
+  return attachments;
+}
+
+async function ensureClientReportAttachmentsSharedToDrive(req, db, attachments = []) {
+  if (!attachments.length) return attachments;
+  if (!googleDriveAttachmentsReady()) {
+    throw new Error("Drive mapa za priloge ni nastavljena.");
+  }
+  const owner = googleDriveOwner(db);
+  if (!owner || Number(owner.google?.driveScopeVersion || 0) !== GOOGLE_DRIVE_SCOPE_VERSION || !owner.google?.tokens) {
+    throw new Error("Bojan mora najprej v Nastavitvah povezati Google Drive.");
+  }
+
+  const { google } = require("googleapis");
+  const drive = google.drive({ version: "v3", auth: googleClient(req, owner.google.tokens) });
+  let changed = false;
+  for (const attachment of attachments) {
+    const stored = db.attachments?.[attachment.id];
+    if (!stored) throw new Error("Izbrane priloge ni vec v evidenci.");
+    const existingUrl = String(attachment.driveUrl || stored.driveUrl || "").trim();
+    if (existingUrl) {
+      attachment.driveUrl = existingUrl;
+      attachment.driveFileId = String(attachment.driveFileId || stored.driveFileId || "");
+      continue;
+    }
+
+    const extension = attachmentMimeExtension(attachment.mimeType);
+    const sourceName = cleanDriveUploadName(attachment.name || "priloga");
+    const displayName = extension && !sourceName.toLowerCase().endsWith(extension)
+      ? `${sourceName}${extension}`
+      : sourceName;
+    const name = `INDUS priloga - ${displayName}`.slice(0, 180);
+    let created = null;
+    try {
+      const response = await drive.files.create({
+        requestBody: {
+          name,
+          parents: [GOOGLE_DRIVE_ATTACHMENTS_FOLDER_ID],
+          appProperties: {
+            indusApp: INDUS_GOOGLE_APP_ID,
+            indusResource: "client-report-attachment",
+            indusAttachmentId: String(attachment.id)
+          }
+        },
+        media: { mimeType: attachment.mimeType, body: Readable.from([attachment.bytes]) },
+        fields: "id,name,mimeType,webViewLink,parents,owners(emailAddress),driveId"
+      });
+      created = response.data;
+      await drive.permissions.create({
+        fileId: created.id,
+        requestBody: { type: "anyone", role: "reader", allowFileDiscovery: false },
+        fields: "id,type,role,allowFileDiscovery"
+      });
+      const ownedByBojan = (created.owners || []).some((item) => String(item.emailAddress || "").toLowerCase() === GOOGLE_DRIVE_OWNER_EMAIL);
+      const inConfiguredFolder = (created.parents || []).includes(GOOGLE_DRIVE_ATTACHMENTS_FOLDER_ID);
+      if (!created.id || !created.webViewLink || created.driveId || !ownedByBojan || !inConfiguredFolder) {
+        throw new Error("Priloge ni bilo mogoce objaviti kot Bojanove datoteke v izbrani Drive mapi.");
+      }
+      const driveUrl = String(created.webViewLink);
+      db.attachments[attachment.id] = {
+        ...stored,
+        driveFileId: String(created.id),
+        driveUrl,
+        driveOwnerEmail: GOOGLE_DRIVE_OWNER_EMAIL,
+        driveSharedAt: new Date().toISOString()
+      };
+      attachment.driveFileId = String(created.id);
+      attachment.driveUrl = driveUrl;
+      changed = true;
+    } catch (error) {
+      if (created?.id) {
+        try {
+          await drive.files.delete({ fileId: created.id });
+        } catch (cleanupError) {
+          console.warn(`Google priloge ${created.id} ni bilo mogoce odstraniti: ${cleanupError.message || cleanupError}`);
+        }
+      }
+      throw error;
+    }
+  }
+  if (changed) await writeDbAsync(db);
   return attachments;
 }
 
@@ -1881,6 +1971,32 @@ function reportPdfAttachmentTitle(attachment, index) {
   return `Priloga ${index}`;
 }
 
+function reportPdfAttachmentLinks(doc, attachments = []) {
+  if (!attachments.length) return;
+  const shared = attachments.filter((attachment) => String(attachment?.driveUrl || "").trim());
+  if (!shared.length) {
+    reportPdfLine(doc, "Vkljucene priloge", reportPdfAttachmentSummary(attachments));
+    return;
+  }
+  doc.font(reportPdfFontPath("bold")).fillColor("#1e3430").text("Vkljucene priloge: ", { continued: true });
+  if (shared.length === 1) {
+    doc.font(reportPdfFontPath()).fillColor("#0d6d95").text(reportPdfAttachmentSummary(shared), {
+      link: shared[0].driveUrl,
+      underline: true
+    });
+  } else {
+    shared.forEach((attachment, index) => {
+      doc.font(reportPdfFontPath()).fillColor("#0d6d95").text(reportPdfAttachmentTitle(attachment, index + 1), {
+        link: attachment.driveUrl,
+        underline: true,
+        continued: index < shared.length - 1
+      });
+      if (index < shared.length - 1) doc.text(" · ", { continued: true });
+    });
+  }
+  doc.fillColor("#263634");
+}
+
 function reportPdfLine(doc, label, value) {
   if (!value) return;
   doc.font(reportPdfFontPath("bold")).fillColor("#1e3430").text(`${label}: `, { continued: true });
@@ -1927,7 +2043,7 @@ function buildClientReportPdf(db, report, attachments = [], exportOptions = {}) 
         const driveFiles = [...new Map(group.todos.flatMap((item) => item.driveFiles || []).filter((file) => file?.url).map((file) => [file.url, file])).values()];
         for (const file of driveFiles) reportPdfDriveFileLink(doc, file);
         const groupAttachments = attachments.filter((attachment) => attachment.eventId === group.eventId);
-        if (groupAttachments.length) reportPdfLine(doc, "Vkljucene priloge", reportPdfAttachmentSummary(groupAttachments));
+        if (groupAttachments.length) reportPdfAttachmentLinks(doc, groupAttachments);
         doc.moveDown(0.75);
         doc.strokeColor("#c8d9d5").lineWidth(1).moveTo(doc.page.margins.left, doc.y).lineTo(doc.page.width - doc.page.margins.right, doc.y).stroke();
         doc.moveDown(0.75);
@@ -3645,6 +3761,7 @@ async function handleApi(req, res) {
       }
       const requestedAttachments = clientReportAttachmentSelection(report, body.attachmentIds);
       const attachments = await loadClientReportAttachments(db, requestedAttachments, { destination: "PDF" });
+      await ensureClientReportAttachmentsSharedToDrive(req, db, attachments);
       const pdf = await buildClientReportPdf(db, report, attachments, body.exportOptions);
       const filename = clientReportFilename(report.client);
       res.writeHead(200, securityHeaders({
@@ -3691,6 +3808,7 @@ async function handleApi(req, res) {
         maxTotalBytes: REPORT_GMAIL_MAX_TOTAL_BYTES,
         destination: "Gmail"
       });
+      await ensureClientReportAttachmentsSharedToDrive(req, db, attachments);
       const pdf = await buildClientReportPdf(db, report, attachments, body.exportOptions);
       const filename = clientReportFilename(report.client);
       try {
