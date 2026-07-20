@@ -592,6 +592,25 @@ function normalizeDb(db = {}) {
     changed = true;
   }
 
+  if (!Array.isArray(db.appIssues)) {
+    db.appIssues = [];
+    changed = true;
+  }
+  const issuesBeforeNormalization = JSON.stringify(db.appIssues);
+  db.appIssues = db.appIssues.map((issue) => ({
+    id: String(issue?.id || crypto.randomUUID()),
+    title: String(issue?.title || "Težava v aplikaciji").trim().slice(0, 160) || "Težava v aplikaciji",
+    description: String(issue?.description || "").trim().slice(0, 4_000),
+    createdBy: cleanUserId(issue?.createdBy) || "system",
+    createdByName: String(issue?.createdByName || "").trim().slice(0, 120),
+    createdAt: String(issue?.createdAt || new Date().toISOString()),
+    status: issue?.status === "resolved" ? "resolved" : "open",
+    resolvedAt: issue?.status === "resolved" ? String(issue?.resolvedAt || "") : "",
+    resolvedBy: issue?.status === "resolved" ? cleanUserId(issue?.resolvedBy) : "",
+    resolvedByName: issue?.status === "resolved" ? String(issue?.resolvedByName || "").trim().slice(0, 120) : ""
+  })).filter((issue) => issue.description);
+  if (JSON.stringify(db.appIssues) !== issuesBeforeNormalization) changed = true;
+
   if (!db.settings || typeof db.settings !== "object") {
     db.settings = {};
     changed = true;
@@ -927,7 +946,7 @@ function normalizeDb(db = {}) {
 function ensureDb() {
   if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
   if (!fs.existsSync(dbFile)) {
-    fs.writeFileSync(dbFile, JSON.stringify({ users: defaultUsers, sessions: {}, entries: [], todos: [], attachments: {}, debts: [], clients: [], clientBills: [] }, null, 2), "utf8");
+    fs.writeFileSync(dbFile, JSON.stringify({ users: defaultUsers, sessions: {}, entries: [], todos: [], attachments: {}, debts: [], clients: [], clientBills: [], appIssues: [] }, null, 2), "utf8");
     return;
   }
 
@@ -972,6 +991,7 @@ function initialDatabaseState() {
     billingLocks: [],
     payrolls: [],
     clientBills: [],
+    appIssues: [],
     settings: {},
     calendarToken: crypto.randomBytes(24).toString("hex"),
     syncRevision: 0
@@ -1112,6 +1132,12 @@ function visibleTodosForUser(db, user) {
     ...todo,
     assigneeIds: todoAssignmentAssigneeIds(db, todo)
   }));
+}
+
+function visibleAppIssuesForUser(db, user) {
+  const issues = Array.isArray(db.appIssues) ? db.appIssues : [];
+  const visible = user.role === "boss" ? issues : issues.filter((issue) => issue.createdBy === user.id);
+  return visible.slice().sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)));
 }
 
 function hydrateDebtAttachments(db, debt) {
@@ -1330,7 +1356,7 @@ function canManageFinancialEntry(user, entry, now = new Date()) {
 function financialEntryAccessError(user, entry, label) {
   if (user?.role === "boss") return "";
   if (entry?.person !== user?.id) return `Lahko urejas samo svoj ${label}.`;
-  return `Delavec lahko ${label} popravi ali izbrise samo na dan vnosa.`;
+  return `Delavec lahko ${label} popravi ali izbriše samo na dan vnosa.`;
 }
 
 function payrollRange(input = {}) {
@@ -1354,7 +1380,7 @@ function payrollNextDate(key) {
 // duplicate, overlapping or skipped periods even if a client bypasses the UI.
 function payrollSequenceError(db, workerId, rangeInput, excludeId = "") {
   const range = payrollRange(rangeInput);
-  if (!range) return "Obracunsko obdobje ni pravilno.";
+  if (!range) return "Obračunsko obdobje ni pravilno.";
   const records = (db.payrolls || [])
     .filter((payroll) => payroll.workerId === workerId && payroll.id !== excludeId)
     .map((payroll) => ({ ...payroll, range: payrollRange(payroll) }))
@@ -1362,15 +1388,15 @@ function payrollSequenceError(db, workerId, rangeInput, excludeId = "") {
     .map((payroll) => ({ id: payroll.id, from: payroll.range.from, to: payroll.range.to }));
   if (!records.length) return "";
   const earliest = records.slice().sort((left, right) => left.from.localeCompare(right.from))[0];
-  if (range.to < earliest.from) return "Starejsega obracuna pred prvim obstojecim obracunom ni mogoce dodati.";
+  if (range.to < earliest.from) return "Starejšega obračuna pred prvim obstoječim obračunom ni mogoče dodati.";
   records.push({ id: excludeId || "candidate", from: range.from, to: range.to });
   records.sort((left, right) => left.from.localeCompare(right.from) || left.to.localeCompare(right.to));
   for (let index = 1; index < records.length; index += 1) {
     const previous = records[index - 1];
     const current = records[index];
     const expectedFrom = payrollNextDate(previous.to);
-    if (current.from < expectedFrom) return "Obracunski obdobji se prekrivata.";
-    if (current.from > expectedFrom) return `Zacetek obracuna mora biti ${expectedFrom}, neposredno po prejsnjem obracunu.`;
+    if (current.from < expectedFrom) return "Obračunski obdobji se prekrivata.";
+    if (current.from > expectedFrom) return `Začetek obračuna mora biti ${expectedFrom}, neposredno po prejšnjem obračunu.`;
   }
   return "";
 }
@@ -1775,9 +1801,9 @@ function clientReportAttachmentSelection(report, attachmentIds) {
   const requested = Array.isArray(attachmentIds)
     ? [...new Set(attachmentIds.map((id) => String(id || "").trim()).filter(Boolean))]
     : [...available.keys()];
-  if (requested.length > 1_000) throw new Error("Za en izvoz lahko izberes najvec 1000 prilog.");
+  if (requested.length > 1_000) throw new Error("Za en izvoz lahko izbereš največ 1000 prilog.");
   if (requested.some((id) => !validTodoAttachmentId(id) || !available.has(id))) {
-    throw new Error("Izbrana priloga ne pripada oznacenim vpisom porocila.");
+    throw new Error("Izbrana priloga ne pripada oznacenim vpisom poročila.");
   }
   return requested.map((id) => available.get(id));
 }
@@ -1806,7 +1832,7 @@ async function loadClientReportAttachments(db, selected = [], { maxAttachmentByt
         bytes = parsed.bytes;
       }
     }
-    if (!bytes?.length) throw new Error(`Priloge \"${selectedAttachment.name}\" ni mogoce prebrati.`);
+    if (!bytes?.length) throw new Error(`Priloge \"${selectedAttachment.name}\" ni mogoče prebrati.`);
     if (bytes.length > maxAttachmentBytes) {
       throw new Error(`Priloga \"${selectedAttachment.name}\" je prevelika za ${destination} izvoz.`);
     }
@@ -1845,7 +1871,7 @@ async function ensureClientReportAttachmentsSharedToDrive(req, db, attachments =
   let changed = false;
   for (const attachment of attachments) {
     const stored = db.attachments?.[attachment.id];
-    if (!stored) throw new Error("Izbrane priloge ni vec v evidenci.");
+    if (!stored) throw new Error("Izbrane priloge ni več v evidenci.");
     const existingUrl = String(attachment.driveUrl || stored.driveUrl || "").trim();
     if (existingUrl) {
       attachment.driveUrl = existingUrl;
@@ -1883,7 +1909,7 @@ async function ensureClientReportAttachmentsSharedToDrive(req, db, attachments =
       const ownedByBojan = (created.owners || []).some((item) => String(item.emailAddress || "").toLowerCase() === GOOGLE_DRIVE_OWNER_EMAIL);
       const inConfiguredFolder = (created.parents || []).includes(GOOGLE_DRIVE_ATTACHMENTS_FOLDER_ID);
       if (!created.id || !created.webViewLink || created.driveId || !ownedByBojan || !inConfiguredFolder) {
-        throw new Error("Priloge ni bilo mogoce objaviti kot Bojanove datoteke v izbrani Drive mapi.");
+        throw new Error("Priloge ni bilo mogoče objaviti kot Bojanove datoteke v izbrani Drive mapi.");
       }
       const driveUrl = String(created.webViewLink);
       db.attachments[attachment.id] = {
@@ -1901,7 +1927,7 @@ async function ensureClientReportAttachmentsSharedToDrive(req, db, attachments =
         try {
           await drive.files.delete({ fileId: created.id });
         } catch (cleanupError) {
-          console.warn(`Google priloge ${created.id} ni bilo mogoce odstraniti: ${cleanupError.message || cleanupError}`);
+          console.warn(`Google priloge ${created.id} ni bilo mogoče odstraniti: ${cleanupError.message || cleanupError}`);
         }
       }
       throw error;
@@ -1975,10 +2001,10 @@ function reportPdfAttachmentLinks(doc, attachments = []) {
   if (!attachments.length) return;
   const shared = attachments.filter((attachment) => String(attachment?.driveUrl || "").trim());
   if (!shared.length) {
-    reportPdfLine(doc, "Vkljucene priloge", reportPdfAttachmentSummary(attachments));
+    reportPdfLine(doc, "Vključene priloge", reportPdfAttachmentSummary(attachments));
     return;
   }
-  doc.font(reportPdfFontPath("bold")).fillColor("#1e3430").text("Vkljucene priloge: ", { continued: true });
+  doc.font(reportPdfFontPath("bold")).fillColor("#1e3430").text("Vključene priloge: ", { continued: true });
   if (shared.length === 1) {
     doc.font(reportPdfFontPath()).fillColor("#0d6d95").text(reportPdfAttachmentSummary(shared), {
       link: shared[0].driveUrl,
@@ -2017,7 +2043,7 @@ function buildClientReportPdf(db, report, attachments = [], exportOptions = {}) 
     doc.once("error", reject);
     doc.once("end", () => resolve(Buffer.concat(chunks)));
     try {
-      doc.font(reportPdfFontPath("bold")).fontSize(21).fillColor("#0d536b").text("Obracun opravljenih storitev");
+      doc.font(reportPdfFontPath("bold")).fontSize(21).fillColor("#0d536b").text("Obračun opravljenih storitev");
       doc.moveDown(0.3);
       doc.font(reportPdfFontPath()).fontSize(11).fillColor("#263634");
       reportPdfLine(doc, "Stranka", report.client?.name || "");
@@ -2145,7 +2171,7 @@ function gmailDraftRaw({ to, pdf, pdfFilename, attachments = [] }) {
 
 function clientReportFilename(client) {
   const suffix = safeReportFileName(client?.name || "stranka").replace(/\s+/g, "-");
-  return `obracun-${suffix || "stranka"}.pdf`;
+  return `obračun-${suffix || "stranka"}.pdf`;
 }
 function buildClientBillSnapshot(db, input, actor) {
   const selection = clientBillCandidates(db, input);
@@ -2390,7 +2416,7 @@ async function getSessionUser(req) {
 async function requireUser(req, res) {
   const user = await getSessionUser(req);
   if (!user) {
-    sendJson(res, 401, { error: "Prijava je potekla. Prijavi se se enkrat." });
+    sendJson(res, 401, { error: "Prijava je potekla. Prijavi se še enkrat." });
     return null;
   }
   if (!validCsrf(req, req.indusSession)) {
@@ -2408,7 +2434,7 @@ async function requireUserForSyncState(req, res) {
   const token = sessionTokenFromRequest(req);
   const record = await getPgStore().sessionWithRevision(sessionTokenHash(token));
   if (!record) {
-    sendJson(res, 401, { error: "Prijava je potekla. Prijavi se se enkrat." });
+    sendJson(res, 401, { error: "Prijava je potekla. Prijavi se še enkrat." });
     return null;
   }
   req.indusSession = record.session;
@@ -2472,11 +2498,11 @@ function cleanEntry(input) {
 }
 
 function validateEntry(entry) {
-  if (!entry.date || !entry.start || !entry.end) return "Manjka datum ali cas.";
+  if (!entry.date || !entry.start || !entry.end) return "Manjka datum ali čas.";
   if (!["errand", "vacation"].includes(entry.status) && !entry.client) return "Manjka stranka.";
-  if (!["errand", "vacation"].includes(entry.status) && !entry.clientId) return "Stranke ni bilo mogoce identificirati.";
+  if (!["errand", "vacation"].includes(entry.status) && !entry.clientId) return "Stranke ni bilo mogoče identificirati.";
   if (!/^\d{4}-\d{2}-\d{2}$/.test(entry.date)) return "Datum ni pravilen.";
-  if (!/^\d{2}:\d{2}$/.test(entry.start) || !/^\d{2}:\d{2}$/.test(entry.end)) return "Cas ni pravilen.";
+  if (!/^\d{2}:\d{2}$/.test(entry.start) || !/^\d{2}:\d{2}$/.test(entry.end)) return "Čas ni pravilen.";
   if (entry.end <= entry.start) return "Ura do mora biti kasneje kot ura od.";
   return "";
 }
@@ -2553,6 +2579,13 @@ function cleanDebt(input) {
   };
 }
 
+function cleanAppIssue(input) {
+  return {
+    title: String(input?.title || "").trim().replace(/\s+/g, " ").slice(0, 160),
+    description: String(input?.description || "").trim().slice(0, 4_000)
+  };
+}
+
 function cleanAdvance(input) {
   const photos = Array.isArray(input.photos) ? input.photos : [];
   return {
@@ -2581,12 +2614,12 @@ function cleanPersonalPurchase(input) {
 
 function validatePersonalPurchase(purchase, db) {
   const error = validateAdvance(purchase, db);
-  return error ? error.replace("zalozenega denarja", "osebnega nakupa") : "";
+  return error ? error.replace("založenega denarja", "osebnega nakupa") : "";
 }
 
 function validateAdvance(advance, db) {
   if (!advance.person || !db.users?.[advance.person]) return "Izberi delavca.";
-  if (!isDateKey(advance.date)) return "Datum zalozenega denarja ni pravilen.";
+  if (!isDateKey(advance.date)) return "Datum založenega denarja ni pravilen.";
   if (!Number.isFinite(advance.amount) || advance.amount <= 0) return "Vnesi znesek.";
   if (!advance.reason) return "Vnesi komentar.";
   if ((advance.photos || []).some((photo) => !validTodoAttachmentDataUrl(photo.data) && !validTodoAttachmentId(photo.attachmentId))) return "Priloga ni veljavna slika ali PDF.";
@@ -2595,7 +2628,7 @@ function validateAdvance(advance, db) {
 
 function validateClient(client) {
   if (!client.name) return "Manjka naziv stranke.";
-  if (client.taxId && !isUsableTaxId(client.taxId)) return "Davcna stevilka ni veljavna.";
+  if (client.taxId && !isUsableTaxId(client.taxId)) return "Davčna številka ni veljavna.";
   return "";
 }
 
@@ -2608,17 +2641,17 @@ function validateDebt(debt) {
 
 function validateTodo(todo, { requireClientId = false } = {}) {
   if (!todo.title) return "Manjka opis opravila.";
-  if (requireClientId && todo.client && !todo.clientId) return "Stranke ni bilo mogoce identificirati.";
+  if (requireClientId && todo.client && !todo.clientId) return "Stranke ni bilo mogoče identificirati.";
   if (todo.date && !/^\d{4}-\d{2}-\d{2}$/.test(todo.date)) return "Datum opravila ni pravilen.";
   if (Boolean(todo.start) !== Boolean(todo.end)) return "Vnesi obe uri: od in do.";
   if ((todo.start || todo.end) && !todo.date) return "Za opravilo z uro vnesi tudi datum.";
-  if (todo.start && (!/^\d{2}:\d{2}$/.test(todo.start) || !/^\d{2}:\d{2}$/.test(todo.end))) return "Cas opravila ni pravilen.";
-  if (todo.status === "execution" && (!todo.date || !todo.start || !todo.end)) return "Za zakljuceno opravilo vnesi datum ter uro od in do.";
+  if (todo.start && (!/^\d{2}:\d{2}$/.test(todo.start) || !/^\d{2}:\d{2}$/.test(todo.end))) return "Čas opravila ni pravilen.";
+  if (todo.status === "execution" && (!todo.date || !todo.start || !todo.end)) return "Za zaključeno opravilo vnesi datum ter uro od in do.";
   if (todo.start && todo.end <= todo.start) return "Ura do mora biti kasneje kot ura od.";
   if ((todo.photos || []).some((photo) => !validTodoAttachmentDataUrl(photo.data) && !validTodoAttachmentId(photo.attachmentId))) return "Priloga ni veljavna slika ali PDF.";
   if ((todo.photos || []).reduce((total, photo) => total + String(photo.data || "").length, 0) > MAX_TODO_ATTACHMENTS_DATA_LENGTH) return "Priloge so skupaj prevelike.";
   if ((todo.photos || []).some((photo) => photo.thumbnailData && !validTodoThumbnailDataUrl(photo.thumbnailData))) return "Predogled PDF priloge ni veljaven.";
-  if ((todo.driveFiles || []).length > 12) return "Najvec je 12 Google dokumentov, preglednic ali videov na opravilo.";
+  if ((todo.driveFiles || []).length > 12) return "Največ je 12 Google dokumentov, preglednic ali videov na opravilo.";
   if ((todo.driveFiles || []).some((file) => {
     const info = googleDriveFileInfo(file?.url);
     return !validGoogleDriveId(file?.fileId) || !info || info.fileId !== file.fileId || (file.kind && info.kind !== file.kind);
@@ -2780,7 +2813,7 @@ function googleDriveOwner(db) {
 
 async function createManagedGoogleDriveFile(req, db, actor, input = {}) {
   if (!googleDriveTasksReady()) {
-    throw new Error("Google Dokumenti niso nastavljeni: manjka mapa ali Bojanov e-naslov v okolju streznika.");
+    throw new Error("Google Dokumenti niso nastavljeni: manjka mapa ali Bojanov e-naslov v okolju strežnika.");
   }
   const owner = googleDriveOwner(db);
   if (!owner || Number(owner.google?.driveScopeVersion || 0) !== GOOGLE_DRIVE_SCOPE_VERSION || !owner.google?.tokens) {
@@ -2789,7 +2822,7 @@ async function createManagedGoogleDriveFile(req, db, actor, input = {}) {
   const kind = input.kind === "spreadsheet" ? "spreadsheet" : input.kind === "document" ? "document" : "";
   if (!kind) throw new Error("Izberi Google Dokument ali Google Preglednico.");
   const title = String(input.title || "").trim();
-  if (!title) throw new Error("Najprej vpisi ime opravila.");
+  if (!title) throw new Error("Najprej vpiši ime opravila.");
   const client = String(input.client || "").trim();
   const name = [client, title].filter(Boolean).join(" - ").slice(0, 180);
   const { google } = require("googleapis");
@@ -2820,7 +2853,7 @@ async function createManagedGoogleDriveFile(req, db, actor, input = {}) {
     const ownedByBojan = (created.owners || []).some((item) => String(item.emailAddress || "").toLowerCase() === GOOGLE_DRIVE_OWNER_EMAIL);
     const inConfiguredFolder = (created.parents || []).includes(GOOGLE_DRIVE_TASKS_FOLDER_ID);
     if (!created.id || !created.webViewLink || created.driveId || !ownedByBojan || !inConfiguredFolder) {
-      throw new Error("Google datoteke ni bilo mogoce ustvariti kot Bojanovo datoteko v izbrani mapi.");
+      throw new Error("Google datoteke ni bilo mogoče ustvariti kot Bojanovo datoteko v izbrani mapi.");
     }
     return {
       id: crypto.randomUUID(),
@@ -2839,7 +2872,7 @@ async function createManagedGoogleDriveFile(req, db, actor, input = {}) {
       try {
         await drive.files.delete({ fileId: created.id });
       } catch (cleanupError) {
-        console.warn(`Google osnutka ${created.id} ni bilo mogoce odstraniti: ${cleanupError.message || cleanupError}`);
+        console.warn(`Google osnutka ${created.id} ni bilo mogoče odstraniti: ${cleanupError.message || cleanupError}`);
       }
     }
     throw error;
@@ -3539,7 +3572,7 @@ async function handleApi(req, res) {
 
     if (url.pathname === "/api/auth/google-url" && req.method === "GET") {
       if (!googleReady()) {
-        sendJson(res, 400, { error: "Google prijava se ni nastavljena na strezniku." });
+        sendJson(res, 400, { error: "Google prijava se ni nastavljena na strežniku." });
         return;
       }
       cleanupPendingGoogleStates();
@@ -3566,11 +3599,11 @@ async function handleApi(req, res) {
       const user = await requireUser(req, res);
       if (!user) return;
       if (String(user.email || "").toLowerCase() !== GOOGLE_DRIVE_OWNER_EMAIL) {
-        sendJson(res, 403, { error: "Google Dokumente lahko poveze samo Bojanov racun." });
+        sendJson(res, 403, { error: "Google Dokumente lahko poveže samo Bojanov račun." });
         return;
       }
       if (!googleDriveTasksReady()) {
-        sendJson(res, 400, { error: "Google Dokumenti niso nastavljeni: manjka mapa ali Bojanov e-naslov v okolju streznika." });
+        sendJson(res, 400, { error: "Google Dokumenti niso nastavljeni: manjka mapa ali Bojanov e-naslov v okolju strežnika." });
         return;
       }
       cleanupPendingGoogleStates();
@@ -3623,7 +3656,7 @@ async function handleApi(req, res) {
         const db = await readDbAsync();
         const user = userByEmail(db, email);
         if (!user) {
-          sendText(res, 403, "Ta Google racun nima dostopa do INDUS URE. Dovoljena sta samo Ibro in Bojan.", "text/plain");
+          sendText(res, 403, "Ta Google račun nima dostopa do INDUS URE. Dovoljena sta samo Ibro in Bojan.", "text/plain");
           return;
         }
         const sessionToken = createSession(db, user.id);
@@ -3646,18 +3679,18 @@ async function handleApi(req, res) {
       const db = await readDbAsync();
       const user = db.users[pending.userId];
       if (!user) {
-        sendText(res, 401, "Uporabnik ne obstaja vec.", "text/plain");
+        sendText(res, 401, "Uporabnik ne obstaja več.", "text/plain");
         return;
       }
       user.google = user.google || {};
       if (pending.kind !== "drive") {
-        sendText(res, 400, "Ta Google povezava ni vec podprta.", "text/plain");
+        sendText(res, 400, "Ta Google povezava ni več podprta.", "text/plain");
         return;
       }
       const currentDriveScope = Number(user.google?.driveScopeVersion || 0) === GOOGLE_DRIVE_SCOPE_VERSION;
       const refreshToken = result.tokens.refresh_token || (currentDriveScope ? user.google.tokens?.refresh_token : "");
       if (!refreshToken) {
-        sendText(res, 400, "Google ni vrnil trajnega dovoljenja. V Google racunu odstrani dostop INDUS URE in poskusi znova.", "text/plain");
+        sendText(res, 400, "Google ni vrnil trajnega dovoljenja. V Google računu odstrani dostop INDUS URE in poskusi znova.", "text/plain");
         return;
       }
       user.google = {
@@ -3666,7 +3699,7 @@ async function handleApi(req, res) {
         driveScopeVersion: GOOGLE_DRIVE_SCOPE_VERSION
       };
       await writeDbAsync(db);
-      sendText(res, 200, "Google Dokumenti, preglednice, Gmail osnutki in backup so povezani. Lahko zapres to okno in se vrnes v INDUS URE.", "text/plain");
+      sendText(res, 200, "Google Dokumenti, preglednice, Gmail osnutki in backup so povezani. Lahko zapreš to okno in se vrneš v INDUS URE.", "text/plain");
       return;
     }
 
@@ -3733,6 +3766,65 @@ async function handleApi(req, res) {
       sendJson(res, 200, { users });
       return;
     }
+    if (url.pathname === "/api/app-issues" && req.method === "GET") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      const db = await readDbAsync();
+      sendJson(res, 200, { issues: visibleAppIssuesForUser(db, user) });
+      return;
+    }
+
+    if (url.pathname === "/api/app-issues" && req.method === "POST") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      const issue = cleanAppIssue(await readBody(req));
+      if (!issue.description) {
+        sendJson(res, 400, { error: "Vpiši opis težave." });
+        return;
+      }
+      const db = await readDbAsync();
+      const record = {
+        id: crypto.randomUUID(),
+        title: issue.title || "Težava v aplikaciji",
+        description: issue.description,
+        createdBy: user.id,
+        createdByName: user.name,
+        createdAt: new Date().toISOString(),
+        status: "open",
+        resolvedAt: "",
+        resolvedBy: "",
+        resolvedByName: ""
+      };
+      db.appIssues.push(record);
+      await writeDbAsync(db);
+      sendJson(res, 201, { issue: record, issues: visibleAppIssuesForUser(db, user) });
+      return;
+    }
+
+    const appIssueMatch = url.pathname.match(/^\/api\/app-issues\/([^/]+)$/);
+    if (appIssueMatch && req.method === "PATCH") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      if (user.role !== "boss") {
+        sendJson(res, 403, { error: "Težave lahko ureja samo šef." });
+        return;
+      }
+      const db = await readDbAsync();
+      const issue = (db.appIssues || []).find((item) => item.id === decodeURIComponent(appIssueMatch[1]));
+      if (!issue) {
+        sendJson(res, 404, { error: "Težave ni bilo mogoče najti." });
+        return;
+      }
+      const body = await readBody(req);
+      issue.status = body.status === "resolved" ? "resolved" : "open";
+      issue.resolvedAt = issue.status === "resolved" ? new Date().toISOString() : "";
+      issue.resolvedBy = issue.status === "resolved" ? user.id : "";
+      issue.resolvedByName = issue.status === "resolved" ? user.name : "";
+      await writeDbAsync(db);
+      sendJson(res, 200, { issue, issues: visibleAppIssuesForUser(db, user) });
+      return;
+    }
+
     if (url.pathname === "/api/payrolls" && req.method === "GET") {
       const user = await requireUser(req, res);
       if (!user) return;
@@ -3745,18 +3837,18 @@ async function handleApi(req, res) {
       const user = await requireUser(req, res);
       if (!user) return;
       if (user.role !== "boss") {
-        sendJson(res, 403, { error: "PDF porocilo za stranko lahko pripravi samo sef." });
+        sendJson(res, 403, { error: "PDF poročilo za stranko lahko pripravi samo šef." });
         return;
       }
       const body = await readBody(req);
       if (body.eventIds !== undefined && !Array.isArray(body.eventIds)) {
-        sendJson(res, 400, { error: "Izbrani vpisi za porocilo niso pravilni." });
+        sendJson(res, 400, { error: "Izbrani vpisi za poročilo niso pravilni." });
         return;
       }
       const db = await readDbAsync();
       const report = clientReportSelection(db, body);
       if (!report) {
-        sendJson(res, 409, { error: "Izbrani vpisi niso vec na voljo za porocilo. Osvezi pogled in preveri izbor." });
+        sendJson(res, 409, { error: "Izbrani vpisi niso več na voljo za poročilo. Osvezi pogled in preveri izbor." });
         return;
       }
       const requestedAttachments = clientReportAttachmentSelection(report, body.attachmentIds);
@@ -3778,23 +3870,23 @@ async function handleApi(req, res) {
       const user = await requireUser(req, res);
       if (!user) return;
       if (user.role !== "boss" || String(user.email || "").toLowerCase() !== GOOGLE_DRIVE_OWNER_EMAIL) {
-        sendJson(res, 403, { error: "Gmail osnutek lahko ustvari samo Bojanov racun." });
+        sendJson(res, 403, { error: "Gmail osnutek lahko ustvari samo Bojanov račun." });
         return;
       }
       const body = await readBody(req);
       if (body.eventIds !== undefined && !Array.isArray(body.eventIds)) {
-        sendJson(res, 400, { error: "Izbrani vpisi za porocilo niso pravilni." });
+        sendJson(res, 400, { error: "Izbrani vpisi za poročilo niso pravilni." });
         return;
       }
       const db = await readDbAsync();
       const owner = googleDriveOwner(db);
       if (!googleReady() || !owner || Number(owner.google?.driveScopeVersion || 0) !== GOOGLE_DRIVE_SCOPE_VERSION || !owner.google?.tokens) {
-        sendJson(res, 409, { error: "V Nastavitvah kot Bojan najprej ponovno povezi Google Dokumente, preglednice in Gmail." });
+        sendJson(res, 409, { error: "V Nastavitvah kot Bojan najprej ponovno poveži Google Dokumente, preglednice in Gmail." });
         return;
       }
       const report = clientReportSelection(db, body);
       if (!report) {
-        sendJson(res, 409, { error: "Izbrani vpisi niso vec na voljo za porocilo. Osvezi pogled in preveri izbor." });
+        sendJson(res, 409, { error: "Izbrani vpisi niso več na voljo za poročilo. Osvezi pogled in preveri izbor." });
         return;
       }
       const email = String(report.client?.email || "").trim();
@@ -3820,8 +3912,8 @@ async function handleApi(req, res) {
         });
         sendJson(res, 201, { ok: true, draftId: String(draft.data?.id || ""), email });
       } catch (error) {
-        console.error("Gmail osnutka ni bilo mogoce ustvariti:", error.message || error);
-        sendJson(res, 502, { error: "Gmail osnutka ni bilo mogoce ustvariti. V Nastavitvah ponovno povezi Google racun in poskusi znova." });
+        console.error("Gmail osnutka ni bilo mogoče ustvariti:", error.message || error);
+        sendJson(res, 502, { error: "Gmail osnutka ni bilo mogoče ustvariti. V Nastavitvah ponovno poveži Google račun in poskusi znova." });
       }
       return;
     }
@@ -3829,7 +3921,7 @@ async function handleApi(req, res) {
       const user = await requireUser(req, res);
       if (!user) return;
       if (user.role !== "boss") {
-        sendJson(res, 403, { error: "Obracune strank vidi samo sef." });
+        sendJson(res, 403, { error: "Obračune strank vidi samo šef." });
         return;
       }
       const db = await readDbAsync();
@@ -3841,38 +3933,38 @@ async function handleApi(req, res) {
       const user = await requireUser(req, res);
       if (!user) return;
       if (user.role !== "boss") {
-        sendJson(res, 403, { error: "Obracun stranki lahko potrdi samo sef." });
+        sendJson(res, 403, { error: "Obračun stranki lahko potrdi samo šef." });
         return;
       }
       const body = await readBody(req);
       if (body.eventIds !== undefined && !Array.isArray(body.eventIds)) {
-        sendJson(res, 400, { error: "Izbrani vpisi za obracun niso pravilni." });
+        sendJson(res, 400, { error: "Izbrani vpisi za obračun niso pravilni." });
         return;
       }
       if (Array.isArray(body.eventIds)) {
         body.eventIds = [...new Set(body.eventIds.map((id) => String(id || "").trim()).filter(Boolean))];
         if (!body.eventIds.length) {
-          sendJson(res, 400, { error: "Oznaci vsaj en vpis za obracun stranki." });
+          sendJson(res, 400, { error: "Označi vsaj en vpis za obračun stranki." });
           return;
         }
         if (body.eventIds.length > 2_000) {
-          sendJson(res, 400, { error: "Za en obracun lahko izberes najvec 2000 vpisov." });
+          sendJson(res, 400, { error: "Za en obračun lahko izbereš največ 2000 vpisov." });
           return;
         }
       }
       if ((body.from && !isDateKey(body.from)) || (body.to && !isDateKey(body.to)) || (body.from && body.to && body.from > body.to)) {
-        sendJson(res, 400, { error: "Obdobje obracuna stranki ni pravilno." });
+        sendJson(res, 400, { error: "Obdobje obračuna stranki ni pravilno." });
         return;
       }
       const db = await readDbAsync();
       const client = clientForBilling(db, body);
       if (!client) {
-        sendJson(res, 400, { error: "Stranke ni bilo mogoce prepoznati." });
+        sendJson(res, 400, { error: "Stranke ni bilo mogoče prepoznati." });
         return;
       }
       const clientBill = buildClientBillSnapshot(db, { ...body, clientId: client.clientId, clientName: client.name }, user);
       if (!clientBill) {
-        sendJson(res, 409, { error: Array.isArray(body.eventIds) ? "Eden ali vec oznacenih vpisov ni vec na voljo za obracun. Osvezi porocilo in preveri izbor." : "Za to stranko v izbranem obdobju ni novih zakljucenih storitev za obracun." });
+        sendJson(res, 409, { error: Array.isArray(body.eventIds) ? "Eden ali več označenih vpisov ni več na voljo za obračun. Osvezi poročilo in preveri izbor." : "Za to stranko v izbranem obdobju ni novih zaključenih storitev za obračun." });
         return;
       }
       db.clientBills.push(clientBill);
@@ -3887,13 +3979,13 @@ async function handleApi(req, res) {
       const user = await requireUser(req, res);
       if (!user) return;
       if (user.role !== "boss") {
-        sendJson(res, 403, { error: "Obracun stranki lahko preklice samo sef." });
+        sendJson(res, 403, { error: "Obračun stranki lahko prekliče samo šef." });
         return;
       }
       const db = await readDbAsync();
       const result = cancelClientBill(db, clientBillDeleteMatch[1], user);
       if (!result) {
-        sendJson(res, 404, { error: "Potrjenega obracuna stranki ni bilo mogoce najti." });
+        sendJson(res, 404, { error: "Potrjenega obračuna stranki ni bilo mogoče najti." });
         return;
       }
       await writeDbAsync(db);
@@ -3904,18 +3996,18 @@ async function handleApi(req, res) {
       const user = await requireUser(req, res);
       if (!user) return;
       if (user.role !== "boss") {
-        sendJson(res, 403, { error: "Samo sef lahko potrdi obracun." });
+        sendJson(res, 403, { error: "Samo šef lahko potrdi obračun." });
         return;
       }
       const body = await readBody(req);
       const workerId = cleanUserId(body.workerId);
       const range = payrollRange(body);
       if (!workerId || !range) {
-        sendJson(res, 400, { error: "Delavec ali obracunsko obdobje ni pravilno." });
+        sendJson(res, 400, { error: "Delavec ali obračunsko obdobje ni pravilno." });
         return;
       }
       if (!payrollPeriodEnded(range)) {
-        sendJson(res, 409, { error: "Obracun lahko potrdis sele po koncu izbranega obracunskega meseca." });
+        sendJson(res, 409, { error: "Obračun lahko potrdiš šele po koncu izbranega obračunskega meseca." });
         return;
       }
       const db = await readDbAsync();
@@ -3931,7 +4023,7 @@ async function handleApi(req, res) {
         return;
       }
       if (previous.status && !["draft", "archiving"].includes(previous.status)) {
-        sendJson(res, 409, { error: "Ta obracun je ze potrjen ali placan." });
+        sendJson(res, 409, { error: "Ta obračun je že potrjen ali plačan." });
         return;
       }
       const now = new Date().toISOString();
@@ -3958,7 +4050,7 @@ async function handleApi(req, res) {
         }, body.note);
       }
       if (!payroll?.lines.length) {
-        sendJson(res, 400, { error: "Za izbrano obdobje delavec nima zakljucenih vnosov ur." });
+        sendJson(res, 400, { error: "Za izbrano obdobje delavec nima zaključenih vnosov ur." });
         return;
       }
       if (existingIndex >= 0) db.payrolls[existingIndex] = payroll;
@@ -4074,7 +4166,7 @@ async function handleApi(req, res) {
       const user = await requireUser(req, res);
       if (!user) return;
       if (user.role !== "boss") {
-        sendJson(res, 403, { error: "Samo sef lahko potrjuje ali odpira obracune." });
+        sendJson(res, 403, { error: "Samo šef lahko potrjuje ali odpira obračune." });
         return;
       }
       const body = await readBody(req);
@@ -4082,13 +4174,13 @@ async function handleApi(req, res) {
       const db = await readDbAsync();
       const index = db.payrolls.findIndex((payroll) => payroll.id === decodeURIComponent(payrollMatch[1]));
       if (index < 0) {
-        sendJson(res, 404, { error: "Obracun ne obstaja." });
+        sendJson(res, 404, { error: "Obračun ne obstaja." });
         return;
       }
       const current = db.payrolls[index];
       const now = new Date().toISOString();
       if (action === "confirm" && !payrollPeriodEnded(current)) {
-        sendJson(res, 409, { error: "Obracun lahko potrdis sele po koncu izbranega obracunskega meseca." });
+        sendJson(res, 409, { error: "Obračun lahko potrdiš šele po koncu izbranega obračunskega meseca." });
         return;
       }
       if (action === "confirm") {
@@ -4101,7 +4193,7 @@ async function handleApi(req, res) {
       let payroll;
       if (action === "refresh") {
         if (current.status !== "draft") {
-          sendJson(res, 409, { error: "Potrjen obracun najprej ponovno odpri." });
+          sendJson(res, 409, { error: "Potrjen obračun najprej ponovno odpri." });
           return;
         }
         payroll = buildPayrollSnapshot(db, current.workerId, current, {
@@ -4125,7 +4217,7 @@ async function handleApi(req, res) {
             updatedAt: now
           }, body.note);
         if (!payroll?.lines.length) {
-          sendJson(res, 400, { error: "Obracun nima zakljucenih vnosov ur." });
+          sendJson(res, 400, { error: "Obračun nima zaključenih vnosov ur." });
           return;
         }
         db.payrolls[index] = payroll;
@@ -4142,7 +4234,7 @@ async function handleApi(req, res) {
         }, db);
       } else if (action === "paid") {
         if (current.status !== "confirmed") {
-          sendJson(res, 409, { error: "Kot placanega lahko oznacis samo potrjen obracun." });
+          sendJson(res, 409, { error: "Kot plačanega lahko označiš samo potrjen obračun." });
           return;
         }
         payroll = normalizePayroll({
@@ -4158,12 +4250,12 @@ async function handleApi(req, res) {
         }, db);
       } else if (action === "reopen") {
         if (current.status === "draft") {
-          sendJson(res, 409, { error: "Obracun je ze odprt za popravke." });
+          sendJson(res, 409, { error: "Obračun je že odprt za popravke." });
           return;
         }
         const clientBill = clientBillLockForTodos(db, payrollTodosForArchive(db, current));
         if (clientBill) {
-          sendJson(res, 409, { error: `Obracun vsebuje vnos, ki je ze v potrjenem obracunu stranki ${clientBill.clientName}. Najprej je potreben kontroliran popravek obracuna stranki.` });
+          sendJson(res, 409, { error: `Obračun vsebuje vnos, ki je že v potrjenem obračunu stranki ${clientBill.clientName}. Najprej je potreben kontroliran popravek obračuna stranki.` });
           return;
         }
         payroll = buildPayrollSnapshot(db, current.workerId, current, {
@@ -4177,11 +4269,11 @@ async function handleApi(req, res) {
           paidByName: ""
         }, body.note);
       } else {
-        sendJson(res, 400, { error: "Neznano dejanje obracuna." });
+        sendJson(res, 400, { error: "Neznano dejanje obračuna." });
         return;
       }
       if (!payroll?.lines.length) {
-        sendJson(res, 400, { error: "Obracun nima zakljucenih vnosov ur." });
+        sendJson(res, 400, { error: "Obračun nima zaključenih vnosov ur." });
         return;
       }
       db.payrolls[index] = payroll;
@@ -4195,17 +4287,17 @@ async function handleApi(req, res) {
       const user = await requireUser(req, res);
       if (!user) return;
       if (user.role !== "boss") {
-        sendJson(res, 403, { error: "Samo sef lahko brise osnutek obracuna." });
+        sendJson(res, 403, { error: "Samo šef lahko briše osnutek obračuna." });
         return;
       }
       const db = await readDbAsync();
       const index = db.payrolls.findIndex((payroll) => payroll.id === decodeURIComponent(payrollMatch[1]));
       if (index < 0) {
-        sendJson(res, 404, { error: "Obracun ne obstaja." });
+        sendJson(res, 404, { error: "Obračun ne obstaja." });
         return;
       }
       if (db.payrolls[index].status !== "draft") {
-        sendJson(res, 409, { error: "Potrjenega obracuna ni mogoce izbrisati; najprej ga ponovno odpri." });
+        sendJson(res, 409, { error: "Potrjenega obračuna ni mogoče izbrisati; najprej ga ponovno odpri." });
         return;
       }
       const deleting = db.payrolls[index];
@@ -4223,7 +4315,7 @@ async function handleApi(req, res) {
       const user = await requireUser(req, res);
       if (!user) return;
       if (user.role !== "boss") {
-        sendJson(res, 403, { error: "Samo sef lahko vidi urne postavke delavcev." });
+        sendJson(res, 403, { error: "Samo šef lahko vidi urne postavke delavcev." });
         return;
       }
       const db = await readDbAsync();
@@ -4242,7 +4334,7 @@ async function handleApi(req, res) {
       const user = await requireUser(req, res);
       if (!user) return;
       if (user.role !== "boss") {
-        sendJson(res, 403, { error: "Samo sef lahko spreminja urne postavke delavcev." });
+        sendJson(res, 403, { error: "Samo šef lahko spreminja urne postavke delavcev." });
         return;
       }
       const body = await readBody(req);
@@ -4291,7 +4383,7 @@ async function handleApi(req, res) {
     }
 
     if (url.pathname === "/api/password" && req.method === "PUT") {
-      sendJson(res, 410, { error: "Gesla se ne spreminja v aplikaciji. Prijava je vezana na Google racun." });
+      sendJson(res, 410, { error: "Gesla se ne spreminja v aplikaciji. Prijava je vezana na Google račun." });
       return;
     }
 
@@ -4319,7 +4411,7 @@ async function handleApi(req, res) {
         .map((id) => String(id || "").trim())
         .filter(Boolean))];
       if (todoIds.length < 2 || todoIds.length > 500) {
-        sendJson(res, 400, { error: "Za razvrscanje posreduj vsaj dve opravili." });
+        sendJson(res, 400, { error: "Za razvrščanje posreduj vsaj dve opravili." });
         return;
       }
       const db = await readDbAsync();
@@ -4328,11 +4420,11 @@ async function handleApi(req, res) {
       const editLockTokens = body.editLockTokens && typeof body.editLockTokens === "object" ? body.editLockTokens : {};
       for (const todo of todos) {
         if (!todo || !canManageTodo(user, todo)) {
-          sendJson(res, 403, { error: "Tega vrstnega reda ne smes spreminjati." });
+          sendJson(res, 403, { error: "Tega vrstnega reda ne smeš spreminjati." });
           return;
         }
         if (todo.done || todo.urgent || todo.status === "meal") {
-          sendJson(res, 400, { error: "Izbranega opravila ni mogoce rocno razvrscati." });
+          sendJson(res, 400, { error: "Izbranega opravila ni mogoče ročno razvrščati." });
           return;
         }
         const editLock = todoAssignmentEditLockConflict(db, todo, user, String(editLockTokens[todo.id] || ""));
@@ -4373,7 +4465,7 @@ async function handleApi(req, res) {
       const user = await requireUser(req, res);
       if (!user) return;
       if (user.role !== "boss") {
-        sendJson(res, 403, { error: "Samo sef lahko spreminja obracunske nastavitve." });
+        sendJson(res, 403, { error: "Samo šef lahko spreminja obračunske nastavitve." });
         return;
       }
       const body = await readBody(req);
@@ -4415,7 +4507,7 @@ async function handleApi(req, res) {
       if (advance.projectTodoId) {
         const project = db.todos.find((todo) => todo.id === advance.projectTodoId);
         if (!project || !["execution", "open", "in_progress", "internal"].includes(project.status)) {
-          sendJson(res, 400, { error: "Povezano opravilo ni vec odprto." });
+          sendJson(res, 400, { error: "Povezano opravilo ni več odprto." });
           return;
         }
       }
@@ -4442,18 +4534,18 @@ async function handleApi(req, res) {
       const id = decodeURIComponent(advanceMatch[1]);
       const db = await readDbAsync();
       const index = db.debts.findIndex((item) => item.id === id && item.type === "advance");
-      if (index < 0) { sendJson(res, 404, { error: "Zalozeni znesek ne obstaja." }); return; }
+      if (index < 0) { sendJson(res, 404, { error: "Založeni znesek ne obstaja." }); return; }
       const existing = db.debts[index];
-      if (!canManageFinancialEntry(user, existing)) { sendJson(res, 403, { error: financialEntryAccessError(user, existing, "zalozeni znesek") }); return; }
+      if (!canManageFinancialEntry(user, existing)) { sendJson(res, 403, { error: financialEntryAccessError(user, existing, "založeni znesek") }); return; }
       const usedInConfirmedPayroll = (db.payrolls || []).some((payroll) => ["archiving", "confirmed", "paid"].includes(payroll.status) && (payroll.advanceIds || []).map(String).includes(id));
-      if (usedInConfirmedPayroll && user.role !== "boss") { sendJson(res, 409, { error: "Zalozeni znesek je ze del potrjenega obracuna." }); return; }
+      if (usedInConfirmedPayroll && user.role !== "boss") { sendJson(res, 409, { error: "Založeni znesek je že del potrjenega obračuna." }); return; }
       let advance = cleanAdvance(await readBody(req));
       if (user.role !== "boss") advance.person = existing.person;
       const validation = validateAdvance(advance, db);
       if (validation) { sendJson(res, 400, { error: validation }); return; }
       if (advance.projectTodoId) {
         const project = db.todos.find((todo) => todo.id === advance.projectTodoId);
-        if (!project || !["execution", "open", "in_progress", "internal"].includes(project.status)) { sendJson(res, 400, { error: "Povezano opravilo ni vec odprto." }); return; }
+        if (!project || !["execution", "open", "in_progress", "internal"].includes(project.status)) { sendJson(res, 400, { error: "Povezano opravilo ni več odprto." }); return; }
       }
       advance = storeTodoAttachments(db, advance, user);
       db.debts[index] = { ...existing, ...advance, id, type: "advance", updatedBy: user.id, updatedByName: user.name, updatedAt: new Date().toISOString() };
@@ -4474,7 +4566,7 @@ async function handleApi(req, res) {
       }
       const advance = db.debts[index];
       if (!canManageFinancialEntry(user, advance)) {
-        sendJson(res, 403, { error: financialEntryAccessError(user, advance, "zalozeni znesek") });
+        sendJson(res, 403, { error: financialEntryAccessError(user, advance, "založeni znesek") });
         return;
       }
       const usedInConfirmedPayroll = (db.payrolls || []).some((payroll) => ["archiving", "confirmed", "paid"].includes(payroll.status)
@@ -4536,7 +4628,7 @@ async function handleApi(req, res) {
       const existing = db.debts[index];
       if (!canManageFinancialEntry(user, existing)) { sendJson(res, 403, { error: financialEntryAccessError(user, existing, "osebni nakup") }); return; }
       const usedInConfirmedPayroll = (db.payrolls || []).some((payroll) => ["archiving", "confirmed", "paid"].includes(payroll.status) && (payroll.personalPurchaseIds || []).map(String).includes(id));
-      if (usedInConfirmedPayroll && user.role !== "boss") { sendJson(res, 409, { error: "Osebni nakup je ze del potrjenega obracuna." }); return; }
+      if (usedInConfirmedPayroll && user.role !== "boss") { sendJson(res, 409, { error: "Osebni nakup je že del potrjenega obračuna." }); return; }
       let purchase = cleanPersonalPurchase(await readBody(req));
       if (user.role !== "boss") purchase.person = existing.person;
       const validation = validatePersonalPurchase(purchase, db);
@@ -4587,7 +4679,7 @@ async function handleApi(req, res) {
       const user = await requireUser(req, res);
       if (!user) return;
       if (user.role !== "boss") {
-        sendJson(res, 403, { error: "Samo sef lahko ureja dolgove." });
+        sendJson(res, 403, { error: "Samo šef lahko ureja dolgove." });
         return;
       }
       const debt = cleanDebt(await readBody(req));
@@ -4648,7 +4740,7 @@ async function handleApi(req, res) {
       const user = await requireUser(req, res);
       if (!user) return;
       if (user.role !== "boss") {
-        sendJson(res, 403, { error: "Samo Bojan lahko zaklene obracun." });
+        sendJson(res, 403, { error: "Samo Bojan lahko zaklene obračun." });
         return;
       }
       const body = await readBody(req);
@@ -4663,7 +4755,7 @@ async function handleApi(req, res) {
         id: crypto.randomUUID(),
         from,
         to,
-        note: String(body.note || "Obracunano").trim(),
+        note: String(body.note || "Obračunano").trim(),
         createdBy: user.id,
         createdByName: user.name,
         createdAt: new Date().toISOString()
@@ -4678,7 +4770,7 @@ async function handleApi(req, res) {
       const user = await requireUser(req, res);
       if (!user) return;
       if (user.role !== "boss") {
-        sendJson(res, 403, { error: "Samo sef lahko ureja dolgove." });
+        sendJson(res, 403, { error: "Samo šef lahko ureja dolgove." });
         return;
       }
       const id = decodeURIComponent(debtMatch[1]);
@@ -4710,7 +4802,7 @@ async function handleApi(req, res) {
       const user = await requireUser(req, res);
       if (!user) return;
       if (user.role !== "boss") {
-        sendJson(res, 403, { error: "Samo sef lahko ureja dolgove." });
+        sendJson(res, 403, { error: "Samo šef lahko ureja dolgove." });
         return;
       }
       const id = decodeURIComponent(debtMatch[1]);
@@ -4744,7 +4836,7 @@ async function handleApi(req, res) {
       const newOrder = todo.order || minOrder - 1;
       const assigneeIds = todoAssigneesForRequest(user, body.assigneeIds || todo.syncUser, db.users);
       if (todo.status === "execution" && assigneeIds.length !== 1) {
-        sendJson(res, 400, { error: "Zakljucene ure se vpisujejo posebej za enega delavca." });
+        sendJson(res, 400, { error: "Zaključene ure se vpisujejo posebej za enega delavca." });
         return;
       }
       const assignmentGroupId = crypto.randomUUID();
@@ -4822,7 +4914,7 @@ async function handleApi(req, res) {
       const db = await readDbAsync();
       const sourceTodo = sourceTodoForNewEntry(db, user, entry);
       if (!sourceTodo) {
-        sendJson(res, 400, { error: "Nov koledarski vnos lahko ustvaris samo iz svojega opravila z istim datumom." });
+        sendJson(res, 400, { error: "Nov koledarski vnos lahko ustvariš samo iz svojega opravila z istim datumom." });
         return;
       }
       entry = attachResolvedClient(db, entry);
@@ -4860,7 +4952,7 @@ async function handleApi(req, res) {
       const db = await readDbAsync();
       const entry = db.entries.find((item) => item.id === id);
       if (!canManageEntry(user, entry)) {
-        sendJson(res, 403, { error: "Tega vnosa ne mores urejati." });
+        sendJson(res, 403, { error: "Tega vnosa ne moreš urejati." });
         return;
       }
       const result = acquireEntryEditLock(id, user, body.lockToken);
@@ -4908,7 +5000,7 @@ async function handleApi(req, res) {
         return;
       }
       if (!canManageEntry(user, db.entries[index])) {
-        sendJson(res, 403, { error: "Tega vnosa ne mores spreminjati." });
+        sendJson(res, 403, { error: "Tega vnosa ne moreš spreminjati." });
         return;
       }
       const editLock = entryEditLockConflict(id, user, editLockToken);
@@ -4918,7 +5010,7 @@ async function handleApi(req, res) {
       }
       entry = entryForUserRole(user, entry, db.entries[index]);
       if (user.role !== "boss" && entryIsLocked(db, db.entries[index]) && lockedFieldChanged(db.entries[index], entry)) {
-        sendJson(res, 403, { error: "To obdobje je obracunano. Ure, kilometrina in start od doma so zaklenjeni." });
+        sendJson(res, 403, { error: "To obdobje je obračunano. Ure, kilometrina in start od doma so zaklenjeni." });
         return;
       }
       entry.sourceTodoId = db.entries[index].sourceTodoId || "";
@@ -4946,7 +5038,7 @@ async function handleApi(req, res) {
       const db = await readDbAsync();
       const entry = db.entries.find((item) => item.id === id);
       if (!canManageEntry(user, entry)) {
-        sendJson(res, 403, { error: "Tega vnosa ne mores izbrisati." });
+        sendJson(res, 403, { error: "Tega vnosa ne moreš izbrisati." });
         return;
       }
       const editLock = entryEditLockConflict(id, user, editLockToken);
@@ -4955,7 +5047,7 @@ async function handleApi(req, res) {
         return;
       }
       if (user.role !== "boss" && entryIsLocked(db, entry)) {
-        sendJson(res, 403, { error: "To obdobje je obracunano. Vnosa ne mores izbrisati." });
+        sendJson(res, 403, { error: "To obdobje je obračunano. Vnosa ne moreš izbrisati." });
         return;
       }
       db.entries = db.entries.filter((item) => item.id !== id);
@@ -4974,7 +5066,7 @@ async function handleApi(req, res) {
       const db = await readDbAsync();
       const todo = db.todos.find((item) => item.id === id);
       if (!canManageTodo(user, todo)) {
-        sendJson(res, 403, { error: "Tega opravila ne mores urejati." });
+        sendJson(res, 403, { error: "Tega opravila ne moreš urejati." });
         return;
       }
       const result = acquireTodoAssignmentEditLock(db, todo, user, body.lockToken);
@@ -5012,7 +5104,7 @@ async function handleApi(req, res) {
       const db = await readDbAsync();
       const previousTodo = db.todos.find((item) => item.id === id);
       if (!canManageTodo(user, previousTodo)) {
-        sendJson(res, 403, { error: "Tega opravila ne mores spreminjati." });
+        sendJson(res, 403, { error: "Tega opravila ne moreš spreminjati." });
         return;
       }
       const editLock = todoAssignmentEditLockConflict(db, previousTodo, user, editLockToken);
@@ -5033,12 +5125,12 @@ async function handleApi(req, res) {
       const assignmentItems = todoAssignmentItems(db, previousTodo);
       const payrollLock = payrollLockForTodos(db, assignmentItems);
       if (payrollLock) {
-        sendJson(res, 403, { error: `Opravilo je del potrjenega obracuna za ${db.users?.[payrollLock.workerId]?.name || payrollLock.workerId} (${payrollLock.month}). Sef ga mora najprej ponovno odpreti.` });
+        sendJson(res, 403, { error: `Opravilo je del potrjenega obračuna za ${db.users?.[payrollLock.workerId]?.name || payrollLock.workerId} (${payrollLock.month}). Šef ga mora najprej ponovno odpreti.` });
         return;
       }
       const clientBillLock = clientBillLockForTodos(db, assignmentItems);
       if (clientBillLock) {
-        sendJson(res, 403, { error: `Opravilo je ze v potrjenem obracunu stranki ${clientBillLock.clientName} in ga ni vec mogoce spreminjati.` });
+        sendJson(res, 403, { error: `Opravilo je že v potrjenem obračunu stranki ${clientBillLock.clientName} in ga ni več mogoče spreminjati.` });
         return;
       }
       const now = new Date().toISOString();
@@ -5051,7 +5143,7 @@ async function handleApi(req, res) {
         updatedBy: user.id,
         updatedByName: user.name,
         updatedAt: now,
-        history: [...(item.history || []), audit(user, date === previousTodo.date ? "prestavljen v casovnici" : `prestavljen na ${date} v casovnici`)]
+        history: [...(item.history || []), audit(user, date === previousTodo.date ? "prestavljen v časovnici" : `prestavljen na ${date} v časovnici`)]
       } : item);
       await writeDbAsync(db);
       releaseTodoAssignmentEditLock(db, previousTodo, user, editLockToken);
@@ -5085,7 +5177,7 @@ async function handleApi(req, res) {
         return;
       }
       if (!canManageTodo(user, db.todos[index])) {
-        sendJson(res, 403, { error: "Tega opravila ne mores spreminjati." });
+        sendJson(res, 403, { error: "Tega opravila ne moreš spreminjati." });
         return;
       }
       const previousTodo = db.todos[index];
@@ -5103,12 +5195,12 @@ async function handleApi(req, res) {
       const assignmentItems = todoAssignmentItems(db, previousTodo);
       const payrollLock = payrollLockForTodos(db, assignmentItems);
       if (payrollLock) {
-        sendJson(res, 403, { error: `Opravilo je del potrjenega obracuna za ${db.users?.[payrollLock.workerId]?.name || payrollLock.workerId} (${payrollLock.month}). Sef ga mora najprej ponovno odpreti.` });
+        sendJson(res, 403, { error: `Opravilo je del potrjenega obračuna za ${db.users?.[payrollLock.workerId]?.name || payrollLock.workerId} (${payrollLock.month}). Šef ga mora najprej ponovno odpreti.` });
         return;
       }
       const clientBillLock = clientBillLockForTodos(db, assignmentItems);
       if (clientBillLock) {
-        sendJson(res, 403, { error: `Opravilo je ze v potrjenem obracunu stranki ${clientBillLock.clientName} in ga ni vec mogoce spreminjati.` });
+        sendJson(res, 403, { error: `Opravilo je že v potrjenem obračunu stranki ${clientBillLock.clientName} in ga ni več mogoče spreminjati.` });
         return;
       }
       const currentAssigneeIds = todoAssignmentAssigneeIds(db, previousTodo);
@@ -5128,7 +5220,7 @@ async function handleApi(req, res) {
       }
 
       if (todo.status === "execution" && assigneeIds.length !== 1) {
-        sendJson(res, 400, { error: "Zakljucene ure se vpisujejo posebej za enega delavca." });
+        sendJson(res, 400, { error: "Zaključene ure se vpisujejo posebej za enega delavca." });
         return;
       }
       const desiredAssignees = new Set(assigneeIds);
@@ -5174,7 +5266,7 @@ releaseTodoAssignmentEditLock(db, previousTodo, user, editLockToken);
             updatedAt: now,
             history: [...(existing.history || []), audit(user, assignmentsChanged
               ? `dodelitev spremenjena: ${assigneeNames}`
-              : todo.done ? "oznaceno opravljeno" : "spremenjeno opravilo")]
+              : todo.done ? "označeno opravljeno" : "spremenjeno opravilo")]
           });
           continue;
         }
@@ -5223,7 +5315,7 @@ releaseTodoAssignmentEditLock(db, previousTodo, user, editLockToken);
       const db = await readDbAsync();
       const todo = db.todos.find((item) => item.id === id);
       if (!canManageTodo(user, todo)) {
-        sendJson(res, 403, { error: "Tega opravila ne mores izbrisati." });
+        sendJson(res, 403, { error: "Tega opravila ne moreš izbrisati." });
         return;
       }
       const editLock = todoAssignmentEditLockConflict(db, todo, user, editLockToken);
@@ -5240,12 +5332,12 @@ releaseTodoAssignmentEditLock(db, previousTodo, user, editLockToken);
       const assignmentItems = todoAssignmentItems(db, todo);
       const payrollLock = payrollLockForTodos(db, assignmentItems);
       if (payrollLock) {
-        sendJson(res, 403, { error: `Opravilo je del potrjenega obracuna za ${db.users?.[payrollLock.workerId]?.name || payrollLock.workerId} (${payrollLock.month}). Sef ga mora najprej ponovno odpreti.` });
+        sendJson(res, 403, { error: `Opravilo je del potrjenega obračuna za ${db.users?.[payrollLock.workerId]?.name || payrollLock.workerId} (${payrollLock.month}). Šef ga mora najprej ponovno odpreti.` });
         return;
       }
       const clientBillLock = clientBillLockForTodos(db, assignmentItems);
       if (clientBillLock) {
-        sendJson(res, 403, { error: `Opravilo je ze v potrjenem obracunu stranki ${clientBillLock.clientName} in ga ni vec mogoce izbrisati.` });
+        sendJson(res, 403, { error: `Opravilo je že v potrjenem obračunu stranki ${clientBillLock.clientName} in ga ni več mogoče izbrisati.` });
         return;
       }
 releaseTodoAssignmentEditLock(db, todo, user, editLockToken);
@@ -5262,7 +5354,7 @@ releaseTodoAssignmentEditLock(db, todo, user, editLockToken);
     sendJson(res, 404, { error: "API pot ne obstaja." });
   } catch (error) {
     console.error("API napaka:", error);
-    const message = NODE_ENV === "production" ? "Napaka na strezniku." : (error.message || "Napaka na strezniku.");
+    const message = NODE_ENV === "production" ? "Napaka na strežniku." : (error.message || "Napaka na strežniku.");
     sendJson(res, 500, { error: message });
   }
 }
@@ -5285,7 +5377,7 @@ async function handleCalendarFeed(req, res) {
     }), "text/calendar");
   } catch (error) {
     console.error("Napaka koledarskega feeda:", error);
-    const message = NODE_ENV === "production" ? "Napaka na strezniku." : (error.message || "Napaka na strezniku.");
+    const message = NODE_ENV === "production" ? "Napaka na strežniku." : (error.message || "Napaka na strežniku.");
     sendText(res, 500, message, "text/plain");
   }
 }
@@ -5298,7 +5390,7 @@ function networkUrls() {
       .filter((item) => item && item.family === "IPv4" && !item.internal)
       .map((item) => `http://${item.address}:${PORT}`);
   } catch (error) {
-    console.warn(`Omreznih URL-jev ni bilo mogoce prebrati: ${error.message || error}`);
+    console.warn(`Omrežnih URL-jev ni bilo mogoče prebrati: ${error.message || error}`);
     return [];
   }
 }
@@ -5306,7 +5398,7 @@ function networkUrls() {
 function handleUnexpectedRequestError(error, res) {
   console.error("Nepricakovana napaka zahtevka:", error);
   if (!res.headersSent) {
-    sendJson(res, 500, { error: "Napaka na strezniku." });
+    sendJson(res, 500, { error: "Napaka na strežniku." });
   } else {
     res.destroy();
   }
@@ -5357,7 +5449,7 @@ async function start() {
 
   server.listen(PORT, HOST, () => {
     console.log(`INDUS URE lokalno: http://127.0.0.1:${PORT}`);
-    for (const url of networkUrls()) console.log(`Na istem omrezju: ${url}`);
+    for (const url of networkUrls()) console.log(`Na istem omrežju: ${url}`);
     console.log("Uporabnika: bojan in ibro");
   });
 
@@ -5429,8 +5521,10 @@ module.exports = {
   googleDriveFileInfo,
   googleWorkspaceFileInfo,
   cleanTodoDriveFiles,
+  cleanAppIssue,
   validateTodo,
   visibleDebtsForUser,
   visibleEntriesForUser,
-  visibleTodosForUser
+  visibleTodosForUser,
+  visibleAppIssuesForUser
 };

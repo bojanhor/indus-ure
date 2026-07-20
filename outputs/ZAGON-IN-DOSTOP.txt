@@ -6,22 +6,22 @@ Uporabnika:
 
 Gesla se nastavijo prek Render Environment ali lokalnih okoljskih spremenljivk.
 
-Zagon na tem racunalniku:
+Zagon na tem računalniku:
 1. Odpri PowerShell v mapi outputs.
 2. Zazeni:
    C:\Users\Uporabnik\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe server.js
-3. Na tem racunalniku odpri:
+3. Na tem računalniku odpri:
    http://127.0.0.1:8123
 
-Dostop z druge naprave na istem Wi-Fi/omrezju:
-- Odpri naslov, ki ga izpise streznik pod "Na istem omrezju".
+Dostop z druge naprave na istem Wi-Fi/omrežju:
+- Odpri naslov, ki ga izpiše strežnik pod "Na istem omrežju".
 - Trenutno je bil zaznan:
   http://192.168.1.14:8123
-- Ce se stran ne odpre, mora Windows Firewall dovoliti Node.js ali vrata 8123.
+- Če se stran ne odpre, mora Windows Firewall dovoliti Node.js ali vrata 8123.
 
 Dostop od kjerkoli prek interneta:
-- Za pravo javno uporabo mora aplikacija teci na gostovanju, VPS strezniku,
-  domacem racunalniku s port forwardingom, ali prek tunela, npr. Cloudflare Tunnel.
+- Za pravo javno uporabo mora aplikacija teci na gostovanju, VPS strežniku,
+  domačem računalniku s port forwardingom, ali prek tunela, npr. Cloudflare Tunnel.
 - Ko bosta pripravljena, lahko naslednji korak naredimo tako, da aplikacijo
   pripravimo za objavo z domeno in HTTPS.
 

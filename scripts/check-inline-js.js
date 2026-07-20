@@ -14,4 +14,4 @@ scripts.forEach((match, index) => {
   new vm.Script(match[1], { filename: `outputs/index.html#script-${index + 1}` });
 });
 
-console.log(`Inline JavaScript: ${scripts.length} skript brez sintakticnih napak.`);
+console.log(`Inline JavaScript: ${scripts.length} skript brez sintaktičnih napak.`);

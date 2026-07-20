@@ -19,6 +19,7 @@ const {
   clientReportSelection,
   clientReportAttachmentSelection,
   buildClientReportPdf,
+  cleanAppIssue,
   gmailDraftRaw,
   cancelClientBill,
   clientBillLockForTodos,
@@ -51,7 +52,8 @@ const {
   validTodoAttachmentDataUrl,
   visibleDebtsForUser,
   visibleEntriesForUser,
-  visibleTodosForUser
+  visibleTodosForUser,
+  visibleAppIssuesForUser
 } = require("../outputs/server");
 
 const boss = { id: "bojan", role: "boss" };
@@ -71,11 +73,23 @@ const db = {
   ]
 };
 
-test("sef vidi vse, delavec pa samo svoje podatke", () => {
+test("šef vidi vse, delavec pa samo svoje podatke", () => {
   assert.equal(visibleEntriesForUser(db, boss).length, 2);
   assert.deepEqual(visibleEntriesForUser(db, worker).map((item) => item.id), ["e1"]);
   assert.deepEqual(visibleTodosForUser(db, worker).map((item) => item.id), ["t1"]);
   assert.deepEqual(visibleDebtsForUser(db, worker).map((item) => item.id), ["d1"]);
+});
+
+test("težave aplikacije so vidne šefu, delavcu pa samo njegove", () => {
+  const issueDb = {
+    appIssues: [
+      { id: "i1", title: "Koledar", description: "Dogodek se ne odpre.", createdBy: "ibro", createdAt: "2026-07-20T08:00:00.000Z", status: "open" },
+      { id: "i2", title: "Obračun", description: "Preveri znesek.", createdBy: "bojan", createdAt: "2026-07-20T09:00:00.000Z", status: "resolved" }
+    ]
+  };
+  assert.equal(cleanAppIssue({ title: "  Koledar  ", description: "  Ne dela  " }).title, "Koledar");
+  assert.deepEqual(visibleAppIssuesForUser(issueDb, worker).map((issue) => issue.id), ["i1"]);
+  assert.deepEqual(visibleAppIssuesForUser(issueDb, boss).map((issue) => issue.id), ["i2", "i1"]);
 });
 
 test("vsako opravilo dobi skriti skupni ID dogodka", () => {
@@ -104,7 +118,7 @@ test("vsak delavec vidi vse dodeljene osebe skupnega opravila", () => {
   assert.deepEqual(todoAssignmentItems(groupedDb, visible[0]).map((item) => item.id), ["shared-ibro", "shared-bojan"]);
 });
 
-test("seje prezivijo restart in v bazi ne hranijo dejanskega zetona", () => {
+test("seje preživijo restart in v bazi ne hranijo dejanskega žetona", () => {
   const now = 10_000;
   const sessionDb = { sessions: {} };
   const token = createSession(sessionDb, "bojan", now);
@@ -148,7 +162,7 @@ test("lastnik opravila ga lahko preda veljavnemu delavcu", () => {
   assert.equal(todoAssigneeForUpdate(boss, "ibro", "bojan", users), "ibro");
 });
 
-test("delavski vnos ne more nastaviti obracuna ali racuna", () => {
+test("delavski vnos ne more nastaviti obračuna ali računa", () => {
   const created = entryForUserRole(worker, {
     syncUser: "bojan",
     status: "billed",
@@ -174,7 +188,7 @@ test("delavski vnos ne more nastaviti obracuna ali racuna", () => {
 
   assert.equal(existing.invoicePaid, false);
 });
-test("delavec v zakljucenem vnosu ur lahko navede kilometrino za stranko", () => {
+test("delavec v zaključenem vnosu ur lahko navede kilometrino za stranko", () => {
   const billingDb = {
     users: {
       bojan: { id: "bojan", role: "boss", billing: { hourlyRate: 25 } },
@@ -269,7 +283,7 @@ test("nov koledarski vnos mora izvirati iz lastnega opravila z istim datumom", (
   assert.equal(sourceTodoForNewEntry(sourceDb, worker, ownEntry), null);
 });
 
-test("koledarski vnos lahko istocasno ureja samo en uporabnik ali zavihek", () => {
+test("koledarski vnos lahko istočasno ureja samo en uporabnik ali zavihek", () => {
   const entryId = "entry-lock-test";
   const bojan = { id: "bojan", name: "Bojan", role: "boss" };
   const ibro = { id: "ibro", name: "Ibro", role: "worker" };
@@ -298,7 +312,7 @@ test("koledarski vnos lahko istocasno ureja samo en uporabnik ali zavihek", () =
   assert.equal(releaseEntryEditLock(entryId, ibro, afterExpiry.token, startedAt + 10 + ENTRY_EDIT_LOCK_TTL_MS + 2), true);
 });
 
-test("isto opravilo lahko istocasno ureja samo en uporabnik ali zavihek", () => {
+test("isto opravilo lahko istočasno ureja samo en uporabnik ali zavihek", () => {
   const todoId = "todo-lock-test";
   const bojan = { id: "bojan", name: "Bojan", role: "boss" };
   const ibro = { id: "ibro", name: "Ibro", role: "worker" };
@@ -431,24 +445,24 @@ test("osebni nakup se odšteje od izplačila delavca", () => {
   assert.equal(payroll.personalPurchaseAmount, 7.5);
   assert.equal(payroll.payoutAmount, 32.5);
 });
-test("obracun je mogoce potrditi sele po koncu izbranega meseca", () => {
+test("obračun je mogoče potrditi šele po koncu izbranega meseca", () => {
   assert.equal(payrollPeriodEnded("2026-07", new Date("2026-07-31T12:00:00Z")), false);
   assert.equal(payrollPeriodEnded("2026-07", new Date("2026-08-01T12:00:00Z")), true);
   assert.equal(payrollPeriodEnded("2026-08", new Date("2026-08-01T12:00:00Z")), false);
 });
-test("obracunska obdobja delavca morajo biti neprekinjena", () => {
+test("obračunska obdobja delavca morajo biti neprekinjena", () => {
   const payrollDb = {
     payrolls: [
       { id: "june", workerId: "ibro", from: "2026-06-01", to: "2026-06-30", status: "confirmed" }
     ]
   };
   assert.equal(payrollSequenceError(payrollDb, "ibro", { from: "2026-07-01", to: "2026-07-31" }), "");
-  assert.match(payrollSequenceError(payrollDb, "ibro", { from: "2026-08-01", to: "2026-08-31" }), /Zacetek obracuna mora biti 2026-07-01/);
-  assert.match(payrollSequenceError(payrollDb, "ibro", { from: "2026-05-01", to: "2026-05-31" }), /Starejsega obracuna/);
+  assert.match(payrollSequenceError(payrollDb, "ibro", { from: "2026-08-01", to: "2026-08-31" }), /Začetek obračuna mora biti 2026-07-01/);
+  assert.match(payrollSequenceError(payrollDb, "ibro", { from: "2026-05-01", to: "2026-05-31" }), /Starejšega obračuna/);
   assert.match(payrollSequenceError(payrollDb, "ibro", { from: "2026-06-15", to: "2026-07-15" }), /prekrivata/);
 });
 
-test("delavec lahko zalozeni znesek ali osebni nakup ureja samo na dan vnosa, sef pa vedno", () => {
+test("delavec lahko založeni znesek ali osebni nakup ureja samo na dan vnosa, šef pa vedno", () => {
   const entry = { person: "ibro", date: "2026-07-19" };
   const sameDay = new Date("2026-07-19T12:00:00+02:00");
   const nextDay = new Date("2026-07-20T12:00:00+02:00");
@@ -518,7 +532,7 @@ test("prevoz za stranko obdrži samo kilometre brez denarne tarife", () => {
   const bill = buildClientBillSnapshot(billingDb, { clientId: "jerin", eventIds: ["project-km"] }, boss);
   assert.equal(bill.lines[0].clientKmRate, 0);
 });
-test("izvoz porocila sprejme samo izbrane dogodke in njihove priloge", async () => {
+test("izvoz poročila sprejme samo izbrane dogodke in njihove priloge", async () => {
   const attachmentId = "a".repeat(64);
   const db = {
     users: { bojan: { id: "bojan", name: "Bojan", role: "boss" } },
@@ -543,7 +557,7 @@ test("izvoz porocila sprejme samo izbrane dogodke in njihove priloge", async () 
   const raw = Buffer.from(gmailDraftRaw({
     to: "stranka@example.com",
     pdf,
-    pdfFilename: "obracun.pdf",
+    pdfFilename: "obračun.pdf",
     attachments: []
   }), "base64url").toString("utf8");
   assert.match(raw, /Subject: =\?UTF-8\?B\?/);

@@ -24,7 +24,7 @@ V meniju šef vidi dva ločena mehanizma:
 
 - **Prenesi varnostno kopijo (ZIP)**: ročna, prenosljiva kopija podatkov in
   prilog. Ne vsebuje OAuth žetonov, gesel ali strežniških skrivnosti.
-- **Nocni recovery backup**: PostgreSQL, priloge, koda aplikacije in hitra navodila v preverjenem paketu na Google Drive. Paket nima OAuth zetona, sej, hashov gesel ali strezniskih skrivnosti.
+- **Nočni recovery backup**: PostgreSQL, priloge, koda aplikacije in hitra navodila v preverjenem paketu na Google Drive. Paket nima OAuth žetona, sej, hashov gesel ali strežniških skrivnosti.
 
 Podrobna namestitev, migracija in obnova so v
 [DEPLOY-UBUNTU.md](DEPLOY-UBUNTU.md).
@@ -47,4 +47,4 @@ npm test
 
 Testi preverijo sintakso, dostopne vloge, lokalno identiteto strank, odstranitev
 Sheets/Calendar poti, varne seje, PWA in backup poti.
-- Video priloge se pretocno shranijo v Google Drive in so v porocilu le kot povezave.
+- Video priloge se pretočno shranijo v Google Drive in so v poročilu le kot povezave.

@@ -16,7 +16,7 @@ const { normalizeDb, pruneUnusedAdHocClients, validateTodo } = require("../outpu
 const serverPath = path.join(__dirname, "../outputs/server.js");
 const storePath = path.join(__dirname, "../outputs/postgres-store.js");
 
-test("davcna stevilka je poslovni podatek, trajni ID pa UUID", () => {
+test("davčna številka je poslovni podatek, trajni ID pa UUID", () => {
   const id = createClientId();
   assert.equal(isStableClientId(id), true);
   assert.equal(normalizeTaxId(" tax:si 123-45678 "), "SI12345678");
@@ -33,7 +33,7 @@ test("ad-hoc stranka lahko obstaja samo z vzdevkom", () => {
   assert.equal(isStableClientId(client.clientId), true);
 });
 
-test("stari uvozeni zapis dobi lokalni trajni ID brez zunanje povezave", () => {
+test("stari uvoženi zapis dobi lokalni trajni ID brez zunanje povezave", () => {
   const id = "3956478d-92e9-425d-8a1e-3d58c7937ded";
   const client = normalizeStoredClient({ id, clientId: id, name: "NOVAK d.o.o.", search: "Novak", source: "external-import", sheetRow: 8 });
   assert.equal(client.clientId, id);
@@ -49,7 +49,7 @@ test("iskanje stranke vedno vrne njen lokalni ID", () => {
   assert.equal(resolveStableClientId(clients, "ne obstaja"), "");
 });
 
-test("normalizacija obdrzi reference opravil na lokalno stranko", () => {
+test("normalizacija obdrži reference opravil na lokalno stranko", () => {
   const id = createClientId();
   const database = {
     users: {},
@@ -63,12 +63,12 @@ test("normalizacija obdrzi reference opravil na lokalno stranko", () => {
   assert.equal(database.todos[0].client, "ABC RENT");
 });
 
-test("opravilo zahteva prepoznano stranko sele po razresitvi", () => {
-  assert.equal(validateTodo({ title: "Servis", client: "Jerin", clientId: "" }, { requireClientId: true }), "Stranke ni bilo mogoce identificirati.");
+test("opravilo zahteva prepoznano stranko šele po razrešitvi", () => {
+  assert.equal(validateTodo({ title: "Servis", client: "Jerin", clientId: "" }, { requireClientId: true }), "Stranke ni bilo mogoče identificirati.");
   assert.equal(validateTodo({ title: "Interno", client: "", clientId: "" }, { requireClientId: true }), "");
 });
 
-test("stranke so v relacijski tabeli; Sheet API ni del streznika", () => {
+test("stranke so v relacijski tabeli; Sheet API ni del strežnika", () => {
   const source = fs.readFileSync(serverPath, "utf8");
   const store = fs.readFileSync(storePath, "utf8");
   assert.match(store, /create table if not exists indus_clients/);
@@ -85,7 +85,7 @@ test("nevezana ad-hoc stranka se odstrani, povezana pa ostane", () => {
     entries: [],
     clients: [
       normalizeStoredClient({ clientId: usedId, name: "ABC RENT", search: "Jerin", source: "ad-hoc" }),
-      normalizeStoredClient({ clientId: staleId, name: "Začasna", search: "Zacasna", source: "ad-hoc" })
+      normalizeStoredClient({ clientId: staleId, name: "Začasna", search: "Začasna", source: "ad-hoc" })
     ]
   };
   assert.equal(pruneUnusedAdHocClients(database), true);

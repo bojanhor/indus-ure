@@ -554,7 +554,7 @@ class PostgresStore {
 
   async #writeMedia(storageKey, buffer) {
     const target = this.#safeMediaPath(storageKey);
-    if (!target) throw new Error("Neveljaven kljuc priloge.");
+    if (!target) throw new Error("Neveljaven ključ priloge.");
     await fsp.mkdir(path.dirname(target), { recursive: true, mode: 0o700 });
     const temp = `${target}.${process.pid}.${Date.now()}.tmp`;
     await fsp.writeFile(temp, buffer, { mode: 0o600 });

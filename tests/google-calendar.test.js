@@ -16,7 +16,7 @@ const {
 const serverPath = path.join(__dirname, "../outputs/server.js");
 const htmlPath = path.join(__dirname, "../outputs/index.html");
 
-test("Google Calendar in Sheets nista vec delovni integraciji", () => {
+test("Google Calendar in Sheets nista več delovni integraciji", () => {
   const source = fs.readFileSync(serverPath, "utf8");
   assert.doesNotMatch(source, /async function syncGoogleForUser/);
   assert.doesNotMatch(source, /syncClientsWithSheets/);
@@ -83,8 +83,8 @@ test("Drive priponke sprejmejo Dokumente, Preglednice in upravljane videe", () =
   assert.equal(files[1].mimeType, "video/mp4");
 });
 
-test("zakljuceno opravilo se brez datuma in ur zavrne", () => {
-  assert.equal(validateTodo({ title: "Delo", status: "execution", date: "", start: "", end: "" }), "Za zakljuceno opravilo vnesi datum ter uro od in do.");
+test("zaključeno opravilo se brez datuma in ur zavrne", () => {
+  assert.equal(validateTodo({ title: "Delo", status: "execution", date: "", start: "", end: "" }), "Za zaključeno opravilo vnesi datum ter uro od in do.");
   assert.equal(validateTodo({ title: "Delo", status: "execution", date: "2026-07-20", start: "08:00", end: "09:00" }), "");
 });
 

@@ -1,4 +1,4 @@
-# INDUS URE na Ubuntu strezniku
+# INDUS URE na Ubuntu strežniku
 
 Produkcijska pot:
 
@@ -88,9 +88,9 @@ Google OAuth client potrebuje redirect URL natanko
 `https://ure.indus.si/api/google/callback`. Google Drive API naj bo omogočen.
 Bojanova potrjena Drive mapa ostane v njegovem My Drive; aplikacija lahko v
 njej ustvarja Dokumente in Preglednice, katerih lastnik je Bojan. Zunanje
-Google datoteke se samo pripnejo kot povezave. Video priloge se pretocno
+Google datoteke se samo pripnejo kot povezave. Video priloge se pretočno
 shranijo v GOOGLE_DRIVE_ATTACHMENTS_FOLDER_ID, zato ne zasedajo diska ali
-pomnilnika streznika. Vsaka nova aplikacijsko ustvarjena Drive priloga dobi
+pomnilnika strežnika. Vsaka nova aplikacijsko ustvarjena Drive priloga dobi
 dovoljenje **anyone with the link / viewer** (ni iskalna po Drive); lokalne slike
 in PDF-ji pa ostanejo zasebne priloge aplikacije.
 
@@ -188,9 +188,9 @@ sudo systemctl start indus-ure-backup.service
 sudo systemctl status indus-ure-backup.service --no-pager
 ```
 
-Nocni backup naredi obnovljiv paket PostgreSQL baze, prilog in kode aplikacije. Pred nalaganjem preveri vsebino arhiva; po nalaganju Google Drive ponovno preveri velikost in MD5 ter sveze prebere metapodatke. Ob neuspehu se takoj ustvari sistemsko opozorilo v aplikaciji in po SMTP, ce je nastavljen.
+Nočni backup naredi obnovljiv paket PostgreSQL baze, prilog in kode aplikacije. Pred nalaganjem preveri vsebino arhiva; po nalaganju Google Drive ponovno preveri velikost in MD5 ter sveže prebere metapodatke. Ob neuspehu se takoj ustvari sistemsko opozorilo v aplikaciji in po SMTP, če je nastavljen.
 
-Paket ne vsebuje OAuth zetona, aktivnih sej, hashov gesel, ICS povezav ali /etc/indus-ure.env. V isti Drive mapi je vedno datoteka `RESTORE-INDUS-URE.txt` s hitrim postopkom za IT obnovo. Ob obnovi se okoljske skrivnosti vnesejo iz locenega varnega zapisa in Google Drive se ponovno poveze.
+Paket ne vsebuje OAuth žetona, aktivnih sej, hashov gesel, ICS povezav ali /etc/indus-ure.env. V isti Drive mapi je vedno datoteka `RESTORE-INDUS-URE.txt` s hitrim postopkom za IT obnovo. Ob obnovi se okoljske skrivnosti vnesejo iz ločenega varnega zapisa in Google Drive se ponovno poveže.
 
 ## 8. Preverjanje po preklopu
 
@@ -222,7 +222,7 @@ sudo systemctl start indus-ure.service
 Ob vsaki spremembi postopka varnostne kopije, obnove, lokacije datotek ali zahtevanih okolijskih nastavitev je treba v isti izdaji:
 
 1. posodobiti ta dokument in `RESTORE-INDUS-URE.txt`;
-2. ob naslednjem uspesnem backupu objaviti novo `RESTORE-INDUS-URE.txt` v Drive recovery mapi;
+2. ob naslednjem uspešnem backupu objaviti novo `RESTORE-INDUS-URE.txt` v Drive recovery mapi;
 3. lastnika posebej opozoriti, da so se navodila spremenila.
 
-Sprememba postopka brez posodobljenih navodil ni zakljucena izdaja.
+Sprememba postopka brez posodobljenih navodil ni zaključena izdaja.

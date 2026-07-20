@@ -19,7 +19,7 @@ function Invoke-Native {
 
   & $Command @Arguments
   if ($LASTEXITCODE -ne 0) {
-    throw "Ukaz '$Command' se je koncal z izhodno kodo $LASTEXITCODE."
+    throw "Ukaz '$Command' se je končal z izhodno kodo $LASTEXITCODE."
   }
 }
 
@@ -28,15 +28,15 @@ Push-Location $repoRoot
 
 try {
   if (-not (Test-Path -LiteralPath $IdentityFile -PathType Leaf)) {
-    throw "SSH kljuc ne obstaja: $IdentityFile"
+    throw "SSH ključ ne obstaja: $IdentityFile"
   }
 
   $dirty = (& git status --porcelain)
   if ($LASTEXITCODE -ne 0) {
-    throw "Ni mogoce preveriti Git delovnega drevesa."
+    throw "Ni mogoče preveriti Git delovnega drevesa."
   }
   if ($dirty) {
-    throw "Delovno drevo ni cisto. Spremembe najprej commitaj."
+    throw "Delovno drevo ni čisto. Spremembe najprej commitaj."
   }
 
   if (-not $SkipTests) {
@@ -48,7 +48,7 @@ try {
 
   $fullCommit = (& git rev-parse HEAD).Trim()
   if ($LASTEXITCODE -ne 0 -or $fullCommit -notmatch '^[0-9a-f]{40}$') {
-    throw "Ni mogoce dolociti trenutnega commita."
+    throw "Ni mogoče dolociti trenutnega commita."
   }
   $release = $fullCommit.Substring(0, 7)
 

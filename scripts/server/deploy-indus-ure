@@ -48,7 +48,7 @@ if [[ "$restart_ok" != true ]] || ! systemctl is-active --quiet indus-ure; then
     ln -sfn "$previous" "$current"
     systemctl restart indus-ure
   fi
-  echo "Zagon nove izdaje ni uspel; povrnjena je prejsnja izdaja." >&2
+  echo "Zagon nove izdaje ni uspel; povrnjena je prejšnja izdaja." >&2
   exit 4
 fi
 

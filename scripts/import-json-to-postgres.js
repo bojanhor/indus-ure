@@ -42,7 +42,7 @@ async function main() {
     `);
     const existing = await client.query("select 1 from app_state where id = $1", ["main"]);
     if (existing.rowCount && !force) {
-      throw new Error("Vrstica app_state/main ze obstaja. Najprej naredi backup; nato ponovi z --force.");
+      throw new Error("Vrstica app_state/main že obstaja. Najprej naredi backup; nato ponovi z --force.");
     }
     await client.query(
       `insert into app_state (id, data, updated_at)

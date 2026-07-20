@@ -28,7 +28,7 @@ if [[ "$actual_checksum" != "$expected_checksum" ]]; then
 fi
 
 if [[ -e "$staging" ]]; then
-  echo "Zacasna mapa izdaje ze obstaja: $staging" >&2
+  echo "Začasna mapa izdaje že obstaja: $staging" >&2
   exit 4
 fi
 

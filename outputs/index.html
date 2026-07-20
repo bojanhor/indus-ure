@@ -520,6 +520,15 @@
       background: #e4eee9;
     }
 
+    .menu-action.menu-link {
+      display: block;
+      text-decoration: none;
+    }
+
+    .app-issue-description {
+      white-space: pre-wrap;
+    }
+
     .menu-action.view-menu-action.active {
       background: #dce9e2;
       color: var(--accent-dark);
@@ -1710,6 +1719,12 @@
       gap: 8px;
     }
 
+    .client-search-results {
+      display: grid;
+      gap: 8px;
+      margin: 4px 0 8px;
+    }
+
     .client-row {
       display: grid;
       grid-template-columns: 1fr auto;
@@ -1742,6 +1757,19 @@
     .day-todo.done {
       opacity: 0.55;
       text-decoration: line-through;
+    }
+
+    .day-todo.month-drag-armed { cursor: grab; }
+    .day-todo.month-dragging { opacity: 0.42; outline: 2px dashed var(--accent); outline-offset: 2px; }
+    .day.month-drag-target { box-shadow: inset 0 0 0 3px var(--accent); background: #edf8f3; }
+    .month-todo-drag-ghost {
+      position: fixed;
+      z-index: 120;
+      pointer-events: none;
+      max-width: min(280px, calc(100vw - 18px));
+      box-shadow: 0 10px 24px rgba(21, 65, 78, 0.28);
+      opacity: 0.92;
+      transform: rotate(1deg);
     }
 
     .day-todo-time,
@@ -3357,6 +3385,10 @@
               <button class="menu-action view-menu-action" id="billingMenuBtn" type="button">Obra&#269;uni</button>
               <button class="menu-action view-menu-action admin-only" id="clientBillingMenuBtn" type="button">Obra&#269;un strank</button>
               <button class="menu-action view-menu-action" id="clientsMenuBtn" type="button">Stranke</button>
+              <span class="tools-menu-label">Podpora in razvoj</span>
+              <a class="menu-action menu-link" href="https://docs.google.com/document/d/1mgQMSOCPml664Fx6uJq6W79XdE1duSKGejEOO6bpnEY/edit" target="_blank" rel="noopener noreferrer">Razvojni TODO</a>
+              <button class="menu-action" id="reportIssueBtn" type="button">Prijavi težavo</button>
+              <button class="menu-action admin-only" id="appIssuesBtn" type="button">Prejete težave</button>
               <span class="tools-menu-label">Podatki in sinhronizacija</span>
               <button class="menu-action hidden" id="googleDrive" type="button">Google Dokumenti, preglednice in Gmail</button>
               <button class="menu-action admin-only" id="notificationsBtn" type="button">Sistemska opozorila <span id="notificationsCount"></span></button>
@@ -3381,7 +3413,7 @@
         </div>
         <div class="tools">
           <div class="search-control">
-            <input class="search" id="clientSearch" placeholder="I&#353;&#269;i opravilo ali opis">
+            <input class="search" id="clientSearch" placeholder="I&#353;&#269;i opravilo, opis ali stranko">
             <button class="search-clear hidden" id="clearClientSearch" type="button" aria-label="Po&#269;isti iskanje" title="Po&#269;isti iskanje">&times;</button>
           </div>
         </div>
@@ -3435,6 +3467,7 @@
         <div class="search-control">
           <input class="search" id="clientsSearch" placeholder="I&#353;&#269;i po bazi strank">
         </div>
+        <div id="clientsSearchResults" class="client-search-results hidden"></div>
         <div class="report-controls">
           <label>Naziv stranke
             <input id="newClientName" placeholder="Naziv stranke">
@@ -3446,7 +3479,7 @@
             <input id="newClientTax" placeholder="npr. SI12345678">
           </label>
           <label>E-po&#353;ta
-            <input id="newClientEmail" type="email" placeholder="racuni@stranka.si">
+            <input id="newClientEmail" type="email" placeholder="računi@stranka.si">
           </label>
           <label>Telefon
             <input id="newClientPhone" type="tel" placeholder="+386 40 123 456">
@@ -3471,7 +3504,7 @@
           </label>
           <button class="primary" id="addClientBtn" type="button">Dodaj stranko</button>
         </div>
-        <div class="todo-head">
+        <div class="todo-head" id="clientsDirectoryHead">
           <strong>Vse stranke</strong>
           <span class="todo-meta" id="clientsCount"></span>
         </div>
@@ -3591,10 +3624,10 @@
         </div>
       </div>
       <div class="day-timeline-toolbar">
-        <div class="gesture-zoom-controls" aria-label="Povecava dnevne casovnice">
-          <button class="secondary zoom-step" id="dayTimelineZoomOut" type="button" aria-label="Pomanjsaj casovnico">&minus;</button>
+        <div class="gesture-zoom-controls" aria-label="Povečava dnevne časovnice">
+          <button class="secondary zoom-step" id="dayTimelineZoomOut" type="button" aria-label="Pomanjšaj časovnico">&minus;</button>
           <span class="zoom-value" id="dayTimelineZoomValue">100 %</span>
-          <button class="secondary zoom-step" id="dayTimelineZoomIn" type="button" aria-label="Povecaj casovnico">&plus;</button>
+          <button class="secondary zoom-step" id="dayTimelineZoomIn" type="button" aria-label="Povečaj časovnico">&plus;</button>
           <button class="secondary" id="dayTimelineFit" type="button">24 h</button>
         </div>
         <span class="day-timeline-hint">Zgoraj/dol spremeni uro · vodoravno povleci dogodek čez rob za drug dan</span>
@@ -4004,6 +4037,24 @@
       </div>
     </form>
   </dialog>
+  <dialog id="appIssueDialog">
+    <form method="dialog" id="appIssueForm">
+      <div class="modal-head"><h3>Prijavi težavo</h3><button class="icon-btn" id="closeAppIssue" type="button" title="Zapri">&times;</button></div>
+      <div class="modal-body">
+        <label>Naslov (neobvezno)<input id="appIssueTitle" type="text" maxlength="160" placeholder="Kratek povzetek"></label>
+        <label>Opiši težavo<textarea id="appIssueDescription" maxlength="4000" required placeholder="Kaj se je zgodilo, kje in kaj si pričakoval?"></textarea></label>
+        <div class="actions"><button class="secondary" id="cancelAppIssue" type="button">Prekliči</button><button class="primary" type="submit">Pošlji prijavo</button></div>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="appIssuesDialog">
+    <form method="dialog">
+      <div class="modal-head"><h3>Prejete težave</h3><button class="icon-btn" id="closeAppIssues" type="button" title="Zapri">&times;</button></div>
+      <div class="modal-body"><div id="appIssuesList" class="debt-list"></div></div>
+    </form>
+  </dialog>
+
   <div class="app-notice" id="appNotice" role="status" aria-live="polite" hidden>
     <span class="app-notice-message" id="appNoticeMessage"></span>
     <button class="app-notice-close" id="closeAppNotice" type="button" aria-label="Zapri obvestilo">&times;</button>
@@ -4072,9 +4123,9 @@
     const payrollPaidTodoStatuses = new Set(["execution", "meal"]);
     const projectHoursSourceStatuses = new Set(["open", "in_progress"]);
     const statusLabels = {
-      billed: "Ze obracunano",
+      billed: "Že obračunano",
       warranty: "Garancija",
-      unbilled: "Opravljeno / ni obracunano",
+      unbilled: "Opravljeno / ni obračunano",
       errand: "Opravki",
       vacation: "Dopust"
     };
@@ -4198,7 +4249,8 @@
       offlineMode: false,
       syncRevision: 0,
       lastServerSyncAt: "",
-      notifications: []
+      notifications: [],
+      appIssues: []
     };
 
     const $ = (id) => document.getElementById(id);
@@ -4265,7 +4317,7 @@
       });
       const text = await response.text();
       const data = text ? JSON.parse(text) : null;
-      if (!response.ok || !data?.url) throw new Error(data?.error || "Google prijave ni bilo mogoce zagnati.");
+      if (!response.ok || !data?.url) throw new Error(data?.error || "Google prijave ni bilo mogoče zagnati.");
       return data;
     }
 
@@ -4803,7 +4855,7 @@
         label: `Delavski pogled - ${user.name || user.id}`
       }));
       const contexts = state.user.role === "boss"
-        ? [{ value: "admin", label: "Sefovski pogled - obracuni in upravljanje" }, ...workerContexts]
+        ? [{ value: "admin", label: "Šefovski pogled - obračuni in upravljanje" }, ...workerContexts]
         : workerContexts.filter((context) => context.value === `worker:${state.user.id}`);
       const appendOption = (parent, context) => {
         const option = document.createElement("option");
@@ -4934,7 +4986,7 @@
       const admin = isAdminView();
       const worker = activeWorker();
       document.body.classList.toggle("admin-view", admin);
-      $("userRole").textContent = admin ? "Sef - administracija" : `${worker?.name || "Delavec"} - delavec`;
+      $("userRole").textContent = admin ? "Šef - administracija" : `${worker?.name || "Delavec"} - delavec`;
       document.querySelectorAll(".admin-only").forEach((element) => element.classList.toggle("hidden", !admin));
       document.querySelectorAll(".worker-only").forEach((element) => element.classList.toggle("hidden", admin));
       $("newTodoButton").classList.toggle("hidden", admin);
@@ -5084,13 +5136,13 @@
       renderBillingView();
     }
     async function lockCurrentReportRange() {
-      if (!await showAppConfirm(`Zaklenem obdobje ${$("reportFrom").value} - ${$("reportTo").value} kot obracunano? Ibro potem ne bo mogel spreminjati ur in kilometrov v tem obdobju.`)) return;
+      if (!await showAppConfirm(`Zaklenem obdobje ${$("reportFrom").value} - ${$("reportTo").value} kot obračunano? Ibro potem ne bo mogel spreminjati ur in kilometrov v tem obdobju.`)) return;
       const data = await api("/api/billing-locks", {
         method: "POST",
-        body: JSON.stringify({ from: $("reportFrom").value, to: $("reportTo").value, note: "Obracunano" })
+        body: JSON.stringify({ from: $("reportFrom").value, to: $("reportTo").value, note: "Obračunano" })
       });
       state.billingLocks = data.billingLocks || [];
-      showNotice("Obdobje je zaklenjeno kot obracunano.");
+      showNotice("Obdobje je zaklenjeno kot obračunano.");
     }
 
     async function editBillingSetting(key) {
@@ -5100,11 +5152,11 @@
 
         commuteKmPerDay: "kilometri dom-sluzba na dan"
       };
-      const next = await showAppPrompt(`Vpisi ${labels[key]}:`, billing[key]);
+      const next = await showAppPrompt(`Vpiši ${labels[key]}:`, billing[key]);
       if (next === null) return;
       const value = Number(String(next).replace(",", "."));
       if (!Number.isFinite(value) || value < 0) {
-        showNotice("Vnesi pravilno stevilko.");
+        showNotice("Vnesi pravilno številko.");
         return;
       }
       await saveBillingSettings({ ...billing, [key]: value });
@@ -5140,7 +5192,7 @@
           row.dataset.userId = worker.id;
           row.innerHTML = `
             <td><strong>${escapeHtml(worker.name || worker.id)}</strong></td>
-            <td>${worker.role === "boss" ? "Sef in delavec" : "Delavec"}</td>
+            <td>${worker.role === "boss" ? "Šef in delavec" : "Delavec"}</td>
             <td><input class="worker-rate-input" type="number" min="0" max="10000" step="0.01" value="${Number(worker.hourlyRate || 0)}" aria-label="Urna postavka za ${escapeHtml(worker.name || worker.id)}"> EUR/h</td>
             <td><input class="worker-export-title-input" type="text" maxlength="120" value="${escapeHtml(worker.exportTitle || "")}" placeholder="npr. monter" aria-label="Naziv izvajalca v izvozu za ${escapeHtml(worker.name || worker.id)}"></td>
             <td><button class="secondary save-worker-rate" type="button">Shrani</button></td>
@@ -5210,7 +5262,7 @@
     }
     function advanceProjectOptions() {
       const query = $("advanceProjectSearch")?.value.trim().toLocaleLowerCase("sl") || "";
-      return uniqueTodosByEventId(state.todos).filter((todo) => ["execution", "open", "in_progress", "internal"].includes(todo.status)).filter((todo) => !query || `${todo.title} ${todo.client} ${todo.notes}`.toLocaleLowerCase("sl").includes(query)).sort((a, b) => String(a.title).localeCompare(String(b.title), "sl"));
+      return uniqueTodosByEventId(state.todos).filter((todo) => ["execution", "open", "in_progress", "internal"].includes(todo.status)).filter((todo) => !query || `${todo.title} ${todoClientSearchText(todo)} ${todo.notes}`.toLocaleLowerCase("sl").includes(query)).sort((a, b) => String(a.title).localeCompare(String(b.title), "sl"));
     }
 
     function renderAdvanceProjects() {
@@ -5226,19 +5278,19 @@
 
     function financialEntryPermission(entry) {
       if (state.user?.role === "boss") return { allowed: true, reason: "" };
-      if (entry.person !== state.user?.id) return { allowed: false, reason: "Lahko upravljas samo svoj vnos." };
-      if (entry.date !== dateKey(new Date())) return { allowed: false, reason: "Delavec lahko vnos popravi ali izbrise samo na dan vnosa." };
+      if (entry.person !== state.user?.id) return { allowed: false, reason: "Lahko upravljaš samo svoj vnos." };
+      if (entry.date !== dateKey(new Date())) return { allowed: false, reason: "Delavec lahko vnos popravi ali izbriše samo na dan vnosa." };
       return { allowed: true, reason: "" };
     }
 
     function financialEntryActions(entry, kind) {
       const permission = financialEntryPermission(entry);
-      const noun = kind === "purchase" ? "osebni nakup" : "zalozeni znesek";
+      const noun = kind === "purchase" ? "osebni nakup" : "založeni znesek";
       const disabled = permission.allowed ? "" : " disabled";
       const controlTitle = permission.allowed ? "Uredi" : permission.reason;
       const editClass = kind === "purchase" ? "edit-billing-purchase" : "edit-billing-advance";
       const deleteClass = kind === "purchase" ? "delete-billing-purchase" : "delete-billing-advance";
-      return `<div class="billing-financial-actions"><button class="secondary ${editClass}" type="button" data-entry-id="${escapeHtml(entry.id)}" aria-label="Uredi: ${escapeHtml(noun)}" title="${escapeHtml(controlTitle)}"${disabled}>&#9998;</button><button class="danger ${deleteClass}" type="button" data-entry-id="${escapeHtml(entry.id)}" aria-label="Izbrisi: ${escapeHtml(noun)}" title="${escapeHtml(permission.allowed ? "Izbrisi" : permission.reason)}"${disabled}>&#128465;</button></div>${permission.allowed ? "" : `<span class="billing-financial-lock">${escapeHtml(permission.reason)}</span>`}`;
+      return `<div class="billing-financial-actions"><button class="secondary ${editClass}" type="button" data-entry-id="${escapeHtml(entry.id)}" aria-label="Uredi: ${escapeHtml(noun)}" title="${escapeHtml(controlTitle)}"${disabled}>&#9998;</button><button class="danger ${deleteClass}" type="button" data-entry-id="${escapeHtml(entry.id)}" aria-label="Izbriši: ${escapeHtml(noun)}" title="${escapeHtml(permission.allowed ? "Izbriši" : permission.reason)}"${disabled}>&#128465;</button></div>${permission.allowed ? "" : `<span class="billing-financial-lock">${escapeHtml(permission.reason)}</span>`}`;
     }
 
     function openAdvanceDialog(mode = "advance", entry = null) {
@@ -5252,9 +5304,9 @@
       $("advanceReason").value = entry?.reason || "";
       $("advanceProjectSearch").value = "";
       state.advancePhotos = (entry?.photos || []).map((photo) => ({ ...photo }));
-      $("advanceDialogTitle").textContent = editing ? (purchase ? "Uredi osebni nakup" : "Uredi zalozeni znesek") : (purchase ? "Osebni nakup (v odbitek)" : "Zalozil denar");
+      $("advanceDialogTitle").textContent = editing ? (purchase ? "Uredi osebni nakup" : "Uredi založeni znesek") : (purchase ? "Osebni nakup (v odbitek)" : "Založil denar");
       $("saveAdvance").textContent = editing ? "Shrani spremembe" : (purchase ? "Dodaj v odbitek" : "Shrani");
-      $("advanceReason").placeholder = purchase ? "Kaj je bilo kupljeno" : "Kaj je bilo zalozeno in zakaj";
+      $("advanceReason").placeholder = purchase ? "Kaj je bilo kupljeno" : "Kaj je bilo založeno in zakaj";
       $("advanceProjectField").classList.toggle("hidden", purchase);
       const workerId = entry?.person || billingWorkerId();
       const workers = state.user?.role === "boss" ? state.users : [activeWorker()];
@@ -5346,7 +5398,7 @@
     }
     async function saveTodoTimeToServer(todo, start, end, date = todo.date) {
       const editLockToken = state.todoEditLock?.todoId === todo.id ? state.todoEditLock.token : "";
-      if (!editLockToken) throw new Error("Opravila pred premikom ni bilo mogoce zakleniti.");
+      if (!editLockToken) throw new Error("Opravila pred premikom ni bilo mogoče zakleniti.");
       const todoRevision = beginTodoMutation();
       try {
         await pauseTodoLockHeartbeat();
@@ -5584,7 +5636,7 @@
         return false;
       }
       if (todo.status === "execution" && (!todo.date || !todo.start || !todo.end)) {
-        showNotice("Za zakljuceno opravilo vnesi datum ter uro od in do.");
+        showNotice("Za zaključeno opravilo vnesi datum ter uro od in do.");
         return false;
       }
       if (todo.start && todo.end <= todo.start) {
@@ -5751,6 +5803,122 @@
         || todoSort(a, b);
     }
 
+    const MONTH_TODO_DRAG_HOLD_MS = 350;
+    const MONTH_TODO_DRAG_CANCEL_DISTANCE = 12;
+    let monthTodoPointerDrag = null;
+    let lastMonthTodoDragAt = 0;
+
+    function clearMonthTodoPointerDrag() {
+      const drag = monthTodoPointerDrag;
+      if (!drag) return null;
+      monthTodoPointerDrag = null;
+      if (drag.holdTimer) clearTimeout(drag.holdTimer);
+      drag.item.classList.remove("month-drag-armed", "month-dragging");
+      drag.targetElement?.classList.remove("month-drag-target");
+      drag.ghostElement?.remove();
+      try {
+        if (drag.item.hasPointerCapture?.(drag.pointerId)) drag.item.releasePointerCapture(drag.pointerId);
+      } catch {
+        // Izguba zajema kazalca samo prekliče trenutno vlečenje.
+      }
+      return drag;
+    }
+
+    function updateMonthTodoPointerDragTarget(drag, clientX, clientY) {
+      const target = document.elementFromPoint(clientX, clientY)?.closest(".day");
+      const targetDate = String(target?.dataset.date || "");
+      if (drag.targetElement !== target) {
+        drag.targetElement?.classList.remove("month-drag-target");
+        drag.targetElement = target || null;
+        drag.targetElement?.classList.add("month-drag-target");
+      }
+      drag.targetDate = targetDate;
+      if (drag.ghostElement) {
+        drag.ghostElement.style.left = `${clientX - drag.grabOffsetX}px`;
+        drag.ghostElement.style.top = `${clientY - drag.grabOffsetY}px`;
+      }
+    }
+
+    function activateMonthTodoPointerDrag() {
+      const drag = monthTodoPointerDrag;
+      if (!drag || drag.active) return;
+      drag.holdTimer = 0;
+      drag.active = true;
+      drag.item.classList.remove("month-drag-armed");
+      drag.item.classList.add("month-dragging");
+      const ghost = drag.item.cloneNode(true);
+      ghost.classList.add("month-todo-drag-ghost");
+      ghost.removeAttribute("id");
+      ghost.setAttribute("aria-hidden", "true");
+      ghost.style.width = `${drag.item.getBoundingClientRect().width}px`;
+      drag.ghostElement = ghost;
+      document.body.append(ghost);
+      try {
+        drag.item.setPointerCapture?.(drag.pointerId);
+      } catch {
+        // Document-level listeners spodaj so rezerva za brskalnike brez zajema kazalca.
+      }
+      updateMonthTodoPointerDragTarget(drag, drag.clientX, drag.clientY);
+      if (drag.pointerType === "touch") navigator.vibrate?.(12);
+    }
+
+    function beginMonthTodoPointerDrag(event, item, todo) {
+      if (!event.isPrimary || (event.pointerType === "mouse" && event.button !== 0)) return;
+      clearMonthTodoPointerDrag();
+      const rect = item.getBoundingClientRect();
+      const drag = {
+        pointerId: event.pointerId,
+        pointerType: event.pointerType,
+        item,
+        todo,
+        startX: event.clientX,
+        startY: event.clientY,
+        clientX: event.clientX,
+        clientY: event.clientY,
+        grabOffsetX: event.clientX - rect.left,
+        grabOffsetY: event.clientY - rect.top,
+        active: false,
+        holdTimer: 0,
+        targetDate: "",
+        targetElement: null,
+        ghostElement: null
+      };
+      monthTodoPointerDrag = drag;
+      item.classList.add("month-drag-armed");
+      drag.holdTimer = window.setTimeout(activateMonthTodoPointerDrag, MONTH_TODO_DRAG_HOLD_MS);
+    }
+
+    function updateMonthTodoPointerDrag(event) {
+      const drag = monthTodoPointerDrag;
+      if (!drag || drag.pointerId !== event.pointerId) return;
+      drag.clientX = event.clientX;
+      drag.clientY = event.clientY;
+      if (!drag.active) {
+        if (Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) > MONTH_TODO_DRAG_CANCEL_DISTANCE) clearMonthTodoPointerDrag();
+        return;
+      }
+      event.preventDefault();
+      updateMonthTodoPointerDragTarget(drag, event.clientX, event.clientY);
+    }
+
+    function finishMonthTodoPointerDrag(event) {
+      const drag = monthTodoPointerDrag;
+      if (!drag || drag.pointerId !== event.pointerId) return;
+      const wasActive = drag.active;
+      const targetDate = drag.targetDate;
+      const todo = drag.todo;
+      if (wasActive) event.preventDefault();
+      clearMonthTodoPointerDrag();
+      if (!wasActive) return;
+      lastMonthTodoDragAt = Date.now();
+      if (!targetDate || targetDate === todo.date) return;
+      saveTodoToServer({ ...todo, date: targetDate }).catch((error) => showNotice(error.message));
+    }
+
+    function cancelMonthTodoPointerDrag(event) {
+      if (!monthTodoPointerDrag || monthTodoPointerDrag.pointerId !== event.pointerId) return;
+      clearMonthTodoPointerDrag();
+    }
     function renderMonth() {
       const calendar = $("calendar");
       calendar.innerHTML = "";
@@ -5775,6 +5943,7 @@
         const key = dateKey(dayDate);
         const day = document.createElement("div");
         day.className = "day";
+        day.dataset.date = key;
         if (dayDate.getMonth() !== month) day.classList.add("other");
         if (key === today) day.classList.add("today");
         if (entries.some((entry) => entry.date === key && entry.status === "vacation")) {
@@ -5827,10 +5996,18 @@
             const settlementIndicators = dayTodoSettlementIndicators(todo);
             item.className = `day-todo todo-status-color ${todoStatusClass(todo.status)} ${todo.done ? "done" : ""} ${settlementIndicators ? "has-settlements" : ""}`;
             const time = todo.start && todo.end ? `${escapeHtml(todo.start)}&ndash;${escapeHtml(todo.end)}` : "Brez ure";
-            const client = todo.client || "Brez stranke";
+            const client = todoClientCalendarName(todo, "Brez stranke");
             const title = `${todo.urgent ? "NUJNO \u00b7 " : ""}${todo.title || "Brez naslova"}`;
             item.innerHTML = `<span class="day-todo-time">${time}</span><span class="day-todo-client">${escapeHtml(client)}</span><span class="day-todo-title">${escapeHtml(title)}</span>${settlementIndicators}`;
-            item.addEventListener("click", () => openTodoDialog(todo));
+            item.addEventListener("pointerdown", (event) => beginMonthTodoPointerDrag(event, item, todo));
+            item.addEventListener("click", (event) => {
+              if (Date.now() - lastMonthTodoDragAt < 450) {
+                event.preventDefault();
+                event.stopPropagation();
+                return;
+              }
+              openTodoDialog(todo);
+            });
             day.appendChild(item);
           });
 
@@ -5965,7 +6142,7 @@
     async function openTodoFromDayTimeline(todo) {
       if (!todo) return;
       if (state.dayTimelineDrafts.size) {
-        showNotice("Najprej shrani ali preklici spremembe dnevne casovnice.");
+        showNotice("Najprej shrani ali preklici spremembe dnevne časovnice.");
         return;
       }
       state.todoDialogReturnDayDate = state.dayTimelineDate;
@@ -5976,7 +6153,7 @@
 
     async function openNewTodoFromDayTimeline(clientY) {
       if (state.dayTimelineDrafts.size) {
-        showNotice("Najprej shrani ali preklici spremembe dnevne casovnice.");
+        showNotice("Najprej shrani ali preklici spremembe dnevne časovnice.");
         return;
       }
       if (isAdminView()) {
@@ -6036,7 +6213,8 @@
         const button = document.createElement("button");
         button.type = "button";
         button.className = "day-all-day-item todo-status-color " + todoStatusClass(todo.status);
-        button.textContent = todo.title + (todo.client ? " - " + todo.client : "");
+        const client = todoClientCalendarName(todo);
+        button.textContent = todo.title + (client ? " - " + client : "");
         button.addEventListener("click", () => openTodoFromDayTimeline(todo).catch((error) => showNotice(error.message)));
         allDayItems.appendChild(button);
       });
@@ -6066,6 +6244,7 @@
       const layouts = dayTimelineLayouts(todos);
       layouts.forEach((layout) => {
         const { todo, startMinute, endMinute, lane, laneCount } = layout;
+        const client = todoClientCalendarName(todo);
         const event = document.createElement("div");
         event.className = "day-timeline-event todo-status-color " + todoStatusClass(todo.status);
         event.dataset.todoId = todo.id;
@@ -6082,8 +6261,8 @@
         const startHandle = document.createElement("span");
         startHandle.className = "day-resize-handle start";
         startHandle.dataset.mode = "resize-start";
-        startHandle.title = "Podaljsaj ali skrajsaj zacetek";
-        startHandle.setAttribute("aria-label", "Podaljsaj ali skrajsaj zacetek dogodka");
+        startHandle.title = "Podaljšaj ali skrajšaj začetek";
+        startHandle.setAttribute("aria-label", "Podaljšaj ali skrajšaj začetek dogodka");
         const title = document.createElement("strong");
         title.className = "day-timeline-event-title";
         title.textContent = todo.title;
@@ -6098,13 +6277,13 @@
         const meta = document.createElement("span");
         meta.className = "day-timeline-event-meta";
         meta.textContent = dayTimelineTime(startMinute) + "-" + dayTimelineTime(endMinute)
-          + (todo.client ? " | " + todo.client : "")
+          + (client ? " | " + client : "")
           + " | Za: " + todoAssigneeNames(todo);
         const endHandle = document.createElement("span");
         endHandle.className = "day-resize-handle end";
         endHandle.dataset.mode = "resize-end";
-        endHandle.title = "Podaljsaj ali skrajsaj konec";
-        endHandle.setAttribute("aria-label", "Podaljsaj ali skrajsaj konec dogodka");
+        endHandle.title = "Podaljšaj ali skrajšaj konec";
+        endHandle.setAttribute("aria-label", "Podaljšaj ali skrajšaj konec dogodka");
         event.append(startHandle, title, meta, endHandle);
         const dayEventPointerOptions = { passive: false };
         event.addEventListener("pointerdown", (pointerEvent) => beginDayTimelineEventPointer(pointerEvent, todo), dayEventPointerOptions);
@@ -6220,7 +6399,7 @@
       const resizeHandle = event.target.closest(".day-resize-handle");
       let mode = resizeHandle?.dataset.mode || "move";
       // Pri nizkem dogodku se zgornji in spodnji prijemni pas prekrivata.
-      // Tedaj smer doloci dejanski polozaj prijema, ne vrstni red DOM elementov.
+      // Tedaj smer določi dejanski položaj prijema, ne vrstni red DOM elementov.
       if (resizeHandle) {
         const bounds = eventElement.getBoundingClientRect();
         const overlapHeight = 30;
@@ -6237,7 +6416,7 @@
       try {
         eventElement.setPointerCapture?.(event.pointerId);
       } catch {
-        // Firefox na telefonu lahko zajem kazalca zavrne; lokalni poslusalci na dogodku ostanejo varna rezerva.
+        // Firefox na telefonu lahko zajem kazalca zavrne; lokalni poslušalci na dogodku ostanejo varna rezerva.
       }
       state.dayTimelineInteraction = {
         pointerId: event.pointerId,
@@ -6840,9 +7019,9 @@
           const hasGap = items.work.some((row, index) => index > 0 && billingGapMinutes(items.work[index - 1], row) > 0);
           const financialDate = `<time class="billing-financial-date" datetime="${escapeHtml(date)}">${escapeHtml(formatDate(date))}</time>`;
           const financialRows = [
-            ...items.advances.map((advance) => `<div class="billing-financial-row advance">${financialDate}<span>Zalozeno${advance.reason ? ` · ${escapeHtml(advance.reason)}` : ""}</span><strong>${money(advance.amount)} EUR</strong>${financialEntryActions(advance, "advance")}</div>`),
+            ...items.advances.map((advance) => `<div class="billing-financial-row advance">${financialDate}<span>Založeno${advance.reason ? ` · ${escapeHtml(advance.reason)}` : ""}</span><strong>${money(advance.amount)} EUR</strong>${financialEntryActions(advance, "advance")}</div>`),
             ...items.purchases.map((purchase) => `<div class="billing-financial-row purchase">${financialDate}<span>Osebni nakup${purchase.reason ? ` · ${escapeHtml(purchase.reason)}` : ""}</span><strong>-${money(purchase.amount)} EUR</strong>${financialEntryActions(purchase, "purchase")}</div>`),
-            ...items.payments.map((payment) => `<div class="billing-financial-row payment">${financialDate}<span>Izplacano${payment.note ? ` · ${escapeHtml(payment.note)}` : ""}</span><strong>${money(payment.amount)} EUR</strong>${isBoss ? `<button class="danger billing-financial-delete delete-billing-payment" type="button" data-payroll-id="${escapeHtml(payroll.id)}" data-payment-id="${escapeHtml(payment.id)}">Izbrisi</button>` : ""}</div>`)
+            ...items.payments.map((payment) => `<div class="billing-financial-row payment">${financialDate}<span>Izplačano${payment.note ? ` · ${escapeHtml(payment.note)}` : ""}</span><strong>${money(payment.amount)} EUR</strong>${isBoss ? `<button class="danger billing-financial-delete delete-billing-payment" type="button" data-payroll-id="${escapeHtml(payroll.id)}" data-payment-id="${escapeHtml(payment.id)}">Izbriši</button>` : ""}</div>`)
           ].join("");
           const hourlyRate = day.hours > 0 ? Number((day.workAmount / day.hours).toFixed(2)) : 0;
           const kmRate = day.km > 0 ? Number((day.kmAmount / day.km).toFixed(3)) : Number(items.work.find((row) => Number.isFinite(Number(row.kmRate)))?.kmRate || state.settings.billing?.workerOwnVehicleKmRate || state.settings.billing?.kmRate || 0);
@@ -6946,13 +7125,16 @@
     }
     function renderClients() {
       const list = $("clientsList");
-      if (!list) return;
+      const searchResults = $("clientsSearchResults");
+      const directoryHead = $("clientsDirectoryHead");
+      if (!list || !searchResults || !directoryHead) return;
       const records = allClientRecords();
       const query = $("clientsSearch")?.value.trim() || "";
       const visibleRecords = query ? records.filter((client) => clientMatches(client, query)) : records;
       const usable = visibleRecords.filter((client) => client.clientId).length;
-      $("clientsCount").textContent = `${visibleRecords.length}${query ? ` od ${records.length}` : ""} strank, ${usable} uporabnih`;
-      list.innerHTML = visibleRecords.map((client) => `
+      const count = `${visibleRecords.length}${query ? ` od ${records.length}` : ""} strank, ${usable} uporabnih`;
+      $("clientsCount").textContent = count;
+      const rows = visibleRecords.map((client) => `
         <div class="client-row">
           <div>
             <strong>${escapeHtml(client.name)}</strong>
@@ -6966,7 +7148,21 @@
           </div>
         </div>
       `).join("") || "<p>Ni strank za to iskanje.</p>";
+      if (query) {
+        searchResults.classList.remove("hidden");
+        searchResults.innerHTML = `<div class="todo-head"><strong>Rezultati iskanja</strong><span class="todo-meta">${escapeHtml(count)}</span></div><div class="client-directory">${rows}</div>`;
+        directoryHead.classList.add("hidden");
+        list.classList.add("hidden");
+        list.innerHTML = "";
+        return;
+      }
+      searchResults.classList.add("hidden");
+      searchResults.innerHTML = "";
+      directoryHead.classList.remove("hidden");
+      list.classList.remove("hidden");
+      list.innerHTML = rows;
     }
+
     function normalizeTaxId(value) {
       return String(value || "").trim().replace(/^tax:/i, "").replace(/[^A-Za-z0-9]/g, "").toUpperCase();
     }
@@ -7009,12 +7205,12 @@
       const alias = $("newClientSearch").value.trim();
       const name = $("newClientName").value.trim() || alias;
       if (!name && !alias) {
-        showNotice("Vpisi vsaj vzdevek stranke.");
+        showNotice("Vpiši vsaj vzdevek stranke.");
         return;
       }
       const taxId = normalizeTaxId($("newClientTax").value);
       if (taxId && !/^(?=.{8,20}$)(?=.*\d)[A-Z0-9]+$/.test(taxId)) {
-        showNotice("Vpisi veljavno davcno stevilko. Uporabi samo crke in stevilke, na primer SI12345678.");
+        showNotice("Vpiši veljavno davčno številko. Uporabi samo črke in številke, na primer SI12345678.");
         return;
       }
       const data = await saveClientToServer({
@@ -7203,7 +7399,7 @@
           dragHandle.addEventListener("pointerdown", (event) => {
             beginTodoPointerDrag(event, item, todo.id);
           }, dragPointerOptions);
-          // Firefox for Android lahko zajeti dotik preskoci na documentu, zato je rocaj sam tudi poslusalec.
+          // Firefox for Android lahko zajeti dotik preskoci na documentu, zato je ročaj sam tudi poslušalec.
           dragHandle.addEventListener("pointermove", updateTodoPointerDrag, dragPointerOptions);
           dragHandle.addEventListener("pointerup", finishTodoPointerDrag, dragPointerOptions);
           dragHandle.addEventListener("pointercancel", cancelTodoPointerDrag, dragPointerOptions);
@@ -7212,7 +7408,7 @@
         }
         item.querySelectorAll(".remove-photo").forEach((button) => {
           button.addEventListener("click", async () => {
-            if (!await showAppConfirm("Izbrisem to prilogo?")) return;
+            if (!await showAppConfirm("Izbrišem to prilogo?")) return;
             await saveTodoToServer({
               ...todo,
               photos: (todo.photos || []).filter((photo) => photo.id !== button.dataset.photoId)
@@ -7564,7 +7760,7 @@
         $("photoEditorDialog").showModal();
         requestAnimationFrame(fitPhotoEditorZoom);
       };
-      image.onerror = () => showNotice("Slike ni bilo mogoce odpreti v urejevalniku.");
+      image.onerror = () => showNotice("Slike ni bilo mogoče odpreti v urejevalniku.");
       image.src = attachmentSource(photo);
     }
 
@@ -7581,7 +7777,7 @@
       const editor = state.photoEditor;
       const value = $("photoEditorText").value.trim();
       if (!editor || !value) {
-        showNotice("Najprej vpisi besedilo, ki ga zelis dodati na sliko.");
+        showNotice("Najprej vpiši besedilo, ki ga želiš dodati na sliko.");
         return;
       }
       const point = photoEditorVisiblePoint();
@@ -7654,11 +7850,11 @@
       return `<div class="todo-photos-inline">${todo.photos.map((photo) => {
         const pdf = isPdfAttachment(photo);
         return `<article class="photo-card">
-          ${pdf ? `<a class="todo-pdf-preview" href="${escapeHtml(attachmentSource(photo))}" target="_blank" rel="noopener noreferrer" aria-label="Odpri PDF ${escapeHtml(photo.name || "Priloga")}">${pdfThumbnailMarkup(photo, true)}</a>` : `<button class="todo-image-preview" type="button" data-photo-id="${escapeHtml(photo.id)}" aria-label="Povecaj sliko ${escapeHtml(photo.name || "Fotografija")}"><img src="${escapeHtml(attachmentSource(photo))}" alt="${escapeHtml(photo.name || "Fotografija")}"></button>`}
+          ${pdf ? `<a class="todo-pdf-preview" href="${escapeHtml(attachmentSource(photo))}" target="_blank" rel="noopener noreferrer" aria-label="Odpri PDF ${escapeHtml(photo.name || "Priloga")}">${pdfThumbnailMarkup(photo, true)}</a>` : `<button class="todo-image-preview" type="button" data-photo-id="${escapeHtml(photo.id)}" aria-label="Povečaj sliko ${escapeHtml(photo.name || "Fotografija")}"><img src="${escapeHtml(attachmentSource(photo))}" alt="${escapeHtml(photo.name || "Fotografija")}"></button>`}
           <div>
             <strong>${escapeHtml(photo.name || "Priloga")}</strong>
             <span class="todo-meta">dodal: ${escapeHtml(photo.createdByName || "-")}</span>
-            <button class="danger remove-photo" type="button" data-photo-id="${escapeHtml(photo.id)}">Izbrisi</button>
+            <button class="danger remove-photo" type="button" data-photo-id="${escapeHtml(photo.id)}">Izbriši</button>
           </div>
         </article>`;
       }).join("")}</div>`;
@@ -7835,12 +8031,12 @@
       const source = attachmentSource(photo);
       if (!source) return "";
       const response = await fetch(source, { credentials: "same-origin" });
-      if (!response.ok) throw new Error("Priloge ni bilo mogoce prenesti.");
+      if (!response.ok) throw new Error("Priloge ni bilo mogoče prenesti.");
       const blob = await response.blob();
       return new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = () => resolve(String(reader.result || ""));
-        reader.onerror = () => reject(new Error("Priloge ni bilo mogoce prebrati."));
+        reader.onerror = () => reject(new Error("Priloge ni bilo mogoče prebrati."));
         reader.readAsDataURL(blob);
       });
     }
@@ -8089,7 +8285,7 @@
       if (existing && !isAdminView()
           && todoAssigneeIds(existing).includes(activeAssignee)
           && !assigneeIds.includes(activeAssignee)
-          && !await showAppConfirm("Odstranil si sebe iz opravila. Po shranjevanju ga v svojem delavskem pogledu ne bos vec videl ali mogel odpreti. Vseeno shranim?")) {
+          && !await showAppConfirm("Odstranil si sebe iz opravila. Po shranjevanju ga v svojem delavskem pogledu ne boš več videl ali mogel odpreti. Vseeno shranim?")) {
         return;
       }
       await saveTodoToServer(todo);
@@ -8204,7 +8400,7 @@
     }
     async function deleteTodoFromDialog() {
       const id = $("todoFormId").value;
-      if (!id || !await showAppConfirm("Izbrisem to opravilo?")) return;
+      if (!id || !await showAppConfirm("Izbrišem to opravilo?")) return;
       const returnDayDate = state.todoDialogReturnDayDate;
       state.todoDialogReturnDayDate = "";
       await deleteTodoFromServer(id);
@@ -8216,7 +8412,7 @@
     }
 
     function setDefaultReportRange() {
-      // Prazen razpon pomeni celotno zgodovino zakljucenih storitev.
+      // Prazen razpon pomeni celotno zgodovino zaključenih storitev.
       $("reportFrom").value = "";
       $("reportTo").value = "";
     }
@@ -8705,7 +8901,7 @@
       ]));
       const html = `<html><head><meta charset="utf-8"></head><body><table>${rows.map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`).join("")}</table></body></html>`;
       const slug = (selection.name || "vse-stranke").replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase() || "stranka";
-      downloadText(html, `indus-porocilo-${slug}.xls`, "application/vnd.ms-excel;charset=utf-8");
+      downloadText(html, `indus-poročilo-${slug}.xls`, "application/vnd.ms-excel;charset=utf-8");
     }
     async function fetchClientReportPdf(payload, retried = false) {
       let response;
@@ -8733,7 +8929,7 @@
       return response;
     }
 
-    function reportDownloadFileName(response, fallback = "obracun.pdf") {
+    function reportDownloadFileName(response, fallback = "obračun.pdf") {
       const header = String(response.headers.get("content-disposition") || "");
       const match = /filename="?([^";]+)"?/i.exec(header);
       return (match?.[1] || fallback).replace(/[\\/:*?"<>|]/g, "-");
@@ -8767,8 +8963,8 @@
     }
 
     const TODO_TOUCH_DRAG_HOLD_MS = 180;
-    const TODO_DRAG_AUTOSCROLL_SLOW_PX_PER_SECOND = 84;
-    const TODO_DRAG_AUTOSCROLL_FAST_PX_PER_SECOND = 280;
+    const TODO_DRAG_AUTOSCROLL_SLOW_PX_PER_SECOND = 168;
+    const TODO_DRAG_AUTOSCROLL_FAST_PX_PER_SECOND = 560;
     let todoPointerDrag = null;
 
     function clearTodoDragVisuals() {
@@ -8779,8 +8975,8 @@
     function updateTodoPointerDragGhost(drag) {
       const ghost = drag?.ghostElement;
       if (!ghost) return;
-      // Sidro ostane na istem delu kartice, kjer je uporabnik prijel rocaj.
-      // Zato kvadratek ne skoci pod kazalec s svojo sredino.
+      // Sidro ostane na istem delu kartice, kjer je uporabnik prijel ročaj.
+      // Zato kvadratek ne skoči pod kazalec s svojo sredino.
       ghost.style.left = `${drag.clientX - drag.ghostAnchorX}px`;
       ghost.style.top = `${drag.clientY - drag.ghostAnchorY}px`;
       ghost.style.display = "block";
@@ -8872,7 +9068,7 @@
       drag.ghostElement.setAttribute("aria-hidden", "true");
       const ghostWidth = Math.max(120, Math.min(sourceRect.width, window.innerWidth - 24));
       const ghostHeight = Math.max(58, Math.min(sourceRect.height, 150));
-      // Zajem od roba kartice ob pointerdown ohrani natancno mesto rocaja tudi po dolgem dotiku.
+      // Zajem od roba kartice ob pointerdown ohrani natančno mesto ročaja tudi po dolgem dotiku.
       drag.ghostAnchorX = Math.max(0, Math.min(ghostWidth, drag.grabOffsetX));
       drag.ghostAnchorY = Math.max(0, Math.min(ghostHeight, drag.grabOffsetY));
       drag.ghostElement.style.width = `${ghostWidth}px`;
@@ -8905,7 +9101,7 @@
         active: false,
         startX: event.clientX,
         startY: event.clientY,
-        // Polozaj prsta/miske znotraj kartice je sidro premikajocega se okvirja.
+        // Položaj prsta/miške znotraj kartice je sidro premikajočega se okvirja.
         grabOffsetX: event.clientX - itemRect.left,
         grabOffsetY: event.clientY - itemRect.top,
         ghostAnchorX: 0,
@@ -8921,7 +9117,7 @@
       try {
         event.currentTarget.setPointerCapture?.(event.pointerId);
       } catch {
-        // Lokalni poslusalci na rocaju spodaj ostanejo varna rezerva za mobilne brskalnike.
+        // Lokalni poslušalci na ročaju spodaj ostanejo varna rezerva za mobilne brskalnike.
       }
       if (isTouch) {
         event.currentTarget.classList.add("drag-armed");
@@ -9064,6 +9260,17 @@
       return [...map.values()].sort((a, b) => a.name.localeCompare(b.name, "sl"));
     }
 
+    function todoClientCalendarName(todo, fallback = "") {
+      const client = findClient(todo?.clientId || todo?.client);
+      return String(client?.search || todo?.client || fallback).trim();
+    }
+
+    function todoClientSearchText(todo) {
+      const client = findClient(todo?.clientId || todo?.client);
+      return [todo?.client, client?.name, client?.search, client?.email, client?.phone]
+        .filter(Boolean)
+        .join(" ");
+    }
     function normalizeClientName(value) {
       const input = String(value || "").trim();
       if (!input) return "";
@@ -9115,7 +9322,7 @@
         return;
       }
       const results = contextTodos()
-        .filter((todo) => normalizeText([todo.client, todo.title, todo.notes, todo.createdByName].join(" ")).includes(normalizeText(query)))
+        .filter((todo) => normalizeText([todoClientSearchText(todo), todo.title, todo.notes, todo.createdByName].join(" ")).includes(normalizeText(query)))
         .sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")) || todoSort(a, b));
       panel.classList.add("active");
       if (!results.length) {
@@ -9179,7 +9386,7 @@
             <span>${escapeHtml(debt.reason)}</span>
           </div>
           <button class="secondary edit-debt" type="button">Uredi</button>
-          <button class="danger remove-debt" type="button">Izbrisi</button>
+          <button class="danger remove-debt" type="button">Izbriši</button>
         </div>
       `).join("");
     }
@@ -9279,7 +9486,7 @@
     }
 
     function exportCsv() {
-      const header = ["Datum", "Od", "Do", "Stranka", "Client ID", "Sodelavci", "Status", "Ure", "Km", "Racun poslan", "Poracunano", "Placano", "Delo", "Material", "Opombe", "Dodal", "Spremenil"];
+      const header = ["Datum", "Od", "Do", "Stranka", "Client ID", "Sodelavci", "Status", "Ure", "Km", "Račun poslan", "Poračunano", "Plačano", "Delo", "Material", "Opombe", "Dodal", "Spremenil"];
       const rows = state.entries
         .slice()
         .sort((a, b) => `${a.date} ${a.start}`.localeCompare(`${b.date} ${b.start}`))
@@ -9391,7 +9598,7 @@
       return new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = () => resolve(reader.result);
-        reader.onerror = () => reject(new Error("Slike ni bilo mogoce prebrati."));
+        reader.onerror = () => reject(new Error("Slike ni bilo mogoče prebrati."));
         reader.readAsDataURL(file);
       });
     }
@@ -9445,10 +9652,10 @@
               createdAt: new Date().toISOString()
             });
           };
-          image.onerror = () => reject(new Error("Slike ni bilo mogoce naloziti."));
+          image.onerror = () => reject(new Error("Slike ni bilo mogoče naložiti."));
           image.src = reader.result;
         };
-        reader.onerror = () => reject(new Error("Slike ni bilo mogoce prebrati."));
+        reader.onerror = () => reject(new Error("Slike ni bilo mogoče prebrati."));
         reader.readAsDataURL(file);
       });
     }
@@ -9516,8 +9723,8 @@
     async function todoAttachmentFromFile(file) {
       const pdf = file.type === "application/pdf" || /\.pdf$/i.test(file.name);
       if (pdf) {
-        if (file.size > 1_500_000) throw new Error("PDF je prevelik. Najvecja dovoljena velikost je 1,5 MB.");
-        let data = await readFileAsDataUrl(file, "PDF datoteke ni bilo mogoce prebrati.");
+        if (file.size > 1_500_000) throw new Error("PDF je prevelik. Največja dovoljena velikost je 1,5 MB.");
+        let data = await readFileAsDataUrl(file, "PDF datoteke ni bilo mogoče prebrati.");
         data = data.replace(/^data:[^;]*;base64,/, "data:application/pdf;base64,");
         const thumbnailData = await createPdfThumbnailSafely(data);
         return {
@@ -9596,6 +9803,38 @@
       await refreshNotifications();
       $("notificationsDialog").showModal();
     }
+    function openAppIssueDialog() {
+      $("appIssueTitle").value = "";
+      $("appIssueDescription").value = "";
+      $("appIssueDialog").showModal();
+    }
+
+    function renderAppIssues() {
+      const list = $("appIssuesList");
+      if (!state.appIssues.length) {
+        list.innerHTML = `<p class="todo-meta">Ni prijavljenih težav.</p>`;
+        return;
+      }
+      list.innerHTML = state.appIssues.map((issue) => `
+        <article class="debt-item" data-app-issue-id="${escapeHtml(issue.id)}">
+          <div>
+            <strong>${escapeHtml(issue.title || "Težava v aplikaciji")}</strong>
+            <span class="app-issue-description">${escapeHtml(issue.description || "")}</span>
+            <small>${escapeHtml(issue.createdByName || issue.createdBy || "-")} · ${formatDateTime(issue.createdAt)}</small>
+            ${issue.status === "resolved" ? `<small>Odpravljeno: ${formatDateTime(issue.resolvedAt)}</small>` : ""}
+          </div>
+          <button class="secondary toggle-app-issue" type="button">${issue.status === "resolved" ? "Ponovno odpri" : "Označi kot odpravljeno"}</button>
+        </article>
+      `).join("");
+    }
+
+    async function openAppIssues() {
+      const data = await api("/api/app-issues");
+      state.appIssues = data.issues || [];
+      renderAppIssues();
+      $("appIssuesDialog").showModal();
+    }
+
     function openAccountDialog() {
       $("accountName").value = state.user.name || "";
       $("accountImage").value = "";
@@ -9611,7 +9850,7 @@
       if (!url) throw new Error("Koledar za ta pogled ni na voljo.");
       await navigator.clipboard.writeText(url);
       showNotice(combined
-        ? "Povezava zdruzenega sefovskega koledarja je kopirana."
+        ? "Povezava združenega šefovskega koledarja je kopirana."
         : "Povezava tvojega delavskega koledarja je kopirana.");
     }
 
@@ -9650,6 +9889,32 @@
       location.reload();
     });
 
+    $("reportIssueBtn").addEventListener("click", openAppIssueDialog);
+    ["closeAppIssue", "cancelAppIssue"].forEach((id) => $(id).addEventListener("click", () => $("appIssueDialog").close()));
+    $("appIssueForm").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      try {
+        const data = await api("/api/app-issues", { method: "POST", body: JSON.stringify({ title: $("appIssueTitle").value, description: $("appIssueDescription").value }) });
+        state.appIssues = data.issues || state.appIssues;
+        $("appIssueDialog").close();
+        showNotice("Težava je poslana.");
+      } catch (error) { showNotice(error.message); }
+    });
+    $("appIssuesBtn").addEventListener("click", () => openAppIssues().catch((error) => showNotice(error.message)));
+    $("closeAppIssues").addEventListener("click", () => $("appIssuesDialog").close());
+    $("appIssuesList").addEventListener("click", async (event) => {
+      const button = event.target.closest(".toggle-app-issue");
+      const item = event.target.closest("[data-app-issue-id]");
+      if (!button || !item) return;
+      const issue = state.appIssues.find((value) => value.id === item.dataset.appIssueId);
+      if (!issue) return;
+      try {
+        const data = await api(`/api/app-issues/${encodeURIComponent(issue.id)}`, { method: "PATCH", body: JSON.stringify({ status: issue.status === "resolved" ? "open" : "resolved" }) });
+        state.appIssues = data.issues || [];
+        renderAppIssues();
+      } catch (error) { showNotice(error.message); }
+    });
+
     $("accountBtn").addEventListener("click", openAccountDialog);
     $("notificationsBtn").addEventListener("click", () => openNotifications().catch((error) => showNotice(error.message)));
     $("closeNotifications").addEventListener("click", () => $("notificationsDialog").close());
@@ -9666,7 +9931,7 @@
     });
     $("copyWorkerCalendar").addEventListener("click", () => copyCalendarFeed(false).catch((error) => showNotice(error.message)));
     $("copyCombinedCalendar").addEventListener("click", () => copyCalendarFeed(true).catch((error) => showNotice(error.message)));
-    // Zapri glavni meni po vsakem dejanju, tudi ce je gumb dodan pozneje
+    // Zapri glavni meni po vsakem dejanju, tudi če je gumb dodan pozneje
     // ali njegov lastni handler ustavi nadaljnje sirjenje dogodka.
     $("toolsMenu").addEventListener("click", (event) => {
       if (event.target.closest(".tools-menu-panel button, .tools-menu-panel a")) closeToolsMenu();
@@ -9764,7 +10029,7 @@
     $("deleteDebt").addEventListener("click", async () => {
       const id = $("debtId").value;
       if (!id) return;
-      if (!await showAppConfirm("Izbrisem ta dolg?")) return;
+      if (!await showAppConfirm("Izbrišem ta dolg?")) return;
       await deleteDebtFromServer(id);
       $("debtId").value = "";
       $("debtAmount").value = "";
@@ -9777,7 +10042,7 @@
       const debt = state.debts.find((row) => row.id === item.dataset.debtId);
       if (!debt) return;
       if (event.target.closest(".remove-debt")) {
-        if (!await showAppConfirm("Izbrisem ta dolg?")) return;
+        if (!await showAppConfirm("Izbrišem ta dolg?")) return;
         await deleteDebtFromServer(debt.id);
         return;
       }
@@ -10051,7 +10316,7 @@
       const item = button.closest(".todo-item");
       const id = item?.dataset.todoId;
       if (!id) return;
-      if (!await showAppConfirm("Izbrisem to opravilo?")) return;
+      if (!await showAppConfirm("Izbrišem to opravilo?")) return;
       button.disabled = true;
       button.setAttribute("aria-busy", "true");
       try {
@@ -10108,7 +10373,7 @@
       else state.clientBillSelectedEventIds.delete(eventId);
       renderReport();
     });
-    $("clientsList").addEventListener("click", (event) => {
+    const handleClientListClick = (event) => {
       const billingButton = event.target.closest(".open-client-billing");
       if (billingButton) {
         openClientReport(billingButton.dataset.clientName || "", billingButton.dataset.clientId || "");
@@ -10117,7 +10382,8 @@
       const button = event.target.closest(".open-client");
       if (!button) return;
       openClientEditDialog(button.dataset.clientId);
-    });
+    };
+    ["clientsList", "clientsSearchResults"].forEach((id) => $(id).addEventListener("click", handleClientListClick));
     $("closeClientEdit").addEventListener("click", () => $("clientEditDialog").close());
     $("cancelClientEdit").addEventListener("click", () => $("clientEditDialog").close());
     $("clientEditForm").addEventListener("submit", (event) => {
@@ -10183,6 +10449,10 @@
         openProjectCompletionDialog(hoursSourceId);
       }
     });
+    document.addEventListener("pointermove", updateMonthTodoPointerDrag, { passive: false });
+    document.addEventListener("pointerup", finishMonthTodoPointerDrag, { passive: false });
+    document.addEventListener("pointercancel", cancelMonthTodoPointerDrag, { passive: false });
+
     $("clientSearch").addEventListener("input", handleClientSearchInput);
     $("clientsSearch").addEventListener("input", renderClients);
     $("clearClientSearch").addEventListener("click", clearClientSearchAndRestoreView);
