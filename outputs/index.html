@@ -8400,7 +8400,10 @@
             }
           }
           if (request.status < 200 || request.status >= 300 || !data?.photo) {
-            const error = new Error(data?.error || (request.status ? "Video ni bil naložen (HTTP " + request.status + ")." : "Prenos videa ni uspel."));
+            const tooLarge = request.status === 413;
+            const error = new Error(data?.error || (tooLarge
+              ? "Video je prevelik za nalaganje. Največja dovoljena velikost je 200 MB."
+              : request.status ? "Video ni bil naložen (HTTP " + request.status + ")." : "Prenos videa ni uspel."));
             error.status = request.status;
             reject(error);
             return;

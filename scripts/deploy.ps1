@@ -73,17 +73,22 @@ try {
   )
   $target = "${UserName}@${HostName}"
 
-  Write-Host "[4/6] Prenos"
+  Write-Host "[4/7] Prenos"
   Invoke-Native scp @sshOptions $archive "${target}:/tmp/indus-ure-$release.tar.gz"
 
-  Write-Host "[5/6] Priprava in preklop izdaje"
-  $remoteCommand = "prepare-indus-ure-release $release $checksum && sudo /usr/local/sbin/deploy-indus-ure $release"
+  $nginxConfig = Join-Path $repoRoot "deploy\nginx-indus-ure.conf"
+  $remoteNginxConfig = "/tmp/indus-ure-nginx-$release.conf"
+  Write-Host "[5/7] Nginx pravila"
+  Invoke-Native scp @sshOptions $nginxConfig "${target}:$remoteNginxConfig"
+
+  Write-Host "[6/7] Priprava in preklop izdaje"
+  $remoteCommand = "prepare-indus-ure-release $release $checksum && sudo /usr/local/sbin/deploy-indus-ure $release && sudo install -o root -g root -m 0644 $remoteNginxConfig /etc/nginx/conf.d/indus-ure.conf && sudo nginx -t && sudo systemctl reload nginx"
   if (-not $SkipVideoSmoke) {
     $remoteCommand += " && sudo systemd-run --quiet --wait --collect --pipe -p User=indus-ure -p Group=indus-ure -p EnvironmentFile=/etc/indus-ure.env -p WorkingDirectory=/opt/indus-ure/current /usr/bin/node /opt/indus-ure/current/scripts/smoke-drive-video-upload.js"
   }
   Invoke-Native ssh @sshOptions $target $remoteCommand
 
-  Write-Host "[6/6] Preverjanje produkcije"
+  Write-Host "[7/7] Preverjanje produkcije"
   $healthy = $false
   for ($attempt = 1; $attempt -le 10; $attempt++) {
     try {
