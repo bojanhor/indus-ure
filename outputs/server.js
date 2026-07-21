@@ -74,6 +74,7 @@ const TODO_STATUS_DEFINITIONS = Object.freeze({
   purchase: { label: "Nabava", googleColorId: "6" }
 });
 const TODO_STATUSES = new Set(Object.keys(TODO_STATUS_DEFINITIONS));
+const TIME_ENTRY_TODO_STATUSES = new Set(["execution", "meal", "drive", "purchase"]);
 const TODO_VEHICLES = new Set(["personal", "van"]);
 
 function todoVehicle(value) {
@@ -1320,7 +1321,7 @@ function nonnegativeNumber(value, fallback = null, maximum = Number.MAX_SAFE_INT
 }
 
 const PAYROLL_STATUSES = new Set(["draft", "archiving", "confirmed", "paid"]);
-const PAYROLL_PAID_TODO_STATUSES = new Set(["execution", "meal"]);
+const PAYROLL_PAID_TODO_STATUSES = new Set(TIME_ENTRY_TODO_STATUSES);
 const CLIENT_BILL_STATUSES = new Set(["confirmed"]);
 
 function isDateKey(value) {
@@ -2284,14 +2285,14 @@ function todoForUserRole(user, db, previous, todo) {
   const requestedClientVehicle = todoVehicle(todo.clientVehicle);
   const isCompleted = todo.status === "execution";
   const isMeal = todo.status === "meal";
-  const isPaidTime = isCompleted || isMeal;
+  const isPaidTime = TIME_ENTRY_TODO_STATUSES.has(todo.status);
   const canSetClientMileage = isCompleted;
   const defaultRate = defaultHourlyRateForUser(db, todo.syncUser || previous?.syncUser || user.id);
   if (user.role !== "boss") {
     return {
       ...todo,
       billingHourlyRate: isPaidTime ? previousRate ?? defaultRate : previousRate,
-      billingKm: isMeal ? 0 : isCompleted ? nonnegativeNumber(todo.billingKm, previousKm, 1_000_000) : previousKm,
+      billingKm: isMeal ? 0 : isPaidTime ? nonnegativeNumber(todo.billingKm, previousKm, 1_000_000) : previousKm,
       warranty: isMeal ? false : isCompleted ? Boolean(todo.warranty) : previousWarranty,
       clientKm: isMeal ? 0 : canSetClientMileage ? nonnegativeNumber(todo.clientKm, previousClientKm, 1_000_000) : previousClientKm,
       clientVehicle: isMeal ? "personal" : canSetClientMileage ? requestedClientVehicle : previousClientVehicle,
@@ -2301,7 +2302,7 @@ function todoForUserRole(user, db, previous, todo) {
   return {
     ...todo,
     billingHourlyRate: isPaidTime ? nonnegativeNumber(todo.billingHourlyRate, previousRate ?? defaultRate, 10_000) : previousRate,
-    billingKm: isMeal ? 0 : isCompleted ? nonnegativeNumber(todo.billingKm, previousKm, 1_000_000) : previousKm,
+    billingKm: isMeal ? 0 : isPaidTime ? nonnegativeNumber(todo.billingKm, previousKm, 1_000_000) : previousKm,
     warranty: isMeal ? false : isCompleted ? Boolean(todo.warranty) : previousWarranty,
     clientKm: isMeal ? 0 : canSetClientMileage ? nonnegativeNumber(todo.clientKm, previousClientKm, 1_000_000) : previousClientKm,
     clientVehicle: isMeal ? "personal" : requestedClientVehicle,
@@ -2507,6 +2508,7 @@ function cleanTodoUserOrderBuckets(input) {
 
 function cleanTodo(input) {
   const isMeal = input.status === "meal";
+  const isTimeEntry = TIME_ENTRY_TODO_STATUSES.has(String(input.status || ""));
   const photos = Array.isArray(input.photos) ? input.photos : [];
   return {
     title: isMeal ? "Malica" : String(input.title || "").trim(),
@@ -2521,7 +2523,7 @@ function cleanTodo(input) {
     order: Number.isFinite(Number(input.order)) ? Number(input.order) : 0,
     // Older tasks without this field are intentionally shown as sorted.
     userOrderBuckets: cleanTodoUserOrderBuckets(input.userOrderBuckets),
-    urgent: isMeal ? false : ["execution", "billing"].includes(input.status) ? false : Boolean(input.urgent),
+    urgent: isMeal || isTimeEntry || input.status === "billing" ? false : Boolean(input.urgent),
     warranty: input.status === "execution" && Boolean(input.warranty),
     syncUser: cleanUserId(input.syncUser),
     sourceProjectTodoId: String(input.sourceProjectTodoId || "").trim().slice(0, 100),
@@ -2639,7 +2641,10 @@ function validateTodo(todo, { requireClientId = false } = {}) {
   if (Boolean(todo.start) !== Boolean(todo.end)) return "Vnesi obe uri: od in do.";
   if ((todo.start || todo.end) && !todo.date) return "Za opravilo z uro vnesi tudi datum.";
   if (todo.start && (!/^\d{2}:\d{2}$/.test(todo.start) || !/^\d{2}:\d{2}$/.test(todo.end))) return "Čas opravila ni pravilen.";
-  if (["execution", "meal"].includes(todo.status) && (!todo.date || !todo.start || !todo.end)) return todo.status === "meal" ? "Za malico vnesi datum ter uro od in do." : "Za zaključeno opravilo vnesi datum ter uro od in do.";
+  if (TIME_ENTRY_TODO_STATUSES.has(todo.status) && (!todo.date || !todo.start || !todo.end)) {
+    const label = todo.status === "meal" ? "malico" : todo.status === "drive" ? "vo\u017enjo" : todo.status === "purchase" ? "nabavo" : "zaklju\u010deno opravilo";
+    return `Za ${label} vnesi datum ter uro od in do.`;
+  }
   if (todo.start && todo.end <= todo.start) return "Ura do mora biti kasneje kot ura od.";
   if ((todo.photos || []).some((photo) => !validTodoAttachmentDataUrl(photo.data) && !validTodoAttachmentId(photo.attachmentId))) return "Priloga ni veljavna slika ali PDF.";
   if ((todo.photos || []).reduce((total, photo) => total + String(photo.data || "").length, 0) > MAX_TODO_ATTACHMENTS_DATA_LENGTH) return "Priloge so skupaj prevelike.";
@@ -4780,8 +4785,8 @@ async function handleApi(req, res) {
       const newOrder = todo.order || minOrder - 1;
       let assigneeIds = todoAssigneesForRequest(user, body.assigneeIds || todo.syncUser, db.users);
       if (todo.status === "meal") assigneeIds = [syncUserForRequest(user, todo.syncUser || assigneeIds[0] || user.id, "", db.users)];
-      if (["execution", "meal"].includes(todo.status) && assigneeIds.length !== 1) {
-        sendJson(res, 400, { error: "Zaključene ure se vpisujejo posebej za enega delavca." });
+      if (TIME_ENTRY_TODO_STATUSES.has(todo.status) && assigneeIds.length !== 1) {
+        sendJson(res, 400, { error: "Vnos ur se vpisuje posebej za enega delavca." });
         return;
       }
       const assignmentGroupId = crypto.randomUUID();
@@ -5166,8 +5171,8 @@ async function handleApi(req, res) {
       }
 
       if (todo.status === "meal") assigneeIds = [syncUserForRequest(user, todo.syncUser || assigneeIds[0] || previousTodo.syncUser || user.id, previousTodo.syncUser, db.users)];
-      if (["execution", "meal"].includes(todo.status) && assigneeIds.length !== 1) {
-        sendJson(res, 400, { error: "Zakljuceni vnosi ur in malica se vpisujejo posebej za enega delavca." });
+      if (TIME_ENTRY_TODO_STATUSES.has(todo.status) && assigneeIds.length !== 1) {
+        sendJson(res, 400, { error: "Vnos ur se vpisuje posebej za enega delavca." });
         return;
       }
       const desiredAssignees = new Set(assigneeIds);

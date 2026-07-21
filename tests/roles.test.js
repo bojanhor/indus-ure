@@ -52,7 +52,8 @@ const {
   visibleDebtsForUser,
   visibleEntriesForUser,
   visibleTodosForUser,
-  payrollMinutesForTodo
+  payrollMinutesForTodo,
+  validateTodo
 } = require("../outputs/server");
 
 const boss = { id: "bojan", role: "boss" };
@@ -83,6 +84,16 @@ test("malica se delavcu plača največ do nastavljene meje", () => {
   const meal = { status: "meal", date: "2026-07-20", start: "12:00", end: "13:00" };
   assert.equal(payrollMinutesForTodo({ settings: { billing: { mealPaidMinutes: 45 } } }, meal), 45);
   assert.equal(payrollMinutesForTodo({ settings: { billing: { mealPaidMinutes: 45 } } }, { ...meal, end: "12:30" }), 30);
+});
+
+test("vo\u017enja in nabava sta obra\u010dunljiva vnosa ur", () => {
+  const db = { settings: { billing: { mealPaidMinutes: 45 } } };
+  for (const status of ["drive", "purchase"]) {
+    const todo = { title: "Vnos ur", status, date: "2026-07-20", start: "08:00", end: "09:00" };
+    assert.equal(payrollMinutesForTodo(db, todo), 60);
+    assert.equal(validateTodo(todo), "");
+  }
+  assert.match(validateTodo({ title: "Vnos ur", status: "drive", date: "", start: "", end: "" }), /datum ter uro/);
 });
 
 test("vsako opravilo dobi skriti skupni ID dogodka", () => {

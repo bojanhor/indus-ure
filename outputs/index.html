@@ -787,38 +787,92 @@
     }
 
     .todo-layout.client-filter-active {
-      grid-template-columns: minmax(220px, 240px) minmax(0, 1fr);
+      grid-template-columns: minmax(0, 1fr);
     }
 
-    .client-list {
+    .client-todo-groups {
       display: grid;
-      gap: 8px;
-      align-content: start;
+      gap: 10px;
+      padding-top: 10px;
     }
 
-    .client-card {
-      width: 100%;
-      text-align: left;
-      background: #f5f8f4;
+    .client-todo-group {
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: #f7faf7;
+      overflow: hidden;
+    }
+
+    .client-todo-group.dragging { opacity: 0.45; }
+    .client-todo-group.drop-target { box-shadow: inset 0 0 0 2px var(--accent); }
+
+    .client-todo-group-head {
+      display: grid;
+      grid-template-columns: 42px minmax(0, 1fr) auto;
+      gap: 8px;
+      align-items: center;
+      padding: 8px;
+      background: #edf4f0;
+    }
+
+    .client-todo-group-drag {
+      width: 38px;
+      min-width: 38px;
+      min-height: 38px;
+      padding: 0;
+      border-radius: 7px;
+      touch-action: none;
+      cursor: grab;
+    }
+
+    .client-todo-group-toggle {
+      min-width: 0;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px;
+      align-items: center;
+      padding: 3px 0;
+      border: 0;
+      background: transparent;
       color: var(--ink);
+      text-align: left;
+      font: inherit;
+      cursor: pointer;
+    }
+
+    .client-todo-group-toggle strong { overflow-wrap: anywhere; }
+    .client-todo-group-toggle span { color: var(--muted); font-size: 12px; font-weight: 700; white-space: nowrap; }
+    .client-todo-group-chevron { color: var(--muted); font-size: 19px; line-height: 1; }
+    .client-todo-group-items { display: grid; gap: 8px; padding: 9px; border-top: 1px solid var(--line); }
+
+    .client-todo-task-row {
+      width: 100%;
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      gap: 9px;
+      align-items: start;
       border: 1px solid var(--line);
       border-radius: 8px;
-      padding: 10px;
-      display: grid;
-      gap: 3px;
+      padding: 9px;
+      background: #fff;
+      color: var(--ink);
+      text-align: left;
+      font: inherit;
+      cursor: pointer;
     }
 
-    .client-card.active {
-      border-color: var(--accent);
-      box-shadow: inset 0 0 0 1px var(--accent);
-    }
+    .client-todo-task-row:hover { border-color: var(--accent); background: #f7fcfd; }
+    .client-todo-task-row.done { background: #f5fbf5; }
+    .client-todo-task-row.urgent { border-left: 4px solid var(--urgent); }
+    .client-todo-task-content { min-width: 0; display: grid; gap: 3px; }
+    .client-todo-task-content strong { overflow-wrap: anywhere; }
+    .client-todo-task-content small { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
 
-    .client-card strong,
+
     .todo-head strong {
       font-size: 14px;
     }
 
-    .client-card span,
     .todo-meta {
       color: var(--muted);
       font-size: 12px;
@@ -979,6 +1033,8 @@
     .todo-item.done {
       opacity: 0.62;
     }
+
+    .todo-item.completed-view-item { opacity: 1; }
 
     .todo-item.dragging {
       opacity: 0.45;
@@ -1293,6 +1349,8 @@
     .todo-item.done .todo-title {
       text-decoration: line-through;
     }
+
+    .todo-item.completed-view-item .todo-title { text-decoration: none; }
 
     .todo-title {
       font-weight: 800;
@@ -3009,13 +3067,6 @@
       }
       .todo-layout,
       .todo-layout.client-filter-active { grid-template-columns: 1fr; }
-      .client-list {
-        display: flex;
-        overflow-x: auto;
-        gap: 8px;
-        padding-bottom: 4px;
-      }
-      .client-card { min-width: 190px; }
     }
 
     @media (max-width: 1250px) {
@@ -3265,15 +3316,6 @@
       .report-line,
       .client-work-row { grid-template-columns: 1fr; }
       .todo-actions-bar .primary { width: 100%; }
-      .client-list {
-        display: flex;
-        overflow-x: auto;
-        gap: 8px;
-        padding-bottom: 4px;
-      }
-      .client-card {
-        min-width: 190px;
-      }
       .client-work-row button {
         justify-self: stretch;
       }
@@ -3562,7 +3604,6 @@
       </section>
 
       <section class="panel todo-layout todos-view view-hidden" id="todoLayout">
-        <div class="client-list" id="clientTodoList"></div>
         <div class="todo-panel">
           <div class="todo-actions-bar">
             <button class="primary" id="newTodoButton" type="button">Dodaj opravilo</button>
@@ -3702,7 +3743,6 @@
       <div class="todo-creation-tabs hidden" id="todoCreationTabs" role="tablist" aria-label="Vrsta novega vnosa">
         <button class="todo-creation-tab" type="button" role="tab" data-create-mode="task">Nov dogodek</button>
         <button class="todo-creation-tab" type="button" role="tab" data-create-mode="hours">Vpis ur na projekt</button>
-        <button class="todo-creation-tab" type="button" role="tab" data-create-mode="meal">Malica</button>
       </div>
       <div class="modal-body">
         <input type="hidden" id="todoFormId">
@@ -4125,7 +4165,8 @@
     const todoSortModeKey = "indus-ure-todo-sort-mode";
     const billingWorkerKey = "indus-ure-billing-worker";
     const todoSortModes = ["manual", "client", "date", "order", "completed", "open", "in_progress"];
-    const payrollPaidTodoStatuses = new Set(["execution", "meal"]);
+    const timeEntryStatusIds = new Set(["execution", "meal", "drive", "purchase"]);
+    const payrollPaidTodoStatuses = new Set(timeEntryStatusIds);
     const projectHoursSourceStatuses = new Set(["open", "in_progress"]);
     const statusLabels = {
       billed: "Že obračunano",
@@ -4163,11 +4204,14 @@
 
     function renderTodoStatusChoices(selected) {
       const current = todoStatus(selected).id;
-      const availableStatuses = state.todoHoursSourceId || state.todoStandaloneHours || state.todoMealEntry || current === "execution" || current === "meal"
-        ? []
-        : todoStatusDefinitions.filter((status) => status.id !== "execution" && status.id !== "meal");
+      const standaloneHours = Boolean(state.todoStandaloneHours && !state.todoHoursSourceId);
+      const availableStatuses = standaloneHours
+        ? todoStatusDefinitions.filter((status) => timeEntryStatusIds.has(status.id))
+        : (state.todoHoursSourceId || state.todoMealEntry || timeEntryStatusIds.has(current)
+          ? []
+          : todoStatusDefinitions.filter((status) => !timeEntryStatusIds.has(status.id)));
       $("todoFormStatusChoices").innerHTML = availableStatuses.map((status) => `
-        <button class="todo-status-choice todo-status-color ${todoStatusClass(status.id)}" type="button" data-status="${status.id}" aria-pressed="${status.id === current}" ${current === "execution" ? "disabled" : ""}>
+        <button class="todo-status-choice todo-status-color ${todoStatusClass(status.id)}" type="button" data-status="${status.id}" aria-pressed="${status.id === current}">
           ${status.label}
         </button>
       `).join("");
@@ -5755,12 +5799,16 @@
 
     function sortedTodosForMode(todos = contextTodos()) {
       let list = [...todos];
-      if (state.todoSortMode === "date") return list.filter((todo) => todo.date).sort(todoDateSort);
+      if (state.todoSortMode === "date") return list.filter((todo) => todo.date && !timeEntryStatusIds.has(todo.status)).sort(todoDateSort);
       if (state.todoSortMode === "order") return list.filter((todo) => todoNeedsOrdering(todo)).sort(todoOrderingSort);
-      if (state.todoSortMode === "open") return list.filter((todo) => todo.status === "open").sort(todoSort);
-      if (state.todoSortMode === "in_progress") return list.filter((todo) => todo.status === "in_progress").sort(todoSort);
-      if (state.todoSortMode === "client") return list.filter((todo) => todo.status !== "meal").sort(todoSort);
-      if (state.todoSortMode === "manual") return list.filter((todo) => todo.status !== "meal").sort(todoManualBucketSort);
+      if (state.todoSortMode === "open") return list.filter((todo) => todo.status === "open").sort(todoManualBucketSort);
+      if (state.todoSortMode === "in_progress") return list.filter((todo) => todo.status === "in_progress").sort(todoManualBucketSort);
+      if (state.todoSortMode === "client") return list.filter((todo) => !timeEntryStatusIds.has(todo.status) || todo.status === "execution").sort(todoSort);
+      if (state.todoSortMode === "manual") {
+        const active = list.filter((todo) => !timeEntryStatusIds.has(todo.status)).sort(todoManualBucketSort);
+        const completed = list.filter((todo) => todo.status === "execution").sort(todoDateSort);
+        return [...active, ...completed];
+      }
       if (state.todoSortMode === "completed") {
         const unique = new Map();
         list.filter((todo) => todo.status === "execution").forEach((todo) => {
@@ -7100,49 +7148,152 @@
       renderTodoItems();
     }
 
-    function todoClients() {
-      const names = [];
-      const seen = new Set();
-      sortedTodosForMode().forEach((todo) => {
-        if (!todo.client || seen.has(todo.client)) return;
-        seen.add(todo.client);
-        names.push(todo.client);
+    function clientTodoPresentationStorageKey(part) {
+      const userId = state.user?.id || 'anonymous';
+      const context = state.workContext || `worker:${userId}`;
+      return `indus-ure:client-todos:${part}:${userId}:${context}`;
+    }
+
+    function clientTodoGroupKey(todo) {
+      const clientId = String(todo?.clientId || '').trim();
+      return clientId ? `id:${clientId}` : `name:${normalizeText(todo?.client || 'Brez stranke')}`;
+    }
+
+    function savedClientTodoGroupOrder() {
+      try {
+        const value = JSON.parse(localStorage.getItem(clientTodoPresentationStorageKey('order')) || '{}');
+        return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+      } catch (_) { return {}; }
+    }
+
+    function savedClientTodoExpandedGroups() {
+      try {
+        const value = JSON.parse(localStorage.getItem(clientTodoPresentationStorageKey('expanded')) || '[]');
+        return new Set(Array.isArray(value) ? value : []);
+      } catch (_) { return new Set(); }
+    }
+
+    function setClientTodoGroupExpanded(key, expanded) {
+      const keys = savedClientTodoExpandedGroups();
+      if (expanded) keys.add(key); else keys.delete(key);
+      localStorage.setItem(clientTodoPresentationStorageKey('expanded'), JSON.stringify([...keys]));
+    }
+
+    function clientTodoGroups() {
+      const groups = new Map();
+      sortedTodosForMode(contextTodos())
+        .filter((todo) => todo.status !== 'meal')
+        .forEach((todo, index) => {
+          const key = clientTodoGroupKey(todo);
+          if (!groups.has(key)) groups.set(key, { key, client: todo.client || 'Brez stranke', todos: [], firstIndex: index });
+          groups.get(key).todos.push(todo);
+        });
+      const order = savedClientTodoGroupOrder();
+      return [...groups.values()].sort((left, right) => {
+        const leftOrder = Number.isFinite(Number(order[left.key])) ? Number(order[left.key]) : Number.MAX_SAFE_INTEGER;
+        const rightOrder = Number.isFinite(Number(order[right.key])) ? Number(order[right.key]) : Number.MAX_SAFE_INTEGER;
+        return leftOrder - rightOrder || left.firstIndex - right.firstIndex || left.client.localeCompare(right.client, 'sl');
       });
-      return names;
+    }
+
+    function saveClientTodoGroupOrder(keys) {
+      localStorage.setItem(clientTodoPresentationStorageKey('order'), JSON.stringify(Object.fromEntries(keys.map((key, index) => [key, index + 1]))));
+    }
+
+    const CLIENT_GROUP_TOUCH_DRAG_HOLD_MS = 200;
+    let clientTodoGroupDrag = null;
+
+    function clearClientTodoGroupDrag() {
+      const drag = clientTodoGroupDrag;
+      if (!drag) return;
+      window.clearTimeout(drag.holdTimer);
+      drag.group.classList.remove('dragging');
+      document.querySelectorAll('.client-todo-group.drop-target').forEach((element) => element.classList.remove('drop-target'));
+      if (drag.handle.hasPointerCapture?.(drag.pointerId)) drag.handle.releasePointerCapture(drag.pointerId);
+      clientTodoGroupDrag = null;
+    }
+
+    function activateClientTodoGroupDrag(drag) {
+      if (!drag || clientTodoGroupDrag !== drag || drag.active) return;
+      drag.active = true;
+      drag.group.classList.add('dragging');
+      drag.handle.setPointerCapture?.(drag.pointerId);
+    }
+
+    function beginClientTodoGroupDrag(event, group, key) {
+      if (event.button !== undefined && event.button !== 0) return;
+      clearClientTodoGroupDrag();
+      const drag = {
+        pointerId: event.pointerId,
+        pointerType: event.pointerType,
+        group,
+        key,
+        handle: event.currentTarget,
+        startX: event.clientX,
+        startY: event.clientY,
+        active: false,
+        target: null,
+        holdTimer: null
+      };
+      clientTodoGroupDrag = drag;
+      if (event.pointerType === 'touch') {
+        drag.holdTimer = window.setTimeout(() => activateClientTodoGroupDrag(drag), CLIENT_GROUP_TOUCH_DRAG_HOLD_MS);
+      } else {
+        event.preventDefault();
+        activateClientTodoGroupDrag(drag);
+      }
+    }
+
+    function updateClientTodoGroupDrag(event) {
+      const drag = clientTodoGroupDrag;
+      if (!drag || drag.pointerId !== event.pointerId) return;
+      if (!drag.active) {
+        if (Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) > 9) clearClientTodoGroupDrag();
+        return;
+      }
+      event.preventDefault();
+      const target = document.elementFromPoint(event.clientX, event.clientY)?.closest('.client-todo-group');
+      document.querySelectorAll('.client-todo-group.drop-target').forEach((element) => element.classList.remove('drop-target'));
+      drag.target = target && target !== drag.group ? target : null;
+      drag.target?.classList.add('drop-target');
+    }
+
+    function finishClientTodoGroupDrag(event) {
+      const drag = clientTodoGroupDrag;
+      if (!drag || drag.pointerId !== event.pointerId) return;
+      const target = drag.target;
+      const active = drag.active;
+      if (active && target) {
+        event.preventDefault();
+        const cards = [...document.querySelectorAll('.client-todo-group')];
+        const from = cards.indexOf(drag.group);
+        const targetIndex = cards.indexOf(target);
+        const before = event.clientY < target.getBoundingClientRect().top + target.getBoundingClientRect().height / 2;
+        if (from >= 0 && targetIndex >= 0) {
+          const keys = cards.map((card) => card.dataset.clientGroupKey);
+          const [moved] = keys.splice(from, 1);
+          const destination = Math.max(0, Math.min(keys.length, targetIndex + (from < targetIndex ? (before ? -1 : 0) : (before ? 0 : 1))));
+          keys.splice(destination, 0, moved);
+          saveClientTodoGroupOrder(keys);
+        }
+      }
+      clearClientTodoGroupDrag();
+      if (active) renderTodos();
+    }
+
+    function cancelClientTodoGroupDrag(event) {
+      if (event && clientTodoGroupDrag && event.pointerId !== clientTodoGroupDrag.pointerId) return;
+      clearClientTodoGroupDrag();
+    }
+
+    function todoClients() {
+      return clientTodoGroups().map((group) => group.client);
     }
 
     function renderClientTodoList() {
-      const list = $("clientTodoList");
-      const active = state.todoSortMode === "client";
-      $("todoLayout").classList.toggle("client-filter-active", active);
-      list.classList.toggle("hidden", !active);
-      list.innerHTML = "";
-      if (!active) {
-        state.selectedClient = "";
-        return;
-      }
-      const modeTodos = sortedTodosForMode();
-      const clientsInTodoOrder = todoClients().map((client) => {
-        const clientTodos = modeTodos.filter((todo) => todo.client === client);
-        const enteredMinutes = clientTodos.reduce((total, todo) => {
-          const start = dayTimelineMinutes(todo.start);
-          const end = dayTimelineMinutes(todo.end);
-          return start === null || end === null || end <= start ? total : total + end - start;
-        }, 0);
-        return { client, clientTodos, enteredMinutes };
-      });
-      clientsInTodoOrder.forEach(({ client, clientTodos, enteredMinutes }) => {
-        const open = clientTodos.filter((todo) => !todo.done).length;
-        const card = document.createElement("button");
-        card.type = "button";
-        card.className = `client-card ${state.selectedClient === client ? "active" : ""}`;
-        card.innerHTML = `<strong>${escapeHtml(client)}</strong><span>${open} odprtih, ${(enteredMinutes / 60).toLocaleString("sl-SI", { maximumFractionDigits: 2 })} h skupaj</span>`;
-        card.addEventListener("click", () => {
-          state.selectedClient = state.selectedClient === client ? "" : client;
-          renderTodos();
-        });
-        list.appendChild(card);
-      });
+      const active = state.todoSortMode === 'client';
+      $('todoLayout').classList.toggle('client-filter-active', active);
+      if (!active) state.selectedClient = '';
     }
 
     function clientHasEntries(client) {
@@ -7332,22 +7483,96 @@
 
     function appendTodoOrderSection(items, bucket) {
       const section = document.createElement("div");
-      const label = bucket === "unsorted" ? "Nerazvrščeno" : "Razvrščeno";
-      section.className = "todo-order-section todo-order-drop-zone";
-      section.dataset.todoDropBucket = bucket;
-      section.dataset.todoDropPlacement = "before";
-      section.innerHTML = `<span>${label}</span><small>${bucket === "unsorted" ? "Nova opravila" : "Ustaljeni vrstni red"}</small>`;
+      const labels = {
+        sorted: ["Razvrščeno", "Ustaljeni vrstni red"],
+        unsorted: ["Nerazvrščeno", "Nova opravila"],
+        completed: ["Zaključeno", "Zaključena opravila po datumu"]
+      };
+      const [label, detail] = labels[bucket] || labels.sorted;
+      const reorderBucket = ["sorted", "unsorted"].includes(bucket);
+      section.className = `todo-order-section${reorderBucket ? " todo-order-drop-zone" : ""}`;
+      if (reorderBucket) {
+        section.dataset.todoDropBucket = bucket;
+        section.dataset.todoDropPlacement = "before";
+      }
+      section.innerHTML = `<span>${label}</span><small>${detail}</small>`;
       items.appendChild(section);
+    }
+
+    function renderClientTodoItems(items, title) {
+      title.textContent = "Opravila po strankah";
+      items.classList.add("client-todo-groups");
+      const groups = clientTodoGroups();
+      if (!groups.length) {
+        items.innerHTML = '<p class="todo-meta">Ni opravil za ta izbor.</p>';
+        return;
+      }
+      const expandedGroups = savedClientTodoExpandedGroups();
+      groups.forEach((group) => {
+        const expanded = expandedGroups.has(group.key);
+        const card = document.createElement("section");
+        card.className = "client-todo-group";
+        card.dataset.clientGroupKey = group.key;
+        const countText = `${group.todos.length} ${group.todos.length === 1 ? "opravilo" : "opravila"}${expanded ? "" : " skrita"}`;
+        card.innerHTML = `
+          <div class="client-todo-group-head">
+            <button class="client-todo-group-drag" type="button" title="Povleci za svoj vrstni red strank" aria-label="Povleci za svoj vrstni red strank">::</button>
+            <button class="client-todo-group-toggle" type="button" aria-expanded="${expanded}">
+              <strong>${escapeHtml(group.client)}</strong>
+              <span>${countText}</span>
+            </button>
+            <span class="client-todo-group-chevron" aria-hidden="true">${expanded ? "⌃" : "⌄"}</span>
+          </div>
+        `;
+        const toggle = card.querySelector(".client-todo-group-toggle");
+        toggle.addEventListener("click", () => {
+          setClientTodoGroupExpanded(group.key, !expanded);
+          renderTodos();
+        });
+        const dragHandle = card.querySelector(".client-todo-group-drag");
+        const dragPointerOptions = { passive: false };
+        dragHandle.addEventListener("pointerdown", (event) => beginClientTodoGroupDrag(event, card, group.key), dragPointerOptions);
+        dragHandle.addEventListener("pointermove", updateClientTodoGroupDrag, dragPointerOptions);
+        dragHandle.addEventListener("pointerup", finishClientTodoGroupDrag, dragPointerOptions);
+        dragHandle.addEventListener("pointercancel", cancelClientTodoGroupDrag, dragPointerOptions);
+        dragHandle.addEventListener("lostpointercapture", cancelClientTodoGroupDrag);
+        dragHandle.addEventListener("contextmenu", (event) => event.preventDefault());
+        if (expanded) {
+          const body = document.createElement("div");
+          body.className = "client-todo-group-items";
+          group.todos.forEach((todo) => {
+            const row = document.createElement("button");
+            row.type = "button";
+            row.className = `client-todo-task-row ${todo.done ? "done" : ""} ${todo.urgent ? "urgent" : ""}`;
+            const dateText = todo.date ? todoDateTimeLabel(todo) : "Brez datuma";
+            row.innerHTML = `
+              <span class="todo-chip todo-status-chip todo-status-color ${todoStatusClass(todo.status)}">${escapeHtml(todoStatus(todo.status).label)}</span>
+              <span class="client-todo-task-content">
+                <strong>${todo.urgent ? '<span class="todo-chip todo-urgent-chip">NUJNO</span> ' : ""}${escapeHtml(todo.title || "Brez naslova")}</strong>
+                <small>${escapeHtml(dateText)} · Za: ${escapeHtml(todoAssigneeNames(todo))}</small>
+              </span>
+            `;
+            row.addEventListener("click", () => openTodoDialog(todo));
+            body.appendChild(row);
+          });
+          card.appendChild(body);
+        }
+        items.appendChild(card);
+      });
     }
 
     function renderTodoItems() {
       const items = $("todoItems");
       const title = $("todoPanelTitle");
-      title.textContent = state.selectedClient ? `Opravila: ${state.selectedClient}` : "Vsa opravila";
       items.innerHTML = "";
+      items.classList.remove("client-todo-groups");
+      if (state.todoSortMode === "client") {
+        renderClientTodoItems(items, title);
+        return;
+      }
+      title.textContent = "Vsa opravila";
 
-      const todos = sortedTodosForMode(contextTodos()
-        .filter((todo) => !state.selectedClient || todo.client === state.selectedClient));
+      const todos = sortedTodosForMode(contextTodos());
 
       if (todos.length === 0) {
         items.innerHTML = `<p class="todo-meta">Ni opravil za ta izbor.</p>`;
@@ -7355,9 +7580,11 @@
       }
 
       const showManualSections = state.todoSortMode === "manual";
+      const manualActiveTodos = showManualSections ? todos.filter((todo) => todo.status !== "execution") : [];
       let completedGroupKey = "";
       let currentManualBucket = "";
-      if (showManualSections) {
+      let manualCompletedSectionShown = false;
+      if (showManualSections && manualActiveTodos.some((todo) => todoManualBucketForCurrentUser(todo) === "sorted")) {
         appendTodoOrderSection(items, "sorted");
         currentManualBucket = "sorted";
       }
@@ -7372,10 +7599,17 @@
           group.innerHTML = `<span>${escapeHtml(todo.client || "Brez stranke")}</span><span>${completedTodoGroupCount(todos, todo)} opravil &middot; ${groupHours.toLocaleString("sl-SI", { maximumFractionDigits: 2 })} h</span>`;
           items.appendChild(group);
         }
-        const manualBucket = todoManualBucketForCurrentUser(todo);
-        if (showManualSections && manualBucket !== currentManualBucket) {
-          appendTodoOrderSection(items, manualBucket);
-          currentManualBucket = manualBucket;
+        const manualCompleted = showManualSections && todo.status === "execution";
+        if (manualCompleted && !manualCompletedSectionShown) {
+          appendTodoOrderSection(items, "completed");
+          manualCompletedSectionShown = true;
+        }
+        if (showManualSections && !manualCompleted) {
+          const manualBucket = todoManualBucketForCurrentUser(todo);
+          if (manualBucket !== currentManualBucket) {
+            appendTodoOrderSection(items, manualBucket);
+            currentManualBucket = manualBucket;
+          }
         }
         const item = document.createElement("div");
         const reorderable = state.todoSortMode === "manual" && !todo.done && !todo.urgent;
@@ -7383,7 +7617,8 @@
         const detailsExpanded = state.expandedTodoIds.has(todo.id);
         const assigneeCount = todoAssigneeIds(todo).length;
         item.dataset.todoId = todo.id;
-        item.className = `todo-item ${todo.done ? "done" : ""} ${todo.urgent ? "urgent" : ""} ${detailsExpanded ? "details-expanded" : ""}`;
+        const completedPresentation = todo.status === "execution" && (state.todoSortMode === "completed" || showManualSections);
+        item.className = `todo-item ${todo.done ? "done" : ""} ${completedPresentation ? "completed-view-item" : ""} ${todo.urgent ? "urgent" : ""} ${detailsExpanded ? "details-expanded" : ""}`;
         item.innerHTML = `
           <div class="todo-control-stack">
             <button class="drag-handle" type="button" ${reorderable ? "" : "disabled"} title="Povleci za vrstni red (na telefonu pridrži)" aria-label="Povleci za vrstni red (na telefonu pridrži)">::</button>
@@ -8132,7 +8367,9 @@
       updateTodoStatusControl($("todoFormStatus"));
       const completed = $("todoFormStatus").value === "execution";
       const meal = $("todoFormStatus").value === "meal";
-      $("todoFormStatusField").classList.toggle("hidden", Boolean(state.todoHoursSourceId) || state.todoStandaloneHours || state.todoMealEntry || completed || meal);
+      const standaloneHours = Boolean(state.todoStandaloneHours && !state.todoHoursSourceId);
+      const selectedStatus = $("todoFormStatus").value;
+      $("todoFormStatusField").classList.toggle("hidden", !standaloneHours && (Boolean(state.todoHoursSourceId) || state.todoMealEntry || timeEntryStatusIds.has(selectedStatus)));
       const mealNote = $("todoFormMealNote");
       mealNote.classList.toggle("hidden", !meal);
       mealNote.textContent = meal ? `Malica se stranki ne obračuna. Delavcu se plača največ ${mealPaidMinutes()} min.` : "";
@@ -8147,15 +8384,16 @@
       $("todoFormMaterialField").classList.toggle("hidden", meal || logisticsStatus);
       $("todoFormNotesLabel").textContent = logisticsStatus ? "Opis" : "Opis del";
       $("todoFormNotes").placeholder = logisticsStatus ? "Vpi\u0161i opis" : "Opi\u0161i, kaj se bo delalo";
-      const showWorkerMileage = completed && !meal;
-      const showHourlyRate = isAdminView() && completed && !meal;
+      const timeEntry = timeEntryStatusIds.has(selectedStatus);
+      const showWorkerMileage = timeEntry && !meal;
+      const showHourlyRate = isAdminView() && timeEntry && !meal;
       const showClientMileage = completed && !meal;
       $("todoFormClientBilling").classList.toggle("hidden", !showClientMileage);
       $("todoFormBilling").classList.toggle("hidden", !showWorkerMileage);
       $("todoFormHourlyRateField").classList.toggle("hidden", !showHourlyRate);
       $("todoFormWarrantyField").classList.toggle("hidden", !showWorkerMileage);
-      $("todoFormUrgentField").classList.toggle("hidden", completed || meal);
-      if (completed) $("todoFormUrgent").checked = false;
+      $("todoFormUrgentField").classList.toggle("hidden", timeEntry);
+      if (timeEntry) $("todoFormUrgent").checked = false;
     }
 
     function renderTodoTaskSuggestions() {
@@ -8263,7 +8501,7 @@
         order: existing?.order || nextTodoOrder(),
         assigneeIds,
         syncUser: existing?.syncUser || assigneeIds[0] || activeWorkerId(),
-        urgent: $("todoFormStatus").value === "execution" ? false : $("todoFormUrgent").checked,
+        urgent: timeEntryStatusIds.has($("todoFormStatus").value) ? false : $("todoFormUrgent").checked,
         warranty: $("todoFormStatus").value === "execution" && Boolean($("todoFormWarranty").checked),
         sourceProjectTodoId: existing?.sourceProjectTodoId || state.todoHoursSourceId || state.todoDraftSourceProjectTodoId || "",
         done: $("todoFormStatus").value === "execution",
@@ -8278,7 +8516,7 @@
         todo.photos = [];
         todo.driveFiles = [];
       }
-      const isHoursEntry = Boolean(state.todoHoursSourceId || state.todoStandaloneHours);
+      const isHoursEntry = Boolean(state.todoHoursSourceId || state.todoStandaloneHours || timeEntryStatusIds.has(todo.status));
       if (isHoursEntry && (!todo.start || !todo.end)) {
         if (!todo.date) {
           showNotice("Za vpis delovnih ur izberi datum.");
