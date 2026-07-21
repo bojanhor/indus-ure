@@ -1548,6 +1548,40 @@
       object-fit: cover;
     }
 
+    .todo-form-video-uploading {
+      align-items: stretch;
+      background: #f3f9fa;
+      border-radius: 8px;
+      padding-inline: 8px;
+    }
+
+    .todo-form-video-uploading .todo-form-attachment-thumb {
+      color: var(--accent);
+      border-color: #9bc7d3;
+      background: #e7f4f7;
+    }
+
+    .todo-form-video-progress {
+      display: grid;
+      min-width: min(270px, 100%);
+      flex: 1 1 220px;
+      gap: 4px;
+      align-content: center;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .todo-form-video-progress progress {
+      width: 100%;
+      height: 10px;
+      accent-color: var(--accent);
+    }
+
+    .todo-form-video-error {
+      color: var(--danger);
+    }
+
 
     .todo-pdf-preview {
       width: 100%;
@@ -3925,7 +3959,7 @@
               <input class="hidden-file" id="todoFormVideoInput" type="file" accept="video/*" multiple>
               <span class="sr-only">Izberi video; shrani se zasebno v INDUS URE</span>
             </label>
-            <div class="todo-upload-status hidden" id="todoFormVideoStatus" role="status" aria-live="polite"><progress id="todoFormVideoProgress" max="100" value="0"></progress><span></span></div>
+            <div class="todo-upload-status" id="todoFormVideoStatus" role="status" aria-live="polite" hidden><progress id="todoFormVideoProgress" max="100" value="0"></progress><span></span></div>
           </div>
         </div>
         <div class="audit-box hidden" id="todoFormAudit"></div>
@@ -8363,13 +8397,25 @@
       const label = status.querySelector("span");
       label.textContent = String(message || "");
       status.hidden = !message;
+      status.classList.toggle("hidden", !message);
       progress.hidden = percent === null;
       progress.value = Math.max(0, Math.min(100, Number(percent) || 0));
       if (stateName) status.dataset.state = stateName;
       else delete status.dataset.state;
     }
 
-    function uploadTodoVideoFile(file, csrfRetried = false) {
+    function updateTodoVideoUploadDraft(draft, percent) {
+      const value = Math.max(0, Math.min(100, Number(percent) || 0));
+      draft.uploadPercent = value;
+      const row = document.querySelector(`[data-todo-video-upload-id="${draft.id}"]`);
+      if (!row) return;
+      const progress = row.querySelector("progress");
+      const label = row.querySelector(".todo-form-video-progress-label");
+      if (progress) progress.value = value;
+      if (label) label.textContent = `Nalagam video: ${value} %`;
+    }
+
+    function uploadTodoVideoFile(file, onProgress = null, csrfRetried = false) {
       return new Promise((resolve, reject) => {
         const request = new XMLHttpRequest();
         request.open("POST", "/api/todos/video", true);
@@ -8381,7 +8427,7 @@
         request.upload.addEventListener("progress", (event) => {
           if (!event.lengthComputable) return;
           const percent = Math.min(100, Math.round((event.loaded / event.total) * 100));
-          setTodoVideoUploadStatus(`Nalagam video: ${percent} %`, "uploading", percent);
+          if (typeof onProgress === "function") onProgress(percent, event);
         });
         request.addEventListener("load", async () => {
           let data = request.response;
@@ -8392,7 +8438,7 @@
           if (csrfFailure && !csrfRetried && navigator.onLine) {
             try {
               await refreshSessionSecurityContext();
-              resolve(await uploadTodoVideoFile(file, true));
+              resolve(await uploadTodoVideoFile(file, onProgress, true));
               return;
             } catch (error) {
               reject(error);
@@ -8423,18 +8469,40 @@
       const maxBytes = 200 * 1024 * 1024;
       input.disabled = true;
       try {
-        for (const file of files) {
+        for (const [index, file] of files.entries()) {
           if (state.todoDialogPhotos.length >= 8) throw new Error("Največ je 8 prilog na opravilo.");
           if (!file.size) throw new Error("Praznega videa ni mogoče dodati.");
           if (file.size > maxBytes) throw new Error("Video je prevelik. Največja dovoljena velikost je 200 MB.");
-          setTodoVideoUploadStatus("Pripravljam nalaganje videa.", "uploading", 0);
-          const data = await uploadTodoVideoFile(file);
-          if (!state.todoDialogPhotos.some((item) => item.attachmentId === data.photo.attachmentId)) {
-            state.todoDialogPhotos.push(data.photo);
+          const draft = {
+            id: crypto.randomUUID(),
+            name: "Video",
+            comment: "",
+            mimeType: todoVideoMimeType(file),
+            uploading: true,
+            uploadPercent: 0,
+            createdByName: state.user?.name || ""
+          };
+          state.todoDialogPhotos.push(draft);
+          renderTodoFormPhotos();
+          setTodoVideoUploadStatus(`Nalagam video ${index + 1}/${files.length}: 0 %`, "uploading", 0);
+          try {
+            const data = await uploadTodoVideoFile(file, (percent) => {
+              updateTodoVideoUploadDraft(draft, percent);
+              setTodoVideoUploadStatus(`Nalagam video ${index + 1}/${files.length}: ${percent} %`, "uploading", percent);
+            });
+            const draftIndex = state.todoDialogPhotos.findIndex((item) => item.id === draft.id);
+            if (draftIndex >= 0 && !state.todoDialogPhotos.some((item, itemIndex) => itemIndex !== draftIndex && item.attachmentId === data.photo.attachmentId)) {
+              state.todoDialogPhotos.splice(draftIndex, 1, data.photo);
+            }
             renderTodoFormPhotos();
+          } catch (error) {
+            draft.uploading = false;
+            draft.uploadError = String(error?.message || "Neznana napaka.");
+            renderTodoFormPhotos();
+            throw error;
           }
         }
-        setTodoVideoUploadStatus("Video je dodan.", "success", 100);
+        setTodoVideoUploadStatus("Video je dodan kot priloga. Pred shranjevanjem lahko dopišeš komentar.", "success", 100);
       } catch (error) {
         setTodoVideoUploadStatus("Video ni bil dodan: " + String(error?.message || "Neznana napaka."), "error");
         throw error;
@@ -8443,6 +8511,7 @@
         input.value = "";
       }
     }
+
     function addTodoDriveLink() {
       const input = $("todoFormDriveLink");
       const info = todoWorkspaceFileInfo(input.value);
@@ -8471,27 +8540,28 @@
       const list = $("todoFormPhotoList");
       list.innerHTML = state.todoDialogPhotos.map((photo) => {
         const video = isVideoAttachment(photo);
-        const label = attachmentLabel(photo);
+        const uploading = video && Boolean(photo.uploading);
+        const uploadError = video && String(photo.uploadError || "");
+        const label = uploading ? "Video se nalaga" : attachmentLabel(photo);
         const thumb = video
           ? "VIDEO"
           : isPdfAttachment(photo)
             ? pdfThumbnailMarkup(photo)
             : `<img src="${escapeHtml(attachmentSource(photo))}" alt="">`;
-        return `
-          <div class="todo-form-photo-row">
-            <button class="todo-form-attachment-preview" type="button" data-photo-id="${escapeHtml(photo.id)}">
-              <span class="todo-form-attachment-thumb">${thumb}</span>
-              <span>${escapeHtml(label)}</span>
-            </button>
-            <input class="todo-form-photo-comment" type="text" maxlength="500" data-photo-comment-id="${escapeHtml(photo.id)}" placeholder="Komentar priloge" value="${escapeHtml(photo.comment || "")}">
-            <div class="todo-form-photo-actions">
-              ${isPdfAttachment(photo) || video ? "" : `<button class="secondary edit-todo-form-photo" type="button" data-photo-id="${escapeHtml(photo.id)}">Uredi</button>`}
-              <button class="danger remove-todo-form-photo" type="button" data-photo-id="${escapeHtml(photo.id)}">Odstrani</button>
-            </div>
-          </div>`;
+        const preview = uploading || uploadError
+          ? `<div class="todo-form-attachment-preview" aria-live="polite"><span class="todo-form-attachment-thumb">${thumb}</span><span>${escapeHtml(label)}</span></div>`
+          : `<button class="todo-form-attachment-preview" type="button" data-photo-id="${escapeHtml(photo.id)}"><span class="todo-form-attachment-thumb">${thumb}</span><span>${escapeHtml(label)}</span></button>`;
+        const detail = uploading
+          ? `<div class="todo-form-video-progress" data-todo-video-upload-id="${escapeHtml(photo.id)}"><span class="todo-form-video-progress-label">Nalagam video: ${Math.max(0, Math.min(100, Number(photo.uploadPercent) || 0))} %</span><progress max="100" value="${Math.max(0, Math.min(100, Number(photo.uploadPercent) || 0))}"></progress><span>Video bo dodan med priloge takoj po prenosu.</span></div>`
+          : uploadError
+            ? `<div class="todo-form-video-progress todo-form-video-error"><span>Video ni bil dodan: ${escapeHtml(uploadError)}</span></div>`
+            : `<input class="todo-form-photo-comment" type="text" maxlength="500" data-photo-comment-id="${escapeHtml(photo.id)}" placeholder="Komentar priloge" value="${escapeHtml(photo.comment || "")}">`;
+        const actions = uploading
+          ? ""
+          : `<div class="todo-form-photo-actions">${isPdfAttachment(photo) || video ? "" : `<button class="secondary edit-todo-form-photo" type="button" data-photo-id="${escapeHtml(photo.id)}">Uredi</button>`}<button class="danger remove-todo-form-photo" type="button" data-photo-id="${escapeHtml(photo.id)}">Odstrani</button></div>`;
+        return `<div class="todo-form-photo-row ${uploading ? "todo-form-video-uploading" : ""}">${preview}${detail}${actions}</div>`;
       }).join("");
     }
-
     async function attachmentDataForProcessing(photo) {
       if (photo?.data) return photo.data;
       const source = attachmentSource(photo);
@@ -8678,6 +8748,9 @@
     }
 
     async function saveTodoFromDialog() {
+      if (state.todoDialogPhotos.some((photo) => photo.uploading)) {
+        throw new Error("Počakaj, da se nalaganje videa konča, nato shrani opravilo.");
+      }
       normalizeTodoFormTimes();
       const id = $("todoFormId").value;
       const existing = id ? state.todos.find((todo) => todo.id === id) : null;
