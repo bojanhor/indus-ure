@@ -1352,6 +1352,16 @@
 
     .todo-item.completed-view-item .todo-title { text-decoration: none; }
 
+    .todo-upload-status {
+      grid-column: 1 / -1;
+      margin: 0;
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--muted);
+    }
+    .todo-upload-status[data-state="uploading"] { color: var(--accent); }
+    .todo-upload-status[data-state="error"] { color: var(--danger); }
+
     .todo-title {
       font-weight: 800;
       margin-bottom: 3px;
@@ -3852,6 +3862,7 @@
               <input class="hidden-file" id="todoFormVideoInput" type="file" accept="video/*" multiple>
               <span class="sr-only">Izberi video; shrani se neposredno v Google Drive</span>
             </label>
+            <p class="todo-upload-status hidden" id="todoFormVideoStatus" role="status" aria-live="polite"></p>
           </div>
         </div>
         <div class="audit-box hidden" id="todoFormAudit"></div>
@@ -5757,7 +5768,7 @@
     }
 
     function todoManualBucketSort(a, b) {
-      const bucketDifference = Number(todoManualBucketForCurrentUser(a) === "unsorted") - Number(todoManualBucketForCurrentUser(b) === "unsorted");
+      const bucketDifference = Number(todoManualBucketForCurrentUser(a) === "sorted") - Number(todoManualBucketForCurrentUser(b) === "sorted");
       return bucketDifference || todoSort(a, b);
     }
 
@@ -7584,9 +7595,9 @@
       let completedGroupKey = "";
       let currentManualBucket = "";
       let manualCompletedSectionShown = false;
-      if (showManualSections && manualActiveTodos.some((todo) => todoManualBucketForCurrentUser(todo) === "sorted")) {
-        appendTodoOrderSection(items, "sorted");
-        currentManualBucket = "sorted";
+      if (showManualSections && manualActiveTodos.some((todo) => todoManualBucketForCurrentUser(todo) === "unsorted")) {
+        appendTodoOrderSection(items, "unsorted");
+        currentManualBucket = "unsorted";
       }
 
       todos.forEach((todo) => {
@@ -7680,7 +7691,7 @@
         });
         items.appendChild(item);
       });
-      if (showManualSections && currentManualBucket === "sorted") appendTodoOrderSection(items, "unsorted");
+
     }
 
     function attachmentSource(photo) {
@@ -8207,6 +8218,76 @@
       }
     }
 
+    function todoVideoMimeType(file) {
+      const nativeType = String(file?.type || "").split(";", 1)[0].trim().toLowerCase();
+      if (nativeType.startsWith("video/")) return nativeType;
+      const name = String(file?.name || "").toLowerCase();
+      const extension = name.includes(".") ? name.slice(name.lastIndexOf(".")) : "";
+      return ({
+        ".mp4": "video/mp4",
+        ".m4v": "video/x-m4v",
+        ".mov": "video/quicktime",
+        ".webm": "video/webm",
+        ".mkv": "video/x-matroska",
+        ".avi": "video/x-msvideo",
+        ".3gp": "video/3gpp"
+      })[extension] || "application/octet-stream";
+    }
+
+    function setTodoVideoUploadStatus(message, stateName = "") {
+      const status = $("todoFormVideoStatus");
+      status.textContent = String(message || "");
+      status.hidden = !message;
+      if (stateName) status.dataset.state = stateName;
+      else delete status.dataset.state;
+    }
+
+    function uploadTodoVideoFile(file, title, client, csrfRetried = false) {
+      return new Promise((resolve, reject) => {
+        const request = new XMLHttpRequest();
+        request.open("POST", "/api/todos/drive-video", true);
+        request.responseType = "json";
+        request.withCredentials = true;
+        request.setRequestHeader("Content-Type", todoVideoMimeType(file));
+        request.setRequestHeader("X-Indus-File-Name", encodeURIComponent(file.name));
+        request.setRequestHeader("X-Indus-Task-Title", encodeURIComponent(title));
+        request.setRequestHeader("X-Indus-Client", encodeURIComponent(client));
+        if (state.csrfToken) request.setRequestHeader("X-CSRF-Token", state.csrfToken);
+        request.upload.addEventListener("progress", (event) => {
+          if (!event.lengthComputable) return;
+          const percent = Math.min(100, Math.round((event.loaded / event.total) * 100));
+          setTodoVideoUploadStatus("Nalagam video " + file.name + ": " + percent + " %", "uploading");
+        });
+        request.addEventListener("load", async () => {
+          let data = request.response;
+          if (!data || typeof data === "string") {
+            try { data = request.responseText ? JSON.parse(request.responseText) : null; } catch { data = null; }
+          }
+          const csrfFailure = request.status === 403 && /varnostna potrditev seje manjka/i.test(String(data?.error || ""));
+          if (csrfFailure && !csrfRetried && navigator.onLine) {
+            try {
+              await refreshSessionSecurityContext();
+              resolve(await uploadTodoVideoFile(file, title, client, true));
+              return;
+            } catch (error) {
+              reject(error);
+              return;
+            }
+          }
+          if (request.status < 200 || request.status >= 300 || !data?.driveFile) {
+            const error = new Error(data?.error || (request.status ? "Video ni bil nalo\u017een (HTTP " + request.status + ")." : "Prenos videa ni uspel."));
+            error.status = request.status;
+            reject(error);
+            return;
+          }
+          resolve(data);
+        });
+        request.addEventListener("error", () => reject(new Error("Povezava med nalaganjem videa je bila prekinjena.")));
+        request.addEventListener("abort", () => reject(new Error("Nalaganju videa je bilo prekinjeno.")));
+        request.send(file);
+      });
+    }
+
     async function uploadTodoVideoFiles(event) {
       const input = event.currentTarget;
       const files = [...(input.files || [])];
@@ -8216,35 +8297,31 @@
       if (!title) {
         input.value = "";
         $("todoFormTask").focus();
-        showNotice("Najprej vpiši ime opravila, nato dodaj video.");
+        showNotice("Najprej vpi\u0161i ime opravila, nato dodaj video.");
         return;
       }
       const client = findTodoClient($("todoFormClient").value);
       input.disabled = true;
       try {
         for (const file of files) {
-          if (state.todoDialogDriveFiles.length >= 12) throw new Error("Največ je 12 Google prilog na opravilo.");
-          if (!String(file.type || "").toLowerCase().startsWith("video/")) throw new Error("Izberi video datoteko.");
-          if (!file.size) throw new Error("Praznega videa ni mogoče dodati.");
-          if (file.size > maxBytes) throw new Error("Video je prevelik. Največja dovoljena velikost je 200 MB.");
-          showNotice(`Nalagam video »${file.name}« v Google Drive. Ne zapiraj obrazca.`);
-          const data = await api("/api/todos/drive-video", {
-            method: "POST",
-            body: file,
-            headers: {
-              "Content-Type": file.type,
-              "X-Indus-File-Name": encodeURIComponent(file.name),
-              "X-Indus-Task-Title": encodeURIComponent(title),
-              "X-Indus-Client": encodeURIComponent(client?.name || normalizeClientName($("todoFormClient").value))
-            }
-          });
-          if (!data?.driveFile) throw new Error("Video datoteke ni bilo mogoče dodati v Google Drive.");
+          if (state.todoDialogDriveFiles.length >= 12) throw new Error("Najve\u010d je 12 Google prilog na opravilo.");
+          if (!file.size) throw new Error("Praznega videa ni mogo\u010de dodati.");
+          if (file.size > maxBytes) throw new Error("Video je prevelik. Najve\u010dja dovoljena velikost je 200 MB.");
+          const clientName = client?.name || normalizeClientName($("todoFormClient").value);
+          setTodoVideoUploadStatus("Pripravljam nalaganje videa " + file.name + " v Google Drive.", "uploading");
+          const data = await uploadTodoVideoFile(file, title, clientName);
           if (!state.todoDialogDriveFiles.some((item) => item.fileId === data.driveFile.fileId)) {
             state.todoDialogDriveFiles.push(data.driveFile);
             renderTodoFormDriveFiles();
           }
         }
-        showNotice("Video je dodan kot povezava do Google Drive.");
+        setTodoVideoUploadStatus("Video je dodan kot povezava do Google Drive.", "success");
+      } catch (error) {
+        const message = /Bojan mora najprej v Nastavitvah povezati Google Drive/i.test(String(error?.message || ""))
+          ? "Video ni bil dodan: Google Drive ni povezan. Kot Bojan v Nastavitvah izberi Google Dokumenti, preglednice in Gmail."
+          : "Video ni bil dodan: " + String(error?.message || "Neznana napaka.");
+        setTodoVideoUploadStatus(message, "error");
+        throw error;
       } finally {
         input.disabled = false;
         input.value = "";
@@ -8464,6 +8541,7 @@
       renderTodoFormAudit(todo);
       renderTodoFormSourceProject(todo);
       ["todoFormPhotoInput", "todoFormCameraInput", "todoFormPdfInput", "todoFormVideoInput"].forEach((id) => { $(id).value = ""; });
+      setTodoVideoUploadStatus("");
       $("todoFormDriveLink").value = "";
       if (editing && !(await acquireTodoEditLockForDialog(todo.id))) return;
       $("todoDialog").showModal();
@@ -9816,8 +9894,16 @@
 
     async function connectGoogleDrive() {
       const status = await api("/api/google/drive-status");
+      if (!status.tasksFolderConfigured) {
+        showNotice("Google Dokumenti in preglednice niso nastavljeni na stre\u017eniku.");
+        return;
+      }
+      if (!status.attachmentsFolderConfigured) {
+        showNotice("Mapa za priloge in videe v Google Drive ni nastavljena na stre\u017eniku.");
+        return;
+      }
       if (!status.configured) {
-        showNotice("Google Dokumenti niso nastavljeni na strežniku.");
+        showNotice("Google Drive ni v celoti nastavljen na stre\u017eniku.");
         return;
       }
       if (!status.owner) {

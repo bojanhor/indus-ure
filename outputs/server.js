@@ -4,7 +4,7 @@ const fsp = fs.promises;
 const path = require("path");
 const crypto = require("crypto");
 const os = require("os");
-const { Readable } = require("stream");
+const { Readable, Transform } = require("stream");
 const PDFDocument = require("pdfkit");
 const { PostgresStore } = require("./postgres-store");
 const {
@@ -2885,6 +2885,40 @@ function cleanDriveUploadName(value) {
     .slice(0, 180) || "video";
 }
 
+function videoMimeType(value, filename = "") {
+  const requested = String(value || "").split(";", 1)[0].trim().toLowerCase();
+  if (requested.startsWith("video/")) return requested;
+  const extension = path.extname(String(filename || "")).toLowerCase();
+  return ({
+    ".mp4": "video/mp4",
+    ".m4v": "video/x-m4v",
+    ".mov": "video/quicktime",
+    ".webm": "video/webm",
+    ".mkv": "video/x-matroska",
+    ".avi": "video/x-msvideo",
+    ".3gp": "video/3gpp"
+  })[extension] || "";
+}
+
+function limitIncomingVideoStream(stream, maximumBytes) {
+  let received = 0;
+  const limiter = new Transform({
+    transform(chunk, encoding, callback) {
+      received += chunk.length;
+      if (received > maximumBytes) {
+        const error = new Error("Video je prevelik. Najve\u010dja dovoljena velikost je " + Math.round(maximumBytes / 1024 / 1024) + " MB.");
+        stream.destroy(error);
+        callback(error);
+        return;
+      }
+      callback(null, chunk);
+    }
+  });
+  stream.once("aborted", () => limiter.destroy(new Error("Prenos videa je bil prekinjen.")));
+  stream.once("error", (error) => limiter.destroy(error));
+  return stream.pipe(limiter);
+}
+
 async function createManagedGoogleDriveVideo(req, db, actor, input = {}) {
   if (!googleDriveAttachmentsReady()) {
     throw new Error("Video priloge niso nastavljene: manjka Drive mapa v okolju strežnika.");
@@ -2893,11 +2927,11 @@ async function createManagedGoogleDriveVideo(req, db, actor, input = {}) {
   if (!owner || Number(owner.google?.driveScopeVersion || 0) !== GOOGLE_DRIVE_SCOPE_VERSION || !owner.google?.tokens) {
     throw new Error("Bojan mora najprej v Nastavitvah povezati Google Drive.");
   }
-  const mimeType = String(input.mimeType || "").split(";", 1)[0].trim().toLowerCase();
-  if (!mimeType.startsWith("video/")) throw new Error("Izberi veljavno video datoteko.");
+  const mimeType = videoMimeType(input.mimeType, input.name);
+  if (!mimeType) throw new Error("Izberi veljavno video datoteko.");
   const bytes = Number(input.contentLength);
-  if (!Number.isSafeInteger(bytes) || bytes <= 0) throw new Error("Velikosti video datoteke ni bilo mogoče preveriti.");
-  if (bytes > MAX_DRIVE_VIDEO_BYTES) throw new Error(`Video je prevelik. Največja dovoljena velikost je ${Math.round(MAX_DRIVE_VIDEO_BYTES / 1024 / 1024)} MB.`);
+  if (Number.isSafeInteger(bytes) && bytes <= 0) throw new Error("Praznega videa ni mogo\u010de dodati.");
+  if (Number.isSafeInteger(bytes) && bytes > MAX_DRIVE_VIDEO_BYTES) throw new Error(`Video je prevelik. Najve\u010dja dovoljena velikost je ${Math.round(MAX_DRIVE_VIDEO_BYTES / 1024 / 1024)} MB.`);
   const title = cleanDriveUploadName(input.title || "opravilo");
   const client = cleanDriveUploadName(input.client || "");
   const originalName = cleanDriveUploadName(input.name || "video");
@@ -2915,7 +2949,7 @@ async function createManagedGoogleDriveVideo(req, db, actor, input = {}) {
           indusResource: "task-video-attachment"
         }
       },
-      media: { mimeType, body: input.stream },
+      media: { mimeType, body: limitIncomingVideoStream(input.stream, MAX_DRIVE_VIDEO_BYTES) },
       fields: "id,name,mimeType,webViewLink,parents,owners(emailAddress),driveId,size"
     });
     created = response.data;
@@ -3561,7 +3595,9 @@ async function handleApi(req, res) {
       const db = await readDbAsync();
       const driveOwner = googleDriveOwner(db);
       sendJson(res, 200, {
-        configured: googleDriveTasksReady(),
+        configured: googleDriveTasksReady() && googleDriveAttachmentsReady(),
+        tasksFolderConfigured: googleDriveTasksReady(),
+        attachmentsFolderConfigured: googleDriveAttachmentsReady(),
         owner,
         connected: Boolean(driveOwner?.google?.tokens && Number(driveOwner.google.driveScopeVersion || 0) === GOOGLE_DRIVE_SCOPE_VERSION)
       });
@@ -5472,6 +5508,7 @@ module.exports = {
   sessionForToken,
   sessionTokenHash,
   validTodoAttachmentDataUrl,
+  videoMimeType,
   validGoogleDriveId,
   googleDriveFileInfo,
   googleWorkspaceFileInfo,

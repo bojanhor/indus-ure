@@ -7,6 +7,7 @@ const {
   GOOGLE_DRIVE_SCOPE_VERSION,
   buildCalendarIcs,
   cleanTodoDriveFiles,
+  videoMimeType,
   createSession,
   normalizeDb,
   sessionForToken,
@@ -81,6 +82,13 @@ test("Drive priponke sprejmejo Dokumente, Preglednice in upravljane videe", () =
   assert.equal(files[0].kind, "document");
   assert.equal(files[1].kind, "video");
   assert.equal(files[1].mimeType, "video/mp4");
+});
+
+test("video sprejme tudi datoteko brez MIME vrste", () => {
+  assert.equal(videoMimeType("", "teren.MP4"), "video/mp4");
+  assert.equal(videoMimeType("application/octet-stream", "teren.mov"), "video/quicktime");
+  assert.equal(videoMimeType("video/webm", "teren.bin"), "video/webm");
+  assert.equal(videoMimeType("", "teren.txt"), "");
 });
 
 test("zaključeno opravilo se brez datuma in ur zavrne", () => {
