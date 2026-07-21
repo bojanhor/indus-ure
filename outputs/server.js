@@ -47,6 +47,7 @@ const ALERT_SMTP_URL = String(process.env.ALERT_SMTP_URL || "").trim();
 const ALERT_EMAIL_FROM = String(process.env.ALERT_EMAIL_FROM || "").trim();
 const ALERT_EMAIL_TO = String(process.env.ALERT_EMAIL_TO || "bojan@indus.si").trim();
 const MONITOR_INTERVAL_MS = Math.max(60_000, Number(process.env.MONITOR_INTERVAL_MS || 5 * 60_000));
+const ARCHIVE_RETENTION_CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const MONITOR_MAX_RSS_MB = Math.max(256, Number(process.env.MONITOR_MAX_RSS_MB || 1_800));
 const REPORT_PDF_MAX_TOTAL_BYTES = 50 * 1024 * 1024;
 const REPORT_GMAIL_MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;
@@ -58,6 +59,8 @@ let mutationQueue = Promise.resolve();
 let monitorTimer = null;
 let alertTransport = null;
 const monitorAlertCooldowns = new Map();
+let archiveRetentionCleanupLastAt = 0;
+let archiveRetentionCleanupPromise = null;
 
 const TODO_STATUS_DEFINITIONS = Object.freeze({
   open: { label: "Čaka", googleColorId: "8" },
@@ -614,6 +617,13 @@ function normalizeDb(db = {}) {
     commuteKmPerDay: nonnegativeNumber(db.settings.billing?.commuteKmPerDay, 28, 1_000_000),
     mealPaidMinutes: Math.round(nonnegativeNumber(db.settings.billing?.mealPaidMinutes, 45, 240))
   };
+  if (!db.settings.archive || typeof db.settings.archive !== "object") {
+    db.settings.archive = {};
+    changed = true;
+  }
+  const archiveRetentionMonths = Math.min(120, Math.max(1, Math.round(nonnegativeNumber(db.settings.archive?.retentionMonths, 12, 120))));
+  if (db.settings.archive.retentionMonths !== archiveRetentionMonths) changed = true;
+  db.settings.archive = { ...db.settings.archive, retentionMonths: archiveRetentionMonths };
   for (const user of Object.values(db.users)) {
     const currentRate = nonnegativeNumber(user.billing?.hourlyRate, null, 10_000);
     const exportTitle = String(user.billing?.exportTitle || "").trim().slice(0, 120);
@@ -2266,6 +2276,57 @@ function reconcileTodoArchives(db, actor = null) {
   }
   return { archived, restored, changed };
 }
+function archiveRetentionMonthsForDb(db) {
+  return Math.min(120, Math.max(1, Math.round(nonnegativeNumber(db?.settings?.archive?.retentionMonths, 12, 120))));
+}
+
+function archiveRetentionCandidates(db, now = new Date()) {
+  const months = archiveRetentionMonthsForDb(db);
+  const cutoff = new Date(now instanceof Date ? now.getTime() : new Date(now).getTime());
+  cutoff.setUTCMonth(cutoff.getUTCMonth() - months);
+  const cutoffMs = cutoff.getTime();
+  const byGroup = new Map();
+  for (const todo of db.todos || []) {
+    const groupId = String(todo.assignmentGroupId || todo.id || "");
+    if (!groupId) continue;
+    const group = byGroup.get(groupId) || [];
+    group.push(todo);
+    byGroup.set(groupId, group);
+  }
+  const groups = [];
+  for (const [id, todos] of byGroup) {
+    const fullyArchived = todos.length > 0 && todos.every((todo) => {
+      const archivedAt = new Date(String(todo.archivedAt || "")).getTime();
+      return Number.isFinite(archivedAt) && archivedAt < cutoffMs;
+    });
+    if (!fullyArchived) continue;
+    const managedDriveFiles = [...new Map(todos.flatMap((todo) => todo.driveFiles || [])
+      .filter((file) => Boolean(file?.managed)
+        && String(file.ownerEmail || "").trim().toLowerCase() === GOOGLE_DRIVE_OWNER_EMAIL
+        && validGoogleDriveId(file.fileId))
+      .map((file) => [String(file.fileId), file])).values()];
+    groups.push({ id, todos, managedDriveFiles });
+  }
+  return { retentionMonths: months, cutoffAt: cutoff.toISOString(), groups };
+}
+
+function purgeArchivedTodoGroups(db, groups) {
+  const groupIds = new Set((groups || []).map((group) => String(group.id || "")).filter(Boolean));
+  if (!groupIds.size) return { groups: 0, todos: 0, attachments: 0, adHocClients: 0 };
+  const beforeTodos = (db.todos || []).length;
+  const beforeAttachments = Object.keys(db.attachments || {}).length;
+  const beforeClients = (db.clients || []).length;
+  db.todos = (db.todos || []).filter((todo) => !groupIds.has(String(todo.assignmentGroupId || todo.id || "")));
+  pruneUnusedTodoAttachments(db);
+  pruneUnusedAdHocClients(db);
+  return {
+    groups: groupIds.size,
+    todos: beforeTodos - db.todos.length,
+    attachments: beforeAttachments - Object.keys(db.attachments || {}).length,
+    adHocClients: beforeClients - (db.clients || []).length
+  };
+}
+
 function defaultHourlyRateForUser(db, userId) {
   return nonnegativeNumber(
     db.users?.[userId]?.billing?.hourlyRate,
@@ -3024,6 +3085,85 @@ async function createManagedGoogleDriveVideo(req, db, actor, input = {}) {
     throw error;
   }
 }
+function systemGoogleDriveClient(tokens) {
+  const { google } = require("googleapis");
+  const auth = new google.auth.OAuth2(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI || undefined);
+  auth.setCredentials(tokens || {});
+  return google.drive({ version: "v3", auth });
+}
+
+async function deleteRetentionManagedDriveFiles(db, files) {
+  if (!files.length) return { deleted: 0, skipped: 0 };
+  const owner = googleDriveOwner(db);
+  if (!googleDriveTokenAvailable(owner)) throw new Error("Google Drive povezava ni na voljo za čiščenje arhivskih prilog.");
+  const drive = systemGoogleDriveClient(owner.google.tokens);
+  let deleted = 0;
+  let skipped = 0;
+  for (const file of files) {
+    try {
+      const metadata = await drive.files.get({ fileId: file.fileId, fields: "id,appProperties,owners(emailAddress)" });
+      const ownedByBojan = (metadata.data.owners || []).some((item) => String(item.emailAddress || "").toLowerCase() === GOOGLE_DRIVE_OWNER_EMAIL);
+      if (!ownedByBojan || metadata.data.appProperties?.indusApp !== INDUS_GOOGLE_APP_ID) {
+        skipped += 1;
+        continue;
+      }
+      await drive.files.delete({ fileId: file.fileId });
+      deleted += 1;
+    } catch (error) {
+      const status = Number(error?.response?.status || error?.code || 0);
+      if (status === 404) continue;
+      throw error;
+    }
+  }
+  return { deleted, skipped };
+}
+
+async function runArchiveRetentionCleanup() {
+  const db = await readDbAsync();
+  const candidates = archiveRetentionCandidates(db);
+  if (!candidates.groups.length) return { ...candidates, purged: { groups: 0, todos: 0, attachments: 0, adHocClients: 0 }, drive: { deleted: 0, skipped: 0 }, blocked: 0 };
+  const approvedGroups = [];
+  let blocked = 0;
+  const drive = { deleted: 0, skipped: 0 };
+  for (const group of candidates.groups) {
+    try {
+      const result = await deleteRetentionManagedDriveFiles(db, group.managedDriveFiles);
+      drive.deleted += result.deleted;
+      drive.skipped += result.skipped;
+      approvedGroups.push(group);
+    } catch (error) {
+      blocked += 1;
+      console.error(`Arhivske priloge za ${group.id} niso bile očiščene: ${error.message || error}`);
+    }
+  }
+  const purged = purgeArchivedTodoGroups(db, approvedGroups);
+  if (purged.todos) await writeDbAsync(db);
+  if (blocked) {
+    await recordOperationalAlert({
+      code: "archive-retention-drive-cleanup-failed",
+      severity: "warning",
+      title: "Čiščenje arhiva čaka na Google Drive",
+      message: `${blocked} arhiviranih dogodkov ni bilo očiščenih, ker njihovih aplikacijskih Drive prilog ni bilo mogoče varno odstraniti. Poveži Google Drive in sistem bo poskusil znova.`
+    });
+  }
+  return { ...candidates, purged, drive, blocked };
+}
+
+function scheduleArchiveRetentionCleanup(force = false) {
+  if (archiveRetentionCleanupPromise) return archiveRetentionCleanupPromise;
+  if (!force && archiveRetentionCleanupLastAt && Date.now() - archiveRetentionCleanupLastAt < ARCHIVE_RETENTION_CLEANUP_INTERVAL_MS) return Promise.resolve(null);
+  archiveRetentionCleanupPromise = mutationQueue.then(async () => {
+    const result = await runArchiveRetentionCleanup();
+    archiveRetentionCleanupLastAt = Date.now();
+    if (result.purged.todos) console.info(`Čiščenje arhiva: ${result.purged.todos} dogodkov, ${result.purged.attachments} prilog, ${result.purged.adHocClients} ad-hoc strank.`);
+    return result;
+  });
+  mutationQueue = archiveRetentionCleanupPromise.catch((error) => {
+    console.error(`Čiščenje arhiva ni uspelo: ${error.message || error}`);
+  });
+  return archiveRetentionCleanupPromise.finally(() => { archiveRetentionCleanupPromise = null; });
+}
+
 function todoStatusDefinition(status) {
   return TODO_STATUS_DEFINITIONS[status] || TODO_STATUS_DEFINITIONS.open;
 }
@@ -3502,6 +3642,7 @@ async function runOperationalMonitor() {
     issues.push({ code: "memory-high", severity: "warning", title: "Poraba pomnilnika je visoka", message: `Proces INDUS URE porabi ${Math.round(rssMb)} MB RAM.` });
   }
   for (const issue of issues) await recordOperationalAlert(issue);
+  scheduleArchiveRetentionCleanup().catch((error) => console.error(`Čiščenje arhiva ni uspelo: ${error.message || error}`));
 }
 
 function startOperationalMonitor() {
@@ -4498,7 +4639,13 @@ async function handleApi(req, res) {
         commuteKmPerDay: nonnegativeNumber(body.commuteKmPerDay, nonnegativeNumber(previousBilling.commuteKmPerDay, 28, 1_000_000), 1_000_000),
         mealPaidMinutes: Math.round(nonnegativeNumber(body.mealPaidMinutes, nonnegativeNumber(previousBilling.mealPaidMinutes, 45, 240), 240))
       };
+      const previousArchive = db.settings.archive || {};
+      db.settings.archive = {
+        ...previousArchive,
+        retentionMonths: Math.min(120, Math.max(1, Math.round(nonnegativeNumber(body.archiveRetentionMonths, nonnegativeNumber(previousArchive.retentionMonths, 12, 120), 120))))
+      };
       await writeDbAsync(db);
+      scheduleArchiveRetentionCleanup(true).catch((error) => console.error(`Čiščenje arhiva ni uspelo: ${error.message || error}`));
       sendJson(res, 200, { settings: db.settings });
       return;
     }
@@ -5540,6 +5687,9 @@ module.exports = {
   cancelClientBill,
   clientBillLockForTodos,
   reconcileTodoArchives,
+  archiveRetentionMonthsForDb,
+  archiveRetentionCandidates,
+  purgeArchivedTodoGroups,
   canManageEntry,
   canManageFinancialEntry,
   canManageTodo,

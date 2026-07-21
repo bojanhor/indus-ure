@@ -23,6 +23,8 @@ const {
   cancelClientBill,
   clientBillLockForTodos,
   reconcileTodoArchives,
+  archiveRetentionCandidates,
+  purgeArchivedTodoGroups,
   entryEditLockConflict,
   sourceTodoForNewEntry,
   entryForUserRole,
@@ -635,4 +637,32 @@ test("migracija vrne prezgodaj arhivirano projektno opravilo, dokler obračun st
   assert.equal(normalized.changed, true);
   assert.equal(db.todos[0].archivedAt, "");
   assert.equal(db.todos[0].archivedPayrollId, "");
+});
+test("arhivski cleanup po poteku hrambe izbriše cel dogodek, priloge in osirotelo začasno stranko", () => {
+  const attachmentId = "a".repeat(64);
+  const db = {
+    settings: { archive: { retentionMonths: 12 } },
+    entries: [],
+    debts: [],
+    attachments: { [attachmentId]: { id: attachmentId, byteSize: 1234 } },
+    clients: [
+      { clientId: "old-client", name: "Stara začasna", search: "stara", source: "ad-hoc" },
+      { clientId: "current-client", name: "Aktivna", search: "aktivna", source: "ad-hoc" }
+    ],
+    todos: [
+      { id: "old-ibro", assignmentGroupId: "old-project", clientId: "old-client", client: "Stara začasna", archivedAt: "2025-07-19T10:00:00.000Z", photos: [{ attachmentId }], driveFiles: [{ fileId: "1wsPGlRaN2M7biJK4zq3KnLSYRXzJX6S1", managed: true, ownerEmail: "bojan@indus.si" }] },
+      { id: "old-bojan", assignmentGroupId: "old-project", clientId: "old-client", client: "Stara začasna", archivedAt: "2025-07-20T10:00:00.000Z", photos: [{ attachmentId }], driveFiles: [{ fileId: "1wsPGlRaN2M7biJK4zq3KnLSYRXzJX6S1", managed: true, ownerEmail: "bojan@indus.si" }] },
+      { id: "new-project", assignmentGroupId: "new-project", clientId: "current-client", client: "Aktivna", archivedAt: "2025-07-22T10:00:00.000Z", photos: [], driveFiles: [] },
+      { id: "partial-ibro", assignmentGroupId: "partial-project", archivedAt: "2025-07-19T10:00:00.000Z", photos: [], driveFiles: [] },
+      { id: "partial-bojan", assignmentGroupId: "partial-project", archivedAt: "", photos: [], driveFiles: [] }
+    ]
+  };
+  const candidates = archiveRetentionCandidates(db, new Date("2026-07-21T12:00:00.000Z"));
+  assert.deepEqual(candidates.groups.map((group) => group.id), ["old-project"]);
+  assert.equal(candidates.groups[0].managedDriveFiles.length, 1);
+  const purged = purgeArchivedTodoGroups(db, candidates.groups);
+  assert.deepEqual(purged, { groups: 1, todos: 2, attachments: 1, adHocClients: 1 });
+  assert.deepEqual(db.todos.map((todo) => todo.id), ["new-project", "partial-ibro", "partial-bojan"]);
+  assert.equal(db.attachments[attachmentId], undefined);
+  assert.deepEqual(db.clients.map((client) => client.clientId), ["current-client"]);
 });

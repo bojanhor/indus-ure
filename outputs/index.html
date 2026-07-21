@@ -3534,7 +3534,7 @@
               <button class="menu-action hidden" id="googleDrive" type="button">Google Dokumenti, preglednice in Gmail</button>
               <button class="menu-action admin-only" id="notificationsBtn" type="button">Sistemska opozorila <span id="notificationsCount"></span></button>
               <span class="tools-menu-label admin-only">Napredno</span>
-              <button class="menu-action admin-only" id="appSettingsBtn" type="button">Obra&#269;unske nastavitve</button>
+              <button class="menu-action admin-only" id="appSettingsBtn" type="button">Nastavitve obračuna in arhiva</button>
               <button class="menu-action admin-only" id="exportCsv" type="button">Izvoz CSV</button>
               <button class="menu-action admin-only" id="downloadBackup" type="button">Prenesi varnostno kopijo (ZIP)</button>
               <button class="menu-action admin-only" id="restoreBackup" type="button">Obnovi iz ZIP kopije</button>
@@ -4104,11 +4104,11 @@
 
   <dialog id="appSettingsDialog">
     <form method="dialog">
-      <div class="modal-head"><h3>Obračunske nastavitve</h3><button class="icon-btn" id="closeAppSettings" type="button" title="Zapri">&times;</button></div>
+      <div class="modal-head"><h3>Nastavitve obračuna in arhiva</h3><button class="icon-btn" id="closeAppSettings" type="button" title="Zapri">&times;</button></div>
       <div class="modal-body app-settings-sections">
         <section class="app-settings-section"><h4>Malica</h4><label>Plačani čas malice za delavca (minute)<input id="settingsMealPaidMinutes" type="number" min="0" max="240" step="1"></label><p class="todo-meta">Malica se stranki ne obračuna. Delavcu se plača največ izbrano število minut.</p></section>
         <section class="app-settings-section"><h4>Kilometrina delavca</h4><label>Povračilo za lastno vozilo (EUR/km)<input id="settingsWorkerOwnVehicleKmRate" type="number" min="0" max="1000" step="0.01"></label><p class="todo-meta">Uporabi se samo za kilometrino delavca; stroški prevoza za stranko ostanejo ločeni po vozilu.</p></section>
-        <section class="app-settings-section worker-billing"><h4>Privzete urne postavke</h4><div class="worker-billing-scroll"><table><thead><tr><th>Delavec</th><th>Vloga</th><th>Privzeta urna postavka</th><th>Naziv v izvozu</th><th></th></tr></thead><tbody id="workerBillingRows"></tbody></table></div></section>
+        <section class="app-settings-section"><h4>Čiščenje arhiva</h4><label>Čas hrambe arhiviranega dogodka (meseci)<input id="settingsArchiveRetentionMonths" type="number" min="1" max="120" step="1"></label><p class="todo-meta">Po tem obdobju se izbriše samo dogodek, ki je že arhiviran po potrjenem obračunu delavca in stranke: lokalne priloge, aplikacijsko ustvarjene Drive priloge ter neuporabljena začasna stranka. Obračunski zapisi ostanejo.</p></section>        <section class="app-settings-section worker-billing"><h4>Privzete urne postavke</h4><div class="worker-billing-scroll"><table><thead><tr><th>Delavec</th><th>Vloga</th><th>Privzeta urna postavka</th><th>Naziv v izvozu</th><th></th></tr></thead><tbody id="workerBillingRows"></tbody></table></div></section>
         <div class="actions"><button class="secondary" id="cancelAppSettings" type="button">Prekliči</button><button class="primary" id="saveAppSettings" type="button">Shrani nastavitve</button></div>
       </div>
     </form>
@@ -10322,22 +10322,26 @@
     window.addEventListener("resize", keepToolsMenuInViewport);
     function openAppSettings() {
       const billing = state.settings.billing || {};
+      const archive = state.settings.archive || {};
       $("settingsMealPaidMinutes").value = mealPaidMinutes();
       $("settingsWorkerOwnVehicleKmRate").value = Number(billing.workerOwnVehicleKmRate ?? billing.kmRate ?? 0);
+      $("settingsArchiveRetentionMonths").value = Number(archive.retentionMonths ?? 12);
       renderWorkerBillingTable();
       $("appSettingsDialog").showModal();
     }
     async function saveAppSettings() {
       const mealPaid = parseBillingNumber($("settingsMealPaidMinutes").value, 240);
       const workerOwnVehicleKmRate = parseBillingNumber($("settingsWorkerOwnVehicleKmRate").value, 1_000);
-      if (mealPaid === null || !Number.isInteger(mealPaid) || workerOwnVehicleKmRate === null) {
-        showNotice("Vnesi veljavne nastavitve malice in kilometrine.");
+      const archiveRetentionMonths = parseBillingNumber($("settingsArchiveRetentionMonths").value, 120);
+      if (mealPaid === null || !Number.isInteger(mealPaid) || workerOwnVehicleKmRate === null || archiveRetentionMonths === null || !Number.isInteger(archiveRetentionMonths) || archiveRetentionMonths < 1 || archiveRetentionMonths > 120) {
+        showNotice("Vnesi veljavne nastavitve malice, kilometrine in časa hrambe arhiva.");
         return;
       }
       await saveBillingSettings({
         ...(state.settings.billing || {}),
         mealPaidMinutes: mealPaid,
-        workerOwnVehicleKmRate
+        workerOwnVehicleKmRate,
+        archiveRetentionMonths
       });
       $("appSettingsDialog").close();
       render();
