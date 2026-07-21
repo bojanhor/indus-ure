@@ -286,6 +286,26 @@
       z-index: 15;
     }
 
+    .drive-connection-banner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px 14px;
+      border: 1px solid #d4a74d;
+      border-radius: 8px;
+      background: #fff7df;
+      color: #634600;
+      font-weight: 700;
+    }
+
+    .drive-connection-banner button {
+      flex: 0 0 auto;
+      white-space: nowrap;
+      background: #8b6100;
+      color: #fff;
+    }
+
     .month-title {
       display: grid;
       grid-template-columns: 42px 180px 42px 42px;
@@ -3184,6 +3204,11 @@
         width: 100%;
         max-width: none;
       }
+      .drive-connection-banner {
+        align-items: stretch;
+        flex-direction: column;
+      }
+      .drive-connection-banner button { width: 100%; }
       .topbar-view-row {
         display: grid;
         grid-template-columns: minmax(0, 1fr) 44px;
@@ -3534,6 +3559,10 @@
         </div>
       </section>
 
+      <section class="drive-connection-banner hidden" id="driveConnectionBanner" role="status" aria-live="polite">
+        <span id="driveConnectionMessage"></span>
+        <button id="driveReconnectBtn" type="button">Poveži Google Drive</button>
+      </section>
 
       <section class="panel search-panel" id="searchPanel"></section>
 
@@ -4328,6 +4357,7 @@
       syncRevision: 0,
       lastServerSyncAt: "",
       notifications: [],
+      googleDriveStatus: null,
     };
 
     const $ = (id) => document.getElementById(id);
@@ -4698,9 +4728,36 @@
       if (!response.ok) {
         const error = new Error(data?.error || "Napaka pri povezavi.");
         error.status = response.status;
+        error.code = String(data?.code || "");
         throw error;
       }
       return data;
+    }
+
+    function setGoogleDriveConnectionBanner(status) {
+      const banner = $("driveConnectionBanner");
+      if (!banner) return;
+      const needsReconnect = Boolean(status?.configured && status?.reconnectRequired);
+      banner.classList.toggle("hidden", !needsReconnect);
+      if (!needsReconnect) return;
+      $("driveConnectionMessage").textContent = status.owner
+        ? "Google Drive povezava ni več veljavna. Za dodajanje videov in Google prilog jo ponovno poveži."
+        : "Google Drive povezava ni več veljavna. Nalaganje videov in Google prilog bo na voljo, ko jo Bojan ponovno poveže.";
+      $("driveReconnectBtn").classList.toggle("hidden", !status.owner);
+    }
+
+    async function refreshGoogleDriveConnectionStatus() {
+      if (!state.user || state.offlineMode || !navigator.onLine) return null;
+      try {
+        const status = await api("/api/google/drive-status", { recoverSession: false });
+        state.googleDriveStatus = status;
+        setGoogleDriveConnectionBanner(status);
+        return status;
+      } catch {
+        // This status probe is advisory. Do not distract the user for a
+        // temporary network problem; a Drive operation will still show its error.
+        return null;
+      }
     }
 
     async function boot() {
@@ -4725,7 +4782,7 @@
         initializeWorkContext();
         showApp();
         await loadAll();
-        await refreshNotifications();
+        await Promise.all([refreshNotifications(), refreshGoogleDriveConnectionStatus()]);
         await updateOfflineSyncNotice();
         await flushOfflineTodoQueue();
       } catch (error) {
@@ -4755,7 +4812,7 @@
         state.users = [...new Map([...(directory.users || []), state.user].map((user) => [user.id, user])).values()];
         initializeWorkContext();
         await loadAll();
-        await flushOfflineTodoQueue();
+        await Promise.all([flushOfflineTodoQueue(), refreshGoogleDriveConnectionStatus()]);
         await updateOfflineSyncNotice();
       } catch (error) {
         if (error.status === 401) recoverExpiredSession().catch(() => {});
@@ -8307,6 +8364,7 @@
           if (request.status < 200 || request.status >= 300 || !data?.driveFile) {
             const error = new Error(data?.error || (request.status ? "Video ni bil nalo\u017een (HTTP " + request.status + ")." : "Prenos videa ni uspel."));
             error.status = request.status;
+            error.code = String(data?.code || "");
             reject(error);
             return;
           }
@@ -8347,7 +8405,10 @@
         }
         setTodoVideoUploadStatus("Video je dodan kot povezava do Google Drive.", "success");
       } catch (error) {
-        const message = /Bojan mora najprej v Nastavitvah povezati Google Drive|Google Drive ni povezan/i.test(String(error?.message || ""))
+        if (error?.code === "google_drive_reconnect_required" || /Bojan mora najprej v Nastavitvah povezati Google Drive|Google Drive ni povezan|povezava z Google Drive ni več veljavna/i.test(String(error?.message || ""))) {
+          await refreshGoogleDriveConnectionStatus();
+        }
+        const message = /Bojan mora najprej v Nastavitvah povezati Google Drive|Google Drive ni povezan|povezava z Google Drive ni več veljavna/i.test(String(error?.message || ""))
           ? "Video ni bil dodan: Google Drive ni povezan. Kot Bojan v Nastavitvah izberi Google Dokumenti, preglednice in Gmail."
           : "Video ni bil dodan: " + String(error?.message || "Neznana napaka.");
         setTodoVideoUploadStatus(message, "error");
@@ -9940,11 +10001,13 @@
         showNotice("Google Dokumente lahko poveže samo Bojanov račun.");
         return;
       }
-      if (status.connected && status.gmailConnected) {
+      if (status.usable && status.gmailConnected) {
         showNotice("Google Dokumenti, preglednice in Gmail so že povezani.");
         return;
       }
       const data = await api("/api/google/drive-auth-url");
+      const refreshAfterGoogle = () => window.setTimeout(() => refreshGoogleDriveConnectionStatus(), 500);
+      window.addEventListener("focus", refreshAfterGoogle, { once: true });
       window.open(data.url, "_blank", "noopener");
     }
 
@@ -10779,6 +10842,7 @@
     $("clearClientSearch").addEventListener("click", clearClientSearchAndRestoreView);
     $("exportCsv").addEventListener("click", exportCsv);
     $("googleDrive").addEventListener("click", () => connectGoogleDrive().catch((error) => showNotice(error.message)));
+    $("driveReconnectBtn").addEventListener("click", () => connectGoogleDrive().catch((error) => showNotice(error.message)));
     $("downloadBackup").addEventListener("click", () => downloadBackup().catch((error) => showNotice(error.message)));
     $("restoreBackup").addEventListener("click", () => $("restoreBackupFile").click());
     $("restoreBackupFile").addEventListener("change", (event) => {

@@ -2816,6 +2816,36 @@ function googleWorkspaceTokenAvailable(user) {
     && Number(user.google?.driveScopeVersion || 0) === GOOGLE_DRIVE_SCOPE_VERSION;
 }
 
+// A saved OAuth token is not proof that Google still accepts it. Check the
+// token with a read-only Drive request before showing the connection as ready.
+async function googleDriveConnectionStatus(req, db) {
+  const driveOwner = googleDriveOwner(db);
+  const configured = googleDriveTasksReady() && googleDriveAttachmentsReady();
+  const base = {
+    configured,
+    tasksFolderConfigured: googleDriveTasksReady(),
+    attachmentsFolderConfigured: googleDriveAttachmentsReady(),
+    connected: googleDriveTokenAvailable(driveOwner),
+    gmailConnected: googleWorkspaceTokenAvailable(driveOwner),
+    usable: false,
+    reconnectRequired: false,
+    checkUnavailable: false
+  };
+  if (!configured) return base;
+  if (!base.connected) return { ...base, reconnectRequired: true };
+  try {
+    const { google } = require("googleapis");
+    const drive = google.drive({ version: "v3", auth: googleClient(req, driveOwner.google.tokens) });
+    await drive.about.get({ fields: "user(emailAddress)" });
+    return { ...base, usable: true };
+  } catch (error) {
+    if (googleConnectionFailure(error)) return { ...base, reconnectRequired: true };
+    // A temporary Google/network problem must not incorrectly tell Bojan to
+    // revoke and reconnect a valid account.
+    return { ...base, checkUnavailable: true };
+  }
+}
+
 async function createManagedGoogleDriveFile(req, db, actor, input = {}) {
   if (!googleDriveTasksReady()) {
     throw new Error("Google Dokumenti niso nastavljeni: manjka mapa ali Bojanov e-naslov v okolju strežnika.");
@@ -3598,16 +3628,11 @@ async function handleApi(req, res) {
     if (url.pathname === "/api/google/drive-status" && req.method === "GET") {
       const user = await requireUser(req, res);
       if (!user) return;
-      const owner = String(user.email || "").toLowerCase() === GOOGLE_DRIVE_OWNER_EMAIL;
       const db = await readDbAsync();
-      const driveOwner = googleDriveOwner(db);
+      const status = await googleDriveConnectionStatus(req, db);
       sendJson(res, 200, {
-        configured: googleDriveTasksReady() && googleDriveAttachmentsReady(),
-        tasksFolderConfigured: googleDriveTasksReady(),
-        attachmentsFolderConfigured: googleDriveAttachmentsReady(),
-        owner,
-        connected: googleDriveTokenAvailable(driveOwner),
-        gmailConnected: googleWorkspaceTokenAvailable(driveOwner)
+        ...status,
+        owner: String(user.email || "").toLowerCase() === GOOGLE_DRIVE_OWNER_EMAIL
       });
       return;
     }
@@ -5403,7 +5428,7 @@ function googleConnectionFailure(error) {
 function actionableGoogleDriveError(error) {
   const message = String(error?.message || "");
   if (/^Bojan mora najprej v Nastavitvah povezati Google (Drive|Dokumente)/.test(message)) {
-    return { status: 409, error: "Google Drive ni povezan. Kot Bojan ga v Nastavitvah poveži in nato poskusi znova." };
+    return { status: 409, code: "google_drive_reconnect_required", error: "Google Drive ni povezan. Kot Bojan ga v Nastavitvah poveži in nato poskusi znova." };
   }
   if (/^Video priloge niso nastavljene:|^Drive mapa za priloge ni nastavljena\./.test(message)) {
     return { status: 503, error: "Mapa Google Drive za priloge in videe ni nastavljena na strežniku." };
@@ -5415,11 +5440,11 @@ function handleUnexpectedRequestError(error, res) {
   if (!res.headersSent) {
     const actionable = actionableGoogleDriveError(error);
     if (actionable) {
-      sendJson(res, actionable.status, { error: actionable.error });
+      sendJson(res, actionable.status, { error: actionable.error, code: actionable.code || "" });
       return;
     }
     if (googleConnectionFailure(error)) {
-      sendJson(res, 409, { error: "Povezava z Google Drive ni več veljavna. V Nastavitvah jo kot Bojan ponovno poveži in poskusi znova." });
+      sendJson(res, 409, { code: "google_drive_reconnect_required", error: "Povezava z Google Drive ni več veljavna. V Nastavitvah jo kot Bojan ponovno poveži in poskusi znova." });
       return;
     }
     sendJson(res, 500, { error: "Napaka na strežniku." });

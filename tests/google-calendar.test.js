@@ -132,3 +132,13 @@ test("browser ZIP backup izrecno izključi OAuth in strežniške skrivnosti", ()
   assert.match(source, /\/api\/backup\/restore/);
   assert.match(source, /x-indus-restore-confirm/);
 });
+test("Drive status preveri veljavnost avtorizacije in UI ponudi ponovno povezavo", () => {
+  const source = fs.readFileSync(serverPath, "utf8");
+  const html = fs.readFileSync(htmlPath, "utf8");
+  assert.match(source, /async function googleDriveConnectionStatus/);
+  assert.match(source, /drive\.about\.get/);
+  assert.match(source, /google_drive_reconnect_required/);
+  assert.match(html, /id="driveConnectionBanner"/);
+  assert.match(html, /refreshGoogleDriveConnectionStatus/);
+  assert.match(html, /error\.code = String\(data\?\.code \|\| ""\)/);
+});
