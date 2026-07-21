@@ -1927,8 +1927,21 @@
       overflow: hidden;
       min-height: 620px;
       display: grid;
-      grid-template-rows: auto 1fr;
+      grid-template-rows: auto auto 1fr;
     }
+
+    .calendar-completed-filter {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      width: max-content;
+      margin: 10px 12px 6px auto;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .calendar-completed-filter input { width: 18px; height: 18px; }
 
     .weekdays,
     .calendar {
@@ -3617,7 +3630,7 @@
         <div class="todo-panel">
           <div class="todo-actions-bar">
             <button class="primary" id="newTodoButton" type="button">Dodaj opravilo</button>
-            <button class="secondary" id="writeHoursButton" type="button">Piši ure na projekt</button>
+            <button class="secondary" id="writeHoursButton" type="button">Vpis ur</button>
           </div>
           <div class="todo-head">
             <strong id="todoPanelTitle">Vsa opravila</strong>
@@ -3696,6 +3709,7 @@
       </section>
 
       <section class="panel calendar-shell calendar-view">
+        <label class="calendar-completed-filter"><input id="calendarCompletedFilter" type="checkbox">Prikazuj tudi zaključene</label>
         <div class="weekdays">
           <div>Pon</div>
           <div>Tor</div>
@@ -3752,7 +3766,7 @@
       </div>
       <div class="todo-creation-tabs hidden" id="todoCreationTabs" role="tablist" aria-label="Vrsta novega vnosa">
         <button class="todo-creation-tab" type="button" role="tab" data-create-mode="task">Nov dogodek</button>
-        <button class="todo-creation-tab" type="button" role="tab" data-create-mode="hours">Vpis ur na projekt</button>
+        <button class="todo-creation-tab" type="button" role="tab" data-create-mode="hours">Vpis ur</button>
       </div>
       <div class="modal-body">
         <input type="hidden" id="todoFormId">
@@ -4174,6 +4188,7 @@
     const modalHistoryStateKey = "indusUreModal";
     const workContextKey = "indus-ure-work-context";
     const todoSortModeKey = "indus-ure-todo-sort-mode";
+    const calendarCompletedFilterKey = "indus-ure-calendar-show-completed";
     const billingWorkerKey = "indus-ure-billing-worker";
     const todoSortModes = ["manual", "client", "date", "order", "completed", "open", "in_progress"];
     const timeEntryStatusIds = new Set(["execution", "meal", "drive", "purchase"]);
@@ -4295,6 +4310,7 @@
       workerBilling: [],
       workContext: "",
       todoSortMode: "manual",
+      showCompletedCalendarTodos: false,
       searchReturnState: null,
       sharedDataRefreshing: false,
       todoEditLock: null,
@@ -4345,6 +4361,17 @@
       const stored = localStorage.getItem(todoSortStorageKey());
       state.todoSortMode = todoSortModes.includes(stored) ? stored : "manual";
       if ($("todoSortMode")) $("todoSortMode").value = state.todoSortMode;
+    }
+
+    function calendarCompletedFilterStorageKey() {
+      const userId = state.user?.id || "anonymous";
+      const context = state.workContext || `worker:${userId}`;
+      return `${calendarCompletedFilterKey}:${userId}:${context}`;
+    }
+
+    function loadCalendarCompletedFilter() {
+      state.showCompletedCalendarTodos = localStorage.getItem(calendarCompletedFilterStorageKey()) === "true";
+      if ($("calendarCompletedFilter")) $("calendarCompletedFilter").checked = state.showCompletedCalendarTodos;
     }
 
     function closeToolsMenu() {
@@ -4938,6 +4965,7 @@
       state.workContext = state.user.role === "boss" && allowed.has(stored) ? stored : contexts[0].value;
       select.value = state.workContext;
       loadTodoSortMode();
+      loadCalendarCompletedFilter();
       $("workContextControl").classList.toggle("hidden", contexts.length <= 1);
     }
 
@@ -5063,6 +5091,7 @@
       state.workContext = context;
       localStorage.setItem(workContextKey, context);
       loadTodoSortMode();
+      loadCalendarCompletedFilter();
       state.selectedClient = "";
       state.reportClient = "";
       state.reportClientId = "";
@@ -6010,7 +6039,7 @@
       const calendar = $("calendar");
       calendar.innerHTML = "";
       const entries = contextEntries();
-      const todos = calendarTodos();
+      const todos = calendarTodos().filter((todo) => state.showCompletedCalendarTodos || todo.status !== "execution");
       const todayDate = new Date();
       $("todayDayNumber").textContent = todayDate.getDate();
       $("todayBtn").setAttribute("aria-label", `Danes, ${todayDate.toLocaleDateString("sl-SI")}`);
@@ -8452,7 +8481,7 @@
       mealNote.classList.toggle("hidden", !meal);
       mealNote.textContent = meal ? `Malica se stranki ne obračuna. Delavcu se plača največ ${mealPaidMinutes()} min.` : "";
       $("todoFormTitle").textContent = meal ? ($("todoFormId").value ? "Uredi malico" : "Nova malica") : state.todoHoursSourceId || state.todoStandaloneHours
-        ? "Pi\u0161i ure na projekt"
+        ? "Vpis ur"
         : completed
           ? ($("todoFormId").value ? "Uredi vpis ur" : "Novo zaključeno opravilo")
           : $("todoFormId").value ? "Uredi opravilo" : "Novo opravilo";
@@ -10267,6 +10296,11 @@
       if (state.todoSortMode !== "client") state.selectedClient = "";
       localStorage.setItem(todoSortStorageKey(), state.todoSortMode);
       renderTodos();
+    });
+    $("calendarCompletedFilter").addEventListener("change", (event) => {
+      state.showCompletedCalendarTodos = Boolean(event.target.checked);
+      localStorage.setItem(calendarCompletedFilterStorageKey(), String(state.showCompletedCalendarTodos));
+      renderMonth();
     });
     $("closeAccount").addEventListener("click", () => $("accountDialog").close());
     $("saveProfile").addEventListener("click", async () => {
