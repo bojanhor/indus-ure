@@ -75,9 +75,7 @@ DATABASE_URL=postgresql://indus_ure:URL_KODIRANO_GESLO@127.0.0.1:5432/indus_ure
 GOOGLE_CLIENT_ID=...
 GOOGLE_CLIENT_SECRET=...
 GOOGLE_REDIRECT_URI=https://ure.indus.si/api/google/callback
-GOOGLE_DRIVE_TASKS_FOLDER_ID=1_z_1I_wX8-VR0K9rXj7BHRFwc--00Ul5
-GOOGLE_DRIVE_ATTACHMENTS_FOLDER_ID=1wsPGlRaN2M7biJK4zq3KnLSYRXzJX6S1
-MAX_DRIVE_VIDEO_BYTES=209715200
+MAX_VIDEO_BYTES=209715200
 GOOGLE_DRIVE_BACKUP_PARENT_FOLDER_ID=1_z_1I_wX8-VR0K9rXj7BHRFwc--00Ul5
 GOOGLE_DRIVE_OWNER_EMAIL=bojan@indus.si
 
@@ -85,14 +83,8 @@ BACKUP_DIR=/var/backups/indus-ure
 ```
 
 Google OAuth client potrebuje redirect URL natanko
-`https://ure.indus.si/api/google/callback`. Google Drive API naj bo omogočen.
-Bojanova potrjena Drive mapa ostane v njegovem My Drive; aplikacija lahko v
-njej ustvarja Dokumente in Preglednice, katerih lastnik je Bojan. Zunanje
-Google datoteke se samo pripnejo kot povezave. Video priloge se pretočno
-shranijo v GOOGLE_DRIVE_ATTACHMENTS_FOLDER_ID, zato ne zasedajo diska ali
-pomnilnika strežnika. Vsaka nova aplikacijsko ustvarjena Drive priloga dobi
-dovoljenje **anyone with the link / viewer** (ni iskalna po Drive); lokalne slike
-in PDF-ji pa ostanejo zasebne priloge aplikacije.
+`https://ure.indus.si/api/google/callback`. Google Drive API potrebuje le backup mehanizem; Gmail API pa avtomatske osnutke obračunov.
+Google Dokumenti in Preglednice se pripnejo izključno kot zunanje povezave. Slike, PDF-ji in videi ostanejo zasebne priloge v `MEDIA_DIR`; video se pretočno zapiše neposredno na strežnik, brez Google Drive objave.
 
 Google Sheets in Google Calendar spremenljivk **ne dodajaj**. ICS povezava je
 samo bralni izvoz.

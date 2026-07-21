@@ -5,6 +5,7 @@ const path = require("path");
 const crypto = require("crypto");
 const os = require("os");
 const { Readable, Transform } = require("stream");
+const { pipeline } = require("stream/promises");
 const PDFDocument = require("pdfkit");
 const { PostgresStore } = require("./postgres-store");
 const {
@@ -96,9 +97,10 @@ const MAX_TODO_IMAGE_DATA_LENGTH = 700_000;
 const MAX_TODO_PDF_DATA_LENGTH = 2_100_000;
 const MAX_TODO_ATTACHMENTS_DATA_LENGTH = 5_000_000;
 const MAX_TODO_THUMBNAIL_DATA_LENGTH = 100_000;
-// Video is streamed through the application to Drive, never materialized in the
-// app database or media directory. Keep a finite limit to protect the upstream.
-const MAX_DRIVE_VIDEO_BYTES = Math.min(500 * 1024 * 1024, Math.max(20 * 1024 * 1024, Number(process.env.MAX_DRIVE_VIDEO_BYTES || 200 * 1024 * 1024)));
+// Video is streamed to the application's private media storage. Keep a finite
+// limit so a slow or malicious upload cannot exhaust the server disk.
+const MAX_VIDEO_BYTES = Math.min(500 * 1024 * 1024, Math.max(20 * 1024 * 1024, Number(process.env.MAX_VIDEO_BYTES || process.env.MAX_DRIVE_VIDEO_BYTES || 200 * 1024 * 1024)));
+const PENDING_ATTACHMENT_TTL_MS = 12 * 60 * 60 * 1000;
 
 
 function validImageDataUrl(value, maxEncodedLength) {
@@ -194,27 +196,24 @@ function googleDriveDefaultName(kind) {
 function cleanTodoDriveFiles(items) {
   const seen = new Set();
   return (Array.isArray(items) ? items : []).map((item) => {
-    const requestedKind = String(item?.kind || "");
-    const info = requestedKind === "video" ? googleDriveFileInfo(item?.url) : googleWorkspaceFileInfo(item?.url);
-    if (!info || (requestedKind && info.kind !== requestedKind) || seen.has(info.fileId)) return null;
+    const info = googleWorkspaceFileInfo(item?.url);
+    if (!info || seen.has(info.fileId)) return null;
     seen.add(info.fileId);
-    const managed = Boolean(item?.managed) && String(item?.ownerEmail || "").trim().toLowerCase() === GOOGLE_DRIVE_OWNER_EMAIL;
     return {
       id: String(item?.id || crypto.randomUUID()).slice(0, 100),
       kind: info.kind,
       fileId: info.fileId,
       url: info.url,
       name: String(item?.name || googleDriveDefaultName(info.kind)).trim().slice(0, 180),
-      mimeType: info.kind === "video" && String(item?.mimeType || "").startsWith("video/") ? String(item.mimeType).slice(0, 100) : "",
-      managed,
-      ownerEmail: managed ? GOOGLE_DRIVE_OWNER_EMAIL : "",
+      mimeType: "",
+      managed: false,
+      ownerEmail: "",
       createdBy: String(item?.createdBy || "").slice(0, 100),
       createdByName: String(item?.createdByName || "").slice(0, 120),
       createdAt: String(item?.createdAt || new Date().toISOString()).slice(0, 40)
     };
   }).filter(Boolean).slice(0, 12);
 }
-
 function stampTodoDriveFiles(todo, user) {
   return (todo.driveFiles || []).map((file) => ({
     ...file,
@@ -230,13 +229,30 @@ function todoAttachmentContentId(data) {
   return crypto.createHash("sha256").update(bytes).digest("hex");
 }
 
+function pendingAttachmentMap(db) {
+  if (!db.settings || typeof db.settings !== "object" || Array.isArray(db.settings)) db.settings = {};
+  const source = db.settings.pendingAttachments && typeof db.settings.pendingAttachments === "object"
+    ? db.settings.pendingAttachments
+    : {};
+  const now = Date.now();
+  const pending = Object.fromEntries(Object.entries(source)
+    .filter(([id, item]) => validTodoAttachmentId(id) && item && Number(item.expiresAt) > now && String(item.userId || ""))
+    .map(([id, item]) => [id, { userId: String(item.userId), expiresAt: Number(item.expiresAt) }]));
+  db.settings.pendingAttachments = pending;
+  return pending;
+}
+
 function storeTodoAttachments(db, todo, user = {}) {
   if (!db.attachments || typeof db.attachments !== "object" || Array.isArray(db.attachments)) db.attachments = {};
+  const pending = pendingAttachmentMap(db);
   const photos = (todo.photos || []).map((photo) => {
     const data = String(photo.data || "");
     const thumbnailData = String(photo.thumbnailData || "");
-    let attachmentId = validTodoAttachmentId(photo.attachmentId) && db.attachments[photo.attachmentId]
-      ? photo.attachmentId
+    const requestedAttachmentId = String(photo.attachmentId || "");
+    const staged = pending[requestedAttachmentId];
+    let attachmentId = validTodoAttachmentId(requestedAttachmentId) && db.attachments[requestedAttachmentId]
+      && (!staged || staged.userId === user.id)
+      ? requestedAttachmentId
       : "";
     if (validTodoAttachmentDataUrl(data)) {
       attachmentId = todoAttachmentContentId(data);
@@ -255,10 +271,12 @@ function storeTodoAttachments(db, todo, user = {}) {
     if (validTodoThumbnailDataUrl(thumbnailData) && !db.attachments[attachmentId].thumbnailData) {
       db.attachments[attachmentId].thumbnailData = thumbnailData;
     }
+    if (pending[attachmentId]?.userId === user.id) delete pending[attachmentId];
     return {
       id: photo.id || crypto.randomUUID(),
       attachmentId,
       name: String(photo.name || "priloga").slice(0, 120),
+      comment: String(photo.comment || "").trim().slice(0, 500),
       createdBy: photo.createdBy || user.id || "system",
       createdByName: photo.createdByName || user.name || "",
       createdAt: photo.createdAt || new Date().toISOString()
@@ -293,19 +311,19 @@ function hydrateTodoAttachments(db, todo) {
 }
 
 function pruneUnusedTodoAttachments(db) {
+  const pending = new Set(Object.keys(pendingAttachmentMap(db)));
   const used = new Set([
     ...(db.todos || []).flatMap((todo) => (todo.photos || []).map((photo) => photo.attachmentId)),
     ...(db.debts || []).flatMap((debt) => (debt.photos || []).map((photo) => photo.attachmentId))
   ].filter(validTodoAttachmentId));
   let changed = false;
   for (const attachmentId of Object.keys(db.attachments || {})) {
-    if (used.has(attachmentId)) continue;
+    if (used.has(attachmentId) || pending.has(attachmentId)) continue;
     delete db.attachments[attachmentId];
     changed = true;
   }
   return changed;
 }
-
 function pruneUnusedAdHocClients(db) {
   const used = new Set();
   for (const item of [...(db.todos || []), ...(db.entries || [])]) {
@@ -1856,87 +1874,6 @@ async function loadClientReportAttachments(db, selected = [], { maxAttachmentByt
   return attachments;
 }
 
-async function ensureClientReportAttachmentsSharedToDrive(req, db, attachments = []) {
-  if (!attachments.length) return attachments;
-  if (!googleDriveAttachmentsReady()) {
-    throw new Error("Drive mapa za priloge ni nastavljena.");
-  }
-  const owner = googleDriveOwner(db);
-  if (!googleDriveTokenAvailable(owner)) {
-    throw new Error("Bojan mora najprej v Nastavitvah povezati Google Drive.");
-  }
-
-  const { google } = require("googleapis");
-  const drive = google.drive({ version: "v3", auth: googleClient(req, owner.google.tokens) });
-  let changed = false;
-  for (const attachment of attachments) {
-    const stored = db.attachments?.[attachment.id];
-    if (!stored) throw new Error("Izbrane priloge ni več v evidenci.");
-    const existingUrl = String(attachment.driveUrl || stored.driveUrl || "").trim();
-    if (existingUrl) {
-      attachment.driveUrl = existingUrl;
-      attachment.driveFileId = String(attachment.driveFileId || stored.driveFileId || "");
-      continue;
-    }
-
-    const extension = attachmentMimeExtension(attachment.mimeType);
-    const sourceName = cleanDriveUploadName(attachment.name || "priloga");
-    const displayName = extension && !sourceName.toLowerCase().endsWith(extension)
-      ? `${sourceName}${extension}`
-      : sourceName;
-    const name = `INDUS priloga - ${displayName}`.slice(0, 180);
-    let created = null;
-    try {
-      const response = await drive.files.create({
-        requestBody: {
-          name,
-          parents: [GOOGLE_DRIVE_ATTACHMENTS_FOLDER_ID],
-          appProperties: {
-            indusApp: INDUS_GOOGLE_APP_ID,
-            indusResource: "client-report-attachment",
-            indusAttachmentId: String(attachment.id)
-          }
-        },
-        media: { mimeType: attachment.mimeType, body: Readable.from([attachment.bytes]) },
-        fields: "id,name,mimeType,webViewLink,parents,owners(emailAddress),driveId"
-      });
-      created = response.data;
-      await drive.permissions.create({
-        fileId: created.id,
-        requestBody: { type: "anyone", role: "reader", allowFileDiscovery: false },
-        fields: "id,type,role,allowFileDiscovery"
-      });
-      const ownedByBojan = (created.owners || []).some((item) => String(item.emailAddress || "").toLowerCase() === GOOGLE_DRIVE_OWNER_EMAIL);
-      const inConfiguredFolder = (created.parents || []).includes(GOOGLE_DRIVE_ATTACHMENTS_FOLDER_ID);
-      if (!created.id || !created.webViewLink || created.driveId || !ownedByBojan || !inConfiguredFolder) {
-        throw new Error("Priloge ni bilo mogoče objaviti kot Bojanove datoteke v izbrani Drive mapi.");
-      }
-      const driveUrl = String(created.webViewLink);
-      db.attachments[attachment.id] = {
-        ...stored,
-        driveFileId: String(created.id),
-        driveUrl,
-        driveOwnerEmail: GOOGLE_DRIVE_OWNER_EMAIL,
-        driveSharedAt: new Date().toISOString()
-      };
-      attachment.driveFileId = String(created.id);
-      attachment.driveUrl = driveUrl;
-      changed = true;
-    } catch (error) {
-      if (created?.id) {
-        try {
-          await drive.files.delete({ fileId: created.id });
-        } catch (cleanupError) {
-          console.warn(`Google priloge ${created.id} ni bilo mogoče odstraniti: ${cleanupError.message || cleanupError}`);
-        }
-      }
-      throw error;
-    }
-  }
-  if (changed) await writeDbAsync(db);
-  return attachments;
-}
-
 function reportPdfFontPath(weight = "regular") {
   return path.resolve(root, "..", "node_modules", "pdfjs-dist", "standard_fonts", weight === "bold" ? "LiberationSans-Bold.ttf" : "LiberationSans-Regular.ttf");
 }
@@ -2598,6 +2535,7 @@ function cleanTodo(input) {
         id: photo.id || crypto.randomUUID(),
         name: String(photo.name || "priloga").slice(0, 120),
         attachmentId: String(photo.attachmentId || ""),
+        comment: String(photo.comment || "").trim().slice(0, 500),
         data: String(photo.data || ""),
         thumbnailData: String(photo.thumbnailData || ""),
         createdBy: photo.createdBy || "",
@@ -2653,6 +2591,7 @@ function cleanAdvance(input) {
       id: photo.id || crypto.randomUUID(),
       name: String(photo.name || "priloga").slice(0, 120),
       attachmentId: String(photo.attachmentId || ""),
+      comment: String(photo.comment || "").trim().slice(0, 500),
       data: String(photo.data || ""),
       thumbnailData: String(photo.thumbnailData || ""),
       createdBy: photo.createdBy || "",
@@ -2708,11 +2647,11 @@ function validateTodo(todo, { requireClientId = false } = {}) {
   if ((todo.photos || []).some((photo) => !validTodoAttachmentDataUrl(photo.data) && !validTodoAttachmentId(photo.attachmentId))) return "Priloga ni veljavna slika ali PDF.";
   if ((todo.photos || []).reduce((total, photo) => total + String(photo.data || "").length, 0) > MAX_TODO_ATTACHMENTS_DATA_LENGTH) return "Priloge so skupaj prevelike.";
   if ((todo.photos || []).some((photo) => photo.thumbnailData && !validTodoThumbnailDataUrl(photo.thumbnailData))) return "Predogled PDF priloge ni veljaven.";
-  if ((todo.driveFiles || []).length > 12) return "Največ je 12 Google dokumentov, preglednic ali videov na opravilo.";
+  if ((todo.driveFiles || []).length > 12) return "Največ je 12 zunanjih Google Dokumentov ali Preglednic na opravilo.";
   if ((todo.driveFiles || []).some((file) => {
-    const info = googleDriveFileInfo(file?.url);
+    const info = googleWorkspaceFileInfo(file?.url);
     return !validGoogleDriveId(file?.fileId) || !info || info.fileId !== file.fileId || (file.kind && info.kind !== file.kind);
-  })) return "Google priponka ni veljaven Dokument, Preglednica ali Video.";
+  })) return "Zunanja povezava mora biti veljaven Google Dokument ali Preglednica.";
   return "";
 }
 
@@ -3017,71 +2956,61 @@ function limitIncomingVideoStream(stream, maximumBytes) {
   return stream.pipe(limiter);
 }
 
-async function createManagedGoogleDriveVideo(req, db, actor, input = {}) {
-  if (!googleDriveAttachmentsReady()) {
-    throw new Error("Video priloge niso nastavljene: manjka Drive mapa v okolju strežnika.");
-  }
-  const owner = googleDriveOwner(db);
-  if (!googleDriveTokenAvailable(owner)) {
-    throw new Error("Bojan mora najprej v Nastavitvah povezati Google Drive.");
-  }
+function videoStorageExtension(mimeType, filename = "") {
+  const known = {
+    "video/mp4": ".mp4",
+    "video/x-m4v": ".m4v",
+    "video/quicktime": ".mov",
+    "video/webm": ".webm",
+    "video/x-matroska": ".mkv",
+    "video/x-msvideo": ".avi",
+    "video/3gpp": ".3gp"
+  };
+  return known[String(mimeType || "").toLowerCase()] || path.extname(String(filename || "")).toLowerCase() || ".video";
+}
+
+async function receiveLocalTodoVideo(input = {}) {
   const mimeType = videoMimeType(input.mimeType, input.name);
   if (!mimeType) throw new Error("Izberi veljavno video datoteko.");
-  const bytes = Number(input.contentLength);
-  if (Number.isSafeInteger(bytes) && bytes <= 0) throw new Error("Praznega videa ni mogo\u010de dodati.");
-  if (Number.isSafeInteger(bytes) && bytes > MAX_DRIVE_VIDEO_BYTES) throw new Error(`Video je prevelik. Najve\u010dja dovoljena velikost je ${Math.round(MAX_DRIVE_VIDEO_BYTES / 1024 / 1024)} MB.`);
-  const title = cleanDriveUploadName(input.title || "opravilo");
-  const client = cleanDriveUploadName(input.client || "");
-  const originalName = cleanDriveUploadName(input.name || "video");
-  const name = [client, title, originalName].filter(Boolean).join(" - ").slice(0, 180);
-  const { google } = require("googleapis");
-  const drive = google.drive({ version: "v3", auth: googleClient(req, owner.google.tokens) });
-  let created = null;
-  try {
-    const response = await drive.files.create({
-      requestBody: {
-        name,
-        parents: [GOOGLE_DRIVE_ATTACHMENTS_FOLDER_ID],
-        appProperties: {
-          indusApp: INDUS_GOOGLE_APP_ID,
-          indusResource: "task-video-attachment"
-        }
-      },
-      media: { mimeType, body: limitIncomingVideoStream(input.stream, MAX_DRIVE_VIDEO_BYTES) },
-      fields: "id,name,mimeType,webViewLink,parents,owners(emailAddress),driveId,size"
-    });
-    created = response.data;
-    await drive.permissions.create({
-      fileId: created.id,
-      requestBody: { type: "anyone", role: "reader", allowFileDiscovery: false },
-      fields: "id,type,role,allowFileDiscovery"
-    });
-    const ownedByBojan = (created.owners || []).some((item) => String(item.emailAddress || "").toLowerCase() === GOOGLE_DRIVE_OWNER_EMAIL);
-    const inConfiguredFolder = (created.parents || []).includes(GOOGLE_DRIVE_ATTACHMENTS_FOLDER_ID);
-    if (!created.id || !created.webViewLink || created.driveId || !ownedByBojan || !inConfiguredFolder) {
-      throw new Error("Video datoteke ni bilo mogoče ustvariti kot Bojanove priloge v izbrani Drive mapi.");
-    }
-    return {
-      id: crypto.randomUUID(),
-      kind: "video",
-      fileId: created.id,
-      url: created.webViewLink,
-      name: String(created.name || name).slice(0, 180),
-      mimeType: String(created.mimeType || mimeType).slice(0, 100),
-      managed: true,
-      ownerEmail: GOOGLE_DRIVE_OWNER_EMAIL,
-      createdBy: actor.id,
-      createdByName: actor.name,
-      createdAt: new Date().toISOString()
-    };
-  } catch (error) {
-    if (created?.id) {
-      try {
-        await drive.files.delete({ fileId: created.id });
-      } catch (cleanupError) {
-        console.warn(`Google videa ${created.id} ni bilo mogoče odstraniti: ${cleanupError.message || cleanupError}`);
+  const declaredBytes = Number(input.contentLength);
+  if (Number.isSafeInteger(declaredBytes) && declaredBytes <= 0) throw new Error("Praznega videa ni mogoče dodati.");
+  if (Number.isSafeInteger(declaredBytes) && declaredBytes > MAX_VIDEO_BYTES) throw new Error(`Video je prevelik. Največja dovoljena velikost je ${Math.round(MAX_VIDEO_BYTES / 1024 / 1024)} MB.`);
+
+  const uploadDirectory = path.join(MEDIA_DIR, ".uploads");
+  await fsp.mkdir(uploadDirectory, { recursive: true, mode: 0o700 });
+  const temporaryPath = path.join(uploadDirectory, `${crypto.randomUUID()}.part`);
+  const digest = crypto.createHash("sha256");
+  let byteSize = 0;
+  const counter = new Transform({
+    transform(chunk, encoding, callback) {
+      byteSize += chunk.length;
+      if (byteSize > MAX_VIDEO_BYTES) {
+        callback(new Error(`Video je prevelik. Največja dovoljena velikost je ${Math.round(MAX_VIDEO_BYTES / 1024 / 1024)} MB.`));
+        return;
       }
+      digest.update(chunk);
+      callback(null, chunk);
     }
+  });
+  input.stream.once("aborted", () => counter.destroy(new Error("Prenos videa je bil prekinjen.")));
+  try {
+    await pipeline(input.stream, counter, fs.createWriteStream(temporaryPath, { mode: 0o600 }));
+    if (!byteSize) throw new Error("Praznega videa ni mogoče dodati.");
+    const attachmentId = digest.digest("hex");
+    const storageKey = path.posix.join("objects", `${attachmentId}${videoStorageExtension(mimeType, input.name)}`);
+    const targetPath = path.join(MEDIA_DIR, ...storageKey.split("/"));
+    await fsp.mkdir(path.dirname(targetPath), { recursive: true, mode: 0o700 });
+    let createdFile = false;
+    try {
+      await fsp.rename(temporaryPath, targetPath);
+      createdFile = true;
+    } catch (error) {
+      if (error.code !== "EEXIST") throw error;
+      await fsp.rm(temporaryPath, { force: true });
+    }
+    return { attachmentId, mimeType, byteSize, storageKey, targetPath, createdFile };
+  } catch (error) {
+    await fsp.rm(temporaryPath, { force: true }).catch(() => {});
     throw error;
   }
 }
@@ -3655,6 +3584,23 @@ async function handleApi(req, res) {
   const url = new URL(req.url, `http://${req.headers.host}`);
 
   try {
+    const pendingAttachmentMatch = url.pathname.match(/^\/api\/attachments\/([a-f0-9]{64})\/pending$/);
+    if (pendingAttachmentMatch && req.method === "DELETE") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      const attachmentId = pendingAttachmentMatch[1];
+      const db = await readDbAsync();
+      const pending = pendingAttachmentMap(db);
+      if (pending[attachmentId]?.userId !== user.id) {
+        sendJson(res, 404, { error: "Začasna priloga ne obstaja." });
+        return;
+      }
+      delete pending[attachmentId];
+      delete db.attachments[attachmentId];
+      await writeDbAsync(db);
+      sendJson(res, 200, { ok: true });
+      return;
+    }
     const attachmentMatch = url.pathname.match(/^\/api\/attachments\/([a-f0-9]{64})(\/thumbnail)?$/);
     if (attachmentMatch && req.method === "GET") {
       const user = await requireUser(req, res);
@@ -4002,7 +3948,6 @@ async function handleApi(req, res) {
       }
       const requestedAttachments = clientReportAttachmentSelection(report, body.attachmentIds);
       const attachments = await loadClientReportAttachments(db, requestedAttachments, { destination: "PDF" });
-      await ensureClientReportAttachmentsSharedToDrive(req, db, attachments);
       const pdf = await buildClientReportPdf(db, report, attachments, body.exportOptions);
       const filename = clientReportFilename(report.client);
       res.writeHead(200, securityHeaders({
@@ -4049,7 +3994,6 @@ async function handleApi(req, res) {
         maxTotalBytes: REPORT_GMAIL_MAX_TOTAL_BYTES,
         destination: "Gmail"
       });
-      await ensureClientReportAttachmentsSharedToDrive(req, db, attachments);
       const pdf = await buildClientReportPdf(db, report, attachments, body.exportOptions);
       const filename = clientReportFilename(report.client);
       try {
@@ -5038,32 +4982,56 @@ async function handleApi(req, res) {
     if (url.pathname === "/api/todos/drive-files" && req.method === "POST") {
       const user = await requireUser(req, res);
       if (!user) return;
-      const body = await readBody(req);
-      const db = await readDbAsync();
-      const driveFile = await createManagedGoogleDriveFile(req, db, user, body);
-      sendJson(res, 201, { driveFile });
+      sendJson(res, 410, { error: "Dokumente in preglednice pripni kot zunanjo povezavo. Drive je rezerviran za varnostne kopije." });
       return;
     }
 
-    if (url.pathname === "/api/todos/drive-video" && req.method === "POST") {
+    if (url.pathname === "/api/todos/video" && req.method === "POST") {
       const user = await requireUser(req, res);
       if (!user) return;
-      const db = await readDbAsync();
       let name = String(req.headers["x-indus-file-name"] || "video");
-      let title = String(req.headers["x-indus-task-title"] || "opravilo");
-      let client = String(req.headers["x-indus-client"] || "");
       try { name = decodeURIComponent(name); } catch { /* keep encoded value */ }
-      try { title = decodeURIComponent(title); } catch { /* keep encoded value */ }
-      try { client = decodeURIComponent(client); } catch { /* keep encoded value */ }
-      const driveFile = await createManagedGoogleDriveVideo(req, db, user, {
+      const received = await receiveLocalTodoVideo({
         stream: req,
         name,
-        title,
-        client,
         mimeType: req.headers["content-type"],
         contentLength: req.headers["content-length"]
       });
-      sendJson(res, 201, { driveFile });
+      try {
+        const photo = await runSerializedWork(async () => {
+          const db = await readDbAsync();
+          const pending = pendingAttachmentMap(db);
+          db.attachments[received.attachmentId] = {
+            ...(db.attachments[received.attachmentId] || {}),
+            id: received.attachmentId,
+            mimeType: received.mimeType,
+            byteSize: received.byteSize,
+            storageKey: received.storageKey,
+            thumbnailKey: "",
+            createdBy: user.id,
+            createdByName: user.name,
+            createdAt: new Date().toISOString()
+          };
+          pending[received.attachmentId] = { userId: user.id, expiresAt: Date.now() + PENDING_ATTACHMENT_TTL_MS };
+          await writeDbAsync(db);
+          return {
+            id: crypto.randomUUID(),
+            attachmentId: received.attachmentId,
+            name: "Video",
+            comment: "",
+            createdBy: user.id,
+            createdByName: user.name,
+            createdAt: new Date().toISOString(),
+            mimeType: received.mimeType,
+            url: attachmentApiUrl(received.attachmentId),
+            thumbnailUrl: ""
+          };
+        });
+        sendJson(res, 201, { photo });
+      } catch (error) {
+        if (received.createdFile) await fsp.rm(received.targetPath, { force: true }).catch(() => {});
+        throw error;
+      }
       return;
     }
 
@@ -5600,6 +5568,14 @@ function handleUnexpectedRequestError(error, res) {
   }
 }
 
+function runSerializedWork(work) {
+  const execution = mutationQueue.then(work);
+  mutationQueue = execution.catch((error) => {
+    console.error(`Zaporedna sprememba ni uspela: ${error.message || error}`);
+  });
+  return execution;
+}
+
 function runSerializedMutation(req, res) {
   const execution = mutationQueue.then(() => handleApi(req, res));
   mutationQueue = execution.catch((error) => handleUnexpectedRequestError(error, res));
@@ -5621,7 +5597,7 @@ async function start() {
     if (req.url.startsWith("/api/")) {
       // A video upload only creates a Drive file; it does not alter app state. Do
       // not hold the global mutation queue while a large body is streaming.
-      const streamedVideoUpload = req.method === "POST" && req.url.startsWith("/api/todos/drive-video");
+      const streamedVideoUpload = req.method === "POST" && req.url.startsWith("/api/todos/video");
       if (streamedVideoUpload) {
         handleApi(req, res).catch((error) => handleUnexpectedRequestError(error, res));
       } else if (req.method !== "GET" || req.url.startsWith("/api/google/callback")) {

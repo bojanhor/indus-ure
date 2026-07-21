@@ -1381,6 +1381,17 @@
     }
     .todo-upload-status[data-state="uploading"] { color: var(--accent); }
     .todo-upload-status[data-state="error"] { color: var(--danger); }
+    .todo-upload-status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .todo-upload-status progress {
+      width: min(220px, 55vw);
+      height: 10px;
+      accent-color: var(--accent);
+    }
+    .todo-upload-status[data-state="success"] progress { accent-color: #2f9d50; }
 
     .todo-title {
       font-weight: 800;
@@ -1465,6 +1476,13 @@
       display: grid;
       gap: 8px;
       padding-bottom: 10px;
+    }
+
+    .todo-video-preview {
+      width: 100%;
+      aspect-ratio: 4 / 3;
+      display: block;
+      background: #14201e;
     }
 
     .photo-card img {
@@ -2702,6 +2720,11 @@
     }
 
     .todo-form-photo-row:last-child { border-bottom: 0; }
+    .todo-form-photo-comment {
+      flex: 1 1 180px;
+      max-width: 340px;
+      min-width: 0;
+    }
 
     .todo-form-photo-actions {
       display: flex;
@@ -3880,12 +3903,9 @@
           <strong>Priloge</strong>
           <div id="todoFormPhotoList"></div>
           <div class="todo-drive-files" id="todoFormDriveFileList"></div>
-          <div class="todo-drive-actions">
-            <button class="secondary" id="createTodoGoogleDoc" type="button" data-create-drive="document">Google Dokument</button>
-            <button class="secondary" id="createTodoGoogleSheet" type="button" data-create-drive="spreadsheet">Google Preglednica</button>
-          </div>
+
           <div class="todo-drive-link-input">
-            <input id="todoFormDriveLink" type="url" placeholder="Prilepi povezavo do Google Dokumenta ali Preglednice" inputmode="url">
+            <input id="todoFormDriveLink" type="url" placeholder="Prilepi zunanjo povezavo do Google Dokumenta ali Preglednice" inputmode="url">
             <button class="secondary" id="addTodoDriveLink" type="button">Dodaj povezavo</button>
           </div>
           <div class="todo-form-attachment-actions">
@@ -3903,9 +3923,9 @@
             </label>
             <label class="secondary add-photo" id="todoFormVideoLabel">Video (do 200 MB)
               <input class="hidden-file" id="todoFormVideoInput" type="file" accept="video/*" multiple>
-              <span class="sr-only">Izberi video; shrani se neposredno v Google Drive</span>
+              <span class="sr-only">Izberi video; shrani se zasebno v INDUS URE</span>
             </label>
-            <p class="todo-upload-status hidden" id="todoFormVideoStatus" role="status" aria-live="polite"></p>
+            <div class="todo-upload-status hidden" id="todoFormVideoStatus" role="status" aria-live="polite"><progress id="todoFormVideoProgress" max="100" value="0"></progress><span></span></div>
           </div>
         </div>
         <div class="audit-box hidden" id="todoFormAudit"></div>
@@ -4737,12 +4757,12 @@
     function setGoogleDriveConnectionBanner(status) {
       const banner = $("driveConnectionBanner");
       if (!banner) return;
-      const needsReconnect = Boolean(status?.configured && status?.reconnectRequired);
+      const needsReconnect = Boolean(state.user?.role === "boss" && status?.configured && status?.reconnectRequired);
       banner.classList.toggle("hidden", !needsReconnect);
       if (!needsReconnect) return;
       $("driveConnectionMessage").textContent = status.owner
-        ? "Google Drive povezava ni več veljavna. Za dodajanje videov in Google prilog jo ponovno poveži."
-        : "Google Drive povezava ni več veljavna. Nalaganje videov in Google prilog bo na voljo, ko jo Bojan ponovno poveže.";
+        ? "Google povezava za Gmail osnutke ni več veljavna. Po potrebi jo kot Bojan ponovno poveži."
+        : "Google povezava za Gmail osnutke ni na voljo. Po potrebi jo lahko poveže Bojan.";
       $("driveReconnectBtn").classList.toggle("hidden", !status.owner);
     }
 
@@ -5421,7 +5441,7 @@
     }
 
     function renderAdvancePhotos() {
-      $("advancePhotoList").innerHTML = state.advancePhotos.map((photo) => `<div class="todo-form-photo-row"><button class="todo-form-attachment-preview advance-photo-preview" type="button" data-photo-id="${escapeHtml(photo.id)}"><span class="todo-form-attachment-thumb">${isPdfAttachment(photo) ? pdfThumbnailMarkup(photo) : `<img src="${escapeHtml(attachmentSource(photo))}" alt="">`}</span><span>${escapeHtml(photo.name || "Priloga")}</span></button><button class="danger remove-advance-photo" type="button" data-photo-id="${escapeHtml(photo.id)}">Odstrani</button></div>`).join("");
+      $("advancePhotoList").innerHTML = state.advancePhotos.map((photo) => `<div class="todo-form-photo-row"><button class="todo-form-attachment-preview advance-photo-preview" type="button" data-photo-id="${escapeHtml(photo.id)}"><span class="todo-form-attachment-thumb">${isPdfAttachment(photo) ? pdfThumbnailMarkup(photo) : `<img src="${escapeHtml(attachmentSource(photo))}" alt="">`}</span><span>${escapeHtml(attachmentLabel(photo))}</span></button><input class="todo-form-photo-comment" type="text" maxlength="500" data-advance-photo-comment-id="${escapeHtml(photo.id)}" placeholder="Komentar priloge" value="${escapeHtml(photo.comment || "")}"><button class="danger remove-advance-photo" type="button" data-photo-id="${escapeHtml(photo.id)}">Odstrani</button></div>`).join("");
     }
 
     function financialEntryPermission(entry) {
@@ -7794,6 +7814,14 @@
         || attachmentSource(photo).startsWith("data:application/pdf;base64,");
     }
 
+    function isVideoAttachment(photo) {
+      return String(photo?.mimeType || "").toLowerCase().startsWith("video/");
+    }
+
+    function attachmentLabel(photo) {
+      return isVideoAttachment(photo) ? "Video" : (photo?.name || "Priloga");
+    }
+
     function pdfThumbnailMarkup(photo, showBadge = false) {
       const thumbnail = attachmentThumbnailSource(photo);
       if (!thumbnail) return "PDF";
@@ -7849,7 +7877,7 @@
     }
 
     function openAttachmentPreview(photo, context = {}) {
-      if (isPdfAttachment(photo)) {
+      if (isPdfAttachment(photo) || isVideoAttachment(photo)) {
         const link = document.createElement("a");
         link.href = attachmentSource(photo);
         link.target = "_blank";
@@ -8211,10 +8239,18 @@
       if (!(todo.photos || []).length) return "";
       return `<div class="todo-photos-inline">${todo.photos.map((photo) => {
         const pdf = isPdfAttachment(photo);
+        const video = isVideoAttachment(photo);
+        const label = attachmentLabel(photo);
+        const media = video
+          ? `<video class="todo-video-preview" controls preload="metadata" src="${escapeHtml(attachmentSource(photo))}">Video ni podprt v tem brskalniku.</video>`
+          : pdf
+            ? `<a class="todo-pdf-preview" href="${escapeHtml(attachmentSource(photo))}" target="_blank" rel="noopener noreferrer" aria-label="Odpri PDF ${escapeHtml(label)}">${pdfThumbnailMarkup(photo, true)}</a>`
+            : `<button class="todo-image-preview" type="button" data-photo-id="${escapeHtml(photo.id)}" aria-label="Povečaj sliko ${escapeHtml(label)}"><img src="${escapeHtml(attachmentSource(photo))}" alt="${escapeHtml(label)}"></button>`;
         return `<article class="photo-card">
-          ${pdf ? `<a class="todo-pdf-preview" href="${escapeHtml(attachmentSource(photo))}" target="_blank" rel="noopener noreferrer" aria-label="Odpri PDF ${escapeHtml(photo.name || "Priloga")}">${pdfThumbnailMarkup(photo, true)}</a>` : `<button class="todo-image-preview" type="button" data-photo-id="${escapeHtml(photo.id)}" aria-label="Povečaj sliko ${escapeHtml(photo.name || "Fotografija")}"><img src="${escapeHtml(attachmentSource(photo))}" alt="${escapeHtml(photo.name || "Fotografija")}"></button>`}
+          ${media}
           <div>
-            <strong>${escapeHtml(photo.name || "Priloga")}</strong>
+            <strong>${escapeHtml(label)}</strong>
+            ${photo.comment ? `<span class="todo-meta">${escapeHtml(photo.comment)}</span>` : ""}
             <span class="todo-meta">dodal: ${escapeHtml(photo.createdByName || "-")}</span>
             <button class="danger remove-photo" type="button" data-photo-id="${escapeHtml(photo.id)}">Izbriši</button>
           </div>
@@ -8321,29 +8357,31 @@
       })[extension] || "application/octet-stream";
     }
 
-    function setTodoVideoUploadStatus(message, stateName = "") {
+    function setTodoVideoUploadStatus(message, stateName = "", percent = null) {
       const status = $("todoFormVideoStatus");
-      status.textContent = String(message || "");
+      const progress = $("todoFormVideoProgress");
+      const label = status.querySelector("span");
+      label.textContent = String(message || "");
       status.hidden = !message;
+      progress.hidden = percent === null;
+      progress.value = Math.max(0, Math.min(100, Number(percent) || 0));
       if (stateName) status.dataset.state = stateName;
       else delete status.dataset.state;
     }
 
-    function uploadTodoVideoFile(file, title, client, csrfRetried = false) {
+    function uploadTodoVideoFile(file, csrfRetried = false) {
       return new Promise((resolve, reject) => {
         const request = new XMLHttpRequest();
-        request.open("POST", "/api/todos/drive-video", true);
+        request.open("POST", "/api/todos/video", true);
         request.responseType = "json";
         request.withCredentials = true;
         request.setRequestHeader("Content-Type", todoVideoMimeType(file));
         request.setRequestHeader("X-Indus-File-Name", encodeURIComponent(file.name));
-        request.setRequestHeader("X-Indus-Task-Title", encodeURIComponent(title));
-        request.setRequestHeader("X-Indus-Client", encodeURIComponent(client));
         if (state.csrfToken) request.setRequestHeader("X-CSRF-Token", state.csrfToken);
         request.upload.addEventListener("progress", (event) => {
           if (!event.lengthComputable) return;
           const percent = Math.min(100, Math.round((event.loaded / event.total) * 100));
-          setTodoVideoUploadStatus("Nalagam video " + file.name + ": " + percent + " %", "uploading");
+          setTodoVideoUploadStatus(`Nalagam video: ${percent} %`, "uploading", percent);
         });
         request.addEventListener("load", async () => {
           let data = request.response;
@@ -8354,17 +8392,16 @@
           if (csrfFailure && !csrfRetried && navigator.onLine) {
             try {
               await refreshSessionSecurityContext();
-              resolve(await uploadTodoVideoFile(file, title, client, true));
+              resolve(await uploadTodoVideoFile(file, true));
               return;
             } catch (error) {
               reject(error);
               return;
             }
           }
-          if (request.status < 200 || request.status >= 300 || !data?.driveFile) {
-            const error = new Error(data?.error || (request.status ? "Video ni bil nalo\u017een (HTTP " + request.status + ")." : "Prenos videa ni uspel."));
+          if (request.status < 200 || request.status >= 300 || !data?.photo) {
+            const error = new Error(data?.error || (request.status ? "Video ni bil naložen (HTTP " + request.status + ")." : "Prenos videa ni uspel."));
             error.status = request.status;
-            error.code = String(data?.code || "");
             reject(error);
             return;
           }
@@ -8381,37 +8418,22 @@
       const files = [...(input.files || [])];
       if (!files.length) return;
       const maxBytes = 200 * 1024 * 1024;
-      const title = $("todoFormTask").value.trim();
-      if (!title) {
-        input.value = "";
-        $("todoFormTask").focus();
-        showNotice("Najprej vpi\u0161i ime opravila, nato dodaj video.");
-        return;
-      }
-      const client = findTodoClient($("todoFormClient").value);
       input.disabled = true;
       try {
         for (const file of files) {
-          if (state.todoDialogDriveFiles.length >= 12) throw new Error("Najve\u010d je 12 Google prilog na opravilo.");
-          if (!file.size) throw new Error("Praznega videa ni mogo\u010de dodati.");
-          if (file.size > maxBytes) throw new Error("Video je prevelik. Najve\u010dja dovoljena velikost je 200 MB.");
-          const clientName = client?.name || normalizeClientName($("todoFormClient").value);
-          setTodoVideoUploadStatus("Pripravljam nalaganje videa " + file.name + " v Google Drive.", "uploading");
-          const data = await uploadTodoVideoFile(file, title, clientName);
-          if (!state.todoDialogDriveFiles.some((item) => item.fileId === data.driveFile.fileId)) {
-            state.todoDialogDriveFiles.push(data.driveFile);
-            renderTodoFormDriveFiles();
+          if (state.todoDialogPhotos.length >= 8) throw new Error("Največ je 8 prilog na opravilo.");
+          if (!file.size) throw new Error("Praznega videa ni mogoče dodati.");
+          if (file.size > maxBytes) throw new Error("Video je prevelik. Največja dovoljena velikost je 200 MB.");
+          setTodoVideoUploadStatus("Pripravljam nalaganje videa.", "uploading", 0);
+          const data = await uploadTodoVideoFile(file);
+          if (!state.todoDialogPhotos.some((item) => item.attachmentId === data.photo.attachmentId)) {
+            state.todoDialogPhotos.push(data.photo);
+            renderTodoFormPhotos();
           }
         }
-        setTodoVideoUploadStatus("Video je dodan kot povezava do Google Drive.", "success");
+        setTodoVideoUploadStatus("Video je dodan.", "success", 100);
       } catch (error) {
-        if (error?.code === "google_drive_reconnect_required" || /Bojan mora najprej v Nastavitvah povezati Google Drive|Google Drive ni povezan|povezava z Google Drive ni več veljavna/i.test(String(error?.message || ""))) {
-          await refreshGoogleDriveConnectionStatus();
-        }
-        const message = /Bojan mora najprej v Nastavitvah povezati Google Drive|Google Drive ni povezan|povezava z Google Drive ni več veljavna/i.test(String(error?.message || ""))
-          ? "Video ni bil dodan: Google Drive ni povezan. Kot Bojan v Nastavitvah izberi Google Dokumenti, preglednice in Gmail."
-          : "Video ni bil dodan: " + String(error?.message || "Neznana napaka.");
-        setTodoVideoUploadStatus(message, "error");
+        setTodoVideoUploadStatus("Video ni bil dodan: " + String(error?.message || "Neznana napaka."), "error");
         throw error;
       } finally {
         input.disabled = false;
@@ -8444,18 +8466,27 @@
 
     function renderTodoFormPhotos() {
       const list = $("todoFormPhotoList");
-      list.innerHTML = state.todoDialogPhotos.map((photo) => `
-        <div class="todo-form-photo-row">
-          <button class="todo-form-attachment-preview" type="button" data-photo-id="${escapeHtml(photo.id)}">
-            <span class="todo-form-attachment-thumb">${isPdfAttachment(photo) ? pdfThumbnailMarkup(photo) : `<img src="${escapeHtml(attachmentSource(photo))}" alt="">`}</span>
-            <span>${escapeHtml(photo.name || "Priloga")}</span>
-          </button>
-          <div class="todo-form-photo-actions">
-            ${isPdfAttachment(photo) ? "" : `<button class="secondary edit-todo-form-photo" type="button" data-photo-id="${escapeHtml(photo.id)}">Uredi</button>`}
-            <button class="danger remove-todo-form-photo" type="button" data-photo-id="${escapeHtml(photo.id)}">Odstrani</button>
-          </div>
-        </div>
-      `).join("");
+      list.innerHTML = state.todoDialogPhotos.map((photo) => {
+        const video = isVideoAttachment(photo);
+        const label = attachmentLabel(photo);
+        const thumb = video
+          ? "VIDEO"
+          : isPdfAttachment(photo)
+            ? pdfThumbnailMarkup(photo)
+            : `<img src="${escapeHtml(attachmentSource(photo))}" alt="">`;
+        return `
+          <div class="todo-form-photo-row">
+            <button class="todo-form-attachment-preview" type="button" data-photo-id="${escapeHtml(photo.id)}">
+              <span class="todo-form-attachment-thumb">${thumb}</span>
+              <span>${escapeHtml(label)}</span>
+            </button>
+            <input class="todo-form-photo-comment" type="text" maxlength="500" data-photo-comment-id="${escapeHtml(photo.id)}" placeholder="Komentar priloge" value="${escapeHtml(photo.comment || "")}">
+            <div class="todo-form-photo-actions">
+              ${isPdfAttachment(photo) || video ? "" : `<button class="secondary edit-todo-form-photo" type="button" data-photo-id="${escapeHtml(photo.id)}">Uredi</button>`}
+              <button class="danger remove-todo-form-photo" type="button" data-photo-id="${escapeHtml(photo.id)}">Odstrani</button>
+            </div>
+          </div>`;
+      }).join("");
     }
 
     async function attachmentDataForProcessing(photo) {
@@ -9138,16 +9169,19 @@
       const driveFiles = todo.driveFiles || [];
       if (!photos.length && !driveFiles.length) return "";
       const attachmentCards = photos.map((photo) => {
-        const title = escapeHtml(photo.name || "Priloga");
+        const video = isVideoAttachment(photo);
+        const title = escapeHtml(attachmentLabel(photo));
         const attachmentId = String(photo.attachmentId || "");
-        const canChooseForExport = exportable && /^[a-f0-9]{64}$/.test(attachmentId);
+        const canChooseForExport = exportable && !video && /^[a-f0-9]{64}$/.test(attachmentId);
         const includeInExport = canChooseForExport && state.reportIncludedAttachmentIds.has(attachmentId);
         const exportToggle = canChooseForExport
           ? `<label class="client-billing-attachment-export"><input type="checkbox" data-report-export-attachment-id="${escapeHtml(attachmentId)}" ${includeInExport ? "checked" : ""}><span>Vključi v izvoz</span></label>`
           : "";
-        const media = isPdfAttachment(photo)
-          ? `<a class="client-billing-attachment" href="${escapeHtml(attachmentSource(photo))}" target="_blank" rel="noopener noreferrer"><span>${pdfThumbnailMarkup(photo)}</span><span>${title}</span></a>`
-          : `<button class="client-billing-attachment report-image-preview" type="button" data-report-todo-id="${escapeHtml(todo.id)}" data-photo-id="${escapeHtml(photo.id)}"><img src="${escapeHtml(attachmentThumbnailSource(photo))}" alt="${title}"><span>${title}</span></button>`;
+        const media = video
+          ? `<span class="client-billing-attachment"><span class="todo-drive-kind">VIDEO</span><span>Video je v aplikaciji in se ne vključuje v PDF/Gmail izvoz.</span></span>`
+          : isPdfAttachment(photo)
+            ? `<a class="client-billing-attachment" href="${escapeHtml(attachmentSource(photo))}" target="_blank" rel="noopener noreferrer"><span>${pdfThumbnailMarkup(photo)}</span><span>${title}</span></a>`
+            : `<button class="client-billing-attachment report-image-preview" type="button" data-report-todo-id="${escapeHtml(todo.id)}" data-photo-id="${escapeHtml(photo.id)}"><img src="${escapeHtml(attachmentThumbnailSource(photo))}" alt="${title}"><span>${title}</span></button>`;
         return `<div class="client-billing-attachment-wrap">${media}${exportToggle}</div>`;
       }).join("");
       return `<section class="client-billing-section"><strong>Priloge in dokumenti</strong>${attachmentCards ? `<div class="client-billing-attachments">${attachmentCards}</div>` : ""}${driveFiles.length ? `<div class="todo-drive-files">${renderTodoDriveFilesHtml(driveFiles)}</div>` : ""}</section>`;
@@ -10531,7 +10565,14 @@
       if (remove) { state.advancePhotos = state.advancePhotos.filter((photo) => photo.id !== remove.dataset.photoId); renderAdvancePhotos(); return; }
       const preview = event.target.closest(".advance-photo-preview");
       if (preview) { const photo = state.advancePhotos.find((item) => item.id === preview.dataset.photoId); if (photo) openAttachmentPreview(photo); }
-    });    $("clientsMenuBtn").addEventListener("click", () => {
+    });
+    $("advancePhotoList").addEventListener("input", (event) => {
+      const input = event.target.closest("[data-advance-photo-comment-id]");
+      if (!input) return;
+      const photo = state.advancePhotos.find((item) => item.id === input.dataset.advancePhotoCommentId);
+      if (photo) photo.comment = input.value.slice(0, 500);
+    });
+    $("clientsMenuBtn").addEventListener("click", () => {
       setView("clients");
       $("toolsMenu").open = false;
     });
@@ -10623,6 +10664,17 @@
     });
     $("deleteCompletedProject").addEventListener("click", () => handleHoursProjectCompletion(true).catch((error) => showNotice(error.message)));
     $("rescheduleProject").addEventListener("click", () => handleHoursProjectCompletion(false).catch((error) => showNotice(error.message)));
+    async function discardTemporaryTodoAttachment(photo) {
+      if (!isVideoAttachment(photo) || !/^[a-f0-9]{64}$/.test(String(photo?.attachmentId || ""))) return;
+      try {
+        await api(`/api/attachments/${encodeURIComponent(photo.attachmentId)}/pending`, { method: "DELETE", body: JSON.stringify({}) });
+      } catch {
+        // A saved attachment is no longer pending, so there is nothing to discard.
+      }
+    }
+    function discardTemporaryTodoAttachments(photos = state.todoDialogPhotos) {
+      return Promise.all((photos || []).map((photo) => discardTemporaryTodoAttachment(photo)));
+    }
     async function handleTodoAttachmentsFromInput(event) {
       try {
         const remaining = Math.max(0, 8 - state.todoDialogPhotos.length);
@@ -10658,8 +10710,16 @@
       }
       const button = event.target.closest(".remove-todo-form-photo");
       if (!button) return;
+      const removed = state.todoDialogPhotos.find((photo) => photo.id === button.dataset.photoId);
       state.todoDialogPhotos = state.todoDialogPhotos.filter((photo) => photo.id !== button.dataset.photoId);
+      discardTemporaryTodoAttachment(removed);
       renderTodoFormPhotos();
+    });
+    $("todoFormPhotoList").addEventListener("input", (event) => {
+      const input = event.target.closest("[data-photo-comment-id]");
+      if (!input) return;
+      const photo = state.todoDialogPhotos.find((item) => item.id === input.dataset.photoCommentId);
+      if (photo) photo.comment = input.value.slice(0, 500);
     });
     $("reportClient").addEventListener("input", () => {
       const value = $("reportClient").value;
@@ -10878,6 +10938,10 @@
       }, 0);
     });
     $("todoDialog").addEventListener("close", hideTodoClientSuggestions);
+    $("todoDialog").addEventListener("close", () => {
+      discardTemporaryTodoAttachments();
+      state.todoDialogPhotos = [];
+    });
     function beginPhotoEditorTextControlChange() {
       const editor = state.photoEditor;
       const text = selectedPhotoEditorText();

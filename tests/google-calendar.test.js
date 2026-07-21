@@ -80,20 +80,19 @@ test("skupni koledar ohrani dogodek, dokler ima vsaj en izvajalec neobračunan v
   }, { combined: true });
   assert.match(ics, /TODO: Montaža/);
 });
-test("Drive priponke sprejmejo Dokumente, Preglednice in upravljane videe", () => {
+test("zunanje povezave dovolijo samo Google Dokumente in Preglednice", () => {
   const id = "1_z_1I_wX8-VR0K9rXj7BHRFwc--00Ul5";
-  const videoId = "1wsPGlRaN2M7biJK4zq3KnLSYRXzJX6S1";
+  const sheetId = "1wsPGlRaN2M7biJK4zq3KnLSYRXzJX6S1";
   const files = cleanTodoDriveFiles([
     { url: `https://docs.google.com/document/d/${id}/edit`, name: "Dokument" },
-    { kind: "video", url: `https://drive.google.com/file/d/${videoId}/view`, name: "Video", mimeType: "video/mp4" },
+    { url: `https://docs.google.com/spreadsheets/d/${sheetId}/edit`, name: "Preglednica" },
+    { kind: "video", url: `https://drive.google.com/file/d/${sheetId}/view`, name: "Video" },
     { url: "https://example.com/foreign", name: "Neveljavno" }
   ]);
   assert.equal(files.length, 2);
   assert.equal(files[0].kind, "document");
-  assert.equal(files[1].kind, "video");
-  assert.equal(files[1].mimeType, "video/mp4");
+  assert.equal(files[1].kind, "spreadsheet");
 });
-
 test("video sprejme tudi datoteko brez MIME vrste", () => {
   assert.equal(videoMimeType("", "teren.MP4"), "video/mp4");
   assert.equal(videoMimeType("application/octet-stream", "teren.mov"), "video/quicktime");
