@@ -4177,6 +4177,7 @@
     const billingWorkerKey = "indus-ure-billing-worker";
     const todoSortModes = ["manual", "client", "date", "order", "completed", "open", "in_progress"];
     const timeEntryStatusIds = new Set(["execution", "meal", "drive", "purchase"]);
+    const monthlyHiddenTodoStatusIds = new Set(["meal", "drive", "ordered"]);
     const payrollPaidTodoStatuses = new Set(timeEntryStatusIds);
     const projectHoursSourceStatuses = new Set(["open", "in_progress"]);
     const statusLabels = {
@@ -6074,7 +6075,7 @@
         day.appendChild(head);
 
         todos
-          .filter((todo) => todo.date === key)
+          .filter((todo) => todo.date === key && !monthlyHiddenTodoStatusIds.has(todo.status))
           .sort(calendarDayTodoSort)
           .forEach((todo) => {
             const item = document.createElement("button");
