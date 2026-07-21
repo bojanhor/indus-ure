@@ -58,6 +58,9 @@ async function main() {
   try {
     await fsp.chmod(stage, 0o755);
     await fsp.writeFile(dump, await tarBuffer(archive, "database.dump"), { mode: 0o644 });
+    // A restrictive caller umask must not prevent pg_restore (postgres) from
+    // reading this throwaway staging copy.
+    await fsp.chmod(dump, 0o644);
     await asPostgres(["createdb", stagingDb]);
     databaseCreated = true;
     await asPostgres(["pg_restore", "--no-owner", "--no-acl", "-d", stagingDb, dump]);
