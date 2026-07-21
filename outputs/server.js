@@ -31,7 +31,9 @@ const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || "";
 const GOOGLE_REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI || "";
 // Bump this whenever the Google Workspace consent set changes. A stale Drive-only
-// token must never be silently reused for creating Gmail drafts.
+// token must never be silently reused for creating Gmail drafts. It remains valid
+// for Drive uploads, though: Drive attachment uploads must not be blocked merely
+// because the optional Gmail consent was added later.
 const GOOGLE_DRIVE_SCOPE_VERSION = 2;
 const GOOGLE_DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file";
 const GOOGLE_GMAIL_COMPOSE_SCOPE = "https://www.googleapis.com/auth/gmail.compose";
@@ -470,11 +472,7 @@ function normalizeGoogleState(value) {
     state.driveScopeVersion = 0;
     changed = true;
   }
-  if (state.driveScopeVersion !== GOOGLE_DRIVE_SCOPE_VERSION) {
-    if (state.tokens || state.driveScopeVersion) changed = true;
-    state.tokens = null;
-    state.driveScopeVersion = 0;
-  }
+
   return { state, changed };
 }
 function normalizeDb(db = {}) {
@@ -1854,7 +1852,7 @@ async function ensureClientReportAttachmentsSharedToDrive(req, db, attachments =
     throw new Error("Drive mapa za priloge ni nastavljena.");
   }
   const owner = googleDriveOwner(db);
-  if (!owner || Number(owner.google?.driveScopeVersion || 0) !== GOOGLE_DRIVE_SCOPE_VERSION || !owner.google?.tokens) {
+  if (!googleDriveTokenAvailable(owner)) {
     throw new Error("Bojan mora najprej v Nastavitvah povezati Google Drive.");
   }
 
@@ -2809,12 +2807,21 @@ function googleDriveOwner(db) {
   return userByEmail(db, GOOGLE_DRIVE_OWNER_EMAIL) || null;
 }
 
+function googleDriveTokenAvailable(user) {
+  return Boolean(user?.google?.tokens);
+}
+
+function googleWorkspaceTokenAvailable(user) {
+  return googleDriveTokenAvailable(user)
+    && Number(user.google?.driveScopeVersion || 0) === GOOGLE_DRIVE_SCOPE_VERSION;
+}
+
 async function createManagedGoogleDriveFile(req, db, actor, input = {}) {
   if (!googleDriveTasksReady()) {
     throw new Error("Google Dokumenti niso nastavljeni: manjka mapa ali Bojanov e-naslov v okolju strežnika.");
   }
   const owner = googleDriveOwner(db);
-  if (!owner || Number(owner.google?.driveScopeVersion || 0) !== GOOGLE_DRIVE_SCOPE_VERSION || !owner.google?.tokens) {
+  if (!googleDriveTokenAvailable(owner)) {
     throw new Error("Bojan mora najprej v Nastavitvah povezati Google Dokumente in preglednice.");
   }
   const kind = input.kind === "spreadsheet" ? "spreadsheet" : input.kind === "document" ? "document" : "";
@@ -2924,7 +2931,7 @@ async function createManagedGoogleDriveVideo(req, db, actor, input = {}) {
     throw new Error("Video priloge niso nastavljene: manjka Drive mapa v okolju strežnika.");
   }
   const owner = googleDriveOwner(db);
-  if (!owner || Number(owner.google?.driveScopeVersion || 0) !== GOOGLE_DRIVE_SCOPE_VERSION || !owner.google?.tokens) {
+  if (!googleDriveTokenAvailable(owner)) {
     throw new Error("Bojan mora najprej v Nastavitvah povezati Google Drive.");
   }
   const mimeType = videoMimeType(input.mimeType, input.name);
@@ -3599,7 +3606,8 @@ async function handleApi(req, res) {
         tasksFolderConfigured: googleDriveTasksReady(),
         attachmentsFolderConfigured: googleDriveAttachmentsReady(),
         owner,
-        connected: Boolean(driveOwner?.google?.tokens && Number(driveOwner.google.driveScopeVersion || 0) === GOOGLE_DRIVE_SCOPE_VERSION)
+        connected: googleDriveTokenAvailable(driveOwner),
+        gmailConnected: googleWorkspaceTokenAvailable(driveOwner)
       });
       return;
     }
@@ -3721,8 +3729,8 @@ async function handleApi(req, res) {
         sendText(res, 400, "Ta Google povezava ni več podprta.", "text/plain");
         return;
       }
-      const currentDriveScope = Number(user.google?.driveScopeVersion || 0) === GOOGLE_DRIVE_SCOPE_VERSION;
-      const refreshToken = result.tokens.refresh_token || (currentDriveScope ? user.google.tokens?.refresh_token : "");
+
+      const refreshToken = result.tokens.refresh_token || user.google.tokens?.refresh_token || "";
       if (!refreshToken) {
         sendText(res, 400, "Google ni vrnil trajnega dovoljenja. V Google računu odstrani dostop INDUS URE in poskusi znova.", "text/plain");
         return;
@@ -3855,7 +3863,7 @@ async function handleApi(req, res) {
       }
       const db = await readDbAsync();
       const owner = googleDriveOwner(db);
-      if (!googleReady() || !owner || Number(owner.google?.driveScopeVersion || 0) !== GOOGLE_DRIVE_SCOPE_VERSION || !owner.google?.tokens) {
+      if (!googleReady() || !googleWorkspaceTokenAvailable(owner)) {
         sendJson(res, 409, { error: "V Nastavitvah kot Bojan najprej ponovno poveži Google Dokumente, preglednice in Gmail." });
         return;
       }
@@ -5385,9 +5393,20 @@ function networkUrls() {
   }
 }
 
+function googleConnectionFailure(error) {
+  const status = Number(error?.response?.status || error?.code || 0);
+  const message = String(error?.response?.data?.error?.message || error?.message || "").toLowerCase();
+  return status === 401 || status === 403
+    || /invalid_grant|invalid credentials|unauthenticated|login required|token has been expired|invalid token/.test(message);
+}
+
 function handleUnexpectedRequestError(error, res) {
   console.error("Nepricakovana napaka zahtevka:", error);
   if (!res.headersSent) {
+    if (googleConnectionFailure(error)) {
+      sendJson(res, 409, { error: "Povezava z Google Drive ni več veljavna. V Nastavitvah jo kot Bojan ponovno poveži in poskusi znova." });
+      return;
+    }
     sendJson(res, 500, { error: "Napaka na strežniku." });
   } else {
     res.destroy();

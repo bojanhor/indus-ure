@@ -28,7 +28,7 @@ test("Google Calendar in Sheets nista več delovni integraciji", () => {
   assert.match(source, /gmail\.compose/);
 });
 
-test("stari Calendar OAuth token se odstrani, Drive token pa potrebuje trenutni scope", () => {
+test("stari Calendar OAuth token se odstrani, starejši Drive token pa ostane veljaven za priponke", () => {
   const database = {
     users: {
       bojan: { id: "bojan", email: "bojan@indus.si", google: { tokens: { refresh_token: "old" }, calendarId: "old-calendar", scopeVersion: 2 } }
@@ -47,6 +47,16 @@ test("stari Calendar OAuth token se odstrani, Drive token pa potrebuje trenutni 
   };
   normalizeDb(driveDatabase);
   assert.equal(driveDatabase.users.bojan.google.tokens.refresh_token, "drive");
+
+  const legacyDriveDatabase = {
+    users: {
+      bojan: { id: "bojan", email: "bojan@indus.si", google: { tokens: { refresh_token: "legacy-drive" }, connectedAt: "2026-07-18", driveScopeVersion: 0 } }
+    },
+    entries: [], todos: [], debts: [], clients: []
+  };
+  normalizeDb(legacyDriveDatabase);
+  assert.equal(legacyDriveDatabase.users.bojan.google.tokens.refresh_token, "legacy-drive");
+  assert.equal(legacyDriveDatabase.users.bojan.google.driveScopeVersion, 0);
 });
 
 test("ICS ostane samo za branje in ne zahteva Google Calendar", () => {
