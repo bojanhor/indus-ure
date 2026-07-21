@@ -19,7 +19,6 @@ const {
   clientReportSelection,
   clientReportAttachmentSelection,
   buildClientReportPdf,
-  cleanAppIssue,
   gmailDraftRaw,
   cancelClientBill,
   clientBillLockForTodos,
@@ -53,7 +52,7 @@ const {
   visibleDebtsForUser,
   visibleEntriesForUser,
   visibleTodosForUser,
-  visibleAppIssuesForUser
+  payrollMinutesForTodo
 } = require("../outputs/server");
 
 const boss = { id: "bojan", role: "boss" };
@@ -80,16 +79,10 @@ test("šef vidi vse, delavec pa samo svoje podatke", () => {
   assert.deepEqual(visibleDebtsForUser(db, worker).map((item) => item.id), ["d1"]);
 });
 
-test("težave aplikacije so vidne šefu, delavcu pa samo njegove", () => {
-  const issueDb = {
-    appIssues: [
-      { id: "i1", title: "Koledar", description: "Dogodek se ne odpre.", createdBy: "ibro", createdAt: "2026-07-20T08:00:00.000Z", status: "open" },
-      { id: "i2", title: "Obračun", description: "Preveri znesek.", createdBy: "bojan", createdAt: "2026-07-20T09:00:00.000Z", status: "resolved" }
-    ]
-  };
-  assert.equal(cleanAppIssue({ title: "  Koledar  ", description: "  Ne dela  " }).title, "Koledar");
-  assert.deepEqual(visibleAppIssuesForUser(issueDb, worker).map((issue) => issue.id), ["i1"]);
-  assert.deepEqual(visibleAppIssuesForUser(issueDb, boss).map((issue) => issue.id), ["i2", "i1"]);
+test("malica se delavcu plača največ do nastavljene meje", () => {
+  const meal = { status: "meal", date: "2026-07-20", start: "12:00", end: "13:00" };
+  assert.equal(payrollMinutesForTodo({ settings: { billing: { mealPaidMinutes: 45 } } }, meal), 45);
+  assert.equal(payrollMinutesForTodo({ settings: { billing: { mealPaidMinutes: 45 } } }, { ...meal, end: "12:30" }), 30);
 });
 
 test("vsako opravilo dobi skriti skupni ID dogodka", () => {

@@ -3130,16 +3130,18 @@
       .calendar-shell {
         margin-left: -16px;
         margin-right: -16px;
-        overflow: hidden;
+        overflow-x: auto;
+        overflow-y: hidden;
         border-left: 0;
         border-right: 0;
         border-radius: 0;
-        touch-action: pan-y pinch-zoom;
+        touch-action: pan-x pan-y pinch-zoom;
+        -webkit-overflow-scrolling: touch;
       }
       .weekdays,
       .calendar {
-        min-width: 0;
-        grid-template-columns: repeat(7, minmax(0, 1fr));
+        min-width: 728px;
+        grid-template-columns: repeat(7, minmax(104px, 1fr));
       }
       .weekdays div {
         padding: 7px 2px;
@@ -3316,24 +3318,27 @@
       .client-billing-attachments { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .client-row-actions { justify-content: stretch; }
       .client-row-actions > button { flex: 1 1 0; }
-      #workerBillingDialog { width: min(calc(100vw - 20px), 520px); max-height: calc(100dvh - 20px); overflow-y: auto; }
-      #workerBillingDialog .modal-head { padding: 13px 14px; }
-      #workerBillingDialog .modal-body { padding: 12px; }
-      #workerBillingDialog .worker-billing-scroll { overflow: visible; }
-      #workerBillingDialog .worker-billing table { min-width: 0; }
-      #workerBillingDialog .worker-billing thead { display: none; }
-      #workerBillingDialog .worker-billing tbody { display: grid; gap: 8px; }
-      #workerBillingDialog .worker-billing tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 5px 8px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: #f8faf7; }
-      #workerBillingDialog .worker-billing td { padding: 0; border: 0; }
-      #workerBillingDialog .worker-billing td:nth-child(1) { min-width: 0; overflow-wrap: anywhere; }
-      #workerBillingDialog .worker-billing td:nth-child(2) { align-self: center; color: var(--muted); font-size: 12px; text-align: right; }
-      #workerBillingDialog .worker-billing td:nth-child(3) { grid-column: 1 / -1; display: grid; gap: 4px; font-size: 0; }
-      #workerBillingDialog .worker-billing td:nth-child(3)::before { content: "Privzeta urna postavka"; color: var(--muted); font-size: 12px; font-weight: 800; }
-      #workerBillingDialog .worker-billing td:nth-child(4) { grid-column: 1 / -1; display: grid; gap: 4px; font-size: 0; }
-      #workerBillingDialog .worker-billing td:nth-child(4)::before { content: "Naziv izvajalca v izvozu"; color: var(--muted); font-size: 12px; font-weight: 800; }
-      #workerBillingDialog .worker-billing td:nth-child(5) { grid-column: 1 / -1; }
-      #workerBillingDialog .worker-export-title-input { width: 100%; }
-      #workerBillingDialog .worker-rate-input { width: calc(100% - 52px); max-width: calc(100% - 52px); }
+      #appSettingsDialog { width: min(calc(100vw - 20px), 520px); max-height: calc(100dvh - 20px); overflow-y: auto; }
+      #appSettingsDialog .modal-head { padding: 13px 14px; }
+      #appSettingsDialog .modal-body { padding: 12px; }
+      #appSettingsDialog .worker-billing-scroll { overflow: visible; }
+      #appSettingsDialog .worker-billing table { min-width: 0; }
+      #appSettingsDialog .worker-billing thead { display: none; }
+      #appSettingsDialog .worker-billing tbody { display: grid; gap: 8px; }
+      #appSettingsDialog .worker-billing tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 5px 8px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: #f8faf7; }
+      #appSettingsDialog .worker-billing td { padding: 0; border: 0; }
+      #appSettingsDialog .worker-billing td:nth-child(1) { min-width: 0; overflow-wrap: anywhere; }
+      #appSettingsDialog .worker-billing td:nth-child(2) { align-self: center; color: var(--muted); font-size: 12px; text-align: right; }
+      #appSettingsDialog .worker-billing td:nth-child(3) { grid-column: 1 / -1; display: grid; gap: 4px; font-size: 0; }
+      #appSettingsDialog .worker-billing td:nth-child(3)::before { content: "Privzeta urna postavka"; color: var(--muted); font-size: 12px; font-weight: 800; }
+      #appSettingsDialog .worker-billing td:nth-child(4) { grid-column: 1 / -1; display: grid; gap: 4px; font-size: 0; }
+      #appSettingsDialog .worker-billing td:nth-child(4)::before { content: "Naziv izvajalca v izvozu"; color: var(--muted); font-size: 12px; font-weight: 800; }
+      #appSettingsDialog .worker-billing td:nth-child(5) { grid-column: 1 / -1; }
+      #appSettingsDialog .worker-export-title-input { width: 100%; }
+      #appSettingsDialog .worker-rate-input { width: calc(100% - 52px); max-width: calc(100% - 52px); }
+      .app-settings-sections { display: grid; gap: 14px; }
+      .app-settings-section { display: grid; gap: 9px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: #f8faf7; }
+      .app-settings-section h4 { margin: 0; }
     }
   </style>
 </head>
@@ -3387,14 +3392,12 @@
               <button class="menu-action view-menu-action" id="clientsMenuBtn" type="button">Stranke</button>
               <span class="tools-menu-label">Podpora in razvoj</span>
               <a class="menu-action menu-link" href="https://docs.google.com/document/d/1mgQMSOCPml664Fx6uJq6W79XdE1duSKGejEOO6bpnEY/edit" target="_blank" rel="noopener noreferrer">Razvojni TODO</a>
-              <button class="menu-action" id="reportIssueBtn" type="button">Prijavi težavo</button>
-              <button class="menu-action admin-only" id="appIssuesBtn" type="button">Prejete težave</button>
+
               <span class="tools-menu-label">Podatki in sinhronizacija</span>
               <button class="menu-action hidden" id="googleDrive" type="button">Google Dokumenti, preglednice in Gmail</button>
               <button class="menu-action admin-only" id="notificationsBtn" type="button">Sistemska opozorila <span id="notificationsCount"></span></button>
               <span class="tools-menu-label admin-only">Napredno</span>
-              <button class="menu-action admin-only" id="workerBillingBtn" type="button">Privzete urne postavke</button>
-              <button class="menu-action admin-only" id="kmRatesBtn" type="button">Tarife kilometrine</button>
+              <button class="menu-action admin-only" id="appSettingsBtn" type="button">Obra&#269;unske nastavitve</button>
               <button class="menu-action admin-only" id="exportCsv" type="button">Izvoz CSV</button>
               <button class="menu-action admin-only" id="downloadBackup" type="button">Prenesi varnostno kopijo (ZIP)</button>
               <button class="menu-action admin-only" id="restoreBackup" type="button">Obnovi iz ZIP kopije</button>
@@ -3652,6 +3655,7 @@
       <div class="todo-creation-tabs hidden" id="todoCreationTabs" role="tablist" aria-label="Vrsta novega vnosa">
         <button class="todo-creation-tab" type="button" role="tab" data-create-mode="task">Nov dogodek</button>
         <button class="todo-creation-tab" type="button" role="tab" data-create-mode="hours">Vpis ur na projekt</button>
+        <button class="todo-creation-tab" type="button" role="tab" data-create-mode="meal">Malica</button>
       </div>
       <div class="modal-body">
         <input type="hidden" id="todoFormId">
@@ -3683,6 +3687,7 @@
           <span class="todo-status-direct-label">Status</span>
           <input id="todoFormStatus" type="hidden" value="open">
           <div class="todo-status-mobile-options" id="todoFormStatusChoices" aria-label="Status opravila"></div>
+          <p class="todo-meta hidden" id="todoFormMealNote"></p>
         </div>
         <div id="todoFormAssigneeField">
           <label>Delo opravil</label>
@@ -3956,44 +3961,14 @@
     </form>
   </dialog>
 
-  <dialog id="workerBillingDialog">
+  <dialog id="appSettingsDialog">
     <form method="dialog">
-      <div class="modal-head">
-        <h3>Privzete urne postavke</h3>
-        <button class="icon-btn" id="closeWorkerBilling" type="button" title="Zapri">&times;</button>
-      </div>
-      <div class="modal-body">
-        <div class="worker-billing">
-          <div class="worker-billing-scroll">
-            <table>
-              <thead>
-                <tr><th>Delavec</th><th>Vloga</th><th>Privzeta urna postavka</th><th>Naziv v izvozu</th><th></th></tr>
-              </thead>
-              <tbody id="workerBillingRows"></tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-    </form>
-  </dialog>
-
-  <dialog id="kmRatesDialog">
-    <form method="dialog" id="kmRatesForm">
-      <div class="modal-head">
-        <h3>Tarife kilometrine</h3>
-        <button class="icon-btn" id="closeKmRates" type="button" title="Zapri">&times;</button>
-      </div>
-      <div class="modal-body">
-        <div class="modal-grid">
-          <label>Povračilo delavcu za lastno vozilo (EUR/km)
-            <input id="workerOwnVehicleKmRate" type="number" min="0" max="1000" step="0.01">
-          </label>
-        </div>
-        <p class="todo-meta">Ta tarifa se uporabi samo pri obračunu kilometrine delavca. Prevoz za stranko se vodi samo v kilometrih in po vozilu.</p>
-        <div class="actions">
-          <button class="secondary" id="cancelKmRates" type="button">Prekliči</button>
-          <button class="primary" id="saveKmRates" type="button">Shrani tarife</button>
-        </div>
+      <div class="modal-head"><h3>Obračunske nastavitve</h3><button class="icon-btn" id="closeAppSettings" type="button" title="Zapri">&times;</button></div>
+      <div class="modal-body app-settings-sections">
+        <section class="app-settings-section"><h4>Malica</h4><label>Plačani čas malice za delavca (minute)<input id="settingsMealPaidMinutes" type="number" min="0" max="240" step="1"></label><p class="todo-meta">Malica se stranki ne obračuna. Delavcu se plača največ izbrano število minut.</p></section>
+        <section class="app-settings-section"><h4>Kilometrina delavca</h4><label>Povračilo za lastno vozilo (EUR/km)<input id="settingsWorkerOwnVehicleKmRate" type="number" min="0" max="1000" step="0.01"></label><p class="todo-meta">Uporabi se samo za kilometrino delavca; stroški prevoza za stranko ostanejo ločeni po vozilu.</p></section>
+        <section class="app-settings-section worker-billing"><h4>Privzete urne postavke</h4><div class="worker-billing-scroll"><table><thead><tr><th>Delavec</th><th>Vloga</th><th>Privzeta urna postavka</th><th>Naziv v izvozu</th><th></th></tr></thead><tbody id="workerBillingRows"></tbody></table></div></section>
+        <div class="actions"><button class="secondary" id="cancelAppSettings" type="button">Prekliči</button><button class="primary" id="saveAppSettings" type="button">Shrani nastavitve</button></div>
       </div>
     </form>
   </dialog>
@@ -4035,23 +4010,6 @@
       <div class="modal-body">
         <div id="notificationsList" class="debt-list"></div>
       </div>
-    </form>
-  </dialog>
-  <dialog id="appIssueDialog">
-    <form method="dialog" id="appIssueForm">
-      <div class="modal-head"><h3>Prijavi težavo</h3><button class="icon-btn" id="closeAppIssue" type="button" title="Zapri">&times;</button></div>
-      <div class="modal-body">
-        <label>Naslov (neobvezno)<input id="appIssueTitle" type="text" maxlength="160" placeholder="Kratek povzetek"></label>
-        <label>Opiši težavo<textarea id="appIssueDescription" maxlength="4000" required placeholder="Kaj se je zgodilo, kje in kaj si pričakoval?"></textarea></label>
-        <div class="actions"><button class="secondary" id="cancelAppIssue" type="button">Prekliči</button><button class="primary" type="submit">Pošlji prijavo</button></div>
-      </div>
-    </form>
-  </dialog>
-
-  <dialog id="appIssuesDialog">
-    <form method="dialog">
-      <div class="modal-head"><h3>Prejete težave</h3><button class="icon-btn" id="closeAppIssues" type="button" title="Zapri">&times;</button></div>
-      <div class="modal-body"><div id="appIssuesList" class="debt-list"></div></div>
     </form>
   </dialog>
 
@@ -4158,9 +4116,9 @@
 
     function renderTodoStatusChoices(selected) {
       const current = todoStatus(selected).id;
-      const availableStatuses = state.todoHoursSourceId || state.todoStandaloneHours || current === "execution"
+      const availableStatuses = state.todoHoursSourceId || state.todoStandaloneHours || state.todoMealEntry || current === "execution" || current === "meal"
         ? []
-        : todoStatusDefinitions.filter((status) => status.id !== "execution");
+        : todoStatusDefinitions.filter((status) => status.id !== "execution" && status.id !== "meal");
       $("todoFormStatusChoices").innerHTML = availableStatuses.map((status) => `
         <button class="todo-status-choice todo-status-color ${todoStatusClass(status.id)}" type="button" data-status="${status.id}" aria-pressed="${status.id === current}" ${current === "execution" ? "disabled" : ""}>
           ${status.label}
@@ -4195,6 +4153,7 @@
       selectedClient: "",
       todoHoursSourceId: "",
       todoStandaloneHours: false,
+      todoMealEntry: false,
       todoHoursSourceOriginal: null,
       todoDraftSourceProjectTodoId: "",
       todoHoursSavedSourceId: "",
@@ -4223,7 +4182,7 @@
       offlineTodoSyncing: false,
       attachmentPreview: null,
       reportClientId: "",
-      settings: { billing: { hourlyRate: 15, kmRate: 0.22, workerOwnVehicleKmRate: 0.22, commuteKmPerDay: 28 } },
+      settings: { billing: { hourlyRate: 15, kmRate: 0.22, workerOwnVehicleKmRate: 0.22, commuteKmPerDay: 28, mealPaidMinutes: 45 } },
       billingLocks: [],
       payrolls: [],
       clientBills: [],
@@ -4250,7 +4209,6 @@
       syncRevision: 0,
       lastServerSyncAt: "",
       notifications: [],
-      appIssues: []
     };
 
     const $ = (id) => document.getElementById(id);
@@ -4533,7 +4491,7 @@
         const ops = (await offlineTodoOps()).filter((item) => item.userId === state.user.id && !item.conflict).sort((a, b) => a.id - b.id);
         for (const op of ops) {
           try {
-            if (op.kind === "reorder") await api("/api/todos/reorder", { method: "POST", body: JSON.stringify({ todoIds: op.todoIds || [] }) });
+            if (op.kind === "reorder") await api("/api/todos/reorder", { method: "POST", body: JSON.stringify({ todoIds: op.todoIds || [], orderUserId: op.orderUserId || state.user?.id || "" }) });
             else if (op.kind === "create") await api("/api/todos", { method: "POST", body: JSON.stringify(op.todo) });
             else {
               const lock = await api(todoLockUrl(op.todoId), { method: "POST", body: JSON.stringify({}) });
@@ -5007,6 +4965,7 @@
       state.reportClientId = "";
       state.todoHoursSourceId = "";
       state.todoStandaloneHours = false;
+      state.todoMealEntry = false;
       if ($("todoDialog").open) $("todoDialog").close();
       if ($("debtDialog").open) $("debtDialog").close();
       // Baza strank je skupna delovna evidenca: dostopna je tudi v delavskem
@@ -5499,6 +5458,16 @@
       return Math.max(0, diff) / 60;
     }
 
+    function mealPaidMinutes() {
+      const configured = Number(state.settings?.billing?.mealPaidMinutes);
+      return Number.isFinite(configured) ? Math.max(0, Math.min(240, Math.round(configured))) : 45;
+    }
+
+    function payrollMinutesForTodo(todo) {
+      const total = Math.round(duration(todo) * 60);
+      return todo.status === "meal" ? Math.min(total, mealPaidMinutes()) : total;
+    }
+
     function uniqueHours(entries) {
       const byDate = new Map();
       entries.forEach((entry) => {
@@ -5635,8 +5604,8 @@
         showNotice("Za opravilo z uro vnesi tudi datum.");
         return false;
       }
-      if (todo.status === "execution" && (!todo.date || !todo.start || !todo.end)) {
-        showNotice("Za zaključeno opravilo vnesi datum ter uro od in do.");
+      if (["execution", "meal"].includes(todo.status) && (!todo.date || !todo.start || !todo.end)) {
+        showNotice(todo.status === "meal" ? "Za malico vnesi datum ter uro od in do." : "Za zaključeno opravilo vnesi datum ter uro od in do.");
         return false;
       }
       if (todo.start && todo.end <= todo.start) {
@@ -6850,12 +6819,13 @@
       return state.todos
         .filter((todo) => (todo.syncUser || todo.createdBy) === workerId && payrollPaidTodoStatuses.has(todo.status) && String(todo.date || "") >= range.from && String(todo.date || "") <= range.to)
         .map((todo) => {
-          const hours = duration(todo);
+          const minutes = payrollMinutesForTodo(todo);
+          const hours = minutes / 60;
           const hourlyRate = todoHourlyRate(todo);
           const km = Number(todo.billingKm || 0);
           const workAmount = Number((hours * hourlyRate).toFixed(2));
           const kmAmount = Number((km * kmRate).toFixed(2));
-          return { todoId: todo.id, assignmentGroupId: todo.assignmentGroupId || todo.id, workerId, date: todo.date, start: todo.start, end: todo.end, title: todo.title, client: todo.client, minutes: Math.round(hours * 60), hours, hourlyRate, km, kmRate, workAmount, kmAmount, totalAmount: Number((workAmount + kmAmount).toFixed(2)) };
+          return { todoId: todo.id, assignmentGroupId: todo.assignmentGroupId || todo.id, workerId, date: todo.date, start: todo.start, end: todo.end, title: todo.title, client: todo.client, minutes, hours, hourlyRate, km, kmRate, workAmount, kmAmount, totalAmount: Number((workAmount + kmAmount).toFixed(2)) };
         })
         .filter((line) => line.hours > 0)
         .sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.start).localeCompare(String(b.start)) || String(a.title).localeCompare(String(b.title)));
@@ -8103,8 +8073,11 @@
       updateTodoStatusControl($("todoFormStatus"));
       const completed = $("todoFormStatus").value === "execution";
       const meal = $("todoFormStatus").value === "meal";
-      $("todoFormStatusField").classList.toggle("hidden", Boolean(state.todoHoursSourceId) || state.todoStandaloneHours || completed);
-      $("todoFormTitle").textContent = state.todoHoursSourceId || state.todoStandaloneHours
+      $("todoFormStatusField").classList.toggle("hidden", Boolean(state.todoHoursSourceId) || state.todoStandaloneHours || state.todoMealEntry || completed || meal);
+      const mealNote = $("todoFormMealNote");
+      mealNote.classList.toggle("hidden", !meal);
+      mealNote.textContent = meal ? `Malica se stranki ne obračuna. Delavcu se plača največ ${mealPaidMinutes()} min.` : "";
+      $("todoFormTitle").textContent = meal ? ($("todoFormId").value ? "Uredi malico" : "Nova malica") : state.todoHoursSourceId || state.todoStandaloneHours
         ? "Pi\u0161i ure na projekt"
         : completed
           ? ($("todoFormId").value ? "Uredi vpis ur" : "Novo zaključeno opravilo")
@@ -8141,13 +8114,14 @@
       const editing = Boolean(todo.id);
       state.todoHoursSourceId = String(todo._hoursSourceId || "");
       state.todoStandaloneHours = Boolean(todo._standaloneHours);
+      state.todoMealEntry = Boolean(todo._mealEntry);
       state.todoDraftSourceProjectTodoId = String(todo.sourceProjectTodoId || "");
       const canChooseCreationMode = !editing && !state.todoHoursSourceId;
       const creationTabs = $("todoCreationTabs");
       creationTabs.classList.toggle("hidden", !canChooseCreationMode);
       creationTabs.dataset.date = todo.date || "";
       creationTabs.querySelectorAll("[data-create-mode]").forEach((button) => {
-        const active = state.todoStandaloneHours ? button.dataset.createMode === "hours" : button.dataset.createMode === "task";
+        const active = state.todoMealEntry ? button.dataset.createMode === "meal" : state.todoStandaloneHours ? button.dataset.createMode === "hours" : button.dataset.createMode === "task";
         button.classList.toggle("active", active);
         button.setAttribute("aria-selected", String(active));
       });
@@ -8167,11 +8141,12 @@
       $("todoFormUrgent").checked = Boolean(todo.urgent);
       $("todoFormWarranty").checked = Boolean(todo.warranty);
       updateTodoFormStatus();
+      if (state.todoMealEntry && !editing) applyMealDefaults();
       const draftAssignees = todo._hoursAssigneeIds?.length
         ? todo._hoursAssigneeIds
         : (todo._duplicateAssigneeIds?.length ? todo._duplicateAssigneeIds : [activeWorkerId()]);
       const selectedAssignees = editing ? todoAssigneeIds(todo) : draftAssignees;
-      renderTodoFormAssignees(selectedAssignees, state.todoHoursSourceId ? selectedAssignees : null);
+      renderTodoFormAssignees(selectedAssignees, state.todoHoursSourceId || state.todoMealEntry ? selectedAssignees : null);
       state.todoDialogPhotos = (todo.photos || []).map((photo) => ({ ...photo }));
       state.todoDialogDriveFiles = (todo.driveFiles || []).map((file) => ({ ...file }));
       renderTodoFormPhotos();
@@ -8196,8 +8171,8 @@
       if (editing && !(await acquireTodoEditLockForDialog(todo.id))) return;
       $("todoDialog").showModal();
       requestAnimationFrame(() => {
-        $(editing ? "todoFormTask" : "todoFormClient").focus();
-        if (!editing && (state.todoStandaloneHours || state.todoHoursSourceId)) showDefaultTimePicker();
+        $(editing || state.todoMealEntry ? "todoFormStart" : "todoFormClient").focus();
+        if (!editing && (state.todoStandaloneHours || state.todoHoursSourceId || state.todoMealEntry)) showDefaultTimePicker();
       });
       fillMissingPdfThumbnailsForDialog(state.todoDialogPhotos).catch((error) => console.warn(error));
     }
@@ -8209,7 +8184,7 @@
       const client = findTodoClient($("todoFormClient").value);
       const meal = $("todoFormStatus").value === "meal";
       const assigneeIds = selectedTodoFormAssignees();
-      if (meal) assigneeIds.splice(0, assigneeIds.length, activeWorkerId());
+      if (meal) assigneeIds.splice(0, assigneeIds.length, existing?.syncUser || activeWorkerId());
       const hourlyRate = parseBillingNumber($("todoFormHourlyRate").value, 10_000);
       const billingKm = parseBillingNumber($("todoFormBillingKm").value, 1_000_000);
       const clientKm = parseBillingNumber($("todoFormClientKm").value, 1_000_000);
@@ -8333,6 +8308,17 @@
         status: "execution",
         urgent: false,
         photos: []
+      });
+    }
+
+    async function openMealTodoDialog(date = dateKey(new Date())) {
+      await openTodoDialog({
+        _mealEntry: true,
+        date,
+        status: "meal",
+        urgent: false,
+        photos: [],
+        driveFiles: []
       });
     }
 
@@ -9182,7 +9168,7 @@
         const editLockTokens = state.todoEditLock ? { [state.todoEditLock.todoId]: state.todoEditLock.token } : {};
         const data = await api("/api/todos/reorder", {
           method: "POST",
-          body: JSON.stringify({ todoIds: ordered.map((todo) => todo.id), editLockTokens })
+          body: JSON.stringify({ todoIds: ordered.map((todo) => todo.id), orderUserId: orderingUserId, editLockTokens })
         });
         if (isCurrentTodoRevision(todoRevision)) {
           state.todos = data.todos;
@@ -9196,7 +9182,8 @@
           await queueOfflineTodo({
             kind: "reorder",
             todoId: `reorder:${activeWorkerId()}`,
-            todoIds: ordered.map((todo) => todo.id)
+            todoIds: ordered.map((todo) => todo.id),
+            orderUserId: orderingUserId
           });
           await updateOfflineSyncNotice();
           return;
@@ -9803,38 +9790,6 @@
       await refreshNotifications();
       $("notificationsDialog").showModal();
     }
-    function openAppIssueDialog() {
-      $("appIssueTitle").value = "";
-      $("appIssueDescription").value = "";
-      $("appIssueDialog").showModal();
-    }
-
-    function renderAppIssues() {
-      const list = $("appIssuesList");
-      if (!state.appIssues.length) {
-        list.innerHTML = `<p class="todo-meta">Ni prijavljenih težav.</p>`;
-        return;
-      }
-      list.innerHTML = state.appIssues.map((issue) => `
-        <article class="debt-item" data-app-issue-id="${escapeHtml(issue.id)}">
-          <div>
-            <strong>${escapeHtml(issue.title || "Težava v aplikaciji")}</strong>
-            <span class="app-issue-description">${escapeHtml(issue.description || "")}</span>
-            <small>${escapeHtml(issue.createdByName || issue.createdBy || "-")} · ${formatDateTime(issue.createdAt)}</small>
-            ${issue.status === "resolved" ? `<small>Odpravljeno: ${formatDateTime(issue.resolvedAt)}</small>` : ""}
-          </div>
-          <button class="secondary toggle-app-issue" type="button">${issue.status === "resolved" ? "Ponovno odpri" : "Označi kot odpravljeno"}</button>
-        </article>
-      `).join("");
-    }
-
-    async function openAppIssues() {
-      const data = await api("/api/app-issues");
-      state.appIssues = data.issues || [];
-      renderAppIssues();
-      $("appIssuesDialog").showModal();
-    }
-
     function openAccountDialog() {
       $("accountName").value = state.user.name || "";
       $("accountImage").value = "";
@@ -9889,32 +9844,6 @@
       location.reload();
     });
 
-    $("reportIssueBtn").addEventListener("click", openAppIssueDialog);
-    ["closeAppIssue", "cancelAppIssue"].forEach((id) => $(id).addEventListener("click", () => $("appIssueDialog").close()));
-    $("appIssueForm").addEventListener("submit", async (event) => {
-      event.preventDefault();
-      try {
-        const data = await api("/api/app-issues", { method: "POST", body: JSON.stringify({ title: $("appIssueTitle").value, description: $("appIssueDescription").value }) });
-        state.appIssues = data.issues || state.appIssues;
-        $("appIssueDialog").close();
-        showNotice("Težava je poslana.");
-      } catch (error) { showNotice(error.message); }
-    });
-    $("appIssuesBtn").addEventListener("click", () => openAppIssues().catch((error) => showNotice(error.message)));
-    $("closeAppIssues").addEventListener("click", () => $("appIssuesDialog").close());
-    $("appIssuesList").addEventListener("click", async (event) => {
-      const button = event.target.closest(".toggle-app-issue");
-      const item = event.target.closest("[data-app-issue-id]");
-      if (!button || !item) return;
-      const issue = state.appIssues.find((value) => value.id === item.dataset.appIssueId);
-      if (!issue) return;
-      try {
-        const data = await api(`/api/app-issues/${encodeURIComponent(issue.id)}`, { method: "PATCH", body: JSON.stringify({ status: issue.status === "resolved" ? "open" : "resolved" }) });
-        state.appIssues = data.issues || [];
-        renderAppIssues();
-      } catch (error) { showNotice(error.message); }
-    });
-
     $("accountBtn").addEventListener("click", openAccountDialog);
     $("notificationsBtn").addEventListener("click", () => openNotifications().catch((error) => showNotice(error.message)));
     $("closeNotifications").addEventListener("click", () => $("notificationsDialog").close());
@@ -9941,31 +9870,31 @@
     });
     $("toolsMenu").addEventListener("toggle", keepToolsMenuInViewport);
     window.addEventListener("resize", keepToolsMenuInViewport);
-    $("workerBillingBtn").addEventListener("click", () => {
-      renderWorkerBillingTable();
-      $("workerBillingDialog").showModal();
-    });
-    $("closeWorkerBilling").addEventListener("click", () => $("workerBillingDialog").close());
-    $("kmRatesBtn").addEventListener("click", () => {
+    function openAppSettings() {
       const billing = state.settings.billing || {};
-      const legacyRate = Number(billing.kmRate || 0);
-      $("workerOwnVehicleKmRate").value = Number(billing.workerOwnVehicleKmRate ?? legacyRate);
-      $("kmRatesDialog").showModal();
-    });
-    ["closeKmRates", "cancelKmRates"].forEach((id) => $(id).addEventListener("click", () => $("kmRatesDialog").close()));
-    $("saveKmRates").addEventListener("click", async () => {
-      const workerOwnVehicleKmRate = parseBillingNumber($("workerOwnVehicleKmRate").value, 1_000);
-      if (workerOwnVehicleKmRate === null) {
-        showNotice("Vnesi veljavni tarifi kilometrine.");
+      $("settingsMealPaidMinutes").value = mealPaidMinutes();
+      $("settingsWorkerOwnVehicleKmRate").value = Number(billing.workerOwnVehicleKmRate ?? billing.kmRate ?? 0);
+      renderWorkerBillingTable();
+      $("appSettingsDialog").showModal();
+    }
+    async function saveAppSettings() {
+      const mealPaid = parseBillingNumber($("settingsMealPaidMinutes").value, 240);
+      const workerOwnVehicleKmRate = parseBillingNumber($("settingsWorkerOwnVehicleKmRate").value, 1_000);
+      if (mealPaid === null || !Number.isInteger(mealPaid) || workerOwnVehicleKmRate === null) {
+        showNotice("Vnesi veljavne nastavitve malice in kilometrine.");
         return;
       }
-      try {
-        await saveBillingSettings({ ...(state.settings.billing || {}), workerOwnVehicleKmRate });
-        $("kmRatesDialog").close();
-      } catch (error) {
-        showNotice(error.message);
-      }
-    });
+      await saveBillingSettings({
+        ...(state.settings.billing || {}),
+        mealPaidMinutes: mealPaid,
+        workerOwnVehicleKmRate
+      });
+      $("appSettingsDialog").close();
+      render();
+    }
+    $("appSettingsBtn").addEventListener("click", openAppSettings);
+    ["closeAppSettings", "cancelAppSettings"].forEach((id) => $(id).addEventListener("click", () => $("appSettingsDialog").close()));
+    $("saveAppSettings").addEventListener("click", () => saveAppSettings().catch((error) => showNotice(error.message)));
     document.addEventListener("click", (event) => {
       const menu = $("toolsMenu");
       if (menu?.open && !menu.contains(event.target)) closeToolsMenu();

@@ -592,24 +592,10 @@ function normalizeDb(db = {}) {
     changed = true;
   }
 
-  if (!Array.isArray(db.appIssues)) {
-    db.appIssues = [];
+  if (Object.prototype.hasOwnProperty.call(db, "appIssues")) {
+    delete db.appIssues;
     changed = true;
   }
-  const issuesBeforeNormalization = JSON.stringify(db.appIssues);
-  db.appIssues = db.appIssues.map((issue) => ({
-    id: String(issue?.id || crypto.randomUUID()),
-    title: String(issue?.title || "Težava v aplikaciji").trim().slice(0, 160) || "Težava v aplikaciji",
-    description: String(issue?.description || "").trim().slice(0, 4_000),
-    createdBy: cleanUserId(issue?.createdBy) || "system",
-    createdByName: String(issue?.createdByName || "").trim().slice(0, 120),
-    createdAt: String(issue?.createdAt || new Date().toISOString()),
-    status: issue?.status === "resolved" ? "resolved" : "open",
-    resolvedAt: issue?.status === "resolved" ? String(issue?.resolvedAt || "") : "",
-    resolvedBy: issue?.status === "resolved" ? cleanUserId(issue?.resolvedBy) : "",
-    resolvedByName: issue?.status === "resolved" ? String(issue?.resolvedByName || "").trim().slice(0, 120) : ""
-  })).filter((issue) => issue.description);
-  if (JSON.stringify(db.appIssues) !== issuesBeforeNormalization) changed = true;
 
   if (!db.settings || typeof db.settings !== "object") {
     db.settings = {};
@@ -621,11 +607,13 @@ function normalizeDb(db = {}) {
   }
   const legacyKmRate = nonnegativeNumber(db.settings.billing?.kmRate, 0.22, 1_000);
   db.settings.billing = {
+    ...db.settings.billing,
     hourlyRate: nonnegativeNumber(db.settings.billing?.hourlyRate, 15, 10_000),
     // Stara enotna tarifa se uporabi samo za prehod ob nadgradnji.
     kmRate: legacyKmRate,
     workerOwnVehicleKmRate: nonnegativeNumber(db.settings.billing?.workerOwnVehicleKmRate, legacyKmRate, 1_000),
-    commuteKmPerDay: nonnegativeNumber(db.settings.billing?.commuteKmPerDay, 28, 1_000_000)
+    commuteKmPerDay: nonnegativeNumber(db.settings.billing?.commuteKmPerDay, 28, 1_000_000),
+    mealPaidMinutes: Math.round(nonnegativeNumber(db.settings.billing?.mealPaidMinutes, 45, 240))
   };
   for (const user of Object.values(db.users)) {
     const currentRate = nonnegativeNumber(user.billing?.hourlyRate, null, 10_000);
@@ -946,7 +934,7 @@ function normalizeDb(db = {}) {
 function ensureDb() {
   if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
   if (!fs.existsSync(dbFile)) {
-    fs.writeFileSync(dbFile, JSON.stringify({ users: defaultUsers, sessions: {}, entries: [], todos: [], attachments: {}, debts: [], clients: [], clientBills: [], appIssues: [] }, null, 2), "utf8");
+    fs.writeFileSync(dbFile, JSON.stringify({ users: defaultUsers, sessions: {}, entries: [], todos: [], attachments: {}, debts: [], clients: [], clientBills: [] }, null, 2), "utf8");
     return;
   }
 
@@ -991,7 +979,6 @@ function initialDatabaseState() {
     billingLocks: [],
     payrolls: [],
     clientBills: [],
-    appIssues: [],
     settings: {},
     calendarToken: crypto.randomBytes(24).toString("hex"),
     syncRevision: 0
@@ -1132,12 +1119,6 @@ function visibleTodosForUser(db, user) {
     ...todo,
     assigneeIds: todoAssignmentAssigneeIds(db, todo)
   }));
-}
-
-function visibleAppIssuesForUser(db, user) {
-  const issues = Array.isArray(db.appIssues) ? db.appIssues : [];
-  const visible = user.role === "boss" ? issues : issues.filter((issue) => issue.createdBy === user.id);
-  return visible.slice().sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)));
 }
 
 function hydrateDebtAttachments(db, debt) {
@@ -1426,17 +1407,22 @@ function payrollPeriodEnded(value, now = new Date()) {
   const currentMonth = Number(localParts.month || 0);
   return year < currentYear || (year === currentYear && month < currentMonth);
 }
-function payrollMinutesForTodo(todo) {
+function payrollMinutesForTodo(db, todo) {
   if (!todo || !PAYROLL_PAID_TODO_STATUSES.has(todo.status) || !/^\d{4}-\d{2}-\d{2}$/.test(String(todo.date || ""))) return null;
   const start = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(String(todo.start || ""));
   const end = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(String(todo.end || ""));
   if (!start || !end) return null;
   const minutes = (Number(end[1]) * 60 + Number(end[2])) - (Number(start[1]) * 60 + Number(start[2]));
-  return minutes > 0 ? minutes : null;
+  if (minutes <= 0) return null;
+  if (todo.status === "meal") {
+    const mealPaidMinutes = Math.round(nonnegativeNumber(db?.settings?.billing?.mealPaidMinutes, 45, 240));
+    return Math.min(minutes, mealPaidMinutes) || null;
+  }
+  return minutes;
 }
 
 function payrollLineForTodo(db, todo, workerId = "") {
-  const minutes = payrollMinutesForTodo(todo);
+  const minutes = payrollMinutesForTodo(db, todo);
   if (!minutes) return null;
   const hourlyRate = nonnegativeNumber(todo.billingHourlyRate, defaultHourlyRateForUser(db, todo.syncUser || todo.createdBy), 10_000);
   const km = nonnegativeNumber(todo.billingKm, 0, 1_000_000);
@@ -2292,31 +2278,31 @@ function todoForUserRole(user, db, previous, todo) {
   const previousClientVehicle = todoVehicle(previous?.clientVehicle);
   const requestedClientVehicle = todoVehicle(todo.clientVehicle);
   const isCompleted = todo.status === "execution";
+  const isMeal = todo.status === "meal";
+  const isPaidTime = isCompleted || isMeal;
   const canSetClientMileage = isCompleted;
   const defaultRate = defaultHourlyRateForUser(db, todo.syncUser || previous?.syncUser || user.id);
   if (user.role !== "boss") {
-    const clientVehicle = canSetClientMileage ? requestedClientVehicle : previousClientVehicle;
     return {
       ...todo,
-      billingHourlyRate: isCompleted ? previousRate ?? defaultRate : previousRate,
-      billingKm: isCompleted ? nonnegativeNumber(todo.billingKm, previousKm, 1_000_000) : previousKm,
-      warranty: isCompleted ? Boolean(todo.warranty) : previousWarranty,
-      clientKm: canSetClientMileage ? nonnegativeNumber(todo.clientKm, previousClientKm, 1_000_000) : previousClientKm,
-      clientVehicle,
+      billingHourlyRate: isPaidTime ? previousRate ?? defaultRate : previousRate,
+      billingKm: isMeal ? 0 : isCompleted ? nonnegativeNumber(todo.billingKm, previousKm, 1_000_000) : previousKm,
+      warranty: isMeal ? false : isCompleted ? Boolean(todo.warranty) : previousWarranty,
+      clientKm: isMeal ? 0 : canSetClientMileage ? nonnegativeNumber(todo.clientKm, previousClientKm, 1_000_000) : previousClientKm,
+      clientVehicle: isMeal ? "personal" : canSetClientMileage ? requestedClientVehicle : previousClientVehicle,
       clientKmRate: 0
     };
   }
   return {
     ...todo,
-    billingHourlyRate: isCompleted ? nonnegativeNumber(todo.billingHourlyRate, previousRate ?? defaultRate, 10_000) : previousRate,
-    billingKm: isCompleted ? nonnegativeNumber(todo.billingKm, previousKm, 1_000_000) : previousKm,
-    warranty: isCompleted ? Boolean(todo.warranty) : previousWarranty,
-    clientKm: nonnegativeNumber(todo.clientKm, previousClientKm, 1_000_000),
-    clientVehicle: requestedClientVehicle,
+    billingHourlyRate: isPaidTime ? nonnegativeNumber(todo.billingHourlyRate, previousRate ?? defaultRate, 10_000) : previousRate,
+    billingKm: isMeal ? 0 : isCompleted ? nonnegativeNumber(todo.billingKm, previousKm, 1_000_000) : previousKm,
+    warranty: isMeal ? false : isCompleted ? Boolean(todo.warranty) : previousWarranty,
+    clientKm: isMeal ? 0 : canSetClientMileage ? nonnegativeNumber(todo.clientKm, previousClientKm, 1_000_000) : previousClientKm,
+    clientVehicle: isMeal ? "personal" : requestedClientVehicle,
     clientKmRate: 0
   };
 }
-
 function syncUserForRequest(user, requested, fallback = "", users = defaultUsers) {
   const allowed = new Set(Object.keys(users || {}));
   const wanted = cleanUserId(requested);
@@ -2508,30 +2494,31 @@ function validateEntry(entry) {
 }
 
 function cleanTodo(input) {
+  const isMeal = input.status === "meal";
   const photos = Array.isArray(input.photos) ? input.photos : [];
   return {
-    title: String(input.title || "").trim(),
+    title: isMeal ? "Malica" : String(input.title || "").trim(),
     date: String(input.date || ""),
     start: roundTimeToQuarterHour(input.start),
     end: roundTimeToQuarterHour(input.end),
-    client: String(input.client || "").trim(),
-    clientId: String(input.clientId || "").trim(),
-    notes: String(input.notes || "").trim(),
-    material: String(input.material || "").trim(),
+    client: isMeal ? "" : String(input.client || "").trim(),
+    clientId: isMeal ? "" : String(input.clientId || "").trim(),
+    notes: isMeal ? "" : String(input.notes || "").trim(),
+    material: isMeal ? "" : String(input.material || "").trim(),
     status: input.status === "billing" ? "execution" : TODO_STATUSES.has(input.status) ? input.status : "open",
     order: Number.isFinite(Number(input.order)) ? Number(input.order) : 0,
-    urgent: ["execution", "billing"].includes(input.status) ? false : Boolean(input.urgent),
+    urgent: isMeal ? false : ["execution", "billing"].includes(input.status) ? false : Boolean(input.urgent),
     warranty: input.status === "execution" && Boolean(input.warranty),
     syncUser: cleanUserId(input.syncUser),
     sourceProjectTodoId: String(input.sourceProjectTodoId || "").trim().slice(0, 100),
     done: input.status === "execution",
     billingHourlyRate: nonnegativeNumber(input.billingHourlyRate, null, 10_000),
-    billingKm: nonnegativeNumber(input.billingKm, null, 1_000_000),
-    clientKm: nonnegativeNumber(input.clientKm, null, 1_000_000),
-    clientVehicle: todoVehicle(input.clientVehicle),
+    billingKm: isMeal ? 0 : nonnegativeNumber(input.billingKm, null, 1_000_000),
+    clientKm: isMeal ? 0 : nonnegativeNumber(input.clientKm, null, 1_000_000),
+    clientVehicle: isMeal ? "personal" : todoVehicle(input.clientVehicle),
     clientKmRate: 0,
-    driveFiles: cleanTodoDriveFiles(input.driveFiles),
-    photos: limitTodoAttachmentsData(photos
+    driveFiles: isMeal ? [] : cleanTodoDriveFiles(input.driveFiles),
+    photos: isMeal ? [] : limitTodoAttachmentsData(photos
       .map((photo) => ({
         id: photo.id || crypto.randomUUID(),
         name: String(photo.name || "priloga").slice(0, 120),
@@ -2546,7 +2533,6 @@ function cleanTodo(input) {
       .slice(0, 8))
   };
 }
-
 function cleanClient(input) {
   const taxId = normalizeTaxId(input.taxId || input.clientId || input.id);
   const requestedId = String(input.clientId || input.id || "").trim();
@@ -2576,13 +2562,6 @@ function cleanDebt(input) {
     person: ["ibro", "bojan"].includes(input.person) ? input.person : "ibro",
     amount: Number(input.amount || 0),
     reason: String(input.reason || "").trim()
-  };
-}
-
-function cleanAppIssue(input) {
-  return {
-    title: String(input?.title || "").trim().replace(/\s+/g, " ").slice(0, 160),
-    description: String(input?.description || "").trim().slice(0, 4_000)
   };
 }
 
@@ -2646,7 +2625,7 @@ function validateTodo(todo, { requireClientId = false } = {}) {
   if (Boolean(todo.start) !== Boolean(todo.end)) return "Vnesi obe uri: od in do.";
   if ((todo.start || todo.end) && !todo.date) return "Za opravilo z uro vnesi tudi datum.";
   if (todo.start && (!/^\d{2}:\d{2}$/.test(todo.start) || !/^\d{2}:\d{2}$/.test(todo.end))) return "Čas opravila ni pravilen.";
-  if (todo.status === "execution" && (!todo.date || !todo.start || !todo.end)) return "Za zaključeno opravilo vnesi datum ter uro od in do.";
+  if (["execution", "meal"].includes(todo.status) && (!todo.date || !todo.start || !todo.end)) return todo.status === "meal" ? "Za malico vnesi datum ter uro od in do." : "Za zaključeno opravilo vnesi datum ter uro od in do.";
   if (todo.start && todo.end <= todo.start) return "Ura do mora biti kasneje kot ura od.";
   if ((todo.photos || []).some((photo) => !validTodoAttachmentDataUrl(photo.data) && !validTodoAttachmentId(photo.attachmentId))) return "Priloga ni veljavna slika ali PDF.";
   if ((todo.photos || []).reduce((total, photo) => total + String(photo.data || "").length, 0) > MAX_TODO_ATTACHMENTS_DATA_LENGTH) return "Priloge so skupaj prevelike.";
@@ -3766,65 +3745,6 @@ async function handleApi(req, res) {
       sendJson(res, 200, { users });
       return;
     }
-    if (url.pathname === "/api/app-issues" && req.method === "GET") {
-      const user = await requireUser(req, res);
-      if (!user) return;
-      const db = await readDbAsync();
-      sendJson(res, 200, { issues: visibleAppIssuesForUser(db, user) });
-      return;
-    }
-
-    if (url.pathname === "/api/app-issues" && req.method === "POST") {
-      const user = await requireUser(req, res);
-      if (!user) return;
-      const issue = cleanAppIssue(await readBody(req));
-      if (!issue.description) {
-        sendJson(res, 400, { error: "Vpiši opis težave." });
-        return;
-      }
-      const db = await readDbAsync();
-      const record = {
-        id: crypto.randomUUID(),
-        title: issue.title || "Težava v aplikaciji",
-        description: issue.description,
-        createdBy: user.id,
-        createdByName: user.name,
-        createdAt: new Date().toISOString(),
-        status: "open",
-        resolvedAt: "",
-        resolvedBy: "",
-        resolvedByName: ""
-      };
-      db.appIssues.push(record);
-      await writeDbAsync(db);
-      sendJson(res, 201, { issue: record, issues: visibleAppIssuesForUser(db, user) });
-      return;
-    }
-
-    const appIssueMatch = url.pathname.match(/^\/api\/app-issues\/([^/]+)$/);
-    if (appIssueMatch && req.method === "PATCH") {
-      const user = await requireUser(req, res);
-      if (!user) return;
-      if (user.role !== "boss") {
-        sendJson(res, 403, { error: "Težave lahko ureja samo šef." });
-        return;
-      }
-      const db = await readDbAsync();
-      const issue = (db.appIssues || []).find((item) => item.id === decodeURIComponent(appIssueMatch[1]));
-      if (!issue) {
-        sendJson(res, 404, { error: "Težave ni bilo mogoče najti." });
-        return;
-      }
-      const body = await readBody(req);
-      issue.status = body.status === "resolved" ? "resolved" : "open";
-      issue.resolvedAt = issue.status === "resolved" ? new Date().toISOString() : "";
-      issue.resolvedBy = issue.status === "resolved" ? user.id : "";
-      issue.resolvedByName = issue.status === "resolved" ? user.name : "";
-      await writeDbAsync(db);
-      sendJson(res, 200, { issue, issues: visibleAppIssuesForUser(db, user) });
-      return;
-    }
-
     if (url.pathname === "/api/payrolls" && req.method === "GET") {
       const user = await requireUser(req, res);
       if (!user) return;
@@ -4433,9 +4353,11 @@ async function handleApi(req, res) {
           return;
         }
       }
+      const requestedOrderUserId = cleanUserId(body.orderUserId);
+      const orderUserId = user.role === "boss" && db.users?.[requestedOrderUserId] ? requestedOrderUserId : user.id;
       const now = new Date().toISOString();
       todos.forEach((todo, index) => {
-        todo.userOrders = { ...(todo.userOrders || {}), [user.id]: index + 1 };
+        todo.userOrders = { ...(todo.userOrders || {}), [orderUserId]: index + 1 };
         todo.updatedBy = user.id;
         todo.updatedByName = user.name;
         todo.updatedAt = now;
@@ -4474,11 +4396,13 @@ async function handleApi(req, res) {
       const previousBilling = db.settings.billing || {};
       const legacyKmRate = nonnegativeNumber(body.kmRate, nonnegativeNumber(previousBilling.kmRate, 0.22, 1_000), 1_000);
       db.settings.billing = {
+        ...previousBilling,
         hourlyRate: nonnegativeNumber(body.hourlyRate, nonnegativeNumber(previousBilling.hourlyRate, 15, 10_000), 10_000),
         // Stara enotna tarifa ostane le za pretekle podatke in kilometrino delavca.
         kmRate: legacyKmRate,
         workerOwnVehicleKmRate: nonnegativeNumber(body.workerOwnVehicleKmRate, nonnegativeNumber(previousBilling.workerOwnVehicleKmRate, legacyKmRate, 1_000), 1_000),
-        commuteKmPerDay: nonnegativeNumber(body.commuteKmPerDay, nonnegativeNumber(previousBilling.commuteKmPerDay, 28, 1_000_000), 1_000_000)
+        commuteKmPerDay: nonnegativeNumber(body.commuteKmPerDay, nonnegativeNumber(previousBilling.commuteKmPerDay, 28, 1_000_000), 1_000_000),
+        mealPaidMinutes: Math.round(nonnegativeNumber(body.mealPaidMinutes, nonnegativeNumber(previousBilling.mealPaidMinutes, 45, 240), 240))
       };
       await writeDbAsync(db);
       sendJson(res, 200, { settings: db.settings });
@@ -4834,8 +4758,9 @@ async function handleApi(req, res) {
       todo = storeTodoAttachments(db, todo, user);
       const minOrder = db.todos.reduce((min, item) => Math.min(min, Number(item.order || 0)), 0);
       const newOrder = todo.order || minOrder - 1;
-      const assigneeIds = todoAssigneesForRequest(user, body.assigneeIds || todo.syncUser, db.users);
-      if (todo.status === "execution" && assigneeIds.length !== 1) {
+      let assigneeIds = todoAssigneesForRequest(user, body.assigneeIds || todo.syncUser, db.users);
+      if (todo.status === "meal") assigneeIds = [syncUserForRequest(user, todo.syncUser || assigneeIds[0] || user.id, "", db.users)];
+      if (["execution", "meal"].includes(todo.status) && assigneeIds.length !== 1) {
         sendJson(res, 400, { error: "Zaključene ure se vpisujejo posebej za enega delavca." });
         return;
       }
@@ -5219,8 +5144,9 @@ async function handleApi(req, res) {
         if (!assigneeIds.includes(nextAssignee)) assigneeIds.push(nextAssignee);
       }
 
-      if (todo.status === "execution" && assigneeIds.length !== 1) {
-        sendJson(res, 400, { error: "Zaključene ure se vpisujejo posebej za enega delavca." });
+      if (todo.status === "meal") assigneeIds = [syncUserForRequest(user, todo.syncUser || assigneeIds[0] || previousTodo.syncUser || user.id, previousTodo.syncUser, db.users)];
+      if (["execution", "meal"].includes(todo.status) && assigneeIds.length !== 1) {
+        sendJson(res, 400, { error: "Zakljuceni vnosi ur in malica se vpisujejo posebej za enega delavca." });
         return;
       }
       const desiredAssignees = new Set(assigneeIds);
@@ -5505,6 +5431,7 @@ module.exports = {
   payrollLockForTodos,
   payrollTotals,
   payrollPeriodEnded,
+  payrollMinutesForTodo,
   pruneUnusedAdHocClients,
   releaseEntryEditLock,
   releaseTodoEditLock,
@@ -5521,10 +5448,8 @@ module.exports = {
   googleDriveFileInfo,
   googleWorkspaceFileInfo,
   cleanTodoDriveFiles,
-  cleanAppIssue,
   validateTodo,
   visibleDebtsForUser,
   visibleEntriesForUser,
   visibleTodosForUser,
-  visibleAppIssuesForUser
 };
