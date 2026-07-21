@@ -157,7 +157,8 @@ async function recordRun(pool, id, status, data) {
   await pool.query("insert into indus_backup_runs (id, status, finished_at, data) values ($1, $2, now(), $3::jsonb) on conflict (id) do update set status = excluded.status, finished_at = excluded.finished_at, data = excluded.data", [id, status, JSON.stringify(data)]);
 }
 async function clearBackupAlerts(pool) {
-  await pool.query("delete from indus_notifications where user_id = $1 and read_at is null and data ->> 'code' = any($2::text[])", ["bojan", ["backup-failed", "backup-stale"]]);
+  // A successful retry proves the current backup is healthy, but it must not erase a failed backup before it is seen.
+  await pool.query("delete from indus_notifications where user_id = $1 and read_at is null and data ->> 'code' = $2", ["bojan", "backup-stale"]);
 }
 async function recordFailureAlert(pool, result) {
   const existing = await pool.query("select id from indus_notifications where user_id = $1 and read_at is null and data ->> 'code' = $2 limit 1", ["bojan", "backup-failed"]);

@@ -48,3 +48,8 @@ npm test
 Testi preverijo sintakso, dostopne vloge, lokalno identiteto strank, odstranitev
 Sheets/Calendar poti, varne seje, PWA in backup poti.
 - Video priloge se pretočno shranijo v Google Drive in so v poročilu le kot povezave.
+
+Ob vsaki objavi se dodatno izvede produkcijski video smoke test: prek pravega
+API-ja naloži majhen testni video, preveri mapo, lastništvo in deljenje z
+povezavo, nato pa testno datoteko in začasno sejo odstrani. Za izreden
+diagnostični preklop je na voljo SkipVideoSmoke.

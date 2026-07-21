@@ -6,7 +6,8 @@
   "main": "outputs/server.js",
   "scripts": {
     "start": "node outputs/server.js",
-    "test": "node --check outputs/server.js && node --check outputs/client-identity.js && node --check outputs/postgres-store.js && node --check outputs/service-worker.js && node --check scripts/backup-indus-ure.js && node --check scripts/delete-legacy-google-calendars.js && node scripts/check-inline-js.js && node --test tests/roles.test.js tests/clients.test.js tests/google-calendar.test.js tests/http-shell.test.js",
+    "test": "node --check outputs/server.js && node --check outputs/client-identity.js && node --check outputs/postgres-store.js && node --check outputs/service-worker.js && node --check scripts/backup-indus-ure.js && node --check scripts/delete-legacy-google-calendars.js && node --check scripts/smoke-drive-video-upload.js && node scripts/check-inline-js.js && node --test tests/roles.test.js tests/clients.test.js tests/google-calendar.test.js tests/http-shell.test.js",
+    "smoke:video": "node scripts/smoke-drive-video-upload.js",
     "import:json": "node scripts/import-json-to-postgres.js"
   },
   "dependencies": {

@@ -5,7 +5,8 @@ param(
   [string]$IdentityFile = "$env:USERPROFILE\.ssh\indus_ure_ed25519",
   [string]$PublicUrl = "https://ure.indus.si/",
   [switch]$SkipTests,
-  [switch]$SkipPush
+  [switch]$SkipPush,
+  [switch]$SkipVideoSmoke
 )
 
 $ErrorActionPreference = "Stop"
@@ -77,6 +78,9 @@ try {
 
   Write-Host "[5/6] Priprava in preklop izdaje"
   $remoteCommand = "prepare-indus-ure-release $release $checksum && sudo /usr/local/sbin/deploy-indus-ure $release"
+  if (-not $SkipVideoSmoke) {
+    $remoteCommand += " && sudo systemd-run --quiet --wait --collect --pipe -p User=indus-ure -p Group=indus-ure -p EnvironmentFile=/etc/indus-ure.env -p WorkingDirectory=/opt/indus-ure/current /usr/bin/node /opt/indus-ure/current/scripts/smoke-drive-video-upload.js"
+  }
   Invoke-Native ssh @sshOptions $target $remoteCommand
 
   Write-Host "[6/6] Preverjanje produkcije"
