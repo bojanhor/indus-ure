@@ -5400,9 +5400,24 @@ function googleConnectionFailure(error) {
     || /invalid_grant|invalid credentials|unauthenticated|login required|token has been expired|invalid token/.test(message);
 }
 
+function actionableGoogleDriveError(error) {
+  const message = String(error?.message || "");
+  if (/^Bojan mora najprej v Nastavitvah povezati Google (Drive|Dokumente)/.test(message)) {
+    return { status: 409, error: "Google Drive ni povezan. Kot Bojan ga v Nastavitvah poveži in nato poskusi znova." };
+  }
+  if (/^Video priloge niso nastavljene:|^Drive mapa za priloge ni nastavljena\./.test(message)) {
+    return { status: 503, error: "Mapa Google Drive za priloge in videe ni nastavljena na strežniku." };
+  }
+  return null;
+}
 function handleUnexpectedRequestError(error, res) {
   console.error("Nepricakovana napaka zahtevka:", error);
   if (!res.headersSent) {
+    const actionable = actionableGoogleDriveError(error);
+    if (actionable) {
+      sendJson(res, actionable.status, { error: actionable.error });
+      return;
+    }
     if (googleConnectionFailure(error)) {
       sendJson(res, 409, { error: "Povezava z Google Drive ni več veljavna. V Nastavitvah jo kot Bojan ponovno poveži in poskusi znova." });
       return;

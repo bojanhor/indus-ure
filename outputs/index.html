@@ -8317,7 +8317,7 @@
         }
         setTodoVideoUploadStatus("Video je dodan kot povezava do Google Drive.", "success");
       } catch (error) {
-        const message = /Bojan mora najprej v Nastavitvah povezati Google Drive/i.test(String(error?.message || ""))
+        const message = /Bojan mora najprej v Nastavitvah povezati Google Drive|Google Drive ni povezan/i.test(String(error?.message || ""))
           ? "Video ni bil dodan: Google Drive ni povezan. Kot Bojan v Nastavitvah izberi Google Dokumenti, preglednice in Gmail."
           : "Video ni bil dodan: " + String(error?.message || "Neznana napaka.");
         setTodoVideoUploadStatus(message, "error");
@@ -9910,7 +9910,7 @@
         showNotice("Google Dokumente lahko poveže samo Bojanov račun.");
         return;
       }
-      if (status.connected) {
+      if (status.connected && status.gmailConnected) {
         showNotice("Google Dokumenti, preglednice in Gmail so že povezani.");
         return;
       }
