@@ -97,6 +97,18 @@ test("vsako opravilo dobi skriti skupni ID dogodka", () => {
   assert.equal(result.changed, true);
   assert.equal(legacyDb.todos[0].assignmentGroupId, "legacy-todo");
 });
+test("osebni predal opravil je ločen po delavcu in varno normaliziran", () => {
+  const database = {
+    users: {}, entries: [], debts: [], clients: [],
+    todos: [{
+      id: "bucket-task", title: "Servis", status: "open", syncUser: "ibro",
+      userOrderBuckets: { ibro: "unsorted", bojan: "sorted", invalid: "outside" }
+    }]
+  };
+  normalizeDb(database);
+  assert.deepEqual(database.todos[0].userOrderBuckets, { ibro: "unsorted", bojan: "sorted" });
+});
+
 test("vsak delavec vidi vse dodeljene osebe skupnega opravila", () => {
   const groupedDb = {
     todos: [

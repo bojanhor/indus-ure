@@ -788,6 +788,11 @@ function normalizeDb(db = {}) {
       next.order = index + 1;
       changed = true;
     }
+    const orderBuckets = cleanTodoUserOrderBuckets(next.userOrderBuckets);
+    if (JSON.stringify(next.userOrderBuckets || {}) !== JSON.stringify(orderBuckets)) {
+      next.userOrderBuckets = orderBuckets;
+      changed = true;
+    }
     if (typeof next.urgent !== "boolean") {
       next.urgent = false;
       changed = true;
@@ -2493,6 +2498,13 @@ function validateEntry(entry) {
   return "";
 }
 
+function cleanTodoUserOrderBuckets(input) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return {};
+  return Object.fromEntries(Object.entries(input)
+    .map(([userId, bucket]) => [cleanUserId(userId), String(bucket || "")])
+    .filter(([userId, bucket]) => userId && ["sorted", "unsorted"].includes(bucket)));
+}
+
 function cleanTodo(input) {
   const isMeal = input.status === "meal";
   const photos = Array.isArray(input.photos) ? input.photos : [];
@@ -2507,6 +2519,8 @@ function cleanTodo(input) {
     material: isMeal ? "" : String(input.material || "").trim(),
     status: input.status === "billing" ? "execution" : TODO_STATUSES.has(input.status) ? input.status : "open",
     order: Number.isFinite(Number(input.order)) ? Number(input.order) : 0,
+    // Older tasks without this field are intentionally shown as sorted.
+    userOrderBuckets: cleanTodoUserOrderBuckets(input.userOrderBuckets),
     urgent: isMeal ? false : ["execution", "billing"].includes(input.status) ? false : Boolean(input.urgent),
     warranty: input.status === "execution" && Boolean(input.warranty),
     syncUser: cleanUserId(input.syncUser),
@@ -4330,7 +4344,7 @@ async function handleApi(req, res) {
       const todoIds = [...new Set((Array.isArray(body.todoIds) ? body.todoIds : [])
         .map((id) => String(id || "").trim())
         .filter(Boolean))];
-      if (todoIds.length < 2 || todoIds.length > 500) {
+      if (todoIds.length < 1 || todoIds.length > 500) {
         sendJson(res, 400, { error: "Za razvrščanje posreduj vsaj dve opravili." });
         return;
       }
@@ -4355,9 +4369,15 @@ async function handleApi(req, res) {
       }
       const requestedOrderUserId = cleanUserId(body.orderUserId);
       const orderUserId = user.role === "boss" && db.users?.[requestedOrderUserId] ? requestedOrderUserId : user.id;
+      const requestedBuckets = body.bucketById && typeof body.bucketById === "object" ? body.bucketById : {};
       const now = new Date().toISOString();
       todos.forEach((todo, index) => {
+        const requestedBucket = String(requestedBuckets[todo.id] || "");
+        const bucket = ["sorted", "unsorted"].includes(requestedBucket)
+          ? requestedBucket
+          : (todo.userOrderBuckets?.[orderUserId] === "unsorted" ? "unsorted" : "sorted");
         todo.userOrders = { ...(todo.userOrders || {}), [orderUserId]: index + 1 };
+        todo.userOrderBuckets = { ...(todo.userOrderBuckets || {}), [orderUserId]: bucket };
         todo.updatedBy = user.id;
         todo.updatedByName = user.name;
         todo.updatedAt = now;
@@ -4775,6 +4795,7 @@ async function handleApi(req, res) {
           photos: stampTodoPhotos(todo, user),
           driveFiles: stampTodoDriveFiles(todo, user),
           syncUser: assigneeId,
+          userOrderBuckets: { ...(todo.userOrderBuckets || {}), [assigneeId]: "unsorted" },
           order: newOrder + index,
           createdBy: user.id,
           createdByName: user.name,
@@ -5186,6 +5207,7 @@ releaseTodoAssignmentEditLock(db, previousTodo, user, editLockToken);
             photos: sharedPhotos.map((photo) => ({ ...photo })),
             driveFiles: sharedDriveFiles.map((file) => ({ ...file })),
             syncUser: assigneeId,
+            userOrderBuckets: { ...(existing.userOrderBuckets || {}) },
             order: isOpenedTodo ? todo.order : existing.order,
             updatedBy: user.id,
             updatedByName: user.name,
@@ -5210,6 +5232,7 @@ releaseTodoAssignmentEditLock(db, previousTodo, user, editLockToken);
           photos: sharedPhotos.map((photo) => ({ ...photo })),
           driveFiles: sharedDriveFiles.map((file) => ({ ...file })),
           syncUser: assigneeId,
+          userOrderBuckets: { ...(todo.userOrderBuckets || {}), [assigneeId]: "unsorted" },
           order: todo.order,
           createdBy: previousTodo.createdBy || user.id,
           createdByName: previousTodo.createdByName || user.name,

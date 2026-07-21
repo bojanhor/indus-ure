@@ -948,6 +948,23 @@
       font-weight: 900;
     }
 
+    .todo-order-section {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 10px;
+      margin-top: 10px;
+      padding: 12px 4px 7px;
+      border-top: 2px solid var(--line);
+      color: var(--ink);
+      font-weight: 900;
+    }
+
+    .todo-order-section span { font-size: 14px; }
+    .todo-order-section small { color: var(--muted); font-size: 11px; font-weight: 700; }
+    .todo-order-drop-zone { min-height: 36px; }
+
+
     .todo-item {
       display: grid;
       grid-template-columns: 72px minmax(0, 1fr);
@@ -1316,6 +1333,11 @@
       max-width: 100%;
     }
 
+    .todo-primary-meta > .todo-assignees-chip.is-multiple {
+      background: #d9e7e0;
+      color: #35584c;
+    }
+
     .todo-date-chip.is-empty {
       visibility: hidden;
     }
@@ -1390,6 +1412,13 @@
       text-align: left;
       cursor: pointer;
       overflow-wrap: anywhere;
+    }
+
+    .todo-form-attachment-preview > span:last-child {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
 
     .todo-form-attachment-thumb {
@@ -3293,13 +3322,31 @@
       .billing-line-edit { grid-column: 1 / -1; justify-content: stretch; }
       .billing-line-edit label { flex: 1; }
       .billing-line-edit input { width: 100%; }
+      .todo-form-photo-row { align-items: flex-start; min-width: 0; }
+      .todo-form-photo-row .todo-form-attachment-preview { flex: 1 1 0; width: 0; }
+      .todo-form-photo-actions { gap: 4px; }
+      .todo-form-photo-actions > button { min-width: 36px; min-height: 36px; padding: 5px 7px; }
       #photoEditorDialog { width: 100vw; height: 100dvh; max-height: none; border-radius: 0; }
-      #photoEditorDialog > form { height: 100%; min-height: 0; display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; }
+      #photoEditorDialog > form { height: 100%; min-height: 0; display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; overflow: hidden; }
       #photoEditorDialog .modal-head { padding: 10px 12px; }
-      #photoEditorDialog .photo-editor-toolbar { max-height: 32dvh; overflow-y: auto; align-content: start; gap: 6px; padding: 8px; }
-      #photoEditorDialog .photo-editor-text-entry { flex-basis: 100%; }
-      #photoEditorDialog .photo-editor-text-tools { width: 100%; }
-      #photoEditorDialog .photo-editor-canvas-shell { min-height: 0; max-height: none; padding: 6px; }
+      #photoEditorDialog .photo-editor-toolbar {
+        display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+        max-height: 31dvh; overflow-y: auto; align-content: start; gap: 6px; padding: 8px;
+      }
+      #photoEditorDialog .photo-editor-toolbar > label,
+      #photoEditorDialog .photo-editor-toolbar > button { min-width: 0; min-height: 40px; }
+      #photoEditorDialog .photo-editor-toolbar > label { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; }
+      #photoEditorDialog .photo-editor-toolbar > button { padding: 6px 4px; }
+      #photoEditorDialog .photo-editor-text-entry,
+      #photoEditorDialog .photo-editor-text-tools,
+      #photoEditorDialog .gesture-zoom-controls { grid-column: 1 / -1; width: 100%; }
+      #photoEditorDialog .photo-editor-text-entry { display: grid; grid-template-columns: 68px minmax(0, 1fr); }
+      #photoEditorDialog .photo-editor-text-tools { display: grid; grid-template-columns: 1fr; gap: 6px; padding: 7px; }
+      #photoEditorDialog .photo-editor-text-tools label { display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; }
+      #photoEditorDialog .photo-editor-text-tools input[type="range"] { width: 100%; min-width: 0; }
+      #photoEditorDialog .gesture-zoom-controls { display: grid; grid-template-columns: 42px minmax(0, 1fr) 42px auto; gap: 6px; }
+      #photoEditorDialog .zoom-value { text-align: center; align-self: center; }
+      #photoEditorDialog .photo-editor-canvas-shell { min-height: 0; max-height: none; padding: 6px; overscroll-behavior: contain; }
       #photoEditorDialog .actions.modal-body { padding: 10px 12px; }
       .client-billing-intro { display: grid; gap: 10px; }
       .client-billing-intro-actions { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -4491,7 +4538,7 @@
         const ops = (await offlineTodoOps()).filter((item) => item.userId === state.user.id && !item.conflict).sort((a, b) => a.id - b.id);
         for (const op of ops) {
           try {
-            if (op.kind === "reorder") await api("/api/todos/reorder", { method: "POST", body: JSON.stringify({ todoIds: op.todoIds || [], orderUserId: op.orderUserId || state.user?.id || "" }) });
+            if (op.kind === "reorder") await api("/api/todos/reorder", { method: "POST", body: JSON.stringify({ todoIds: op.todoIds || [], orderUserId: op.orderUserId || state.user?.id || "", bucketById: op.bucketById || {} }) });
             else if (op.kind === "create") await api("/api/todos", { method: "POST", body: JSON.stringify(op.todo) });
             else {
               const lock = await api(todoLockUrl(op.todoId), { method: "POST", body: JSON.stringify({}) });
@@ -5660,6 +5707,16 @@
       return Number.isFinite(personalOrder) ? personalOrder : Number(todo?.order || 0);
     }
 
+    function todoManualBucketForCurrentUser(todo) {
+      const userId = activeWorkerId() || state.user?.id || "";
+      return todo?.userOrderBuckets?.[userId] === "unsorted" ? "unsorted" : "sorted";
+    }
+
+    function todoManualBucketSort(a, b) {
+      const bucketDifference = Number(todoManualBucketForCurrentUser(a) === "unsorted") - Number(todoManualBucketForCurrentUser(b) === "unsorted");
+      return bucketDifference || todoSort(a, b);
+    }
+
     function nextTodoOrder() {
       const orders = contextTodos().map(todoOrderForCurrentUser);
       return (orders.length ? Math.min(...orders) : 0) - 1;
@@ -5702,7 +5759,8 @@
       if (state.todoSortMode === "order") return list.filter((todo) => todoNeedsOrdering(todo)).sort(todoOrderingSort);
       if (state.todoSortMode === "open") return list.filter((todo) => todo.status === "open").sort(todoSort);
       if (state.todoSortMode === "in_progress") return list.filter((todo) => todo.status === "in_progress").sort(todoSort);
-      if (state.todoSortMode === "manual") return list.filter((todo) => todo.status !== "meal").sort(todoSort);
+      if (state.todoSortMode === "client") return list.filter((todo) => todo.status !== "meal").sort(todoSort);
+      if (state.todoSortMode === "manual") return list.filter((todo) => todo.status !== "meal").sort(todoManualBucketSort);
       if (state.todoSortMode === "completed") {
         const unique = new Map();
         list.filter((todo) => todo.status === "execution").forEach((todo) => {
@@ -7272,6 +7330,16 @@
       </div>`;
     }
 
+    function appendTodoOrderSection(items, bucket) {
+      const section = document.createElement("div");
+      const label = bucket === "unsorted" ? "Nerazvrščeno" : "Razvrščeno";
+      section.className = "todo-order-section todo-order-drop-zone";
+      section.dataset.todoDropBucket = bucket;
+      section.dataset.todoDropPlacement = "before";
+      section.innerHTML = `<span>${label}</span><small>${bucket === "unsorted" ? "Nova opravila" : "Ustaljeni vrstni red"}</small>`;
+      items.appendChild(section);
+    }
+
     function renderTodoItems() {
       const items = $("todoItems");
       const title = $("todoPanelTitle");
@@ -7286,7 +7354,14 @@
         return;
       }
 
+      const showManualSections = state.todoSortMode === "manual";
       let completedGroupKey = "";
+      let currentManualBucket = "";
+      if (showManualSections) {
+        appendTodoOrderSection(items, "sorted");
+        currentManualBucket = "sorted";
+      }
+
       todos.forEach((todo) => {
         const groupKey = todo.clientId || normalizeText(todo.client) || "__brez_stranke__";
         if (state.todoSortMode === "completed" && groupKey !== completedGroupKey) {
@@ -7294,28 +7369,30 @@
           const group = document.createElement("div");
           group.className = "todo-client-group-title";
           const groupHours = completedTodoGroupHours(todos, todo);
-          group.innerHTML = `<span>${escapeHtml(todo.client || "Brez stranke")}</span><span>${completedTodoGroupCount(todos, todo)} opravil · ${groupHours.toLocaleString("sl-SI", { maximumFractionDigits: 2 })} h</span>`;
+          group.innerHTML = `<span>${escapeHtml(todo.client || "Brez stranke")}</span><span>${completedTodoGroupCount(todos, todo)} opravil &middot; ${groupHours.toLocaleString("sl-SI", { maximumFractionDigits: 2 })} h</span>`;
           items.appendChild(group);
+        }
+        const manualBucket = todoManualBucketForCurrentUser(todo);
+        if (showManualSections && manualBucket !== currentManualBucket) {
+          appendTodoOrderSection(items, manualBucket);
+          currentManualBucket = manualBucket;
         }
         const item = document.createElement("div");
         const reorderable = state.todoSortMode === "manual" && !todo.done && !todo.urgent;
         const hasExpandedDetails = todoHasExpandedDetails(todo);
         const detailsExpanded = state.expandedTodoIds.has(todo.id);
+        const assigneeCount = todoAssigneeIds(todo).length;
         item.dataset.todoId = todo.id;
         item.className = `todo-item ${todo.done ? "done" : ""} ${todo.urgent ? "urgent" : ""} ${detailsExpanded ? "details-expanded" : ""}`;
         item.innerHTML = `
           <div class="todo-control-stack">
-            <button class="drag-handle" type="button" ${reorderable ? "" : "disabled"} title="Povleci za vrstni red (na telefonu pridr&#382;i)" aria-label="Povleci za vrstni red (na telefonu pridr&#382;i)">::</button>
+            <button class="drag-handle" type="button" ${reorderable ? "" : "disabled"} title="Povleci za vrstni red (na telefonu pridrži)" aria-label="Povleci za vrstni red (na telefonu pridrži)">::</button>
             <div class="todo-tools">
               <button class="todo-edit-icon edit-todo" type="button" title="Uredi opravilo" aria-label="Uredi opravilo">
-                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <path d="M4 14.5V17h2.5L15.8 7.7l-2.5-2.5L4 14.5zM12.4 6.1l2.5 2.5M13.3 5.2l1.2-1.2a1.4 1.4 0 012 0l.5.5a1.4 1.4 0 010 2l-1.2 1.2"></path>
-                </svg>
+                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 14.5V17h2.5L15.8 7.7l-2.5-2.5L4 14.5zM12.4 6.1l2.5 2.5M13.3 5.2l1.2-1.2a1.4 1.4 0 012 0l.5.5a1.4 1.4 0 010 2l-1.2 1.2"></path></svg>
               </button>
-              <button class="todo-delete-icon delete-todo" type="button" title="Izbri&#353;i opravilo" aria-label="Izbri&#353;i opravilo">
-                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <path d="M3 5.5h14M7.5 5.5V3.5h5v2M5.5 5.5l1 11h7l1-11M8.5 8.5v5M11.5 8.5v5"></path>
-                </svg>
+              <button class="todo-delete-icon delete-todo" type="button" title="Izbriši opravilo" aria-label="Izbriši opravilo">
+                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 5.5h14M7.5 5.5V3.5h5v2M5.5 5.5l1 11h7l1-11M8.5 8.5v5M11.5 8.5v5"></path></svg>
               </button>
             </div>
           </div>
@@ -7328,48 +7405,32 @@
             ${todo.client ? `<div class="todo-client-name">${escapeHtml(todo.client)}</div>` : ""}
             <div class="todo-primary-meta">
               <span class="todo-chip todo-date-chip ${todo.date ? "" : "is-empty"}" ${todo.date ? "" : 'aria-hidden="true"'}>${todo.date ? todoDateTimeLabel(todo) : "&nbsp;"}</span>
-              <span class="todo-chip todo-assignees-chip">Za: ${escapeHtml(todoAssigneeNames(todo))}</span>
+              <span class="todo-chip todo-assignees-chip ${assigneeCount > 1 ? "is-multiple" : ""}">Za: ${escapeHtml(todoAssigneeNames(todo))}</span>
             </div>
             ${hasExpandedDetails ? todoExpandedDetailsMarkup(todo) : ""}
           </div>
         `;
-        const openTodoEditor = (event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          openTodoDialog(todo);
-        };
+        const openTodoEditor = (event) => { event.preventDefault(); event.stopPropagation(); openTodoDialog(todo); };
         item.querySelector(".edit-todo").addEventListener("click", openTodoEditor);
         const todoSummary = item.querySelector(".todo-summary");
-        todoSummary.addEventListener("click", (event) => {
-          if (event.target.closest("a, button, .todo-expanded-details")) return;
-          openTodoEditor(event);
-        });
-        todoSummary.addEventListener("keydown", (event) => {
-          if (!["Enter", " "].includes(event.key) || event.target.closest("a, button, .todo-expanded-details")) return;
-          openTodoEditor(event);
-        });
+        todoSummary.addEventListener("click", (event) => { if (event.target.closest("a, button, .todo-expanded-details")) return; openTodoEditor(event); });
+        todoSummary.addEventListener("keydown", (event) => { if (!["Enter", " "].includes(event.key) || event.target.closest("a, button, .todo-expanded-details")) return; openTodoEditor(event); });
         const detailsToggle = item.querySelector(".todo-details-toggle");
         const todoExpandedDetails = item.querySelector(".todo-expanded-details");
         detailsToggle?.addEventListener("click", (event) => {
-          event.preventDefault();
-          event.stopPropagation();
+          event.preventDefault(); event.stopPropagation();
           const expanded = item.classList.toggle("details-expanded");
-          if (expanded) state.expandedTodoIds.add(todo.id);
-          else state.expandedTodoIds.delete(todo.id);
+          if (expanded) state.expandedTodoIds.add(todo.id); else state.expandedTodoIds.delete(todo.id);
           detailsToggle.setAttribute("aria-expanded", String(expanded));
           const label = expanded ? "Skrij podrobnosti" : "Prikaži podrobnosti";
-          detailsToggle.setAttribute("aria-label", label);
-          detailsToggle.title = label;
+          detailsToggle.setAttribute("aria-label", label); detailsToggle.title = label;
         });
         todoExpandedDetails?.addEventListener("click", (event) => event.stopPropagation());
         todoExpandedDetails?.addEventListener("keydown", (event) => event.stopPropagation());
         const dragHandle = item.querySelector(".drag-handle");
         if (reorderable) {
           const dragPointerOptions = { passive: false };
-          dragHandle.addEventListener("pointerdown", (event) => {
-            beginTodoPointerDrag(event, item, todo.id);
-          }, dragPointerOptions);
-          // Firefox for Android lahko zajeti dotik preskoci na documentu, zato je ročaj sam tudi poslušalec.
+          dragHandle.addEventListener("pointerdown", (event) => beginTodoPointerDrag(event, item, todo.id), dragPointerOptions);
           dragHandle.addEventListener("pointermove", updateTodoPointerDrag, dragPointerOptions);
           dragHandle.addEventListener("pointerup", finishTodoPointerDrag, dragPointerOptions);
           dragHandle.addEventListener("pointercancel", cancelTodoPointerDrag, dragPointerOptions);
@@ -7379,14 +7440,12 @@
         item.querySelectorAll(".remove-photo").forEach((button) => {
           button.addEventListener("click", async () => {
             if (!await showAppConfirm("Izbrišem to prilogo?")) return;
-            await saveTodoToServer({
-              ...todo,
-              photos: (todo.photos || []).filter((photo) => photo.id !== button.dataset.photoId)
-            });
+            await saveTodoToServer({ ...todo, photos: (todo.photos || []).filter((photo) => photo.id !== button.dataset.photoId) });
           });
         });
         items.appendChild(item);
       });
+      if (showManualSections && currentManualBucket === "sorted") appendTodoOrderSection(items, "unsorted");
     }
 
     function attachmentSource(photo) {
@@ -7687,7 +7746,7 @@
       const shell = canvas.closest(".photo-editor-canvas-shell");
       if (!canvas.width || !canvas.height || !shell) return;
       const widthRatio = Math.max(0.1, (shell.clientWidth - 20) / canvas.width);
-      const heightRatio = Math.max(0.1, (window.innerHeight - 230) / canvas.height);
+      const heightRatio = Math.max(0.1, (shell.clientHeight - 20) / canvas.height);
       const zoom = Math.min(100, Math.floor(Math.min(widthRatio, heightRatio) * 100));
       setPhotoEditorZoom(Math.max(10, zoom));
       shell.scrollLeft = 0;
@@ -8941,11 +9000,15 @@
       showNotice(`Gmail osnutek za ${result.email} je pripravljen. Sporočilo ni bilo poslano.`);
       window.open("https://mail.google.com/mail/u/0/#drafts", "_blank", "noopener");
     }
+    function todoCanManualReorder(todo) {
+      return Boolean(todo && !todo.done && !todo.urgent && todo.status !== "meal");
+    }
+
     function todosCanReorderTogether(sourceId, targetId) {
       const todos = contextTodos();
       const source = todos.find((todo) => todo.id === sourceId);
       const target = todos.find((todo) => todo.id === targetId);
-      return Boolean(source && target && !source.done && !target.done && !source.urgent && !target.urgent && source.status !== "meal" && target.status !== "meal");
+      return todoCanManualReorder(source) && todoCanManualReorder(target);
     }
 
     const TODO_TOUCH_DRAG_HOLD_MS = 180;
@@ -8961,8 +9024,6 @@
     function updateTodoPointerDragGhost(drag) {
       const ghost = drag?.ghostElement;
       if (!ghost) return;
-      // Sidro ostane na istem delu kartice, kjer je uporabnik prijel ročaj.
-      // Zato kvadratek ne skoči pod kazalec s svojo sredino.
       ghost.style.left = `${drag.clientX - drag.ghostAnchorX}px`;
       ghost.style.top = `${drag.clientY - drag.ghostAnchorY}px`;
       ghost.style.display = "block";
@@ -8972,10 +9033,7 @@
       const indicator = drag?.indicatorElement;
       const target = drag?.targetElement;
       if (!indicator) return;
-      if (!target) {
-        indicator.style.display = "none";
-        return;
-      }
+      if (!target) { indicator.style.display = "none"; return; }
       const rect = target.getBoundingClientRect();
       const left = Math.max(8, rect.left + 8);
       const width = Math.max(24, Math.min(window.innerWidth - left - 8, rect.width - 16));
@@ -8988,18 +9046,30 @@
     function updateTodoPointerDragTarget(clientX, clientY) {
       const drag = todoPointerDrag;
       if (!drag) return;
-      const target = document.elementFromPoint(clientX, clientY)?.closest(".todo-item");
+      const atPoint = document.elementFromPoint(clientX, clientY);
+      const target = atPoint?.closest(".todo-item");
+      const section = atPoint?.closest("[data-todo-drop-bucket]");
       let targetElement = null;
-      let targetId = drag.sourceId;
+      let targetId = "";
       let targetPlacement = "before";
+      let targetBucket = todoManualBucketForCurrentUser(contextTodos().find((todo) => todo.id === drag.sourceId));
       if (target && target.dataset.todoId !== drag.sourceId && todosCanReorderTogether(drag.sourceId, target.dataset.todoId)) {
         const targetRect = target.getBoundingClientRect();
         targetPlacement = clientY < targetRect.top + targetRect.height / 2 ? "before" : "after";
         targetId = target.dataset.todoId;
         targetElement = target;
+        targetBucket = todoManualBucketForCurrentUser(contextTodos().find((todo) => todo.id === targetId));
+      } else if (section && todoCanManualReorder(contextTodos().find((todo) => todo.id === drag.sourceId))) {
+        const bucket = String(section.dataset.todoDropBucket || "");
+        if (["sorted", "unsorted"].includes(bucket)) {
+          targetBucket = bucket;
+          targetPlacement = section.dataset.todoDropPlacement === "after" ? "after" : "before";
+          targetElement = section;
+        }
       }
       drag.targetElement = targetElement;
       drag.targetId = targetId;
+      drag.targetBucket = targetBucket;
       drag.targetPlacement = targetPlacement;
       updateTodoPointerDragGhost(drag);
       updateTodoPointerDragIndicator(drag);
@@ -9033,7 +9103,6 @@
       if (!drag) return null;
       if (drag.holdTimer) clearTimeout(drag.holdTimer);
       if (drag.autoScrollFrame) cancelAnimationFrame(drag.autoScrollFrame);
-      // Najprej pobrisi stanje, ker releasePointerCapture lahko sprozi lostpointercapture.
       todoPointerDrag = null;
       if (drag.handle.hasPointerCapture?.(drag.pointerId)) drag.handle.releasePointerCapture(drag.pointerId);
       drag.handle.classList.remove("drag-armed");
@@ -9044,8 +9113,7 @@
     function activateTodoPointerDrag() {
       const drag = todoPointerDrag;
       if (!drag || drag.active) return;
-      drag.holdTimer = 0;
-      drag.active = true;
+      drag.holdTimer = 0; drag.active = true;
       drag.handle.classList.remove("drag-armed");
       drag.item.classList.add("dragging");
       const sourceRect = drag.item.getBoundingClientRect();
@@ -9054,7 +9122,6 @@
       drag.ghostElement.setAttribute("aria-hidden", "true");
       const ghostWidth = Math.max(120, Math.min(sourceRect.width, window.innerWidth - 24));
       const ghostHeight = Math.max(58, Math.min(sourceRect.height, 150));
-      // Zajem od roba kartice ob pointerdown ohrani natančno mesto ročaja tudi po dolgem dotiku.
       drag.ghostAnchorX = Math.max(0, Math.min(ghostWidth, drag.grabOffsetX));
       drag.ghostAnchorY = Math.max(0, Math.min(ghostHeight, drag.grabOffsetY));
       drag.ghostElement.style.width = `${ghostWidth}px`;
@@ -9076,35 +9143,13 @@
       const isTouch = event.pointerType === "touch";
       const itemRect = item.getBoundingClientRect();
       todoPointerDrag = {
-        pointerId: event.pointerId,
-        sourceId: todoId,
-        targetId: todoId,
-        targetPlacement: "before",
-        targetElement: null,
-        handle: event.currentTarget,
-        item,
-        pointerType: event.pointerType,
-        active: false,
-        startX: event.clientX,
-        startY: event.clientY,
-        // Položaj prsta/miške znotraj kartice je sidro premikajočega se okvirja.
-        grabOffsetX: event.clientX - itemRect.left,
-        grabOffsetY: event.clientY - itemRect.top,
-        ghostAnchorX: 0,
-        ghostAnchorY: 0,
-        clientX: event.clientX,
-        clientY: event.clientY,
-        autoScrollFrame: 0,
-        autoScrollAt: performance.now(),
-        holdTimer: 0,
-        ghostElement: null,
-        indicatorElement: null
+        pointerId: event.pointerId, sourceId: todoId, targetId: "", targetBucket: "", targetPlacement: "before", targetElement: null,
+        handle: event.currentTarget, item, pointerType: event.pointerType, active: false, startX: event.clientX, startY: event.clientY,
+        grabOffsetX: event.clientX - itemRect.left, grabOffsetY: event.clientY - itemRect.top, ghostAnchorX: 0, ghostAnchorY: 0,
+        clientX: event.clientX, clientY: event.clientY, autoScrollFrame: 0, autoScrollAt: performance.now(), holdTimer: 0,
+        ghostElement: null, indicatorElement: null
       };
-      try {
-        event.currentTarget.setPointerCapture?.(event.pointerId);
-      } catch {
-        // Lokalni poslušalci na ročaju spodaj ostanejo varna rezerva za mobilne brskalnike.
-      }
+      try { event.currentTarget.setPointerCapture?.(event.pointerId); } catch {}
       if (isTouch) {
         event.currentTarget.classList.add("drag-armed");
         todoPointerDrag.holdTimer = window.setTimeout(() => activateTodoPointerDrag(), TODO_TOUCH_DRAG_HOLD_MS);
@@ -9116,88 +9161,76 @@
     function updateTodoPointerDrag(event) {
       const drag = todoPointerDrag;
       if (!drag || drag.pointerId !== event.pointerId) return;
-      if (!drag.active) {
-        event.preventDefault();
-        // Premik prsta pred iztekom pridrzenega dotika ne sme preklicati vlecenja.
-        // Telefon pri naravnem dotiku skoraj vedno zazna nekaj pikslov premika.
-        drag.clientX = event.clientX;
-        drag.clientY = event.clientY;
-        return;
-      }
       event.preventDefault();
-      drag.clientX = event.clientX;
-      drag.clientY = event.clientY;
-      updateTodoPointerDragTarget(event.clientX, event.clientY);
+      drag.clientX = event.clientX; drag.clientY = event.clientY;
+      if (drag.active) updateTodoPointerDragTarget(event.clientX, event.clientY);
     }
 
     function finishTodoPointerDrag(event) {
       if (!todoPointerDrag || todoPointerDrag.pointerId !== event.pointerId) return;
       event.preventDefault();
-      const { sourceId, targetId, targetPlacement, active } = clearTodoPointerDrag();
+      const { sourceId, targetId, targetPlacement, targetBucket, active } = clearTodoPointerDrag();
       if (!active) return;
-      reorderTodos(sourceId, targetId, targetPlacement).catch((error) => showNotice(error.message));
+      reorderTodos(sourceId, targetId, targetPlacement, targetBucket).catch((error) => showNotice(error.message));
     }
+
     function cancelTodoPointerDrag(event) {
       if (!todoPointerDrag || todoPointerDrag.pointerId !== event.pointerId) return;
       clearTodoPointerDrag();
     }
-    async function reorderTodos(sourceId, targetId, targetPlacement = "before") {
-      if (!sourceId || !targetId || sourceId === targetId) return;
-      const source = contextTodos().find((todo) => todo.id === sourceId);
-      if (!source || !todosCanReorderTogether(sourceId, targetId)) return;
-      const ordered = contextTodos()
-        .filter((todo) => !todo.done && !todo.urgent && todo.status !== "meal")
-        .sort(todoSort);
+
+    async function reorderTodos(sourceId, targetId = "", targetPlacement = "before", requestedBucket = "") {
+      if (!sourceId) return;
+      const candidates = contextTodos().filter(todoCanManualReorder).sort(todoManualBucketSort);
+      const source = candidates.find((todo) => todo.id === sourceId);
+      const target = candidates.find((todo) => todo.id === targetId);
+      if (!source) return;
+      const bucketsById = new Map(candidates.map((todo) => [todo.id, todoManualBucketForCurrentUser(todo)]));
+      const destinationBucket = ["sorted", "unsorted"].includes(requestedBucket)
+        ? requestedBucket
+        : (target ? bucketsById.get(target.id) : bucketsById.get(source.id));
+      const ordered = candidates.slice();
       const from = ordered.findIndex((todo) => todo.id === sourceId);
-      const targetIndex = ordered.findIndex((todo) => todo.id === targetId);
-      if (from < 0 || targetIndex < 0) return;
       const [moved] = ordered.splice(from, 1);
-      const insertionTarget = ordered.findIndex((todo) => todo.id === targetId);
-      const insertAt = insertionTarget + (targetPlacement === "after" ? 1 : 0);
+      bucketsById.set(sourceId, destinationBucket);
+      let insertAt = 0;
+      if (target && target.id !== sourceId) {
+        const targetIndex = ordered.findIndex((todo) => todo.id === target.id);
+        insertAt = Math.max(0, targetIndex + (targetPlacement === "after" ? 1 : 0));
+      } else {
+        const matching = ordered.map((todo, index) => ({ todo, index })).filter((item) => bucketsById.get(item.todo.id) === destinationBucket);
+        if (matching.length) insertAt = targetPlacement === "after" ? matching.at(-1).index + 1 : matching[0].index;
+      }
       ordered.splice(insertAt, 0, moved);
-      const ordersById = new Map(ordered.map((todo, index) => [todo.id, index + 1]));
+      const persisted = ["sorted", "unsorted"].flatMap((bucket) => ordered.filter((todo) => bucketsById.get(todo.id) === bucket));
+      const ordersById = new Map(persisted.map((todo, index) => [todo.id, index + 1]));
+      const bucketById = Object.fromEntries(persisted.map((todo) => [todo.id, bucketsById.get(todo.id)]));
       const previousTodos = state.todos.slice();
       const todoRevision = beginTodoMutation();
       const orderingUserId = activeWorkerId() || state.user?.id || "";
       state.todos = state.todos.map((todo) => ordersById.has(todo.id)
-        ? { ...todo, userOrders: { ...(todo.userOrders || {}), [orderingUserId]: ordersById.get(todo.id) } }
+        ? { ...todo, userOrders: { ...(todo.userOrders || {}), [orderingUserId]: ordersById.get(todo.id) }, userOrderBuckets: { ...(todo.userOrderBuckets || {}), [orderingUserId]: bucketById[todo.id] } }
         : todo);
-      refreshClientList();
-      render();
+      refreshClientList(); render();
       try {
         const editLockTokens = state.todoEditLock ? { [state.todoEditLock.todoId]: state.todoEditLock.token } : {};
         const data = await api("/api/todos/reorder", {
           method: "POST",
-          body: JSON.stringify({ todoIds: ordered.map((todo) => todo.id), orderUserId: orderingUserId, editLockTokens })
+          body: JSON.stringify({ todoIds: persisted.map((todo) => todo.id), orderUserId: orderingUserId, bucketById, editLockTokens })
         });
-        if (isCurrentTodoRevision(todoRevision)) {
-          state.todos = data.todos;
-          refreshClientList();
-          render();
-        }
+        if (isCurrentTodoRevision(todoRevision)) { state.todos = data.todos; refreshClientList(); render(); }
       } catch (error) {
         if (isNetworkError(error)) {
           const pendingIds = new Set(ordersById.keys());
           state.todos = state.todos.map((todo) => pendingIds.has(todo.id) ? { ...todo, offlinePending: true } : todo);
-          await queueOfflineTodo({
-            kind: "reorder",
-            todoId: `reorder:${activeWorkerId()}`,
-            todoIds: ordered.map((todo) => todo.id),
-            orderUserId: orderingUserId
-          });
-          await updateOfflineSyncNotice();
-          return;
+          await queueOfflineTodo({ kind: "reorder", todoId: `reorder:${activeWorkerId()}`, todoIds: persisted.map((todo) => todo.id), orderUserId: orderingUserId, bucketById });
+          await updateOfflineSyncNotice(); return;
         }
-        if (isCurrentTodoRevision(todoRevision)) {
-          state.todos = previousTodos;
-          refreshClientList();
-          render();
-        }
+        if (isCurrentTodoRevision(todoRevision)) { state.todos = previousTodos; refreshClientList(); render(); }
         throw error;
-      } finally {
-        finishTodoMutation();
-      }
+      } finally { finishTodoMutation(); }
     }
+
     function normalizeText(value) {
       return String(value || "")
         .toLowerCase()
