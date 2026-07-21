@@ -12,12 +12,18 @@ const { Pool } = require("pg");
 
 const DATABASE_URL = process.env.DATABASE_URL || "";
 const PORT = Number(process.env.PORT || 8123);
+const REQUEST_HOST = String(process.env.SMOKE_VIDEO_HOST || "127.0.0.1");
+const REQUEST_PORT = Number(process.env.SMOKE_VIDEO_PORT || PORT);
+const REQUEST_SERVER_NAME = String(process.env.SMOKE_VIDEO_SERVER_NAME || "").trim();
 const MEDIA_DIR = path.resolve(process.env.MEDIA_DIR || "/var/lib/indus-ure/media");
 const OWNER_EMAIL = String(process.env.GOOGLE_DRIVE_OWNER_EMAIL || "bojan@indus.si").trim().toLowerCase();
 const COOKIE_NAME = process.env.NODE_ENV === "production" ? "__Host-indus-ure" : "indus-ure-session";
 // The route streams the body unchanged.  A short deterministic sample is enough
 // to exercise the same HTTP/storage path as a browser upload.
-const SAMPLE_VIDEO = Buffer.from("INDUS-URE-local-video-upload-smoke-test-v2\n", "utf8");
+const samplePrefix = Buffer.from("INDUS-URE-local-video-upload-smoke-test-v3\\n", "utf8");
+const requestedSampleBytes = Number(process.env.SMOKE_VIDEO_BYTES || samplePrefix.length);
+const sampleBytes = Number.isFinite(requestedSampleBytes) ? Math.max(samplePrefix.length, Math.min(16 * 1024 * 1024, Math.floor(requestedSampleBytes))) : samplePrefix.length;
+const SAMPLE_VIDEO = Buffer.concat([samplePrefix, Buffer.alloc(sampleBytes - samplePrefix.length)]);
 
 function fail(message) { throw new Error(message); }
 function tokenHash(token) { return crypto.createHash("sha256").update(token).digest("hex"); }
@@ -25,11 +31,12 @@ function tokenHash(token) { return crypto.createHash("sha256").update(token).dig
 function requestJson({ token, csrfToken, method, requestPath, body = null, headers = {} }) {
   return new Promise((resolve, reject) => {
     const request = http.request({
-      hostname: "127.0.0.1",
-      port: PORT,
+      hostname: REQUEST_HOST,
+      port: REQUEST_PORT,
       method,
       path: requestPath,
       headers: {
+        ...(REQUEST_SERVER_NAME ? { Host: REQUEST_SERVER_NAME } : {}),
         Cookie: COOKIE_NAME + "=" + encodeURIComponent(token),
         "X-CSRF-Token": csrfToken,
         ...headers
@@ -110,7 +117,7 @@ async function main() {
     if (removed.rowCount) fail("Začasna video priloga po čiščenju ostaja v bazi.");
     if (fs.existsSync(storedPath)) fail("Začasna video datoteka po čiščenju ostaja na strežniku.");
     attachmentId = "";
-    process.stdout.write(JSON.stringify({ ok: true, bytes: SAMPLE_VIDEO.length, route: "/api/todos/video" }) + "\n");
+    process.stdout.write(JSON.stringify({ ok: true, bytes: SAMPLE_VIDEO.length, route: "/api/todos/video", host: REQUEST_HOST, port: REQUEST_PORT }) + "\n");
   } finally {
     if (attachmentId) {
       try {
