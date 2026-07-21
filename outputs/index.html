@@ -1548,6 +1548,12 @@
       object-fit: cover;
     }
 
+    #todoFormPhotoList .todo-form-attachment-thumb {
+      width: 180px;
+      height: 135px;
+      flex-basis: 180px;
+    }
+
     .todo-form-video-uploading {
       align-items: stretch;
       background: #f3f9fa;
@@ -3490,6 +3496,7 @@
       .todo-form-photo-row > .todo-form-video-progress,
       .todo-form-photo-row > .todo-form-attachment-detail { grid-column: 1 / -1; }
       .todo-form-video-player { grid-column: 1 / -1; max-width: 100%; }
+      #todoFormPhotoList .todo-form-attachment-thumb { width: 150px; height: 112px; flex-basis: 150px; }
       .todo-form-photo-actions { gap: 4px; }
       .todo-form-photo-actions > button { min-width: 36px; min-height: 36px; padding: 5px 7px; }
       #photoEditorDialog { width: 100vw; height: 100dvh; max-height: none; border-radius: 0; }
