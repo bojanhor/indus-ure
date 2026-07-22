@@ -3913,7 +3913,7 @@
       </div>
     </form>
   </dialog>
-  <dialog id="todoDialog">
+  <dialog id="todoDialog" tabindex="-1">
     <form method="dialog" id="todoForm">
       <div class="modal-head">
         <h3 id="todoFormTitle">Opravilo</h3>
@@ -6354,12 +6354,6 @@
       localStorage.setItem(workerVehiclePreferenceKey(), vehicle === "van" ? "van" : "personal");
     }
 
-    function showDefaultTimePicker() {
-      const input = $("todoFormStart");
-      if (!input || input.value) return;
-      input.focus({ preventScroll: true });
-      try { input.showPicker?.(); } catch { /* Native wheel opens after the next tap where unavailable. */ }
-    }
 
     function dayTimelineLayouts(todos) {
       const layouts = new Map();
@@ -8859,10 +8853,7 @@
       $("todoFormDriveLink").value = "";
       if (editing && !(await acquireTodoEditLockForDialog(todo.id))) return;
       $("todoDialog").showModal();
-      requestAnimationFrame(() => {
-        $(editing || state.todoMealEntry ? "todoFormStart" : "todoFormClient").focus();
-        if (!editing && (state.todoStandaloneHours || state.todoHoursSourceId || state.todoMealEntry)) showDefaultTimePicker();
-      });
+      requestAnimationFrame(() => $("todoDialog").focus({ preventScroll: true }));
       fillMissingPdfThumbnailsForDialog(state.todoDialogPhotos).catch((error) => console.warn(error));
     }
 
