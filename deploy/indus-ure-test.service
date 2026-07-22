@@ -1,0 +1,35 @@
+[Unit]
+Description=INDUS URE local browser test instance
+After=network-online.target postgresql.service
+Wants=network-online.target
+Requires=postgresql.service
+
+[Service]
+Type=simple
+User=indus-ure-test
+Group=indus-ure-test
+WorkingDirectory=/opt/indus-ure/test-current
+EnvironmentFile=/etc/indus-ure-test.env
+ExecStart=/usr/bin/node /opt/indus-ure/test-current/outputs/server.js
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=20s
+UMask=0077
+
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectControlGroups=true
+ProtectHome=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/indus-ure-test
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target

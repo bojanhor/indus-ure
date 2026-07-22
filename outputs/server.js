@@ -23,6 +23,13 @@ const dataDir = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path
 const dbFile = path.join(dataDir, "db.json");
 const MEDIA_DIR = process.env.MEDIA_DIR ? path.resolve(process.env.MEDIA_DIR) : path.join(dataDir, "media");
 const DATABASE_URL = process.env.DATABASE_URL || "";
+// A deliberately separate, LAN-only browser test instance may use a password
+// because Google's OAuth redirect cannot target a private-network IP address.
+// This is impossible to enable in production: both NODE_ENV=test and the
+// explicit opt-in flag are required.
+const LOCAL_TEST_MODE = NODE_ENV === "test" && process.env.INDUS_URE_TEST_MODE === "true";
+const TEST_LOCAL_LOGIN_PASSWORD = String(process.env.TEST_LOCAL_LOGIN_PASSWORD || "");
+const TEST_LOCAL_NETWORK = String(process.env.TEST_LOCAL_NETWORK || "192.168.50.");
 const configuredBojanPassword = process.env.INITIAL_BOJAN_PASSWORD || "";
 const configuredIbroPassword = process.env.INITIAL_IBRO_PASSWORD || "";
 const initialBojanPassword = configuredBojanPassword || crypto.randomBytes(24).toString("hex");
@@ -48,6 +55,7 @@ const ALERT_SMTP_URL = String(process.env.ALERT_SMTP_URL || "").trim();
 const ALERT_EMAIL_FROM = String(process.env.ALERT_EMAIL_FROM || "").trim();
 const ALERT_EMAIL_TO = String(process.env.ALERT_EMAIL_TO || "bojan@indus.si").trim();
 const MONITOR_INTERVAL_MS = Math.max(60_000, Number(process.env.MONITOR_INTERVAL_MS || 5 * 60_000));
+const OPERATIONAL_MONITOR_ENABLED = process.env.DISABLE_OPERATIONAL_MONITOR !== "true";
 const ARCHIVE_RETENTION_CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const MONITOR_MAX_RSS_MB = Math.max(256, Number(process.env.MONITOR_MAX_RSS_MB || 1_800));
 const REPORT_PDF_MAX_TOTAL_BYTES = 50 * 1024 * 1024;
@@ -60,6 +68,7 @@ let mutationQueue = Promise.resolve();
 let monitorTimer = null;
 let alertTransport = null;
 const monitorAlertCooldowns = new Map();
+const testLoginFailures = new Map();
 let archiveRetentionCleanupLastAt = 0;
 let archiveRetentionCleanupPromise = null;
 
@@ -419,6 +428,42 @@ function createSession(db, userId, now = Date.now()) {
   return token;
 }
 
+function localTestRequestAllowed(req) {
+  const remoteAddress = String(req.socket?.remoteAddress || "").replace(/^::ffff:/, "");
+  return remoteAddress === "127.0.0.1" || remoteAddress === "::1" || (TEST_LOCAL_NETWORK === "192.168.50." && remoteAddress.startsWith(TEST_LOCAL_NETWORK));
+}
+
+function localTestLoginEnabled(req) {
+  return LOCAL_TEST_MODE && TEST_LOCAL_LOGIN_PASSWORD.length >= 16 && localTestRequestAllowed(req);
+}
+
+function localTestLoginKey(req) {
+  return String(req.socket?.remoteAddress || "unknown").replace(/^::ffff:/, "");
+}
+
+function localTestLoginRateAllowed(req, now = Date.now()) {
+  const key = localTestLoginKey(req);
+  const attempts = (testLoginFailures.get(key) || []).filter((at) => now - at < 10 * 60_000);
+  testLoginFailures.set(key, attempts);
+  return attempts.length < 6;
+}
+
+function recordLocalTestLoginFailure(req, now = Date.now()) {
+  const key = localTestLoginKey(req);
+  const attempts = (testLoginFailures.get(key) || []).filter((at) => now - at < 10 * 60_000);
+  attempts.push(now);
+  testLoginFailures.set(key, attempts);
+}
+
+function clearLocalTestLoginFailures(req) {
+  testLoginFailures.delete(localTestLoginKey(req));
+}
+
+function validLocalTestPassword(value) {
+  const received = Buffer.from(String(value || ""));
+  const expected = Buffer.from(TEST_LOCAL_LOGIN_PASSWORD);
+  return received.length === expected.length && crypto.timingSafeEqual(received, expected);
+}
 function sessionForToken(db, token, now = Date.now()) {
   if (!token) return null;
   const session = db.sessions?.[sessionTokenHash(token)];
@@ -3595,6 +3640,42 @@ async function handleApi(req, res) {
   const url = new URL(req.url, `http://${req.headers.host}`);
 
   try {
+    if (url.pathname === "/api/test-mode" && req.method === "GET") {
+      sendJson(res, 200, { enabled: LOCAL_TEST_MODE, localNetwork: LOCAL_TEST_MODE ? "192.168.50.0/24" : "" });
+      return;
+    }
+
+    if (url.pathname === "/api/test-login" && req.method === "POST") {
+      // This endpoint is intentionally unavailable in production and from any
+      // network except the current local subnet/loopback.
+      if (!localTestLoginEnabled(req)) {
+        sendJson(res, 404, { error: "Ni na voljo." });
+        return;
+      }
+      if (!localTestLoginRateAllowed(req)) {
+        sendJson(res, 429, { error: "Preveč neuspelih poskusov. Počakaj deset minut." });
+        return;
+      }
+      const body = await readBody(req);
+      const userId = String(body.userId || "").trim();
+      if (!Object.hasOwn(defaultUsers, userId) || !validLocalTestPassword(body.password)) {
+        recordLocalTestLoginFailure(req);
+        sendJson(res, 401, { error: "Testno uporabniško ime ali geslo ni pravilno." });
+        return;
+      }
+      const db = await readDbAsync();
+      const user = db.users?.[userId];
+      if (!user) {
+        sendJson(res, 403, { error: "Testni uporabnik ni na voljo." });
+        return;
+      }
+      clearLocalTestLoginFailures(req);
+      const sessionToken = createSession(db, user.id);
+      await writeDbAsync(db);
+      setSessionCookie(req, res, sessionToken);
+      sendJson(res, 200, { ok: true, user: publicUser(user), csrfToken: db.sessions[sessionTokenHash(sessionToken)]?.csrfToken || "" });
+      return;
+    }
     const pendingAttachmentMatch = url.pathname.match(/^\/api\/attachments\/([a-f0-9]{64})\/pending$/);
     if (pendingAttachmentMatch && req.method === "DELETE") {
       const user = await requireUser(req, res);
@@ -5628,7 +5709,7 @@ async function start() {
   server.requestTimeout = 15 * 60_000;
   server.headersTimeout = 65_000;
   server.keepAliveTimeout = 5_000;
-  startOperationalMonitor();
+  if (OPERATIONAL_MONITOR_ENABLED) startOperationalMonitor();
 
   server.listen(PORT, HOST, () => {
     console.log(`INDUS URE lokalno: http://127.0.0.1:${PORT}`);

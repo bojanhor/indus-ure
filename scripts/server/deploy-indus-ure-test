@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+release="${1:-}"
+base="/opt/indus-ure"
+staging="/tmp/indus-ure-${release}-deploy"
+destination="$base/releases/$release"
+current="$base/test-current"
+
+if [[ ! "$release" =~ ^[0-9a-f]{7,40}$ ]]; then
+  echo "Neveljavna oznaka testne izdaje." >&2
+  exit 2
+fi
+
+previous="$(readlink -f "$current" 2>/dev/null || true)"
+if [[ ! -d "$destination" ]]; then
+  if [[ ! -d "$staging" || -L "$staging" || "$(realpath "$staging")" != "$staging" ]]; then
+    echo "Pripravljena testna izdaja ne obstaja." >&2
+    exit 3
+  fi
+  if [[ ! -f "$staging/package.json" || ! -f "$staging/outputs/server.js" ]]; then
+    echo "Pripravljena testna izdaja nima obveznih datotek." >&2
+    exit 3
+  fi
+  mv "$staging" "$destination"
+  chown -R root:root "$destination"
+fi
+
+chmod 0755 "$destination"
+temporary_link="$base/.test-current-$release"
+rm -f "$temporary_link"
+ln -s "$destination" "$temporary_link"
+mv -Tf "$temporary_link" "$current"
+
+if ! systemctl restart indus-ure-test || ! systemctl is-active --quiet indus-ure-test; then
+  if [[ -n "$previous" && -d "$previous" ]]; then
+    ln -sfn "$previous" "$current"
+    systemctl restart indus-ure-test || true
+  fi
+  echo "Zagon testne izdaje ni uspel; povrnjena je prejšnja testna izdaja." >&2
+  exit 4
+fi
+
+echo "Aktivna testna izdaja: $release"

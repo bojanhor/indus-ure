@@ -250,6 +250,17 @@
       background: #4285f4;
       font-weight: 800;
     }
+    .local-test-login {
+      width: min(360px, 100%);
+      display: grid;
+      gap: 10px;
+      padding: 14px;
+      border: 1px solid rgba(248, 250, 246, 0.28);
+      border-radius: 10px;
+      background: rgba(13, 27, 31, 0.58);
+      box-shadow: 0 18px 38px rgba(0, 0, 0, 0.18);
+    }
+    .local-test-login strong { color: #fff; font-size: 13px; letter-spacing: 0.04em; }
     .secondary { background: #e4eee9; color: #203035; }
     .ghost {
       border: 1px solid rgba(255, 255, 255, 0.18);
@@ -3765,6 +3776,19 @@
       <div class="login-logo">IU</div>
       <h1>INDUS URE</h1>
       <div class="offline hidden" id="serverWarning">Odpri stran prek lokalnega stre&#382;nika, ne direktno kot datoteko.</div>
+      <div class="local-test-login hidden" id="localTestLoginPanel">
+        <strong>LOKALNO TESTNO OKOLJE</strong>
+        <label>Testni uporabnik
+          <select id="localTestUser" disabled>
+            <option value="bojan">Bojan (&#353;ef)</option>
+            <option value="ibro">Ibro (delavec)</option>
+          </select>
+        </label>
+        <label>Testno geslo
+          <input id="localTestPassword" type="password" autocomplete="current-password" required disabled>
+        </label>
+        <button class="primary" id="localTestLoginBtn" type="submit" disabled>Vstopi v testno okolje</button>
+      </div>
       <button class="google-button" id="googleLoginBtn" type="submit">
         <span class="google-mark">G</span>
         <span>Prijavi se z Googlom</span>
@@ -4634,6 +4658,7 @@
       clientBills: [],
       billingWorkerId: "",
       user: null,
+      localTestMode: false,
       users: [],
       workerBilling: [],
       workContext: "",
@@ -4723,6 +4748,41 @@
 
     let sessionRecoveryPromise = null;
 
+    async function loadLocalTestMode() {
+      const panel = $("localTestLoginPanel");
+      const user = $("localTestUser");
+      const password = $("localTestPassword");
+      const button = $("localTestLoginBtn");
+      try {
+        const response = await fetch("/api/test-mode", { credentials: "same-origin", headers: { Accept: "application/json" } });
+        const data = response.ok ? await response.json() : {};
+        state.localTestMode = data?.enabled === true;
+      } catch {
+        state.localTestMode = false;
+      }
+      panel.classList.toggle("hidden", !state.localTestMode);
+      $("googleLoginBtn").classList.toggle("hidden", state.localTestMode);
+      user.disabled = !state.localTestMode;
+      password.disabled = !state.localTestMode;
+      button.disabled = !state.localTestMode;
+      if (state.localTestMode) password.value = "";
+    }
+
+    async function requestLocalTestLogin() {
+      const response = await fetch("/api/test-login", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({
+          userId: $("localTestUser").value,
+          password: $("localTestPassword").value
+        })
+      });
+      const text = await response.text();
+      const data = text ? JSON.parse(text) : {};
+      if (!response.ok) throw new Error(data?.error || "Testna prijava ni uspela.");
+      return data;
+    }
     async function requestGoogleLoginUrl(automatic = false) {
       const params = new URLSearchParams();
       if (automatic) params.set("automatic", "1");
@@ -5060,6 +5120,7 @@
     }
 
     async function boot() {
+      await loadLocalTestMode();
       setDefaultReportRange();
       if (location.protocol === "file:") {
         $("serverWarning").classList.remove("hidden");
@@ -10893,6 +10954,17 @@
 
     $("loginForm").addEventListener("submit", async (event) => {
       event.preventDefault();
+      if (state.localTestMode) {
+        try {
+          $("localTestLoginBtn").disabled = true;
+          await requestLocalTestLogin();
+          location.reload();
+        } catch (error) {
+          $("localTestLoginBtn").disabled = false;
+          showNotice(error.message);
+        }
+        return;
+      }
       try {
         $("googleLoginBtn").disabled = true;
         sessionStorage.removeItem(automaticLoginAttemptKey);
