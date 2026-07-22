@@ -2023,7 +2023,7 @@
       align-items: center;
       gap: 8px;
       width: max-content;
-      margin: 10px 12px 6px auto;
+      margin: 10px auto 6px 12px;
       color: var(--muted);
       font-size: 13px;
       font-weight: 700;
@@ -2561,6 +2561,23 @@
 
     #todoDialog { width: min(820px, calc(100vw - 26px)); }
 
+    #todoDialog .modal-head-actions { gap: 6px; }
+
+    #todoDialog .todo-modal-action {
+      width: 38px;
+      min-width: 38px;
+      height: 38px;
+      min-height: 38px;
+      display: inline-grid;
+      place-items: center;
+      padding: 0;
+      font-size: 20px;
+      line-height: 1;
+    }
+
+    #todoDialog .todo-modal-action.primary { background: var(--accent); color: #fff; }
+    #todoDialog .todo-modal-action.danger { background: #fff1f1; color: #9f3636; border: 1px solid #e3bcbc; }
+
     #attachmentPreviewDialog {
       width: min(1100px, calc(100vw - 20px));
       max-height: calc(100vh - 20px);
@@ -2636,51 +2653,121 @@
       text-align: center;
     }
 
-    .photo-editor-toolbar label {
+    .photo-editor-toolbar {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      flex-wrap: wrap;
+      padding: 9px 12px;
+      background: #f8fbf8;
+    }
+
+    .photo-editor-tool,
+    .photo-editor-tool.secondary {
+      width: 38px;
+      min-width: 38px;
+      height: 38px;
+      min-height: 38px;
+      display: inline-grid;
+      place-items: center;
+      padding: 0;
+      border: 1px solid #cadad3;
+      border-radius: 8px;
+      background: #fff;
+      color: #203035;
+      font-size: 20px;
+      font-weight: 850;
+      line-height: 1;
+    }
+
+    .photo-editor-tool:hover,
+    .photo-editor-tool:focus-visible,
+    .photo-editor-tool.is-active {
+      border-color: var(--accent);
+      background: #e5f4f2;
+      color: #0b627a;
+      outline: none;
+    }
+
+    .photo-editor-tool.danger:hover,
+    .photo-editor-tool.danger:focus-visible { background: #fff1f1; color: #9f3636; }
+
+    .photo-editor-tool.primary {
+      border-color: var(--accent);
+      background: var(--accent);
+      color: #fff;
+    }
+
+    .photo-editor-tool.primary:hover,
+    .photo-editor-tool.primary:focus-visible { background: #126b83; color: #fff; }
+    .photo-editor-color-control {
+      width: 38px;
+      height: 38px;
+      overflow: hidden;
+      border: 1px solid #cadad3;
+      border-radius: 8px;
+      background: #fff;
+      cursor: pointer;
+    }
+
+    .photo-editor-color-control input {
+      display: block;
+      width: 48px;
+      height: 48px;
+      margin: -5px;
+      padding: 0;
+      border: 0;
+      cursor: pointer;
+    }
+
+    .photo-editor-size-control {
       display: inline-flex;
       align-items: center;
-      gap: 6px;
+      gap: 5px;
+      min-width: 116px;
+      height: 38px;
+      padding: 0 8px;
+      border: 1px solid #cadad3;
+      border-radius: 8px;
+      background: #fff;
       color: var(--muted);
-      font-size: 12px;
-      font-weight: 800;
     }
 
-    .photo-editor-text-entry {
-      flex: 1 1 220px;
-      min-width: min(100%, 220px);
+    .photo-editor-size-control svg { width: 16px; height: 16px; fill: currentColor; }
+    .photo-editor-size-control input { min-width: 0; width: 74px; }
+
+    .photo-editor-text-editor {
+      flex: 1 1 320px;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      min-width: min(100%, 300px);
+      padding: 7px;
+      border: 1px solid #cadad3;
+      border-radius: 9px;
+      background: #fff;
     }
 
-    .photo-editor-text-entry input {
-      min-width: 0;
-      width: 100%;
-    }
+    .photo-editor-text-editor[hidden] { display: none; }
+
+    .photo-editor-text-entry { flex: 1 1 160px; min-width: 0; }
+    .photo-editor-text-entry input { width: 100%; min-width: 0; }
 
     .photo-editor-text-tools {
       display: flex;
       align-items: center;
       gap: 8px;
       flex-wrap: wrap;
-      padding: 7px 10px;
-      border: 1px solid var(--line);
-      border-radius: 9px;
-      background: var(--soft);
+      min-width: 0;
     }
 
     .photo-editor-text-tools[hidden] {
       display: none;
     }
 
-    .photo-editor-text-tools input[type="range"] {
-      width: min(140px, 28vw);
-    }
-
-    .photo-editor-text-step {
-      min-width: 34px;
-      min-height: 34px;
-      padding: 0;
-      line-height: 1;
-      font-size: 20px;
-    }
+    .photo-editor-text-tools input[type="range"] { width: min(112px, 20vw); min-width: 70px; }
+    .photo-editor-text-tools label { display: inline-flex; align-items: center; gap: 5px; min-width: 0; color: var(--muted); font-size: 11px; font-weight: 800; }
+    .photo-editor-text-step { width: 30px; min-width: 30px; height: 30px; min-height: 30px; padding: 0; font-size: 18px; }
 
     .photo-editor-canvas-shell.is-text-editing #photoEditorCanvas {
       cursor: move;
@@ -2689,6 +2776,8 @@
     .photo-editor-canvas-shell.is-pan-mode #photoEditorCanvas {
       cursor: grab;
     }
+
+    .photo-editor-canvas-shell.is-crop-mode #photoEditorCanvas { cursor: crosshair; }
 
     .photo-editor-canvas-shell.is-panning #photoEditorCanvas {
       cursor: grabbing;
@@ -2699,6 +2788,16 @@
       align-items: center;
       gap: 7px;
     }
+
+    .photo-editor-crop-actions {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding-left: 2px;
+      border-left: 1px solid var(--line);
+    }
+
+    .photo-editor-crop-actions[hidden] { display: none; }
 
     .gesture-zoom-controls .zoom-step {
       width: 44px;
@@ -2723,13 +2822,22 @@
     }
     #photoEditorDialog {
       width: min(1100px, calc(100vw - 20px));
-      max-height: calc(100vh - 20px);
+      height: min(900px, calc(100dvh - 20px));
+      max-height: calc(100dvh - 20px);
+    }
+
+    #photoEditorDialog > form {
+      height: 100%;
+      min-height: 0;
+      display: grid;
+      grid-template-rows: auto auto minmax(0, 1fr);
+      overflow: hidden;
     }
 
     .photo-editor-canvas-shell {
       display: block;
       min-height: 220px;
-      max-height: calc(100vh - 210px);
+      max-height: none;
       overflow: auto;
       padding: 10px;
       background: #11181c;
@@ -2741,7 +2849,7 @@
       display: block;
       max-width: none;
       height: auto;
-      margin: 0;
+      margin: 0 auto;
       background: #fff;
       cursor: crosshair;
       touch-action: none;
@@ -3543,27 +3651,27 @@
       .todo-form-photo-actions { gap: 4px; }
       .todo-form-photo-actions > button { min-width: 36px; min-height: 36px; padding: 5px 7px; }
       #photoEditorDialog { width: 100vw; height: 100dvh; max-height: none; border-radius: 0; }
-      #photoEditorDialog > form { height: 100%; min-height: 0; display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; overflow: hidden; }
+      #photoEditorDialog > form { height: 100%; min-height: 0; display: grid; grid-template-rows: auto auto minmax(0, 1fr); overflow: hidden; }
       #photoEditorDialog .modal-head { padding: 10px 12px; }
       #photoEditorDialog .photo-editor-toolbar {
         display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
         max-height: 31dvh; overflow-y: auto; align-content: start; gap: 6px; padding: 8px;
       }
       #photoEditorDialog .photo-editor-toolbar > label,
-      #photoEditorDialog .photo-editor-toolbar > button { min-width: 0; min-height: 40px; }
-      #photoEditorDialog .photo-editor-toolbar > label { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; }
-      #photoEditorDialog .photo-editor-toolbar > button { padding: 6px 4px; }
-      #photoEditorDialog .photo-editor-text-entry,
-      #photoEditorDialog .photo-editor-text-tools,
+      #photoEditorDialog .photo-editor-toolbar > button { min-width: 0; min-height: 38px; }
+      #photoEditorDialog .photo-editor-size-control { grid-column: span 2; }
+      #photoEditorDialog .photo-editor-text-editor,
       #photoEditorDialog .gesture-zoom-controls { grid-column: 1 / -1; width: 100%; }
-      #photoEditorDialog .photo-editor-text-entry { display: grid; grid-template-columns: 68px minmax(0, 1fr); }
-      #photoEditorDialog .photo-editor-text-tools { display: grid; grid-template-columns: 1fr; gap: 6px; padding: 7px; }
+      #photoEditorDialog .photo-editor-text-editor { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
+      #photoEditorDialog .photo-editor-text-editor[hidden] { display: none; }
+      #photoEditorDialog .photo-editor-text-tools { display: grid; grid-template-columns: 1fr; gap: 6px; }
       #photoEditorDialog .photo-editor-text-tools label { display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; }
       #photoEditorDialog .photo-editor-text-tools input[type="range"] { width: 100%; min-width: 0; }
-      #photoEditorDialog .gesture-zoom-controls { display: grid; grid-template-columns: 42px minmax(0, 1fr) 42px auto; gap: 6px; }
+      #photoEditorDialog .gesture-zoom-controls { display: grid; grid-template-columns: 38px minmax(0, 1fr) 38px 38px; gap: 6px; }
+      #photoEditorDialog .photo-editor-crop-actions { display: inline-flex; grid-column: span 2; justify-content: flex-end; }
+      #photoEditorDialog .photo-editor-crop-actions[hidden] { display: none; }
       #photoEditorDialog .zoom-value { text-align: center; align-self: center; }
       #photoEditorDialog .photo-editor-canvas-shell { min-height: 0; max-height: none; padding: 6px; overscroll-behavior: contain; }
-      #photoEditorDialog .actions.modal-body { padding: 10px 12px; }
       .client-billing-intro { display: grid; gap: 10px; }
       .client-billing-intro-actions { display: flex; flex-wrap: wrap; gap: 8px; }
       .client-billing-intro .secondary { width: 100%; }
@@ -3917,7 +4025,13 @@
     <form method="dialog" id="todoForm">
       <div class="modal-head">
         <h3 id="todoFormTitle">Opravilo</h3>
-        <button class="icon-btn" id="closeTodoDialog" type="button" title="Zapri">&times;</button>
+        <div class="modal-head-actions" aria-label="Dejanja opravila">
+          <button class="todo-modal-action danger hidden" id="deleteTodoFromDialog" type="button" title="Izbriši opravilo" aria-label="Izbriši opravilo">&#128465;</button>
+          <button class="todo-modal-action secondary hidden" id="duplicateTodoFromDialog" type="button" title="Podvoji opravilo" aria-label="Podvoji opravilo">&#10697;</button>
+          <button class="todo-modal-action secondary hidden" id="writeHoursFromTodo" type="button" title="Piši ure na ta projekt" aria-label="Piši ure na ta projekt">&#9201;</button>
+          <button class="todo-modal-action primary" id="saveTodoDialog" type="submit" title="Shrani" aria-label="Shrani">&#10003;</button>
+          <button class="icon-btn" id="closeTodoDialog" type="button" title="Zapri brez shranjevanja" aria-label="Zapri brez shranjevanja">&times;</button>
+        </div>
       </div>
       <div class="todo-creation-tabs hidden" id="todoCreationTabs" role="tablist" aria-label="Vrsta novega vnosa">
         <button class="todo-creation-tab" type="button" role="tab" data-create-mode="task">Nov dogodek</button>
@@ -4035,13 +4149,7 @@
         <div class="audit-box hidden" id="todoFormSourceProject">
           <span>Izvorno opravilo: </span><button class="secondary" id="openTodoSourceProject" type="button">Odpri in uredi</button>
         </div>
-        <div class="actions">
-          <button type="button" class="danger" id="deleteTodoFromDialog">Izbri&#353;i opravilo</button>
-          <button type="button" class="secondary hidden" id="duplicateTodoFromDialog">Podvoji</button>
-          <button type="button" class="secondary hidden" id="writeHoursFromTodo">Pi&#353;i ure na ta projekt</button>
-          <button type="button" class="secondary" id="cancelTodoDialog">Prekli&#269;i</button>
-          <button type="submit" class="primary" id="saveTodoDialog">Shrani</button>
-        </div>
+
       </div>
     </form>
   </dialog>
@@ -4185,47 +4293,56 @@
     <form method="dialog">
       <div class="modal-head">
         <h3 id="photoEditorTitle">Uredi fotografijo</h3>
-        <button class="icon-btn" type="submit" title="Zapri" aria-label="Zapri urejevalnik">&times;</button>
+        <div class="modal-head-actions">
+          <button class="photo-editor-tool primary" id="photoEditorSave" type="button" title="Shrani sliko" aria-label="Shrani sliko">&#10003;</button>
+          <button class="icon-btn" type="submit" title="Zapri brez shranjevanja" aria-label="Zapri brez shranjevanja">&times;</button>
+        </div>
       </div>
-      <div class="photo-editor-toolbar">
-        <label>Barva
+      <div class="photo-editor-toolbar" role="toolbar" aria-label="Orodja za urejanje slike">
+        <label class="photo-editor-color-control" title="Barva črte in besedila" aria-label="Barva črte in besedila">
           <input id="photoEditorColor" type="color" value="#ff2d2d">
         </label>
-        <label>Debelina
-          <input id="photoEditorSize" type="range" min="1" max="30" value="1">
+        <label class="photo-editor-size-control" title="Debelina črte">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="5" cy="10" r="2"></circle><circle cx="14" cy="10" r="5"></circle></svg>
+          <input id="photoEditorSize" type="range" min="1" max="30" value="1" aria-label="Debelina črte">
         </label>
-        <button class="secondary" id="photoEditorDraw" type="button">&#268;rta</button>
-        <button class="secondary" id="photoEditorPan" type="button">Premakni</button>
-        <label class="photo-editor-text-entry">Besedilo
-          <input id="photoEditorText" type="text" maxlength="160" placeholder="Vpi&#353;i oznako za sliko">
-        </label>
-        <button class="secondary" id="photoEditorAddText" type="button">Dodaj besedilo</button>
-        <div class="photo-editor-text-tools" id="photoEditorTextTools" hidden>
-          <label>Velikost
-            <button class="secondary photo-editor-text-step" id="photoEditorTextSmaller" type="button" aria-label="Manj&#353;a pisava">&minus;</button>
-            <input id="photoEditorTextSize" type="range" min="12" max="160" value="32" aria-label="Velikost besedila">
-            <button class="secondary photo-editor-text-step" id="photoEditorTextLarger" type="button" aria-label="Ve&#269;ja pisava">&plus;</button>
-          </label>
-          <label>Vrtenje
-            <input id="photoEditorTextRotation" type="range" min="-180" max="180" value="0" aria-label="Vrtenje besedila">
-          </label>
-          <button class="secondary" id="photoEditorDeleteText" type="button">Odstrani napis</button>
-        </div>
-        <button class="secondary" id="photoEditorUndo" type="button">Razveljavi</button>
-        <div class="gesture-zoom-controls" aria-label="Pove&#269;ava urejevalnika">
-          <button class="secondary zoom-step" id="photoEditorZoomOut" type="button" aria-label="Pomanj&#353;aj">&minus;</button>
+        <button class="photo-editor-tool is-active" id="photoEditorDraw" type="button" title="Riši" aria-label="Riši">&#9998;</button>
+        <button class="photo-editor-tool" id="photoEditorPan" type="button" title="Premakni sliko" aria-label="Premakni sliko">&#9995;</button>
+        <button class="photo-editor-tool" id="photoEditorCrop" type="button" title="Obreži sliko" aria-label="Obreži sliko">&#9986;</button>
+        <button class="photo-editor-tool" id="photoEditorAddText" type="button" title="Dodaj besedilo" aria-label="Dodaj besedilo">T</button>
+        <button class="photo-editor-tool" id="photoEditorUndo" type="button" title="Razveljavi zadnje dejanje" aria-label="Razveljavi zadnje dejanje">&#8630;</button>
+        <button class="photo-editor-tool danger" id="photoEditorClear" type="button" title="Počisti oznake" aria-label="Počisti oznake">&#9003;</button>
+        <div class="gesture-zoom-controls" aria-label="Povečava urejevalnika">
+          <button class="photo-editor-tool" id="photoEditorZoomOut" type="button" aria-label="Pomanjšaj">&minus;</button>
           <span class="zoom-value" id="photoEditorZoomValue">100 %</span>
-          <button class="secondary zoom-step" id="photoEditorZoomIn" type="button" aria-label="Pove&#269;aj">&plus;</button>
-          <button class="secondary" id="photoEditorFit" type="button">Prilagodi</button>
+          <button class="photo-editor-tool" id="photoEditorZoomIn" type="button" aria-label="Povečaj">&plus;</button>
+          <button class="photo-editor-tool" id="photoEditorFit" type="button" title="Prilagodi sliko" aria-label="Prilagodi sliko">&#8862;</button>
         </div>
-        <button class="secondary" id="photoEditorClear" type="button">Po&#269;isti</button>
+        <div class="photo-editor-crop-actions" id="photoEditorCropActions" hidden>
+          <button class="photo-editor-tool primary" id="photoEditorApplyCrop" type="button" title="Uporabi izrez" aria-label="Uporabi izrez">&#10003;</button>
+          <button class="photo-editor-tool" id="photoEditorCancelCrop" type="button" title="Prekliči izrez" aria-label="Prekliči izrez">&times;</button>
+        </div>
+        <div class="photo-editor-text-editor" id="photoEditorTextEditor" hidden>
+          <label class="photo-editor-text-entry">
+            <span class="sr-only">Besedilo</span>
+            <input id="photoEditorText" type="text" maxlength="160" placeholder="Vpiši oznako za sliko">
+          </label>
+          <div class="photo-editor-text-tools" id="photoEditorTextTools" hidden>
+            <label title="Velikost besedila">
+              <button class="photo-editor-tool photo-editor-text-step" id="photoEditorTextSmaller" type="button" aria-label="Manjša pisava">&minus;</button>
+              <input id="photoEditorTextSize" type="range" min="12" max="160" value="32" aria-label="Velikost besedila">
+              <button class="photo-editor-tool photo-editor-text-step" id="photoEditorTextLarger" type="button" aria-label="Večja pisava">&plus;</button>
+            </label>
+            <label title="Vrtenje besedila">
+              <span class="sr-only">Vrtenje</span>
+              <input id="photoEditorTextRotation" type="range" min="-180" max="180" value="0" aria-label="Vrtenje besedila">
+            </label>
+            <button class="photo-editor-tool danger" id="photoEditorDeleteText" type="button" title="Odstrani napis" aria-label="Odstrani napis">&#128465;</button>
+          </div>
+        </div>
       </div>
       <div class="photo-editor-canvas-shell">
         <canvas id="photoEditorCanvas"></canvas>
-      </div>
-      <div class="actions modal-body">
-        <button class="secondary" type="submit">Prekli&#269;i</button>
-        <button class="primary" id="photoEditorSave" type="button">Shrani sliko</button>
       </div>
     </form>
   </dialog>
@@ -5977,9 +6094,23 @@
       return Number.isFinite(personalOrder) ? personalOrder : Number(todo?.order || 0);
     }
 
+    const manualOrderingStatusIds = new Set(["order", "order_car", "order_warehouse", "add_to_car"]);
+
     function todoManualBucketForCurrentUser(todo) {
       const userId = activeWorkerId() || state.user?.id || "";
       return todo?.userOrderBuckets?.[userId] === "unsorted" ? "unsorted" : "sorted";
+    }
+
+    function todoManualCategory(todo) {
+      if (todo?.status === "execution") return "completed";
+      if (manualOrderingStatusIds.has(todo?.status)) return "ordering";
+      return todoManualBucketForCurrentUser(todo);
+    }
+
+    function todoManualCategorySort(a, b) {
+      const positions = { unsorted: 0, ordering: 1, sorted: 2, completed: 3 };
+      const categoryDifference = (positions[todoManualCategory(a)] ?? 9) - (positions[todoManualCategory(b)] ?? 9);
+      return categoryDifference || todoSort(a, b);
     }
 
     function todoManualBucketSort(a, b) {
@@ -6031,7 +6162,7 @@
       if (state.todoSortMode === "in_progress") return list.filter((todo) => todo.status === "in_progress").sort(todoManualBucketSort);
       if (state.todoSortMode === "client") return list.filter((todo) => !timeEntryStatusIds.has(todo.status) || todo.status === "execution").sort(todoSort);
       if (state.todoSortMode === "manual") {
-        const active = list.filter((todo) => !timeEntryStatusIds.has(todo.status)).sort(todoManualBucketSort);
+        const active = list.filter((todo) => !timeEntryStatusIds.has(todo.status)).sort(todoManualCategorySort);
         const completed = list.filter((todo) => todo.status === "execution").sort(todoDateSort);
         return [...active, ...completed];
       }
@@ -7714,6 +7845,7 @@
       const labels = {
         sorted: ["Razvrščeno", "Ustaljeni vrstni red"],
         unsorted: ["Nerazvrščeno", "Nova opravila"],
+        ordering: ["Naroči", "Naročila in opravila za v avto"],
         completed: ["Zaključeno", "Zaključena opravila po datumu"]
       };
       const [label, detail] = labels[bucket] || labels.sorted;
@@ -7808,14 +7940,8 @@
       }
 
       const showManualSections = state.todoSortMode === "manual";
-      const manualActiveTodos = showManualSections ? todos.filter((todo) => todo.status !== "execution") : [];
       let completedGroupKey = "";
-      let currentManualBucket = "";
-      let manualCompletedSectionShown = false;
-      if (showManualSections && manualActiveTodos.some((todo) => todoManualBucketForCurrentUser(todo) === "unsorted")) {
-        appendTodoOrderSection(items, "unsorted");
-        currentManualBucket = "unsorted";
-      }
+      let currentManualCategory = "";
 
       todos.forEach((todo) => {
         const groupKey = todo.clientId || normalizeText(todo.client) || "__brez_stranke__";
@@ -7827,16 +7953,11 @@
           group.innerHTML = `<span>${escapeHtml(todo.client || "Brez stranke")}</span><span>${completedTodoGroupCount(todos, todo)} opravil &middot; ${groupHours.toLocaleString("sl-SI", { maximumFractionDigits: 2 })} h</span>`;
           items.appendChild(group);
         }
-        const manualCompleted = showManualSections && todo.status === "execution";
-        if (manualCompleted && !manualCompletedSectionShown) {
-          appendTodoOrderSection(items, "completed");
-          manualCompletedSectionShown = true;
-        }
-        if (showManualSections && !manualCompleted) {
-          const manualBucket = todoManualBucketForCurrentUser(todo);
-          if (manualBucket !== currentManualBucket) {
-            appendTodoOrderSection(items, manualBucket);
-            currentManualBucket = manualBucket;
+        if (showManualSections) {
+          const manualCategory = todoManualCategory(todo);
+          if (manualCategory !== currentManualCategory) {
+            appendTodoOrderSection(items, manualCategory);
+            currentManualCategory = manualCategory;
           }
         }
         const item = document.createElement("div");
@@ -8151,22 +8272,131 @@
       return null;
     }
 
+    function photoEditorCropMinimum() {
+      const canvas = $("photoEditorCanvas");
+      return Math.max(24, Math.min(96, Math.round(Math.min(canvas.width, canvas.height) * 0.06)));
+    }
+
+    function normalizePhotoEditorCropRect(rect) {
+      const canvas = $("photoEditorCanvas");
+      const minimum = photoEditorCropMinimum();
+      const width = Math.max(minimum, Math.min(canvas.width, Number(rect?.width) || minimum));
+      const height = Math.max(minimum, Math.min(canvas.height, Number(rect?.height) || minimum));
+      return {
+        x: Math.max(0, Math.min(canvas.width - width, Number(rect?.x) || 0)),
+        y: Math.max(0, Math.min(canvas.height - height, Number(rect?.y) || 0)),
+        width,
+        height
+      };
+    }
+
+    function defaultPhotoEditorCropRect() {
+      const canvas = $("photoEditorCanvas");
+      const inset = Math.max(0, Math.round(Math.min(canvas.width, canvas.height) * 0.075));
+      return normalizePhotoEditorCropRect({ x: inset, y: inset, width: canvas.width - inset * 2, height: canvas.height - inset * 2 });
+    }
+
+    function drawPhotoEditorCropOverlay(context, crop) {
+      if (!crop) return;
+      const canvas = $("photoEditorCanvas");
+      context.save();
+      context.fillStyle = "rgba(6, 18, 22, .52)";
+      context.beginPath();
+      context.rect(0, 0, canvas.width, canvas.height);
+      context.rect(crop.x, crop.y, crop.width, crop.height);
+      context.fill("evenodd");
+      context.strokeStyle = "#e7ffff";
+      context.lineWidth = Math.max(2, Math.min(canvas.width, canvas.height) * 0.004);
+      context.setLineDash([Math.max(6, context.lineWidth * 3), Math.max(5, context.lineWidth * 2)]);
+      context.strokeRect(crop.x, crop.y, crop.width, crop.height);
+      context.setLineDash([]);
+      const handle = Math.max(10, Math.min(26, Math.min(crop.width, crop.height) * 0.12));
+      context.fillStyle = "#e7ffff";
+      context.strokeStyle = "#087c99";
+      context.lineWidth = Math.max(1.5, context.lineWidth * .8);
+      [
+        [crop.x, crop.y], [crop.x + crop.width, crop.y],
+        [crop.x, crop.y + crop.height], [crop.x + crop.width, crop.y + crop.height]
+      ].forEach(([x, y]) => {
+        context.beginPath();
+        context.rect(x - handle / 2, y - handle / 2, handle, handle);
+        context.fill();
+        context.stroke();
+      });
+      context.restore();
+    }
+
+    function photoEditorCropHitTest(point) {
+      const editor = state.photoEditor;
+      const crop = editor?.cropRect;
+      if (!crop) return { action: "new" };
+      const handle = Math.max(18, Math.min(48, Math.min(crop.width, crop.height) * 0.16));
+      const near = (x, y) => Math.abs(point.x - x) <= handle && Math.abs(point.y - y) <= handle;
+      if (near(crop.x, crop.y)) return { action: "nw" };
+      if (near(crop.x + crop.width, crop.y)) return { action: "ne" };
+      if (near(crop.x, crop.y + crop.height)) return { action: "sw" };
+      if (near(crop.x + crop.width, crop.y + crop.height)) return { action: "se" };
+      if (point.x >= crop.x && point.x <= crop.x + crop.width && point.y >= crop.y && point.y <= crop.y + crop.height) return { action: "move" };
+      return { action: "new" };
+    }
+
+    function updatePhotoEditorCropInteraction(point) {
+      const editor = state.photoEditor;
+      const interaction = editor?.cropInteraction;
+      if (!interaction) return;
+      const canvas = $("photoEditorCanvas");
+      const minimum = photoEditorCropMinimum();
+      const dx = point.x - interaction.start.x;
+      const dy = point.y - interaction.start.y;
+      const before = interaction.before;
+      let next = { ...before };
+      if (interaction.action === "move") {
+        next.x = before.x + dx;
+        next.y = before.y + dy;
+      } else if (interaction.action === "new") {
+        next = { x: Math.min(interaction.start.x, point.x), y: Math.min(interaction.start.y, point.y), width: Math.abs(dx), height: Math.abs(dy) };
+      } else {
+        if (interaction.action.includes("w")) { next.x = before.x + dx; next.width = before.width - dx; }
+        if (interaction.action.includes("e")) next.width = before.width + dx;
+        if (interaction.action.includes("n")) { next.y = before.y + dy; next.height = before.height - dy; }
+        if (interaction.action.includes("s")) next.height = before.height + dy;
+        if (next.width < minimum) {
+          if (interaction.action.includes("w")) next.x = before.x + before.width - minimum;
+          next.width = minimum;
+        }
+        if (next.height < minimum) {
+          if (interaction.action.includes("n")) next.y = before.y + before.height - minimum;
+          next.height = minimum;
+        }
+      }
+      next.width = Math.max(minimum, Math.min(canvas.width, next.width));
+      next.height = Math.max(minimum, Math.min(canvas.height, next.height));
+      editor.cropRect = normalizePhotoEditorCropRect(next);
+    }
+
     function setPhotoEditorTextSelection(textId = "") {
       const editor = state.photoEditor;
       if (!editor) return;
       editor.selectedTextId = textId;
       const text = selectedPhotoEditorText();
+      if (text) editor.textDraftActive = false;
+      $("photoEditorTextEditor").hidden = !text && !editor.textDraftActive;
       $("photoEditorTextTools").hidden = !text;
+      $("photoEditorCropActions").hidden = editor.mode !== "crop";
       const shell = $("photoEditorCanvas").closest(".photo-editor-canvas-shell");
       shell.classList.toggle("is-text-editing", Boolean(text) && editor.mode === "text");
       shell.classList.toggle("is-pan-mode", editor.mode === "pan");
+      shell.classList.toggle("is-crop-mode", editor.mode === "crop");
       $("photoEditorDraw").classList.toggle("is-active", editor.mode === "draw");
       $("photoEditorPan").classList.toggle("is-active", editor.mode === "pan");
+      $("photoEditorCrop").classList.toggle("is-active", editor.mode === "crop");
       if (text) {
         $("photoEditorText").value = text.text;
         $("photoEditorTextSize").value = Math.round(Math.max(12, Math.min(160, text.size)));
         $("photoEditorTextRotation").value = Math.round(Number(text.rotation || 0));
         $("photoEditorColor").value = text.color;
+      } else if (!editor.textDraftActive) {
+        $("photoEditorText").value = "";
       }
     }
 
@@ -8193,6 +8423,7 @@
       editor.strokes.forEach((stroke) => drawPhotoEditorStroke(context, stroke));
       if (editor.activeStroke) drawPhotoEditorStroke(context, editor.activeStroke);
       editor.texts.forEach((text) => drawPhotoEditorText(context, text, includeSelection && text.id === editor.selectedTextId));
+      if (editor.cropRect) drawPhotoEditorCropOverlay(context, editor.cropRect);
     }
 
     function photoEditorPoint(event) {
@@ -8276,6 +8507,9 @@
           selectedTextId: "",
           textInteraction: null,
           textControlBefore: null,
+          textDraftActive: false,
+          cropRect: null,
+          cropInteraction: null,
           mode: "draw",
           activeStroke: null,
           zoom: 100,
@@ -8329,8 +8563,84 @@
       editor.texts.push(text);
       photoEditorHistoryPush({ type: "text-add", id: text.id });
       editor.mode = "text";
+      editor.textDraftActive = false;
       setPhotoEditorTextSelection(text.id);
       redrawPhotoEditor();
+    }
+
+    function openPhotoEditorTextEntry() {
+      const editor = state.photoEditor;
+      if (!editor) return;
+      if (editor.textDraftActive && $("photoEditorText").value.trim()) {
+        addPhotoEditorText();
+        return;
+      }
+      finishPhotoEditorStroke();
+      editor.mode = "text";
+      editor.cropRect = null;
+      editor.cropInteraction = null;
+      editor.textDraftActive = true;
+      setPhotoEditorTextSelection();
+      redrawPhotoEditor();
+      requestAnimationFrame(() => $("photoEditorText").focus({ preventScroll: true }));
+    }
+
+    function enterPhotoEditorCropMode() {
+      const editor = state.photoEditor;
+      if (!editor) return;
+      finishPhotoEditorStroke();
+      editor.mode = "crop";
+      editor.textDraftActive = false;
+      editor.cropInteraction = null;
+      editor.cropRect = editor.cropRect || defaultPhotoEditorCropRect();
+      setPhotoEditorTextSelection();
+      redrawPhotoEditor();
+    }
+
+    function cancelPhotoEditorCrop() {
+      const editor = state.photoEditor;
+      if (!editor) return;
+      editor.cropRect = null;
+      editor.cropInteraction = null;
+      editor.mode = "draw";
+      setPhotoEditorTextSelection();
+      redrawPhotoEditor();
+    }
+
+    function copyPhotoEditorCanvas(canvas) {
+      const copy = document.createElement("canvas");
+      copy.width = canvas.width;
+      copy.height = canvas.height;
+      copy.getContext("2d").drawImage(canvas, 0, 0);
+      return copy;
+    }
+
+    function applyPhotoEditorCrop() {
+      const editor = state.photoEditor;
+      const canvas = $("photoEditorCanvas");
+      if (!editor?.cropRect) return;
+      finishPhotoEditorStroke();
+      const crop = normalizePhotoEditorCropRect(editor.cropRect);
+      editor.cropRect = null;
+      redrawPhotoEditor({ includeSelection: false });
+      const beforeImage = copyPhotoEditorCanvas(canvas);
+      const output = document.createElement("canvas");
+      output.width = Math.max(1, Math.round(crop.width));
+      output.height = Math.max(1, Math.round(crop.height));
+      output.getContext("2d").drawImage(beforeImage, crop.x, crop.y, crop.width, crop.height, 0, 0, output.width, output.height);
+      photoEditorHistoryPush({ type: "crop", beforeImage });
+      canvas.width = output.width;
+      canvas.height = output.height;
+      editor.image = output;
+      editor.strokes = [];
+      editor.texts = [];
+      editor.selectedTextId = "";
+      editor.textDraftActive = false;
+      editor.cropInteraction = null;
+      editor.mode = "draw";
+      setPhotoEditorTextSelection();
+      redrawPhotoEditor();
+      requestAnimationFrame(fitPhotoEditorZoom);
     }
 
     function undoPhotoEditorAction() {
@@ -8362,12 +8672,30 @@
         editor.texts = action.texts;
         setPhotoEditorTextSelection(action.selectedTextId);
       }
+      if (action.type === "crop") {
+        const canvas = $("photoEditorCanvas");
+        canvas.width = action.beforeImage.width;
+        canvas.height = action.beforeImage.height;
+        editor.image = action.beforeImage;
+        editor.strokes = [];
+        editor.texts = [];
+        editor.cropRect = null;
+        editor.cropInteraction = null;
+        editor.mode = "draw";
+        editor.textDraftActive = false;
+        setPhotoEditorTextSelection();
+        requestAnimationFrame(fitPhotoEditorZoom);
+      }
       redrawPhotoEditor();
     }
 
     function savePhotoEditor() {
       const editor = state.photoEditor;
       if (!editor) return;
+      if (editor.mode === "crop" && editor.cropRect) {
+        showNotice("Najprej potrdi ali prekliči izrez slike.");
+        return;
+      }
       finishPhotoEditorStroke();
       redrawPhotoEditor({ includeSelection: false });
       const data = canvasAsLimitedJpegDataUrl($("photoEditorCanvas"));
@@ -10768,7 +11096,7 @@
     $("reportClientSort").addEventListener("change", () => { state.reportClientSort = $("reportClientSort").value; renderReport(); });
 
     $("closeTodoDialog").addEventListener("click", () => $("todoDialog").close());
-    $("cancelTodoDialog").addEventListener("click", () => $("todoDialog").close());
+
     ["todoFormStart", "todoFormEnd"].forEach((id) => $(id).addEventListener("change", normalizeTodoFormTimes));
     $("clearTodoFormDate").addEventListener("click", () => {
       $("todoFormDate").value = "";
@@ -11175,6 +11503,7 @@
       if (editor.pointers.size >= 2) {
         editor.activeStroke = null;
         editor.textInteraction = null;
+        editor.cropInteraction = null;
         editor.pan = null;
         shell.classList.remove("is-panning");
         editor.gestureUsed = true;
@@ -11190,6 +11519,19 @@
         return;
       }
       const point = photoEditorPoint(event);
+      if (editor.mode === "crop") {
+        const hit = photoEditorCropHitTest(point);
+        const currentCrop = editor.cropRect || defaultPhotoEditorCropRect();
+        if (hit.action === "new") editor.cropRect = normalizePhotoEditorCropRect({ x: point.x, y: point.y, width: photoEditorCropMinimum(), height: photoEditorCropMinimum() });
+        editor.cropInteraction = {
+          pointerId: event.pointerId,
+          action: hit.action,
+          start: point,
+          before: { ...(editor.cropRect || currentCrop) }
+        };
+        redrawPhotoEditor();
+        return;
+      }
       const hit = photoEditorTextHitTest(point);
       if (hit) {
         editor.mode = "text";
@@ -11226,6 +11568,12 @@
       editor.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
       if (editor.pointers.size >= 2) {
         queuePhotoEditorPinch(pointerGestureMetrics(editor.pointers));
+        return;
+      }
+      const cropInteraction = editor.cropInteraction;
+      if (cropInteraction?.pointerId === event.pointerId) {
+        updatePhotoEditorCropInteraction(photoEditorPoint(event));
+        redrawPhotoEditor();
         return;
       }
       const pan = editor.pan;
@@ -11270,6 +11618,11 @@
         editor.pan = null;
         shell.classList.remove("is-panning");
       }
+      const cropInteraction = editor.cropInteraction;
+      if (cropInteraction?.pointerId === event.pointerId) {
+        editor.cropInteraction = null;
+        redrawPhotoEditor();
+      }
       const interaction = editor.textInteraction;
       if (interaction?.pointerId === event.pointerId) {
         const text = selectedPhotoEditorText();
@@ -11305,16 +11658,25 @@
     $("photoEditorDraw").addEventListener("click", () => {
       if (!state.photoEditor) return;
       state.photoEditor.mode = "draw";
+      state.photoEditor.cropRect = null;
+      state.photoEditor.cropInteraction = null;
+      state.photoEditor.textDraftActive = false;
       setPhotoEditorTextSelection();
       redrawPhotoEditor();
     });
     $("photoEditorPan").addEventListener("click", () => {
       if (!state.photoEditor) return;
       state.photoEditor.mode = "pan";
+      state.photoEditor.cropRect = null;
+      state.photoEditor.cropInteraction = null;
+      state.photoEditor.textDraftActive = false;
       setPhotoEditorTextSelection();
       redrawPhotoEditor();
     });
-    $("photoEditorAddText").addEventListener("click", addPhotoEditorText);
+    $("photoEditorCrop").addEventListener("click", enterPhotoEditorCropMode);
+    $("photoEditorApplyCrop").addEventListener("click", applyPhotoEditorCrop);
+    $("photoEditorCancelCrop").addEventListener("click", cancelPhotoEditorCrop);
+    $("photoEditorAddText").addEventListener("click", openPhotoEditorTextEntry);
     $("photoEditorText").addEventListener("keydown", (event) => {
       if (event.key !== "Enter") return;
       event.preventDefault();
@@ -11385,7 +11747,9 @@
       shell.scrollTop = 0;
       $("photoEditorZoomValue").textContent = "100 %";
       $("photoEditorTextTools").hidden = true;
-      shell.classList.remove("is-text-editing", "is-pan-mode", "is-panning");
+      $("photoEditorTextEditor").hidden = true;
+      $("photoEditorCropActions").hidden = true;
+      shell.classList.remove("is-text-editing", "is-pan-mode", "is-crop-mode", "is-panning");
     });
     $("photoEditorDialog").addEventListener("click", (event) => {
       if (event.target === event.currentTarget) event.currentTarget.close();
