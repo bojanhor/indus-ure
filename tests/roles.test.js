@@ -4,6 +4,7 @@ const test = require("node:test");
 const {
   ENTRY_EDIT_LOCK_TTL_MS,
   SESSION_TTL_MS,
+  TODO_STATUS_DEFINITIONS,
   TODO_EDIT_LOCK_TTL_MS,
   acquireEntryEditLock,
   acquireTodoEditLock,
@@ -109,6 +110,20 @@ test("vsako opravilo dobi skriti skupni ID dogodka", () => {
   const result = normalizeDb(legacyDb);
   assert.equal(result.changed, true);
   assert.equal(legacyDb.todos[0].assignmentGroupId, "legacy-todo");
+});
+test("naročila uporabljajo ločeno potrditev namesto statusa naročeno", () => {
+  assert.equal(TODO_STATUS_DEFINITIONS.order.label, "Naro\u010di-projekt");
+  assert.equal(Object.hasOwn(TODO_STATUS_DEFINITIONS, "ordered"), false);
+
+  const database = {
+    users: {}, entries: [], debts: [], clients: [],
+    todos: [
+      { id: "legacy-ordered", title: "Ventil", status: "ordered", syncUser: "ibro" },
+      { id: "keep-car", title: "V avto", status: "add_to_car", syncUser: "ibro" }
+    ]
+  };
+  normalizeDb(database);
+  assert.deepEqual(database.todos.map((todo) => [todo.status, todo.ordered]), [["order", true], ["add_to_car", false]]);
 });
 test("osebni predal opravil je ločen po delavcu in varno normaliziran", () => {
   const database = {

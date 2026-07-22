@@ -67,11 +67,10 @@ const TODO_STATUS_DEFINITIONS = Object.freeze({
   open: { label: "Čaka", googleColorId: "8" },
   in_progress: { label: "V teku", googleColorId: "9" },
   execution: { label: "Zaklju\u010deno", googleColorId: "10" },
-  order: { label: "Naroči", googleColorId: "11" },
+  order: { label: "Naro\u010di-projekt", googleColorId: "11" },
   order_car: { label: "Naroči Avto", googleColorId: "11" },
   order_warehouse: { label: "Naroči Sklad.", googleColorId: "11" },
   add_to_car: { label: "Dodaj v avto", googleColorId: "4" },
-  ordered: { label: "Naro\u010deno", googleColorId: "7" },
   return_and_bill: { label: "Vrne naj/Poračunaj", googleColorId: "6" },
   return: { label: "!!Vrni", googleColorId: "3" },
   meal: { label: "Malica", googleColorId: "5" },
@@ -81,6 +80,7 @@ const TODO_STATUS_DEFINITIONS = Object.freeze({
 });
 const TODO_STATUSES = new Set(Object.keys(TODO_STATUS_DEFINITIONS));
 const TIME_ENTRY_TODO_STATUSES = new Set(["execution", "meal", "drive", "purchase"]);
+const ORDER_TODO_STATUSES = new Set(["order", "order_car", "order_warehouse"]);
 const TODO_VEHICLES = new Set(["personal", "van"]);
 
 function todoVehicle(value) {
@@ -804,7 +804,11 @@ function normalizeDb(db = {}) {
       next.assignmentGroupId = assignmentGroupId;
       changed = true;
     }
-    if (next.status === "billing") {
+    if (next.status === "ordered") {
+      next.status = "order";
+      next.ordered = true;
+      changed = true;
+    } else if (next.status === "billing") {
       next.status = "execution";
       changed = true;
     } else if (!TODO_STATUSES.has(next.status)) {
@@ -835,6 +839,11 @@ function normalizeDb(db = {}) {
     }
     if (next.done !== completed) {
       next.done = completed;
+      changed = true;
+    }
+    const ordered = ORDER_TODO_STATUSES.has(next.status) && Boolean(next.ordered);
+    if (next.ordered !== ordered) {
+      next.ordered = ordered;
       changed = true;
     }
     for (const field of ["start", "end"]) {
@@ -2503,8 +2512,9 @@ function cleanTodoUserOrderBuckets(input) {
 }
 
 function cleanTodo(input) {
-  const isMeal = input.status === "meal";
-  const isTimeEntry = TIME_ENTRY_TODO_STATUSES.has(String(input.status || ""));
+  const status = input.status === "billing" ? "execution" : TODO_STATUSES.has(input.status) ? input.status : "open";
+  const isMeal = status === "meal";
+  const isTimeEntry = TIME_ENTRY_TODO_STATUSES.has(status);
   const photos = Array.isArray(input.photos) ? input.photos : [];
   return {
     title: isMeal ? "Malica" : String(input.title || "").trim(),
@@ -2515,11 +2525,12 @@ function cleanTodo(input) {
     clientId: isMeal ? "" : String(input.clientId || "").trim(),
     notes: isMeal ? "" : String(input.notes || "").trim(),
     material: isMeal ? "" : String(input.material || "").trim(),
-    status: input.status === "billing" ? "execution" : TODO_STATUSES.has(input.status) ? input.status : "open",
+    status,
     order: Number.isFinite(Number(input.order)) ? Number(input.order) : 0,
     // Older tasks without this field are intentionally shown as sorted.
     userOrderBuckets: cleanTodoUserOrderBuckets(input.userOrderBuckets),
     urgent: isMeal || isTimeEntry || input.status === "billing" ? false : Boolean(input.urgent),
+    ordered: ORDER_TODO_STATUSES.has(status) && Boolean(input.ordered),
     warranty: input.status === "execution" && Boolean(input.warranty),
     syncUser: cleanUserId(input.syncUser),
     sourceProjectTodoId: String(input.sourceProjectTodoId || "").trim().slice(0, 100),

@@ -1224,7 +1224,6 @@
     .todo-status-order_car,
     .todo-status-order_warehouse { --todo-bg: #dc2127; --todo-fg: #fff; }
     .todo-status-add_to_car { --todo-bg: #ff887c; --todo-fg: #202124; --todo-border: #d95f54; }
-    .todo-status-ordered { --todo-bg: #46d6db; --todo-fg: #202124; --todo-border: #249ca2; }
     .todo-status-return_and_bill { --todo-bg: #ffb878; --todo-fg: #202124; --todo-border: #d8883f; }
     .todo-status-return { --todo-bg: #dbadff; --todo-fg: #202124; --todo-border: #8e5bb7; }
     .todo-status-meal,
@@ -1310,6 +1309,53 @@
       flex: 0 0 auto;
       align-self: center;
     }
+    .todo-ordered-toggle {
+      width: 28px;
+      min-width: 28px;
+      height: 28px;
+      min-height: 28px;
+      display: inline-grid;
+      place-items: center;
+      padding: 0;
+      border: 1px solid #9aa0a6;
+      border-radius: 7px;
+      background: #f4f6f5;
+      color: #77817c;
+      font-size: 17px;
+      font-weight: 900;
+      line-height: 1;
+    }
+
+    .todo-ordered-toggle[aria-pressed="true"] {
+      border-color: #217a3f;
+      background: #dff4e5;
+      color: #176b36;
+    }
+
+    .todo-ordered-toggle[aria-pressed="false"] > span { opacity: .28; }
+
+    .modal-body label.todo-form-ordered {
+      display: grid;
+      grid-template-columns: 20px minmax(0, 1fr);
+      column-gap: 8px;
+      row-gap: 4px;
+      align-items: center;
+      color: var(--ink);
+    }
+
+    .modal-body label.todo-form-ordered input[type="checkbox"] {
+      grid-column: 1;
+      grid-row: 1;
+      width: 18px;
+      height: 18px;
+      min-height: 0;
+      margin: 0;
+      padding: 0;
+      accent-color: #217a3f;
+    }
+
+    .todo-form-ordered > span { grid-column: 2; grid-row: 1; font-weight: 800; }
+    .todo-form-ordered > small { grid-column: 1 / -1; color: var(--muted); line-height: 1.35; }
 
     .todo-title {
       flex: 1 1 auto;
@@ -4069,6 +4115,11 @@
           <div class="todo-status-mobile-options" id="todoFormStatusChoices" aria-label="Status opravila"></div>
           <p class="todo-meta hidden" id="todoFormMealNote"></p>
         </div>
+        <label class="todo-form-ordered hidden" id="todoFormOrderedField">
+          <input id="todoFormOrdered" type="checkbox">
+          <span>Naročeno</span>
+          <small>Označi, ko je material za ta projekt, avto ali skladišče že naročen.</small>
+        </label>
         <div id="todoFormAssigneeField">
           <label>Delo opravil</label>
           <div class="todo-form-assignees" id="todoFormAssignees"></div>
@@ -4466,7 +4517,7 @@
     const billingWorkerKey = "indus-ure-billing-worker";
     const todoSortModes = ["manual", "client", "date", "order", "completed", "open", "in_progress"];
     const timeEntryStatusIds = new Set(["execution", "meal", "drive", "purchase"]);
-    const monthlyHiddenTodoStatusIds = new Set(["meal", "drive", "ordered"]);
+    const monthlyHiddenTodoStatusIds = new Set(["meal", "drive"]);
     const payrollPaidTodoStatuses = new Set(timeEntryStatusIds);
     const projectHoursSourceStatuses = new Set(["open", "in_progress"]);
     const statusLabels = {
@@ -4478,11 +4529,10 @@
     };
 
     const todoStatusDefinitions = [
-      { id: "order", label: "Naro\u010di" },
+      { id: "order", label: "Naro\u010di-projekt" },
       { id: "order_car", label: "Naro\u010di Avto" },
       { id: "order_warehouse", label: "Naro\u010di Sklad." },
       { id: "add_to_car", label: "Dodaj v avto" },
-      { id: "ordered", label: "Naro\u010deno" },
       { id: "return_and_bill", label: "Vrne naj/Pora\u010dunaj" },
       { id: "in_progress", label: "V teku" },
       { id: "execution", label: "Zaklju\u010deno" },
@@ -4494,11 +4544,15 @@
       { id: "purchase", label: "Nabava" }
     ];
     const todoStatusById = Object.fromEntries(todoStatusDefinitions.map((status) => [status.id, status]));
-    const todoLogisticsStatusIds = new Set(["order", "order_car", "order_warehouse", "ordered", "add_to_car", "return_and_bill", "return"]);
+    const todoOrderStatusIds = new Set(["order", "order_car", "order_warehouse"]);
+    const todoLogisticsStatusIds = new Set(["order", "order_car", "order_warehouse", "add_to_car", "return_and_bill", "return"]);
     function todoStatus(status) {
       return todoStatusById[status] || todoStatusById.open;
     }
 
+    function todoUsesOrderConfirmation(todo) {
+      return Boolean(todo && todoOrderStatusIds.has(todo.status));
+    }
     function todoStatusClass(status) {
       return `todo-status-${todoStatus(status).id}`;
     }
@@ -6094,7 +6148,7 @@
       return Number.isFinite(personalOrder) ? personalOrder : Number(todo?.order || 0);
     }
 
-    const manualOrderingStatusIds = new Set(["order", "order_car", "order_warehouse", "add_to_car"]);
+    const manualOrderingStatusIds = new Set([...todoOrderStatusIds, "add_to_car"]);
 
     function todoManualBucketForCurrentUser(todo) {
       const userId = activeWorkerId() || state.user?.id || "";
@@ -6108,7 +6162,7 @@
     }
 
     function todoManualCategorySort(a, b) {
-      const positions = { unsorted: 0, ordering: 1, sorted: 2, completed: 3 };
+      const positions = { ordering: 0, unsorted: 1, sorted: 2, completed: 3 };
       const categoryDifference = (positions[todoManualCategory(a)] ?? 9) - (positions[todoManualCategory(b)] ?? 9);
       return categoryDifference || todoSort(a, b);
     }
@@ -6143,8 +6197,7 @@
     }
 
     function todoNeedsOrdering(todo) {
-      const orderStatuses = new Set(["order", "order_car", "order_warehouse", "add_to_car"]);
-      if (orderStatuses.has(todo.status)) return true;
+      if (manualOrderingStatusIds.has(todo.status)) return true;
       const orderTextMarker = /(^|[^\p{L}\p{N}_])naroči(?=$|[^\p{L}\p{N}_])/iu;
       return orderTextMarker.test(`${todo.notes || ""}\n${todo.material || ""}`);
     }
@@ -7983,6 +8036,7 @@
           </div>
           <div class="todo-summary" role="button" tabindex="0" aria-label="Uredi opravilo: ${escapeHtml(todo.title)}">
             <div class="todo-title-row">
+              ${todoUsesOrderConfirmation(todo) ? `<button class="todo-ordered-toggle" type="button" aria-pressed="${Boolean(todo.ordered)}" title="${todo.ordered ? "Označeno kot naročeno" : "Označi kot naročeno"}" aria-label="${todo.ordered ? "Označeno kot naročeno" : "Označi kot naročeno"}"><span aria-hidden="true">&#10003;</span></button>` : ""}
               <span class="todo-chip todo-status-chip todo-status-color ${todoStatusClass(todo.status)}">${todoStatus(todo.status).label}</span>
               <div class="todo-title">${todo.urgent ? '<span class="todo-chip todo-urgent-chip">NUJNO</span> ' : ""}${linkifyText(todo.title)}</div>
               ${hasExpandedDetails ? `<button class="todo-details-toggle${attachmentCount ? " has-attachments" : ""}" type="button" aria-expanded="${detailsExpanded}" aria-controls="todo-details-${escapeHtml(todo.id)}" title="${todoDetailsToggleLabel(detailsExpanded, attachmentCount)}" aria-label="${todoDetailsToggleLabel(detailsExpanded, attachmentCount)}">${attachmentCount ? '<span class="todo-attachment-indicator" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7.2 10.8 5.5-5.5a3.1 3.1 0 1 1 4.4 4.4l-7.4 7.4a4.5 4.5 0 0 1-6.4-6.4l7-7"></path></svg></span>' : ""}<svg class="todo-details-chevron" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 7 6 6 6-6"></path></svg></button>` : ""}
@@ -7997,6 +8051,18 @@
         `;
         const openTodoEditor = (event) => { event.preventDefault(); event.stopPropagation(); openTodoDialog(todo); };
         item.querySelector(".edit-todo").addEventListener("click", openTodoEditor);
+        const orderedToggle = item.querySelector(".todo-ordered-toggle");
+        orderedToggle?.addEventListener("click", async (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          orderedToggle.disabled = true;
+          try {
+            await saveTodoToServer({ ...todo, ordered: !todo.ordered });
+          } catch (error) {
+            showNotice(error.message);
+            orderedToggle.disabled = false;
+          }
+        });
         const todoSummary = item.querySelector(".todo-summary");
         todoSummary.addEventListener("click", (event) => { if (event.target.closest("a, button, .todo-expanded-details")) return; openTodoEditor(event); });
         todoSummary.addEventListener("keydown", (event) => { if (!["Enter", " "].includes(event.key) || event.target.closest("a, button, .todo-expanded-details")) return; openTodoEditor(event); });
@@ -9095,6 +9161,9 @@
       const logisticsStatus = todoLogisticsStatusIds.has($("todoFormStatus").value);
       ["todoFormTask", "todoFormNotes"].forEach((id) => $(id).closest("label").classList.toggle("hidden", meal));
       $("todoFormMaterialField").classList.toggle("hidden", meal || logisticsStatus);
+      const supportsOrderConfirmation = todoOrderStatusIds.has(selectedStatus);
+      $("todoFormOrderedField").classList.toggle("hidden", !supportsOrderConfirmation);
+      if (!supportsOrderConfirmation) $("todoFormOrdered").checked = false;
       $("todoFormNotesLabel").textContent = logisticsStatus ? "Opis" : "Opis del";
       $("todoFormNotes").placeholder = logisticsStatus ? "Vpi\u0161i opis" : "Opi\u0161i, kaj se bo delalo";
       const timeEntry = timeEntryStatusIds.has(selectedStatus);
@@ -9149,6 +9218,7 @@
       $("todoFormStatus").value = todoStatus(todo.status || "open").id;
       renderTodoStatusChoices(todo.status || "open");
       $("todoFormUrgent").checked = Boolean(todo.urgent);
+      $("todoFormOrdered").checked = todoOrderStatusIds.has(todoStatus(todo.status || "open").id) && Boolean(todo.ordered);
       $("todoFormWarranty").checked = Boolean(todo.warranty);
       updateTodoFormStatus();
       if (state.todoMealEntry && !editing) applyMealDefaults();
@@ -9216,6 +9286,7 @@
         assigneeIds,
         syncUser: existing?.syncUser || assigneeIds[0] || activeWorkerId(),
         urgent: timeEntryStatusIds.has($("todoFormStatus").value) ? false : $("todoFormUrgent").checked,
+        ordered: todoOrderStatusIds.has($("todoFormStatus").value) && $("todoFormOrdered").checked,
         warranty: $("todoFormStatus").value === "execution" && Boolean($("todoFormWarranty").checked),
         sourceProjectTodoId: existing?.sourceProjectTodoId || state.todoHoursSourceId || state.todoDraftSourceProjectTodoId || "",
         done: $("todoFormStatus").value === "execution",
@@ -9280,6 +9351,18 @@
       $("todoDialog").close();
     }
 
+    let todoDialogSaveInFlight = false;
+    async function submitTodoDialog() {
+      if (todoDialogSaveInFlight) return;
+      todoDialogSaveInFlight = true;
+      try {
+        await saveTodoFromDialog();
+      } catch (error) {
+        showNotice(error.message);
+      } finally {
+        todoDialogSaveInFlight = false;
+      }
+    }
     async function openHoursTodoFromCurrent() {
       const sourceId = $("todoFormId").value;
       const source = state.todos.find((todo) => todo.id === sourceId);
@@ -11128,7 +11211,7 @@
         event.preventDefault();
         if ($("todoFormClientSuggestions").classList.contains("hidden")) renderTodoClientSuggestions();
         setTodoClientSuggestionIndex(state.todoClientSuggestionIndex + (event.key === "ArrowDown" ? 1 : -1));
-      } else if (event.key === "Enter" && state.todoClientSuggestionIndex >= 0 && !$("todoFormClientSuggestions").classList.contains("hidden")) {
+      } else if (event.key === "Enter" && !event.ctrlKey && !event.metaKey && state.todoClientSuggestionIndex >= 0 && !$("todoFormClientSuggestions").classList.contains("hidden")) {
         event.preventDefault();
         chooseTodoClientSuggestion(state.todoClientSuggestionIndex);
       } else if (event.key === "Escape") {
@@ -11144,7 +11227,17 @@
     });
     $("todoForm").addEventListener("submit", (event) => {
       event.preventDefault();
-      saveTodoFromDialog().catch((error) => showNotice(error.message));
+      submitTodoDialog();
+    });
+    $("todoForm").addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" || (!event.ctrlKey && !event.metaKey)) return;
+      event.preventDefault();
+      submitTodoDialog();
+    });
+    $("todoDialog").addEventListener("click", (event) => {
+      if (event.target !== event.currentTarget) return;
+      event.preventDefault();
+      submitTodoDialog();
     });
     $("deleteTodoFromDialog").addEventListener("click", () => deleteTodoFromDialog().catch((error) => showNotice(error.message)));
     $("duplicateTodoFromDialog").addEventListener("click", () => duplicateTodoFromCurrent().catch((error) => showNotice(error.message)));
@@ -11166,7 +11259,7 @@
     });
     $("addTodoDriveLink").addEventListener("click", addTodoDriveLink);
     $("todoFormDriveLink").addEventListener("keydown", (event) => {
-      if (event.key !== "Enter") return;
+      if (event.key !== "Enter" || event.ctrlKey || event.metaKey) return;
       event.preventDefault();
       addTodoDriveLink();
     });
