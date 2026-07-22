@@ -21,6 +21,14 @@ test("front-end naročila in foto urejevalnik ohranita dogovorjeni mobilni prika
   assert.match(html, /\$\("photoEditorTitle"\)\.textContent = "Uredi fotografijo";/);
   assert.doesNotMatch(html, /\$\("photoEditorTitle"\)\.textContent = `Uredi:/);
 });
+test("obračunsko obdobje samodejno sledi novemu dnevu, ročna izbira pa ostane ločena po delavcu", async () => {
+  const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  assert.match(html, /billingRangeSelections: \{\}/);
+  assert.match(html, /function billingRangeSelectionForWorker\(workerId\)/);
+  assert.match(html, /if \(custom\) \{[\s\S]*?else if \(openPayroll\) \{[\s\S]*?else if \(latest\) \{/);
+  assert.match(html, /saveBillingRangeSelection\(billingWorkerId\(\), \{ from: \$\("billingFrom"\)\.value, to: \$\("billingTo"\)\.value \}\);/);
+  assert.match(html, /saveBillingRangeSelection\(state\.billingWorkerId, \{ from: button\.dataset\.from, to: button\.dataset\.to \}\);/);
+});
 function request(port, pathname, { method = "GET", headers = {}, body = "" } = {}) {
   return new Promise((resolve, reject) => {
     const request = http.request({ host: "127.0.0.1", port, path: pathname, method, headers }, (response) => {

@@ -4718,6 +4718,9 @@
       payrolls: [],
       clientBills: [],
       billingWorkerId: "",
+      // Each worker keeps an in-memory auto/custom period independently.
+      // Auto follows the newest eligible day; a deliberate choice stays put.
+      billingRangeSelections: {},
       user: null,
       localTestMode: false,
       users: [],
@@ -7306,6 +7309,7 @@
       if (!draft?.from || draft.from > maxDate) return;
       $("billingFrom").value = draft.from;
       $("billingTo").value = (draft.to || draft.from) > maxDate ? maxDate : (draft.to || draft.from);
+      saveBillingRangeSelection(billingWorkerId(), { from: $("billingFrom").value, to: $("billingTo").value });
       $("billingRangeDialog").close();
       state.billingRangeDraft = null;
       renderBillingView();
@@ -7329,6 +7333,20 @@
       return `${year}-${String(month).padStart(2, "0")}-${String(new Date(year, month, 0).getDate()).padStart(2, "0")}`;
     }
 
+    function billingRangeSelectionForWorker(workerId) {
+      const selection = state.billingRangeSelections?.[workerId];
+      if (selection?.mode !== "custom") return { mode: "auto", from: "", to: "" };
+      return { mode: "custom", from: String(selection.from || ""), to: String(selection.to || "") };
+    }
+
+    function saveBillingRangeSelection(workerId, range) {
+      if (!workerId) return;
+      state.billingRangeSelections[workerId] = {
+        mode: "custom",
+        from: String(range?.from || ""),
+        to: String(range?.to || "")
+      };
+    }
     function latestCompletedPayroll(workerId) {
       return state.payrolls
         .filter((payroll) => payroll.workerId === workerId
@@ -7410,6 +7428,26 @@
       })();
       const fromInput = $("billingFrom");
       const toInput = $("billingTo");
+      const selection = billingRangeSelectionForWorker(workerId);
+      const custom = selection.mode === "custom";
+
+      // A current open period follows yesterday on every render. Explicit
+      // selections stay pinned; otherwise an interrupted draft wins over the
+      // regular newest-period default.
+      if (custom) {
+        fromInput.value = selection.from;
+        toInput.value = selection.to;
+      } else if (openPayroll) {
+        fromInput.value = openPayroll.from;
+        toInput.value = openPayroll.to;
+      } else if (latest) {
+        fromInput.value = latest.from;
+        toInput.value = latest.to;
+      } else {
+        fromInput.value = fallback.from;
+        toInput.value = fallback.to;
+      }
+
       if (!/^\d{4}-\d{2}-\d{2}$/.test(fromInput.value)) fromInput.value = fallback.from;
       if (!/^\d{4}-\d{2}-\d{2}$/.test(toInput.value) || toInput.value < fromInput.value) toInput.value = fallback.to;
       const selectedPayroll = billingPayrollsForWorker(workerId).find((payroll) => payroll.from === fromInput.value && payroll.to === toInput.value);
@@ -7421,8 +7459,9 @@
         fromInput.value = earliest.from;
         toInput.value = earliest.to;
       }
-      monthInput.value = fromInput.value.slice(0, 7);
       const range = { from: fromInput.value, to: toInput.value };
+      if (custom) saveBillingRangeSelection(workerId, range);
+      monthInput.value = range.from.slice(0, 7);
       updateBillingRangeControls(range);
       return range;
     }
@@ -7553,6 +7592,7 @@
         state.billingWorkerId = button.dataset.workerId;
         $("billingFrom").value = button.dataset.from;
         $("billingTo").value = button.dataset.to;
+        saveBillingRangeSelection(state.billingWorkerId, { from: button.dataset.from, to: button.dataset.to });
         renderBillingView();
       }));
     }
@@ -11232,7 +11272,10 @@
       setView("report");
       $("toolsMenu").open = false;
     });
-    ["billingFrom", "billingTo"].forEach((id) => $(id).addEventListener("change", renderBillingView));
+    ["billingFrom", "billingTo"].forEach((id) => $(id).addEventListener("change", () => {
+      saveBillingRangeSelection(billingWorkerId(), { from: $("billingFrom").value, to: $("billingTo").value });
+      renderBillingView();
+    }));
     $("billingRangePrev").addEventListener("click", () => shiftBillingRangePickerMonth(-1));
     $("billingRangeNext").addEventListener("click", () => shiftBillingRangePickerMonth(1));
     $("closeBillingRangeDialog").addEventListener("click", () => $("billingRangeDialog").close());
@@ -11258,12 +11301,14 @@
         if (!previousPayroll) return;
         $("billingFrom").value = previousPayroll.from;
         $("billingTo").value = previousPayroll.to;
+        saveBillingRangeSelection(workerId, { from: previousPayroll.from, to: previousPayroll.to });
         renderBillingView();
         return;
       }
       if (nextPayroll) {
         $("billingFrom").value = nextPayroll.from;
         $("billingTo").value = nextPayroll.to;
+        saveBillingRangeSelection(workerId, { from: nextPayroll.from, to: nextPayroll.to });
         renderBillingView();
         return;
       }
@@ -11283,6 +11328,7 @@
         $("billingFrom").value = nextFrom;
         $("billingTo").value = nextTo;
       }
+      saveBillingRangeSelection(workerId, { from: $("billingFrom").value, to: $("billingTo").value });
       renderBillingView();
     }));
     $("closeAdvanceDialog").addEventListener("click", () => $("advanceDialog").close());
