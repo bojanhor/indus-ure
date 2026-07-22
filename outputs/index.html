@@ -1067,6 +1067,24 @@
 
     .todo-item.completed-view-item { opacity: 1; }
 
+    .todo-item.ordered-confirmed {
+      border-color: #d6e0db;
+      background: #f8fbf9;
+    }
+
+    .todo-item.ordered-confirmed .todo-summary {
+      opacity: 0.62;
+    }
+
+    .todo-item.ordered-confirmed .todo-title,
+    .todo-item.ordered-confirmed .todo-client-name {
+      text-decoration: line-through;
+    }
+
+    .todo-item.ordered-confirmed .todo-status-chip {
+      filter: grayscale(0.45);
+    }
+
     .todo-item.dragging {
       opacity: 0.45;
     }
@@ -2409,6 +2427,30 @@
 
     .modal-head-actions { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
 
+    .modal-head-actions .icon-btn,
+    .modal-head-actions .todo-modal-action,
+    .modal-head-actions .photo-editor-tool {
+      width: 38px;
+      min-width: 38px;
+      height: 38px;
+      min-height: 38px;
+      display: inline-grid;
+      place-items: center;
+      padding: 0;
+      border-radius: 8px;
+    }
+
+    .modal-head-actions .icon-btn {
+      border: 1px solid #cadad3;
+      background: #eef4f0;
+      color: #203035;
+    }
+
+    .modal-head-actions .icon-btn:hover,
+    .modal-head-actions .icon-btn:focus-visible {
+      background: #e0ebe5;
+    }
+
     .day-timeline-title-nav { display: flex; align-items: center; min-width: 0; gap: 8px; }
     .day-timeline-title-nav h3 { min-width: 0; }
     .day-timeline-date-nav { flex: 0 0 auto; font-size: 26px; line-height: 1; }
@@ -2715,8 +2757,19 @@
       align-items: center;
       gap: 7px;
       flex-wrap: wrap;
+      min-width: 0;
+      max-width: 100%;
+      overflow-x: hidden;
       padding: 9px 12px;
       background: #f8fbf8;
+    }
+
+    .photo-editor-main-tools {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      flex: 0 1 auto;
+      min-width: 0;
     }
 
     .photo-editor-tool,
@@ -2781,7 +2834,7 @@
       display: inline-flex;
       align-items: center;
       gap: 5px;
-      min-width: 116px;
+      min-width: 180px;
       height: 38px;
       padding: 0 8px;
       border: 1px solid #cadad3;
@@ -2791,7 +2844,7 @@
     }
 
     .photo-editor-size-control svg { width: 16px; height: 16px; fill: currentColor; }
-    .photo-editor-size-control input { min-width: 0; width: 74px; }
+    .photo-editor-size-control input { min-width: 110px; width: 150px; flex: 1 1 150px; }
 
     .photo-editor-text-editor {
       flex: 1 1 320px;
@@ -2881,11 +2934,14 @@
       width: min(1100px, calc(100vw - 20px));
       height: min(900px, calc(100dvh - 20px));
       max-height: calc(100dvh - 20px);
+      box-sizing: border-box;
+      overflow: hidden;
     }
 
     #photoEditorDialog > form {
       height: 100%;
       min-height: 0;
+      min-width: 0;
       display: grid;
       grid-template-rows: auto auto minmax(0, 1fr);
       overflow: hidden;
@@ -3707,16 +3763,19 @@
       #todoFormPhotoList .todo-form-attachment-thumb { width: 150px; height: 112px; flex-basis: 150px; }
       .todo-form-photo-actions { gap: 4px; }
       .todo-form-photo-actions > button { min-width: 36px; min-height: 36px; padding: 5px 7px; }
-      #photoEditorDialog { width: 100vw; height: 100dvh; max-height: none; border-radius: 0; }
-      #photoEditorDialog > form { height: 100%; min-height: 0; display: grid; grid-template-rows: auto auto minmax(0, 1fr); overflow: hidden; }
+      #photoEditorDialog { inset: 0; width: 100vw; height: 100dvh; max-width: 100vw; max-height: 100dvh; margin: 0; border-radius: 0; }
+      #photoEditorDialog > form { height: 100%; min-height: 0; min-width: 0; display: grid; grid-template-rows: auto auto minmax(0, 1fr); overflow: hidden; }
       #photoEditorDialog .modal-head { padding: 10px 12px; }
       #photoEditorDialog .photo-editor-toolbar {
         display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
-        max-height: 31dvh; overflow-y: auto; align-content: start; gap: 6px; padding: 8px;
+        min-width: 0; max-width: 100%; max-height: 31dvh; overflow-x: hidden; overflow-y: auto; align-content: start; gap: 6px; padding: 8px;
       }
       #photoEditorDialog .photo-editor-toolbar > label,
       #photoEditorDialog .photo-editor-toolbar > button { min-width: 0; min-height: 38px; }
+      #photoEditorDialog .photo-editor-main-tools { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; width: 100%; }
+      #photoEditorDialog .photo-editor-main-tools > button { width: 100%; min-width: 0; }
       #photoEditorDialog .photo-editor-size-control { grid-column: span 2; }
+      #photoEditorDialog .photo-editor-size-control input { width: 100%; min-width: 0; flex: 1 1 auto; }
       #photoEditorDialog .photo-editor-text-editor,
       #photoEditorDialog .gesture-zoom-controls { grid-column: 1 / -1; width: 100%; }
       #photoEditorDialog .photo-editor-text-editor { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
@@ -3728,7 +3787,7 @@
       #photoEditorDialog .photo-editor-crop-actions { display: inline-flex; grid-column: span 2; justify-content: flex-end; }
       #photoEditorDialog .photo-editor-crop-actions[hidden] { display: none; }
       #photoEditorDialog .zoom-value { text-align: center; align-self: center; }
-      #photoEditorDialog .photo-editor-canvas-shell { min-height: 0; max-height: none; padding: 6px; overscroll-behavior: contain; }
+      #photoEditorDialog .photo-editor-canvas-shell { min-width: 0; min-height: 0; max-height: none; padding: 6px; overscroll-behavior: contain; }
       .client-billing-intro { display: grid; gap: 10px; }
       .client-billing-intro-actions { display: flex; flex-wrap: wrap; gap: 8px; }
       .client-billing-intro .secondary { width: 100%; }
@@ -4374,19 +4433,21 @@
         </div>
       </div>
       <div class="photo-editor-toolbar" role="toolbar" aria-label="Orodja za urejanje slike">
-        <label class="photo-editor-color-control" title="Barva črte in besedila" aria-label="Barva črte in besedila">
-          <input id="photoEditorColor" type="color" value="#ff2d2d">
-        </label>
+        <div class="photo-editor-main-tools" aria-label="Orodja za urejanje slike">
+          <label class="photo-editor-color-control" title="Barva črte in besedila" aria-label="Barva črte in besedila">
+            <input id="photoEditorColor" type="color" value="#ff2d2d">
+          </label>
+          <button class="photo-editor-tool is-active" id="photoEditorDraw" type="button" title="Riši" aria-label="Riši">&#9998;</button>
+          <button class="photo-editor-tool" id="photoEditorPan" type="button" title="Premakni sliko" aria-label="Premakni sliko">&#9995;</button>
+          <button class="photo-editor-tool" id="photoEditorCrop" type="button" title="Obreži sliko" aria-label="Obreži sliko">&#9986;</button>
+          <button class="photo-editor-tool" id="photoEditorAddText" type="button" title="Dodaj besedilo" aria-label="Dodaj besedilo">T</button>
+          <button class="photo-editor-tool" id="photoEditorUndo" type="button" title="Razveljavi zadnje dejanje" aria-label="Razveljavi zadnje dejanje">&#8630;</button>
+          <button class="photo-editor-tool danger" id="photoEditorClear" type="button" title="Počisti oznake" aria-label="Počisti oznake">&#9003;</button>
+        </div>
         <label class="photo-editor-size-control" title="Debelina črte">
           <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="5" cy="10" r="2"></circle><circle cx="14" cy="10" r="5"></circle></svg>
           <input id="photoEditorSize" type="range" min="1" max="30" value="1" aria-label="Debelina črte">
         </label>
-        <button class="photo-editor-tool is-active" id="photoEditorDraw" type="button" title="Riši" aria-label="Riši">&#9998;</button>
-        <button class="photo-editor-tool" id="photoEditorPan" type="button" title="Premakni sliko" aria-label="Premakni sliko">&#9995;</button>
-        <button class="photo-editor-tool" id="photoEditorCrop" type="button" title="Obreži sliko" aria-label="Obreži sliko">&#9986;</button>
-        <button class="photo-editor-tool" id="photoEditorAddText" type="button" title="Dodaj besedilo" aria-label="Dodaj besedilo">T</button>
-        <button class="photo-editor-tool" id="photoEditorUndo" type="button" title="Razveljavi zadnje dejanje" aria-label="Razveljavi zadnje dejanje">&#8630;</button>
-        <button class="photo-editor-tool danger" id="photoEditorClear" type="button" title="Počisti oznake" aria-label="Počisti oznake">&#9003;</button>
         <div class="gesture-zoom-controls" aria-label="Povečava urejevalnika">
           <button class="photo-editor-tool" id="photoEditorZoomOut" type="button" aria-label="Pomanjšaj">&minus;</button>
           <span class="zoom-value" id="photoEditorZoomValue">100 %</span>
@@ -6224,8 +6285,15 @@
 
     function todoManualCategorySort(a, b) {
       const positions = { ordering: 0, unsorted: 1, sorted: 2, completed: 3 };
-      const categoryDifference = (positions[todoManualCategory(a)] ?? 9) - (positions[todoManualCategory(b)] ?? 9);
-      return categoryDifference || todoSort(a, b);
+      const aCategory = todoManualCategory(a);
+      const bCategory = todoManualCategory(b);
+      const categoryDifference = (positions[aCategory] ?? 9) - (positions[bCategory] ?? 9);
+      if (categoryDifference) return categoryDifference;
+      if (aCategory === "ordering") {
+        const orderedDifference = Number(Boolean(todoUsesOrderConfirmation(a) && a.ordered)) - Number(Boolean(todoUsesOrderConfirmation(b) && b.ordered));
+        if (orderedDifference) return orderedDifference;
+      }
+      return todoSort(a, b);
     }
 
     function todoManualBucketSort(a, b) {
@@ -6265,7 +6333,9 @@
 
     function todoOrderingSort(a, b) {
       const activeDifference = Number(b.status === "in_progress") - Number(a.status === "in_progress");
-      return activeDifference || todoSort(a, b);
+      if (activeDifference) return activeDifference;
+      const orderedDifference = Number(Boolean(todoUsesOrderConfirmation(a) && a.ordered)) - Number(Boolean(todoUsesOrderConfirmation(b) && b.ordered));
+      return orderedDifference || todoSort(a, b);
     }
 
     function sortedTodosForMode(todos = contextTodos()) {
@@ -8082,7 +8152,8 @@
         const assigneeCount = todoAssigneeIds(todo).length;
         item.dataset.todoId = todo.id;
         const completedPresentation = todo.status === "execution" && (state.todoSortMode === "completed" || showManualSections);
-        item.className = `todo-item ${todo.done ? "done" : ""} ${completedPresentation ? "completed-view-item" : ""} ${todo.urgent ? "urgent" : ""} ${detailsExpanded ? "details-expanded" : ""}`;
+        const orderedPresentation = todoUsesOrderConfirmation(todo) && Boolean(todo.ordered);
+        item.className = `todo-item ${todo.done ? "done" : ""} ${completedPresentation ? "completed-view-item" : ""} ${orderedPresentation ? "ordered-confirmed" : ""} ${todo.urgent ? "urgent" : ""} ${detailsExpanded ? "details-expanded" : ""}`;
         item.innerHTML = `
           <div class="todo-control-stack">
             <button class="drag-handle" type="button" ${reorderable ? "" : "disabled"} title="Povleci za vrstni red (na telefonu pridrži)" aria-label="Povleci za vrstni red (na telefonu pridrži)">::</button>
@@ -8178,7 +8249,9 @@
     }
 
     function attachmentLabel(photo) {
-      return isVideoAttachment(photo) ? "Video" : (photo?.name || "Priloga");
+      if (isVideoAttachment(photo)) return "Video";
+      if (isPdfAttachment(photo)) return "PDF dokument";
+      return "Fotografija";
     }
 
     function pdfThumbnailMarkup(photo, showBadge = false) {
@@ -8253,10 +8326,9 @@
       const preview = state.attachmentPreview;
       if (!preview || !photo) return;
       preview.photo = photo;
-      const name = photo.name || "Fotografija";
-      $("attachmentPreviewTitle").textContent = name;
+      $("attachmentPreviewTitle").textContent = "Fotografija";
       const image = $("attachmentPreviewImage");
-      image.alt = `Predogled: ${name}`;
+      image.alt = "Predogled fotografije";
       image.onload = () => requestAnimationFrame(fitAttachmentPreview);
       image.src = attachmentSource(photo);
       if (image.complete) requestAnimationFrame(fitAttachmentPreview);
@@ -8651,7 +8723,7 @@
         $("photoEditorSize").value = "1";
         $("photoEditorTextSize").value = "32";
         $("photoEditorTextRotation").value = "0";
-        $("photoEditorTitle").textContent = `Uredi: ${photo.name || "Fotografija"}`;
+        $("photoEditorTitle").textContent = "Uredi fotografijo";
         setPhotoEditorTextSelection();
         redrawPhotoEditor();
         $("photoEditorDialog").showModal();

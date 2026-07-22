@@ -10,6 +10,17 @@ test("Postgres store singleton is initialized before database startup", async ()
   const serverSource = await fs.readFile(path.join(__dirname, "..", "outputs", "server.js"), "utf8");
   assert.match(serverSource, /let pgStore = null;/);
 });
+
+test("front-end naročila in foto urejevalnik ohranita dogovorjeni mobilni prikaz", async () => {
+  const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  assert.match(html, /function todoOrderingSort\(a, b\) \{[\s\S]*?orderedDifference/);
+  assert.match(html, /ordered-confirmed/);
+  assert.match(html, /photo-editor-main-tools/);
+  assert.match(html, /#photoEditorDialog \{ inset: 0; width: 100vw;/);
+  assert.match(html, /function attachmentLabel\(photo\) \{[\s\S]*?return "Fotografija";/);
+  assert.match(html, /\$\("photoEditorTitle"\)\.textContent = "Uredi fotografijo";/);
+  assert.doesNotMatch(html, /\$\("photoEditorTitle"\)\.textContent = `Uredi:/);
+});
 function request(port, pathname, { method = "GET", headers = {}, body = "" } = {}) {
   return new Promise((resolve, reject) => {
     const request = http.request({ host: "127.0.0.1", port, path: pathname, method, headers }, (response) => {
