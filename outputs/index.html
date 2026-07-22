@@ -1321,10 +1321,12 @@
     }
 
     .todo-details-toggle {
-      flex: 0 0 32px;
-      width: 32px;
+      flex: 0 0 40px;
+      width: 40px;
       height: 32px;
       display: inline-grid;
+      grid-auto-flow: column;
+      gap: 2px;
       place-items: center;
       padding: 0;
       border: 1px solid var(--line);
@@ -1333,13 +1335,21 @@
       color: var(--accent);
     }
 
-    .todo-details-toggle svg {
+    .todo-details-chevron {
       width: 18px;
       height: 18px;
       transition: transform 160ms ease;
     }
 
-    .todo-item.details-expanded .todo-details-toggle svg { transform: rotate(180deg); }
+    .todo-item.details-expanded .todo-details-chevron { transform: rotate(180deg); }
+
+    .todo-attachment-indicator {
+      display: inline-grid;
+      place-items: center;
+      color: #336e7d;
+    }
+
+    .todo-attachment-indicator svg { width: 14px; height: 14px; }
 
     .todo-client-name {
       margin-top: 4px;
@@ -2593,6 +2603,39 @@
       border-bottom: 1px solid var(--line);
     }
 
+    .attachment-preview-navigation {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      margin-left: auto;
+    }
+
+    .attachment-preview-navigation[hidden] { display: none; }
+
+    .attachment-preview-nav-button {
+      min-width: 32px;
+      min-height: 30px;
+      padding: 2px 8px;
+      border-color: rgba(20, 59, 52, .25);
+      background: rgba(20, 59, 52, .10);
+      color: var(--ink);
+      font-size: 22px;
+      line-height: 1;
+      opacity: .72;
+    }
+
+    .attachment-preview-nav-button:not(:disabled):hover,
+    .attachment-preview-nav-button:not(:disabled):focus-visible { opacity: 1; background: rgba(20, 59, 52, .18); }
+    .attachment-preview-nav-button:disabled { opacity: .28; }
+
+    .attachment-preview-position {
+      min-width: 34px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+      text-align: center;
+    }
+
     .photo-editor-toolbar label {
       display: inline-flex;
       align-items: center;
@@ -2754,9 +2797,9 @@
       display: grid;
       grid-template-columns: minmax(0, 1fr) minmax(190px, 0.8fr) auto;
       align-items: center;
-      gap: 8px;
-      padding: 7px 0;
-      border-bottom: 1px solid var(--line);
+      gap: 12px;
+      padding: 14px 0;
+      border-bottom: 2px solid #c7d5cd;
     }
 
     .todo-form-photo-row:last-child { border-bottom: 0; }
@@ -4125,6 +4168,11 @@
           <button class="secondary" id="attachmentPreviewFit" type="button">Prilagodi</button>
         </div>
         <span class="gesture-hint">Pove&#269;aj z dvema prstoma</span>
+        <div class="attachment-preview-navigation" id="attachmentPreviewNavigation" hidden aria-label="Navigacija med prilogami">
+          <button class="secondary attachment-preview-nav-button" id="attachmentPreviewPrevious" type="button" aria-label="Prej&#353;nja priloga" title="Prej&#353;nja priloga">&#8249;</button>
+          <span class="attachment-preview-position" id="attachmentPreviewPosition" aria-live="polite"></span>
+          <button class="secondary attachment-preview-nav-button" id="attachmentPreviewNext" type="button" aria-label="Naslednja priloga" title="Naslednja priloga">&#8250;</button>
+        </div>
         <button class="primary" id="attachmentPreviewEdit" type="button">Uredi</button>
       </div>
       <div class="attachment-preview-body">
@@ -7641,6 +7689,14 @@
       showNotice("Spremembe stranke so shranjene v bazi INDUS URE.");
 
     }
+    function todoAttachmentCount(todo) {
+      return (todo.photos || []).length + (todo.driveFiles || []).length;
+    }
+
+    function todoDetailsToggleLabel(expanded, attachmentCount) {
+      return `${expanded ? "Skrij" : "Prika\u017ei"} podrobnosti${attachmentCount ? ` in priloge (${attachmentCount})` : ""}`;
+    }
+
     function todoHasExpandedDetails(todo) {
       return Boolean(
         String(todo.notes || "").trim() ||
@@ -7793,6 +7849,7 @@
         const reorderable = state.todoSortMode === "manual" && !todo.done && !todo.urgent;
         const hasExpandedDetails = todoHasExpandedDetails(todo);
         const detailsExpanded = state.expandedTodoIds.has(todo.id);
+        const attachmentCount = todoAttachmentCount(todo);
         const assigneeCount = todoAssigneeIds(todo).length;
         item.dataset.todoId = todo.id;
         const completedPresentation = todo.status === "execution" && (state.todoSortMode === "completed" || showManualSections);
@@ -7813,7 +7870,7 @@
             <div class="todo-title-row">
               <span class="todo-chip todo-status-chip todo-status-color ${todoStatusClass(todo.status)}">${todoStatus(todo.status).label}</span>
               <div class="todo-title">${todo.urgent ? '<span class="todo-chip todo-urgent-chip">NUJNO</span> ' : ""}${linkifyText(todo.title)}</div>
-              ${hasExpandedDetails ? `<button class="todo-details-toggle" type="button" aria-expanded="${detailsExpanded}" aria-controls="todo-details-${escapeHtml(todo.id)}" title="${detailsExpanded ? "Skrij podrobnosti" : "Prikaži podrobnosti"}" aria-label="${detailsExpanded ? "Skrij podrobnosti" : "Prikaži podrobnosti"}"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 7 6 6 6-6"></path></svg></button>` : ""}
+              ${hasExpandedDetails ? `<button class="todo-details-toggle${attachmentCount ? " has-attachments" : ""}" type="button" aria-expanded="${detailsExpanded}" aria-controls="todo-details-${escapeHtml(todo.id)}" title="${todoDetailsToggleLabel(detailsExpanded, attachmentCount)}" aria-label="${todoDetailsToggleLabel(detailsExpanded, attachmentCount)}">${attachmentCount ? '<span class="todo-attachment-indicator" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7.2 10.8 5.5-5.5a3.1 3.1 0 1 1 4.4 4.4l-7.4 7.4a4.5 4.5 0 0 1-6.4-6.4l7-7"></path></svg></span>' : ""}<svg class="todo-details-chevron" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 7 6 6 6-6"></path></svg></button>` : ""}
             </div>
             ${todo.client ? `<div class="todo-client-name">${escapeHtml(todo.client)}</div>` : ""}
             <div class="todo-primary-meta">
@@ -7835,7 +7892,7 @@
           const expanded = item.classList.toggle("details-expanded");
           if (expanded) state.expandedTodoIds.add(todo.id); else state.expandedTodoIds.delete(todo.id);
           detailsToggle.setAttribute("aria-expanded", String(expanded));
-          const label = expanded ? "Skrij podrobnosti" : "Prikaži podrobnosti";
+          const label = todoDetailsToggleLabel(expanded, attachmentCount);
           detailsToggle.setAttribute("aria-label", label); detailsToggle.title = label;
         });
         todoExpandedDetails?.addEventListener("click", (event) => event.stopPropagation());
@@ -7936,6 +7993,43 @@
       body.scrollTop = 0;
     }
 
+    function previewableAttachmentPhotos(photos) {
+      return (photos || []).filter((item) => !isPdfAttachment(item) && !isVideoAttachment(item) && Boolean(attachmentSource(item)));
+    }
+
+    function updateAttachmentPreviewNavigation() {
+      const preview = state.attachmentPreview;
+      const navigation = $("attachmentPreviewNavigation");
+      const count = preview?.photos?.length || 0;
+      navigation.hidden = count < 2;
+      $("attachmentPreviewPrevious").disabled = !preview || preview.index <= 0;
+      $("attachmentPreviewNext").disabled = !preview || preview.index >= count - 1;
+      $("attachmentPreviewPosition").textContent = count > 1 ? `${preview.index + 1}/${count}` : "";
+    }
+
+    function showAttachmentPreviewPhoto(photo) {
+      const preview = state.attachmentPreview;
+      if (!preview || !photo) return;
+      preview.photo = photo;
+      const name = photo.name || "Fotografija";
+      $("attachmentPreviewTitle").textContent = name;
+      const image = $("attachmentPreviewImage");
+      image.alt = `Predogled: ${name}`;
+      image.onload = () => requestAnimationFrame(fitAttachmentPreview);
+      image.src = attachmentSource(photo);
+      if (image.complete) requestAnimationFrame(fitAttachmentPreview);
+      updateAttachmentPreviewNavigation();
+    }
+
+    function moveAttachmentPreview(offset) {
+      const preview = state.attachmentPreview;
+      if (!preview?.photos?.length) return;
+      const index = Math.max(0, Math.min(preview.photos.length - 1, preview.index + offset));
+      if (index === preview.index) return;
+      preview.index = index;
+      showAttachmentPreviewPhoto(preview.photos[index]);
+    }
+
     function openAttachmentPreview(photo, context = {}) {
       if (isPdfAttachment(photo) || isVideoAttachment(photo)) {
         const link = document.createElement("a");
@@ -7947,24 +8041,22 @@
         link.remove();
         return;
       }
+      const photos = previewableAttachmentPhotos(context.photos || [photo]);
+      const index = Math.max(0, photos.findIndex((item) => item.id === photo.id));
       state.attachmentPreview = {
-        photo,
+        photo: photos[index] || photo,
         todoId: context.todoId || "",
+        photos: photos.length ? photos : [photo],
+        index,
         zoom: 100,
         pointers: new Map(),
         gesture: null
       };
-      const name = photo.name || "Fotografija";
-      $("attachmentPreviewTitle").textContent = name;
       const image = $("attachmentPreviewImage");
-      image.alt = `Predogled: ${name}`;
       image.draggable = false;
       const dialog = $("attachmentPreviewDialog");
       if (!dialog.open) dialog.showModal();
-
-      image.onload = () => requestAnimationFrame(fitAttachmentPreview);
-      image.src = attachmentSource(photo);
-      if (image.complete) requestAnimationFrame(fitAttachmentPreview);
+      showAttachmentPreviewPhoto(state.attachmentPreview.photo);
     }
     function drawPhotoEditorStroke(context, stroke) {
       const points = stroke?.points || [];
@@ -10808,7 +10900,7 @@
       const preview = event.target.closest(".todo-form-attachment-preview");
       if (preview) {
         const photo = state.todoDialogPhotos.find((item) => item.id === preview.dataset.photoId);
-        if (photo) openAttachmentPreview(photo);
+        if (photo) openAttachmentPreview(photo, { todoId: $("todoFormId").value, photos: state.todoDialogPhotos });
         return;
       }
       const button = event.target.closest(".remove-todo-form-photo");
@@ -10857,7 +10949,7 @@
         const item = preview.closest(".todo-item");
         const todo = state.todos.find((candidate) => candidate.id === item?.dataset.todoId);
         const photo = todo?.photos?.find((candidate) => candidate.id === preview.dataset.photoId);
-        if (photo) openAttachmentPreview(photo, { todoId: todo.id });
+        if (photo) openAttachmentPreview(photo, { todoId: todo.id, photos: todo.photos });
         return;
       }
       const button = event.target.closest(".delete-todo");
@@ -10896,7 +10988,7 @@
       if (preview) {
         const todo = state.todos.find((item) => item.id === preview.dataset.reportTodoId);
         const photo = todo?.photos?.find((item) => item.id === preview.dataset.photoId);
-        if (photo) openAttachmentPreview(photo, { todoId: todo.id });
+        if (photo) openAttachmentPreview(photo, { todoId: todo.id, photos: todo.photos });
         return;
       }
       const todoButton = event.target.closest(".open-report-todo");
@@ -11317,6 +11409,8 @@
       setAttachmentPreviewZoom((state.attachmentPreview?.zoom || 100) * 1.25, scrollerViewportCenter(body));
     });
     $("attachmentPreviewFit").addEventListener("click", fitAttachmentPreview);
+    $("attachmentPreviewPrevious").addEventListener("click", () => moveAttachmentPreview(-1));
+    $("attachmentPreviewNext").addEventListener("click", () => moveAttachmentPreview(1));
     const attachmentPreviewBody = $("attachmentPreviewImage").closest(".attachment-preview-body");
     attachmentPreviewBody.addEventListener("pointerdown", (event) => {
       const preview = state.attachmentPreview;
