@@ -2256,6 +2256,18 @@ function clientReportFilename(client) {
   const suffix = safeReportFileName(client?.name || "stranka").replace(/\s+/g, "-");
   return `obračun-${suffix || "stranka"}.pdf`;
 }
+function attachmentContentDisposition(filename) {
+  const original = safeReportFileName(filename, "priloga");
+  const asciiFallback = original.normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^A-Za-z0-9._ -]+/g, "-")
+    .replace(/\s+/g, " ")
+    .replace(/^[-. ]+|[-. ]+$/g, "")
+    .slice(0, 120) || "priloga";
+  const utf8Filename = encodeURIComponent(original).replace(/[!'()*]/g, (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`);
+  return `attachment; filename="${asciiFallback}"; filename*=UTF-8''${utf8Filename}`;
+}
+
 function buildClientBillSnapshot(db, input, actor) {
   const selection = clientBillCandidates(db, input);
   if (!selection.client || !selection.groups.length) return null;
@@ -4168,7 +4180,7 @@ async function handleApi(req, res) {
       res.writeHead(200, securityHeaders({
         "Content-Type": "application/pdf",
         "Content-Length": pdf.length,
-        "Content-Disposition": `attachment; filename="${filename}"`,
+        "Content-Disposition": attachmentContentDisposition(filename),
         "Cache-Control": "no-store"
       }));
       res.end(pdf);
@@ -5992,6 +6004,7 @@ module.exports = {
   buildClientBillSnapshot,
   clientReportSelection,
   clientReportAttachmentSelection,
+  attachmentContentDisposition,
   buildClientReportPdf,
   gmailDraftRaw,
   gmailCompletionRequestRaw,

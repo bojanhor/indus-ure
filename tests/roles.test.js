@@ -19,6 +19,7 @@ const {
   buildClientBillSnapshot,
   clientReportSelection,
   clientReportAttachmentSelection,
+  attachmentContentDisposition,
   buildClientReportPdf,
   gmailDraftRaw,
   gmailCompletionRequestRaw,
@@ -658,6 +659,12 @@ test("izvoz poročila sprejme samo izbrane dogodke in njihove priloge", async ()
   }), "base64url").toString("utf8");
   assert.match(raw, /Subject: =\?UTF-8\?B\?/);
   assert.match(raw, /Content-Type: application\/pdf/);
+});
+test("PDF report download permits Unicode customer names", () => {
+  const header = attachmentContentDisposition("obra\u010dun-MIZARSTVO KO\u0160NIK d.o.o..pdf");
+  assert.match(header, /^attachment; filename="obracun-MIZARSTVO KOSNIK d\.o\.o\.\.pdf";/);
+  assert.match(header, /filename\*=UTF-8''obra%C4%8Dun-MIZARSTVO%20KO%C5%A0NIK%20d\.o\.o\.\.pdf$/);
+  assert.doesNotMatch(header, /[^\x20-\x7e]/);
 });
 test("preklic obračuna stranki odklene in vrne arhiviran dogodek", () => {
   const db = {
