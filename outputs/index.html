@@ -2587,7 +2587,13 @@
 
     .modal-body textarea { min-height: 82px; resize: vertical; }
     #todoFormNotes,
-    #todoFormMaterial { resize: none; overflow-y: hidden; }
+    #todoFormMaterial {
+      box-sizing: border-box;
+      min-height: 82px;
+      max-height: none;
+      resize: none;
+      overflow-y: hidden;
+    }
 
     .todo-client-field {
       display: grid;
@@ -9771,11 +9777,20 @@
     function autosizeTodoNarrativeFields() {
       ["todoFormNotes", "todoFormMaterial"].forEach((id) => {
         const field = $(id);
-        if (!field) return;
-        field.style.height = "auto";
-        field.style.height = `${Math.max(82, field.scrollHeight)}px`;
+        if (!field || field.closest(".hidden")) return;
+        const minHeight = Math.max(82, Number.parseFloat(getComputedStyle(field).minHeight) || 0);
+        field.style.height = "0px";
+        field.style.height = `${Math.max(minHeight, field.scrollHeight)}px`;
       });
     }
+
+    function autosizeTodoNarrativeFieldsAfterLayout() {
+      requestAnimationFrame(() => {
+        autosizeTodoNarrativeFields();
+        requestAnimationFrame(autosizeTodoNarrativeFields);
+      });
+    }
+
     async function openTodoDialog(todo = {}) {
       const editing = Boolean(todo.id);
       state.todoHoursSourceId = String(todo._hoursSourceId || "");
@@ -9841,6 +9856,7 @@
       $("todoFormDriveLink").value = "";
       if (editing && !(await acquireTodoEditLockForDialog(todo.id))) return;
       $("todoDialog").showModal();
+      autosizeTodoNarrativeFieldsAfterLayout();
       requestAnimationFrame(() => $("todoDialog").focus({ preventScroll: true }));
       fillMissingPdfThumbnailsForDialog(state.todoDialogPhotos).catch((error) => console.warn(error));
     }

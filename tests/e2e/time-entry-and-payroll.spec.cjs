@@ -36,6 +36,14 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
       await expect(page.locator("#todoFormStatus")).toHaveValue("execution");
       await expect(page.locator("#todoFormHourlyRateField")).toBeHidden();
 
+      await page.locator("#todoFormNotes").fill("Podroben opis opravljenega dela. ".repeat(28));
+      const notesMetrics = await page.locator("#todoFormNotes").evaluate((field) => ({
+        offsetHeight: field.offsetHeight,
+        scrollHeight: field.scrollHeight
+      }));
+      expect(notesMetrics.offsetHeight).toBeGreaterThan(82);
+      expect(notesMetrics.offsetHeight).toBeGreaterThanOrEqual(notesMetrics.scrollHeight);
+
       await page.locator("#todoFormClient").fill(CLIENT_ALIAS);
       await page.locator("#quickAddClientBtn").click();
       await expect(page.locator("#quickClientDialog")).toBeVisible();
