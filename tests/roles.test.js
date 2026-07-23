@@ -437,6 +437,22 @@ test("obračun naredi nespremenljiv posnetek ur posameznega delavca", () => {
   assert.deepEqual(payrollForUser(db, db.users.ibro).map((payroll) => payroll.id), ["p-1"]);
   assert.equal(payrollForUser(db, db.users.bojan).length, 1);
 });
+test("pot v sluzbo se obracuna enkrat na dejanski delovni dan", () => {
+  const db = {
+    users: { ibro: { id: "ibro", billing: { hourlyRate: 20, commuteKmOneWay: 7 } } },
+    settings: { billing: { workerOwnVehicleKmRate: 0.22 } },
+    payrolls: [],
+    todos: [
+      { id: "day-one-first", syncUser: "ibro", status: "execution", date: "2026-07-20", start: "08:00", end: "09:00", title: "Prvo", billingKm: 3 },
+      { id: "day-one-second", syncUser: "ibro", status: "execution", date: "2026-07-20", start: "10:00", end: "11:00", title: "Drugo", billingKm: 1 },
+      { id: "day-two", syncUser: "ibro", status: "execution", date: "2026-07-21", start: "08:00", end: "09:00", title: "Tretje", billingKm: 0 }
+    ]
+  };
+  const payroll = buildPayrollSnapshot(db, "ibro", { from: "2026-07-20", to: "2026-07-21" }, { status: "draft" });
+  assert.deepEqual(payroll.lines.map((line) => [line.workerKm, line.commuteKm, line.km]), [[3, 14, 17], [1, 0, 1], [0, 14, 14]]);
+  assert.equal(payroll.km, 32);
+  assert.equal(payroll.kmAmount, 7.04);
+});
 test("delna izplačila se seštejejo in zmanjšajo preostanek", () => {
   const db = { users: { ibro: { id: "ibro" } } };
   const payroll = normalizePayroll({

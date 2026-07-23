@@ -26,6 +26,10 @@ test("front-end naročila in foto urejevalnik ohranita dogovorjeni mobilni prika
   assert.match(html, /function beginPhotoEditorPinch\(editor, shell\)/);
   assert.match(html, /lostpointercapture/);
   assert.doesNotMatch(html, /photoEditorCropActions|photoEditorApplyCrop|photoEditorCancelCrop/);
+  assert.match(html, /todoFormFooterActions/);
+  assert.match(html, /function autosizeTodoNarrativeFields\(\)/);
+  assert.match(html, /function dayTimelineDragAutoScrollVelocity\(clientY\)/);
+  assert.match(html, /todoTextOrderMarker/);
 });
 test("obračunsko obdobje samodejno sledi novemu dnevu, ročna izbira pa ostane ločena po delavcu", async () => {
   const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");

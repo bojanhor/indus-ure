@@ -690,8 +690,14 @@ function normalizeDb(db = {}) {
   for (const user of Object.values(db.users)) {
     const currentRate = nonnegativeNumber(user.billing?.hourlyRate, null, 10_000);
     const exportTitle = String(user.billing?.exportTitle || "").trim().slice(0, 120);
-    if (!user.billing || currentRate === null || user.billing.exportTitle !== exportTitle) {
-      user.billing = { ...(user.billing || {}), hourlyRate: currentRate ?? db.settings.billing.hourlyRate, exportTitle };
+    const commuteKmOneWay = nonnegativeNumber(user.billing?.commuteKmOneWay, 0, 1_000_000);
+    if (!user.billing || currentRate === null || user.billing.exportTitle !== exportTitle || user.billing.commuteKmOneWay !== commuteKmOneWay) {
+      user.billing = {
+        ...(user.billing || {}),
+        hourlyRate: currentRate ?? db.settings.billing.hourlyRate,
+        exportTitle,
+        commuteKmOneWay
+      };
       changed = true;
     } else {
       user.billing.hourlyRate = currentRate;
@@ -1512,7 +1518,7 @@ function payrollLineForTodo(db, todo, workerId = "") {
   const minutes = payrollMinutesForTodo(db, todo);
   if (!minutes) return null;
   const hourlyRate = nonnegativeNumber(todo.billingHourlyRate, defaultHourlyRateForUser(db, todo.syncUser || todo.createdBy), 10_000);
-  const km = nonnegativeNumber(todo.billingKm, 0, 1_000_000);
+  const workerKm = nonnegativeNumber(todo.billingKm, 0, 1_000_000);
   // Kilometrina delavca je povračilo za njegovo lastno vozilo.
   // Ne sme se mešati s tarifo, ki se zaračuna stranki za kombi ali osebni avto.
   const kmRate = nonnegativeNumber(
@@ -1522,7 +1528,7 @@ function payrollLineForTodo(db, todo, workerId = "") {
   );
   const hours = minutes / 60;
   const workAmount = Number((hours * hourlyRate).toFixed(2));
-  const kmAmount = Number((km * kmRate).toFixed(2));
+  const kmAmount = Number((workerKm * kmRate).toFixed(2));
   return {
     todoId: String(todo.id || ""),
     assignmentGroupId: String(todo.assignmentGroupId || todo.id || ""),
@@ -1535,12 +1541,43 @@ function payrollLineForTodo(db, todo, workerId = "") {
     minutes,
     hours,
     hourlyRate,
-    km,
+    workerKm,
+    commuteKm: 0,
+    km: workerKm,
     kmRate,
     workAmount,
     kmAmount,
     totalAmount: Number((workAmount + kmAmount).toFixed(2))
   };
+}
+
+function commuteKmOneWayForUser(db, userId) {
+  return nonnegativeNumber(db.users?.[userId]?.billing?.commuteKmOneWay, 0, 1_000_000);
+}
+
+// Each worker gets the commute reimbursement once for a worked day, never once
+// per task. It is attached to the first chronological line so the immutable
+// payroll snapshot remains compatible with the existing task-based archive.
+function withDailyCommuteInPayroll(db, workerId, lines = []) {
+  const commuteKm = Number((commuteKmOneWayForUser(db, workerId) * 2).toFixed(2));
+  if (!commuteKm) return lines;
+  const appliedDates = new Set();
+  return lines.map((line) => {
+    const workerKm = nonnegativeNumber(line.workerKm, nonnegativeNumber(line.km, 0, 1_000_000), 1_000_000);
+    const addCommute = !appliedDates.has(line.date);
+    if (addCommute) appliedDates.add(line.date);
+    const lineCommuteKm = addCommute ? commuteKm : 0;
+    const km = Number((workerKm + lineCommuteKm).toFixed(2));
+    const kmAmount = Number((km * Number(line.kmRate || 0)).toFixed(2));
+    return {
+      ...line,
+      workerKm,
+      commuteKm: lineCommuteKm,
+      km,
+      kmAmount,
+      totalAmount: Number((Number(line.workAmount || 0) + kmAmount).toFixed(2))
+    };
+  });
 }
 
 function payrollTotals(lines = []) {
@@ -1573,7 +1610,9 @@ function normalizePayroll(input, db) {
   const lines = (Array.isArray(input?.lines) ? input.lines : []).map((line) => {
     const minutes = Math.round(Number(line?.minutes || 0));
     const hourlyRate = nonnegativeNumber(line?.hourlyRate, null, 10_000);
-    const km = nonnegativeNumber(line?.km, 0, 1_000_000);
+    const commuteKm = nonnegativeNumber(line?.commuteKm, 0, 1_000_000);
+    const workerKm = nonnegativeNumber(line?.workerKm, Math.max(0, nonnegativeNumber(line?.km, 0, 1_000_000) - commuteKm), 1_000_000);
+    const km = Number((workerKm + commuteKm).toFixed(2));
     const kmRate = nonnegativeNumber(line?.kmRate, 0, 1_000);
     if (!String(line?.todoId || "") || minutes <= 0 || hourlyRate === null) return null;
     const hours = minutes / 60;
@@ -1591,6 +1630,8 @@ function normalizePayroll(input, db) {
       minutes,
       hours,
       hourlyRate,
+      workerKm,
+      commuteKm,
       km,
       kmRate,
       workAmount,
@@ -1669,12 +1710,12 @@ function buildPayrollSnapshot(db, workerId, rangeInput, previous = {}, note = un
   const lockedElsewhere = lockedPayrollLineTodoIds(db, previous.id);
   const lockedAdvanceIds = lockedPayrollFinancialIds(db, "advanceIds", previous.id);
   const lockedPersonalPurchaseIds = lockedPayrollFinancialIds(db, "personalPurchaseIds", previous.id);
-  const lines = (db.todos || [])
+  const lines = withDailyCommuteInPayroll(db, workerId, (db.todos || [])
     .filter((todo) => (todo.syncUser || todo.createdBy) === workerId && !todo.archivedAt && String(todo.date || "") >= range.from && String(todo.date || "") <= range.to)
     .filter((todo) => !lockedElsewhere.has(String(todo.id || "")))
     .map((todo) => payrollLineForTodo(db, todo, workerId))
     .filter(Boolean)
-    .sort((a, b) => a.date.localeCompare(b.date) || a.start.localeCompare(b.start) || a.title.localeCompare(b.title));
+    .sort((a, b) => a.date.localeCompare(b.date) || a.start.localeCompare(b.start) || a.title.localeCompare(b.title)));
   const advances = payrollAdvances(db, workerId, range)
     .filter((item) => !lockedAdvanceIds.has(String(item.id || "")));
   const personalPurchases = payrollPersonalPurchases(db, workerId, range)
@@ -4516,17 +4557,16 @@ async function handleApi(req, res) {
     if (url.pathname === "/api/workers/billing" && req.method === "GET") {
       const user = await requireUser(req, res);
       if (!user) return;
-      if (user.role !== "boss") {
-        sendJson(res, 403, { error: "Samo šef lahko vidi urne postavke delavcev." });
-        return;
-      }
       const db = await readDbAsync();
-      const workers = Object.values(db.users || {}).map((worker) => ({
+      const workers = Object.values(db.users || {})
+        .filter((worker) => user.role === "boss" || worker.id === user.id)
+        .map((worker) => ({
         id: worker.id,
         name: worker.name,
         role: worker.role,
         hourlyRate: defaultHourlyRateForUser(db, worker.id),
-        exportTitle: String(worker.billing?.exportTitle || "")
+        exportTitle: String(worker.billing?.exportTitle || ""),
+        commuteKmOneWay: commuteKmOneWayForUser(db, worker.id)
       }));
       sendJson(res, 200, { workers });
       return;
@@ -4544,18 +4584,20 @@ async function handleApi(req, res) {
       const workerId = cleanUserId(body.userId);
       const hourlyRate = nonnegativeNumber(body.hourlyRate, null, 10_000);
       const exportTitle = String(body.exportTitle || "").trim().slice(0, 120);
+      const commuteKmOneWay = nonnegativeNumber(body.commuteKmOneWay, nonnegativeNumber(db.users?.[workerId]?.billing?.commuteKmOneWay, 0, 1_000_000), 1_000_000);
       if (!db.users?.[workerId] || hourlyRate === null) {
         sendJson(res, 400, { error: "Delavec ali urna postavka ni pravilna." });
         return;
       }
-      db.users[workerId].billing = { ...(db.users[workerId].billing || {}), hourlyRate, exportTitle };
+      db.users[workerId].billing = { ...(db.users[workerId].billing || {}), hourlyRate, exportTitle, commuteKmOneWay };
       await writeDbAsync(db);
       const workers = Object.values(db.users).map((worker) => ({
         id: worker.id,
         name: worker.name,
         role: worker.role,
         hourlyRate: defaultHourlyRateForUser(db, worker.id),
-        exportTitle: String(worker.billing?.exportTitle || "")
+        exportTitle: String(worker.billing?.exportTitle || ""),
+        commuteKmOneWay: commuteKmOneWayForUser(db, worker.id)
       }));
       sendJson(res, 200, { workers });
       return;

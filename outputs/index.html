@@ -2550,6 +2550,8 @@
     }
 
     .modal-body textarea { min-height: 82px; resize: vertical; }
+    #todoFormNotes,
+    #todoFormMaterial { resize: none; overflow-y: hidden; }
 
     .todo-client-field {
       display: grid;
@@ -2661,7 +2663,18 @@
       padding-top: 2px;
     }
 
-    #todoDialog { width: min(820px, calc(100vw - 26px)); }
+    #todoDialog { width: min(820px, calc(100vw - 26px)); max-height: calc(100dvh - 20px); overflow-y: auto; }
+    .todo-form-footer-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 4px;
+      padding-top: 14px;
+      border-top: 1px solid var(--line);
+    }
+    .todo-form-footer-actions .footer-danger { margin-right: auto; }
+    .todo-form-footer-actions button { min-height: 42px; }
 
     #todoDialog .modal-head-actions { gap: 6px; }
 
@@ -4292,6 +4305,13 @@
         <div class="audit-box hidden" id="todoFormSourceProject">
           <span>Izvorno opravilo: </span><button class="secondary" id="openTodoSourceProject" type="button">Odpri in uredi</button>
         </div>
+        <div class="todo-form-footer-actions" id="todoFormFooterActions" aria-label="Dejanja opravila">
+          <button class="danger footer-danger hidden" id="deleteTodoFromDialogFooter" type="button">Izbriši</button>
+          <button class="secondary hidden" id="duplicateTodoFromDialogFooter" type="button">Podvoji</button>
+          <button class="secondary hidden" id="writeHoursFromTodoFooter" type="button">Vpis ur</button>
+          <button class="secondary" id="cancelTodoDialogFooter" type="button">Prekliči</button>
+          <button class="primary" id="saveTodoDialogFooter" type="submit">Shrani</button>
+        </div>
 
       </div>
     </form>
@@ -4501,7 +4521,7 @@
       <div class="modal-body app-settings-sections">
         <section class="app-settings-section"><h4>Malica</h4><label>Plačani čas malice za delavca (minute)<input id="settingsMealPaidMinutes" type="number" min="0" max="240" step="1"></label><p class="todo-meta">Malica se stranki ne obračuna. Delavcu se plača največ izbrano število minut.</p></section>
         <section class="app-settings-section"><h4>Kilometrina delavca</h4><label>Povračilo za lastno vozilo (EUR/km)<input id="settingsWorkerOwnVehicleKmRate" type="number" min="0" max="1000" step="0.01"></label><p class="todo-meta">Uporabi se samo za kilometrino delavca; stroški prevoza za stranko ostanejo ločeni po vozilu.</p></section>
-        <section class="app-settings-section"><h4>Čiščenje arhiva</h4><label>Čas hrambe arhiviranega dogodka (meseci)<input id="settingsArchiveRetentionMonths" type="number" min="1" max="120" step="1"></label><p class="todo-meta">Po tem obdobju se izbriše samo dogodek, ki je že arhiviran po potrjenem obračunu delavca in stranke: lokalne priloge, aplikacijsko ustvarjene Drive priloge ter neuporabljena začasna stranka. Obračunski zapisi ostanejo.</p></section>        <section class="app-settings-section worker-billing"><h4>Privzete urne postavke</h4><div class="worker-billing-scroll"><table><thead><tr><th>Delavec</th><th>Vloga</th><th>Privzeta urna postavka</th><th>Naziv v izvozu</th><th></th></tr></thead><tbody id="workerBillingRows"></tbody></table></div></section>
+        <section class="app-settings-section"><h4>Čiščenje arhiva</h4><label>Čas hrambe arhiviranega dogodka (meseci)<input id="settingsArchiveRetentionMonths" type="number" min="1" max="120" step="1"></label><p class="todo-meta">Po tem obdobju se izbriše samo dogodek, ki je že arhiviran po potrjenem obračunu delavca in stranke: lokalne priloge, aplikacijsko ustvarjene Drive priloge ter neuporabljena začasna stranka. Obračunski zapisi ostanejo.</p></section>        <section class="app-settings-section worker-billing"><h4>Privzete urne postavke</h4><div class="worker-billing-scroll"><table><thead><tr><th>Delavec</th><th>Vloga</th><th>Privzeta urna postavka</th><th>Pot v službo (ena smer)</th><th>Naziv v izvozu</th><th></th></tr></thead><tbody id="workerBillingRows"></tbody></table></div></section>
         <div class="actions"><button class="secondary" id="cancelAppSettings" type="button">Prekliči</button><button class="primary" id="saveAppSettings" type="button">Shrani nastavitve</button></div>
       </div>
     </form>
@@ -5637,9 +5657,7 @@
     async function loadAll() {
       const todoRevision = state.todoRevision;
       const todoSnapshotWasStable = state.todoMutationPending === 0;
-      const workerBillingRequest = state.user?.role === "boss"
-        ? api("/api/workers/billing")
-        : Promise.resolve({ workers: [] });
+      const workerBillingRequest = api("/api/workers/billing");
       const clientBillsRequest = state.user?.role === "boss"
         ? api("/api/client-bills")
         : Promise.resolve({ clientBills: [] });
@@ -5751,6 +5769,34 @@
       return Number.isFinite(Number(worker?.hourlyRate)) ? Number(worker.hourlyRate) : fallback;
     }
 
+    function workerCommuteKmOneWay(userId) {
+      const worker = state.workerBilling.find((item) => item.id === userId)
+        || state.users.find((item) => item.id === userId);
+      const value = Number(worker?.commuteKmOneWay || 0);
+      return Number.isFinite(value) && value >= 0 ? value : 0;
+    }
+
+    function withDailyCommuteInBilling(lines, workerId) {
+      const dailyCommuteKm = Number((workerCommuteKmOneWay(workerId) * 2).toFixed(2));
+      if (!dailyCommuteKm) return lines;
+      const appliedDates = new Set();
+      return lines.map((line) => {
+        const workerKm = Number(line.workerKm ?? line.km ?? 0);
+        const commuteKm = appliedDates.has(line.date) ? 0 : dailyCommuteKm;
+        appliedDates.add(line.date);
+        const km = Number((workerKm + commuteKm).toFixed(2));
+        const kmAmount = Number((km * Number(line.kmRate || 0)).toFixed(2));
+        return {
+          ...line,
+          workerKm,
+          commuteKm,
+          km,
+          kmAmount,
+          totalAmount: Number((Number(line.workAmount || 0) + kmAmount).toFixed(2))
+        };
+      });
+    }
+
     function todoHourlyRate(todo) {
       if (todo.billingHourlyRate !== null && todo.billingHourlyRate !== undefined && todo.billingHourlyRate !== "") {
         const value = Number(todo.billingHourlyRate);
@@ -5778,22 +5824,24 @@
             <td><strong>${escapeHtml(worker.name || worker.id)}</strong></td>
             <td>${worker.role === "boss" ? "Šef in delavec" : "Delavec"}</td>
             <td><input class="worker-rate-input" type="number" min="0" max="10000" step="0.01" value="${Number(worker.hourlyRate || 0)}" aria-label="Urna postavka za ${escapeHtml(worker.name || worker.id)}"> EUR/h</td>
+            <td><input class="worker-commute-input" type="number" min="0" max="1000000" step="0.1" value="${Number(worker.commuteKmOneWay || 0)}" aria-label="Pot v službo v eno smer za ${escapeHtml(worker.name || worker.id)}"> km</td>
             <td><input class="worker-export-title-input" type="text" maxlength="120" value="${escapeHtml(worker.exportTitle || "")}" placeholder="npr. monter" aria-label="Naziv izvajalca v izvozu za ${escapeHtml(worker.name || worker.id)}"></td>
             <td><button class="secondary save-worker-rate" type="button">Shrani</button></td>
           `;
           row.querySelector(".save-worker-rate").addEventListener("click", async (event) => {
             const input = row.querySelector(".worker-rate-input");
             const hourlyRate = parseBillingNumber(input.value, 10_000);
+            const commuteKmOneWay = parseBillingNumber(row.querySelector(".worker-commute-input").value, 1_000_000);
             const exportTitle = row.querySelector(".worker-export-title-input").value.trim();
-            if (hourlyRate === null) {
-              showNotice("Vnesi pravilno urno postavko.");
+            if (hourlyRate === null || commuteKmOneWay === null) {
+              showNotice("Vnesi pravilno urno postavko in pot v sluzbo.");
               return;
             }
             event.currentTarget.disabled = true;
             try {
               const data = await api("/api/workers/billing", {
                 method: "PUT",
-                body: JSON.stringify({ userId: worker.id, hourlyRate, exportTitle })
+                body: JSON.stringify({ userId: worker.id, hourlyRate, commuteKmOneWay, exportTitle })
               });
               state.workerBilling = data.workers || state.workerBilling;
               render();
@@ -6340,12 +6388,16 @@
       return endDifference || todoSort(a, b);
     }
 
-    function todoNeedsOrdering(todo) {
-      if (manualOrderingStatusIds.has(todo.status)) return true;
-      const orderTextMarker = /(^|[^\p{L}\p{N}_])naroči(?=$|[^\p{L}\p{N}_])/iu;
-      return orderTextMarker.test(`${todo.notes || ""}\n${todo.material || ""}`);
+    const todoTextOrderMarker = /(^|[^\p{L}\p{N}_])naro\u010di(?=$|[^\p{L}\p{N}_])/iu;
+
+    function todoUsesTextOrdering(todo) {
+      return todoTextOrderMarker.test([todo.title, todo.notes, todo.material].filter(Boolean).join("\n"));
     }
 
+    function todoNeedsOrdering(todo) {
+      if (manualOrderingStatusIds.has(todo.status)) return true;
+      return todoUsesTextOrdering(todo);
+    }
     function todoOrderingSort(a, b) {
       const activeDifference = Number(b.status === "in_progress") - Number(a.status === "in_progress");
       if (activeDifference) return activeDifference;
@@ -7023,32 +7075,27 @@
       const eventElement = event.currentTarget;
       const resizeHandle = event.target.closest(".day-resize-handle");
       let mode = resizeHandle?.dataset.mode || "move";
-      // Pri nizkem dogodku se zgornji in spodnji prijemni pas prekrivata.
-      // Tedaj smer določi dejanski položaj prijema, ne vrstni red DOM elementov.
       if (resizeHandle) {
         const bounds = eventElement.getBoundingClientRect();
         const overlapHeight = 30;
-        if (bounds.height <= overlapHeight * 2) {
-          mode = event.clientY - bounds.top <= bounds.height / 2 ? "resize-start" : "resize-end";
-        }
+        if (bounds.height <= overlapHeight * 2) mode = event.clientY - bounds.top <= bounds.height / 2 ? "resize-start" : "resize-end";
       }
       const startMinute = dayTimelineMinutes(todo.start);
-      const touchHoldRequired = event.pointerType === "touch" && mode === "move";
       const endMinute = dayTimelineMinutes(todo.end);
       if (startMinute === null || endMinute === null) return;
+      const touchHoldRequired = event.pointerType === "touch" && mode === "move";
       event.preventDefault();
       event.stopPropagation();
-      try {
-        eventElement.setPointerCapture?.(event.pointerId);
-      } catch {
-        // Firefox na telefonu lahko zajem kazalca zavrne; lokalni poslušalci na dogodku ostanejo varna rezerva.
-      }
+      try { eventElement.setPointerCapture?.(event.pointerId); } catch { /* Firefox touch capture can be unavailable. */ }
       state.dayTimelineInteraction = {
         pointerId: event.pointerId,
+        pointerType: event.pointerType,
         todoId: todo.id,
         mode,
         startX: event.clientX,
         startY: event.clientY,
+        currentX: event.clientX,
+        currentY: event.clientY,
         originalDate: todo.date,
         targetDate: todo.date,
         dayOffset: 0,
@@ -7056,6 +7103,9 @@
         originalEnd: endMinute,
         startMinute,
         endMinute,
+        scrollDeltaY: 0,
+        autoScrollFrame: 0,
+        autoScrollAt: performance.now(),
         moved: false,
         touchReady: !touchHoldRequired,
         touchHoldRequired,
@@ -7072,29 +7122,32 @@
           navigator.vibrate?.(10);
         }, 220);
       }
-
     }
-    function updateDayTimelineEventPointer(event) {
-      const interaction = state.dayTimelineInteraction;
-      if (!interaction || interaction.pointerId !== event.pointerId) return;
-      const rawDelta = (event.clientY - interaction.startY) / state.dayTimelineMinuteHeight;
+
+    function dayTimelineDragAutoScrollVelocity(clientY) {
+      const viewport = $("dayTimelineScroll");
+      if (!viewport) return 0;
+      const bounds = viewport.getBoundingClientRect();
+      const edge = Math.max(72, Math.min(150, bounds.height * 0.18));
+      const maxSpeed = 420;
+      if (clientY < bounds.top + edge) {
+        const proximity = Math.min(1, Math.max(0, (bounds.top + edge - clientY) / edge));
+        return -maxSpeed * (0.15 + 0.85 * proximity * proximity);
+      }
+      if (clientY > bounds.bottom - edge) {
+        const proximity = Math.min(1, Math.max(0, (clientY - (bounds.bottom - edge)) / edge));
+        return maxSpeed * (0.15 + 0.85 * proximity * proximity);
+      }
+      return 0;
+    }
+
+    function refreshDayTimelineEventPreview(interaction) {
+      const rawDelta = ((interaction.currentY - interaction.startY) + interaction.scrollDeltaY) / state.dayTimelineMinuteHeight;
       const delta = Math.round(rawDelta / 15) * 15;
-      if (!interaction.touchReady) {
-        event.preventDefault(); event.stopPropagation();
-        interaction.startX = event.clientX; interaction.startY = event.clientY;
-        return;
-      }
-      const deltaX = event.clientX - interaction.startX;
-      const deltaY = event.clientY - interaction.startY;
-      if (!interaction.moved && Math.max(Math.abs(deltaX), Math.abs(deltaY)) < 4) return;
-      event.preventDefault(); event.stopPropagation();
-      if (!interaction.moved) {
-        interaction.moved = true;
-        interaction.element.classList.add("is-moving");
-        interaction.lockPromise = acquireTodoEditLockForDialog(interaction.todoId);
-      }
+      const deltaX = interaction.currentX - interaction.startX;
+      const deltaY = (interaction.currentY - interaction.startY) + interaction.scrollDeltaY;
       const isMove = interaction.mode === "move";
-      const dayThreshold = event.pointerType === "touch" ? 96 : 72;
+      const dayThreshold = interaction.pointerType === "touch" ? 96 : 72;
       const wantsDayMove = isMove && Math.abs(deltaX) >= dayThreshold && Math.abs(deltaX) > Math.abs(deltaY) * 1.35;
       interaction.dayOffset = wantsDayMove ? (deltaX > 0 ? 1 : -1) : 0;
       if (interaction.dayOffset) {
@@ -7102,7 +7155,7 @@
         target.setDate(target.getDate() + interaction.dayOffset);
         interaction.targetDate = dateKey(target);
         interaction.element.classList.add("is-day-moving");
-        interaction.element.dataset.dayTarget = interaction.dayOffset > 0 ? "→ naslednji dan" : "← prejšnji dan";
+        interaction.element.dataset.dayTarget = interaction.dayOffset > 0 ? "\u2192 naslednji dan" : "\u2190 pre\u0161nji dan";
         interaction.element.style.transform = `translateX(${Math.max(-80, Math.min(80, deltaX))}px)`;
       } else {
         interaction.targetDate = interaction.originalDate;
@@ -7111,23 +7164,78 @@
         interaction.element.style.transform = "";
       }
       if (interaction.mode === "resize-start") {
-        interaction.startMinute = Math.max(0, Math.min(interaction.originalEnd - 15, interaction.originalStart + delta)); interaction.endMinute = interaction.originalEnd;
+        interaction.startMinute = Math.max(0, Math.min(interaction.originalEnd - 15, interaction.originalStart + delta));
+        interaction.endMinute = interaction.originalEnd;
       } else if (interaction.mode === "resize-end") {
-        interaction.startMinute = interaction.originalStart; interaction.endMinute = Math.min(1440, Math.max(interaction.originalStart + 15, interaction.originalEnd + delta));
+        interaction.startMinute = interaction.originalStart;
+        interaction.endMinute = Math.min(1440, Math.max(interaction.originalStart + 15, interaction.originalEnd + delta));
       } else {
         const duration = interaction.originalEnd - interaction.originalStart;
-        interaction.startMinute = Math.max(0, Math.min(1440 - duration, interaction.originalStart + delta)); interaction.endMinute = interaction.startMinute + duration;
+        interaction.startMinute = Math.max(0, Math.min(1440 - duration, interaction.originalStart + delta));
+        interaction.endMinute = interaction.startMinute + duration;
       }
       interaction.element.style.top = Math.round(interaction.startMinute * state.dayTimelineMinuteHeight) + "px";
       interaction.element.style.height = Math.max(18, Math.round((interaction.endMinute - interaction.startMinute) * state.dayTimelineMinuteHeight)) + "px";
       const meta = interaction.element.querySelector(".day-timeline-event-meta");
-      if (meta) { const suffix = meta.textContent.includes(" | ") ? meta.textContent.slice(meta.textContent.indexOf(" | ")) : ""; meta.textContent = dayTimelineTime(interaction.startMinute) + "-" + dayTimelineTime(interaction.endMinute) + suffix; }
+      if (meta) {
+        const suffix = meta.textContent.includes(" | ") ? meta.textContent.slice(meta.textContent.indexOf(" | ")) : "";
+        meta.textContent = dayTimelineTime(interaction.startMinute) + "-" + dayTimelineTime(interaction.endMinute) + suffix;
+      }
+    }
+
+    function tickDayTimelineEventAutoScroll(timestamp) {
+      const interaction = state.dayTimelineInteraction;
+      if (!interaction || !interaction.moved) return;
+      const viewport = $("dayTimelineScroll");
+      const elapsed = Math.min(48, Math.max(0, timestamp - (interaction.autoScrollAt || timestamp)));
+      interaction.autoScrollAt = timestamp;
+      const velocity = interaction.dayOffset ? 0 : dayTimelineDragAutoScrollVelocity(interaction.currentY);
+      if (viewport && velocity) {
+        const previousTop = viewport.scrollTop;
+        viewport.scrollTop = Math.max(0, Math.min(viewport.scrollHeight - viewport.clientHeight, previousTop + velocity * elapsed / 1000));
+        const scrolled = viewport.scrollTop - previousTop;
+        if (scrolled) {
+          interaction.scrollDeltaY += scrolled;
+          refreshDayTimelineEventPreview(interaction);
+        }
+      }
+      interaction.autoScrollFrame = requestAnimationFrame(tickDayTimelineEventAutoScroll);
+    }
+
+    function updateDayTimelineEventPointer(event) {
+      const interaction = state.dayTimelineInteraction;
+      if (!interaction || interaction.pointerId !== event.pointerId) return;
+      interaction.currentX = event.clientX;
+      interaction.currentY = event.clientY;
+      if (!interaction.touchReady) {
+        event.preventDefault();
+        event.stopPropagation();
+        interaction.startX = event.clientX;
+        interaction.startY = event.clientY;
+        interaction.currentX = event.clientX;
+        interaction.currentY = event.clientY;
+        return;
+      }
+      const deltaX = event.clientX - interaction.startX;
+      const deltaY = event.clientY - interaction.startY;
+      if (!interaction.moved && Math.max(Math.abs(deltaX), Math.abs(deltaY)) < 4) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (!interaction.moved) {
+        interaction.moved = true;
+        interaction.element.classList.add("is-moving");
+        interaction.lockPromise = acquireTodoEditLockForDialog(interaction.todoId);
+        interaction.autoScrollAt = performance.now();
+        interaction.autoScrollFrame = requestAnimationFrame(tickDayTimelineEventAutoScroll);
+      }
+      refreshDayTimelineEventPreview(interaction);
     }
     async function finishDayTimelineEventPointer(event, cancelled = false) {
       const interaction = state.dayTimelineInteraction;
       if (!interaction || interaction.pointerId !== event.pointerId) return;
       event.stopPropagation();
       state.dayTimelineInteraction = null;
+      if (interaction.autoScrollFrame) cancelAnimationFrame(interaction.autoScrollFrame);
       interaction.element.classList.remove("is-moving", "is-drag-ready", "is-day-moving");
       interaction.element.style.transform = "";
       delete interaction.element.dataset.dayTarget;
@@ -7530,20 +7638,21 @@
     function billingLiveLines(workerId, range) {
       const kmRate = Number(state.settings.billing?.workerOwnVehicleKmRate ?? state.settings.billing?.kmRate ?? 0);
       const lockedTodoIds = lockedBillingTodoIds(workerId);
-      return state.todos
+      const lines = state.todos
         .filter((todo) => (todo.syncUser || todo.createdBy) === workerId && payrollPaidTodoStatuses.has(todo.status) && String(todo.date || "") >= range.from && String(todo.date || "") <= range.to)
         .filter((todo) => !lockedTodoIds.has(String(todo.id || "")))
         .map((todo) => {
           const minutes = payrollMinutesForTodo(todo);
           const hours = minutes / 60;
           const hourlyRate = todoHourlyRate(todo);
-          const km = Number(todo.billingKm || 0);
+          const workerKm = Number(todo.billingKm || 0);
           const workAmount = Number((hours * hourlyRate).toFixed(2));
-          const kmAmount = Number((km * kmRate).toFixed(2));
-          return { todoId: todo.id, assignmentGroupId: todo.assignmentGroupId || todo.id, workerId, date: todo.date, start: todo.start, end: todo.end, title: todo.title, client: todo.client, minutes, hours, hourlyRate, km, kmRate, workAmount, kmAmount, totalAmount: Number((workAmount + kmAmount).toFixed(2)) };
+          const kmAmount = Number((workerKm * kmRate).toFixed(2));
+          return { todoId: todo.id, assignmentGroupId: todo.assignmentGroupId || todo.id, workerId, date: todo.date, start: todo.start, end: todo.end, title: todo.title, client: todo.client, minutes, hours, hourlyRate, workerKm, commuteKm: 0, km: workerKm, kmRate, workAmount, kmAmount, totalAmount: Number((workAmount + kmAmount).toFixed(2)) };
         })
         .filter((line) => line.hours > 0)
         .sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.start).localeCompare(String(b.start)) || String(a.title).localeCompare(String(b.title)));
+      return withDailyCommuteInBilling(lines, workerId);
     }
 
     function billingAdvances(workerId, range) {
@@ -8276,7 +8385,7 @@
           <div class="todo-summary" role="button" tabindex="0" aria-label="Uredi opravilo: ${escapeHtml(todo.title)}">
             <div class="todo-title-row">
               ${todoUsesOrderConfirmation(todo) ? `<button class="todo-ordered-toggle" type="button" aria-pressed="${Boolean(todo.ordered)}" title="${todo.ordered ? "Označeno kot naročeno" : "Označi kot naročeno"}" aria-label="${todo.ordered ? "Označeno kot naročeno" : "Označi kot naročeno"}"><span aria-hidden="true">&#10003;</span></button>` : ""}
-              <span class="todo-chip todo-status-chip todo-status-color ${todoStatusClass(todo.status)}">${todoStatus(todo.status).label}</span>
+              <span class="todo-chip todo-status-chip todo-status-color ${todoStatusClass(todo.status)}">${todoStatus(todo.status).label}</span>               ${todoUsesTextOrdering(todo) && !manualOrderingStatusIds.has(todo.status) ? '<span class="todo-chip">naroči</span>' : ""}
               <div class="todo-title">${todo.urgent ? '<span class="todo-chip todo-urgent-chip">NUJNO</span> ' : ""}${linkifyText(todo.title)}</div>
               ${hasExpandedDetails ? `<button class="todo-details-toggle${attachmentCount ? " has-attachments" : ""}" type="button" aria-expanded="${detailsExpanded}" aria-controls="todo-details-${escapeHtml(todo.id)}" title="${todoDetailsToggleLabel(detailsExpanded, attachmentCount)}" aria-label="${todoDetailsToggleLabel(detailsExpanded, attachmentCount)}">${attachmentCount ? '<span class="todo-attachment-indicator" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7.2 10.8 5.5-5.5a3.1 3.1 0 1 1 4.4 4.4l-7.4 7.4a4.5 4.5 0 0 1-6.4-6.4l7-7"></path></svg></span>' : ""}<svg class="todo-details-chevron" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 7 6 6 6-6"></path></svg></button>` : ""}
             </div>
@@ -9518,6 +9627,14 @@
         .sort((a, b) => a.localeCompare(b, "sl"));
       $("todoFormTaskSuggestions").innerHTML = names.map((name) => `<option value="${escapeHtml(name)}"></option>`).join("");
     }
+    function autosizeTodoNarrativeFields() {
+      ["todoFormNotes", "todoFormMaterial"].forEach((id) => {
+        const field = $(id);
+        if (!field) return;
+        field.style.height = "auto";
+        field.style.height = `${Math.max(82, field.scrollHeight)}px`;
+      });
+    }
     async function openTodoDialog(todo = {}) {
       const editing = Boolean(todo.id);
       state.todoHoursSourceId = String(todo._hoursSourceId || "");
@@ -9550,7 +9667,8 @@
       $("todoFormOrdered").checked = todoOrderStatusIds.has(todoStatus(todo.status || "open").id) && Boolean(todo.ordered);
       $("todoFormWarranty").checked = Boolean(todo.warranty);
       updateTodoFormStatus();
-      if (state.todoMealEntry && !editing) applyMealDefaults();
+       autosizeTodoNarrativeFields();
+       if (state.todoMealEntry && !editing) applyMealDefaults();
       const draftAssignees = todo._hoursAssigneeIds?.length
         ? todo._hoursAssigneeIds
         : (todo._duplicateAssigneeIds?.length ? todo._duplicateAssigneeIds : [activeWorkerId()]);
@@ -9570,9 +9688,9 @@
       $("todoFormBillingKm").value = Number(todo.billingKm || 0);
       $("todoFormClientKm").value = Number(todo.clientKm || 0);
       $("todoFormClientVehicle").value = editing ? (todo.clientVehicle === "van" ? "van" : "personal") : (todo.clientVehicle === "van" ? "van" : preferredClientVehicle());
-      $("deleteTodoFromDialog").classList.toggle("hidden", !editing);
-      $("duplicateTodoFromDialog").classList.toggle("hidden", !editing || Boolean(state.todoHoursSourceId));
-      $("writeHoursFromTodo").classList.toggle("hidden", !editing || Boolean(state.todoHoursSourceId) || !projectHoursSourceStatuses.has(todoStatus(todo.status).id));
+      ["deleteTodoFromDialog", "deleteTodoFromDialogFooter"].forEach((id) => $(id).classList.toggle("hidden", !editing));
+      ["duplicateTodoFromDialog", "duplicateTodoFromDialogFooter"].forEach((id) => $(id).classList.toggle("hidden", !editing || Boolean(state.todoHoursSourceId)));
+      ["writeHoursFromTodo", "writeHoursFromTodoFooter"].forEach((id) => $(id).classList.toggle("hidden", !editing || Boolean(state.todoHoursSourceId) || !projectHoursSourceStatuses.has(todoStatus(todo.status).id)));
       renderTodoFormAudit(todo);
       renderTodoFormSourceProject(todo);
       ["todoFormPhotoInput", "todoFormCameraInput", "todoFormPdfInput", "todoFormVideoInput"].forEach((id) => { $(id).value = ""; });
@@ -11524,7 +11642,7 @@
     $("reportTo").addEventListener("change", renderReport);
     $("reportClientSort").addEventListener("change", () => { state.reportClientSort = $("reportClientSort").value; renderReport(); });
 
-    $("closeTodoDialog").addEventListener("click", () => $("todoDialog").close());
+    ["closeTodoDialog", "cancelTodoDialogFooter"].forEach((id) => $(id).addEventListener("click", () => $("todoDialog").close()));
 
     ["todoFormStart", "todoFormEnd"].forEach((id) => $(id).addEventListener("change", normalizeTodoFormTimes));
     $("clearTodoFormDate").addEventListener("click", () => {
@@ -11541,6 +11659,7 @@
       renderTodoStatusChoices(button.dataset.status);
       updateTodoFormStatus();
     });
+    ["todoFormNotes", "todoFormMaterial"].forEach((id) => $(id).addEventListener("input", autosizeTodoNarrativeFields));
     $("todoFormHourlyRate").addEventListener("input", () => {
       $("todoFormHourlyRate").dataset.autoRate = "false";
     });
@@ -11585,8 +11704,8 @@
       event.preventDefault();
       submitTodoDialog();
     });
-    $("deleteTodoFromDialog").addEventListener("click", () => deleteTodoFromDialog().catch((error) => showNotice(error.message)));
-    $("duplicateTodoFromDialog").addEventListener("click", () => duplicateTodoFromCurrent().catch((error) => showNotice(error.message)));
+    ["deleteTodoFromDialog", "deleteTodoFromDialogFooter"].forEach((id) => $(id).addEventListener("click", () => deleteTodoFromDialog().catch((error) => showNotice(error.message))));
+    ["duplicateTodoFromDialog", "duplicateTodoFromDialogFooter"].forEach((id) => $(id).addEventListener("click", () => duplicateTodoFromCurrent().catch((error) => showNotice(error.message))));
     $("openTodoSourceProject").addEventListener("click", async (event) => {
       const sourceId = event.currentTarget.dataset.sourceTodoId || "";
       const source = state.todos.find((todo) => todo.id === sourceId);
@@ -11599,7 +11718,7 @@
       await new Promise((resolve) => setTimeout(resolve, 0));
       await openTodoDialog(source);
     });
-    $("writeHoursFromTodo").addEventListener("click", () => openHoursTodoFromCurrent().catch((error) => showNotice(error.message)));
+    ["writeHoursFromTodo", "writeHoursFromTodoFooter"].forEach((id) => $(id).addEventListener("click", () => openHoursTodoFromCurrent().catch((error) => showNotice(error.message))));
     document.querySelectorAll("[data-create-drive]").forEach((button) => {
       button.addEventListener("click", () => createTodoGoogleDriveFile(button.dataset.createDrive).catch((error) => showNotice(error.message)));
     });
@@ -11838,6 +11957,7 @@
       state.dayTimelineInteraction = null;
       state.dayTimelinePointers.clear();
       if (interaction?.holdTimer) clearTimeout(interaction.holdTimer);
+      if (interaction?.autoScrollFrame) cancelAnimationFrame(interaction.autoScrollFrame);
       state.dayTimelineGesture = null;
       $("dayTimelineScroll").classList.remove("is-panning");
       state.dayTimelineDrafts.clear();
