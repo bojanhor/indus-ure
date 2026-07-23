@@ -58,6 +58,7 @@ const MONITOR_INTERVAL_MS = Math.max(60_000, Number(process.env.MONITOR_INTERVAL
 const OPERATIONAL_MONITOR_ENABLED = process.env.DISABLE_OPERATIONAL_MONITOR !== "true";
 const ARCHIVE_RETENTION_CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const MONITOR_MAX_RSS_MB = Math.max(256, Number(process.env.MONITOR_MAX_RSS_MB || 1_800));
+const MONITOR_DISK_WARNING_PERCENT = Math.min(99, Math.max(90, Number(process.env.MONITOR_DISK_WARNING_PERCENT || 90)));
 const REPORT_PDF_MAX_TOTAL_BYTES = 50 * 1024 * 1024;
 const REPORT_GMAIL_MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;
 const REPORT_GMAIL_MAX_TOTAL_BYTES = 8 * 1024 * 1024;
@@ -2098,26 +2099,51 @@ function reportPdfLine(doc, label, value) {
   doc.font(reportPdfFontPath()).fillColor("#263634").text(String(value));
 }
 
+function reportPdfEnsureSpace(doc, height = 0) {
+  const bottom = doc.page.height - doc.page.margins.bottom;
+  if (doc.y + height > bottom) doc.addPage();
+}
+
+function reportPdfAttachmentPreviews(doc, attachments = []) {
+  const images = attachments.filter((attachment) => /^image\/(jpeg|png)$/i.test(String(attachment?.mimeType || '')));
+  for (const [index, attachment] of images.entries()) {
+    reportPdfEnsureSpace(doc, 218);
+    const label = reportPdfAttachmentTitle(attachment, index + 1);
+    doc.font(reportPdfFontPath('bold')).fontSize(10).fillColor('#1e3430').text(label);
+    const x = doc.page.margins.left;
+    const y = doc.y + 5;
+    try {
+      // Half of the printable A4 width keeps reports readable while retaining
+      // enough detail for photos from the field.
+      doc.image(attachment.bytes, x, y, { fit: [250, 180], align: 'left', valign: 'top' });
+      if (String(attachment.driveUrl || '').trim()) doc.link(x, y, 250, 180, attachment.driveUrl);
+      doc.y = y + 188;
+    } catch {
+      reportPdfLine(doc, 'Priloga', 'Slike ni bilo mogo\u010de vgraditi; v PDF je prilo\u017een izvirnik.');
+    }
+  }
+}
+
 function buildClientReportPdf(db, report, attachments = [], exportOptions = {}) {
   const options = clientReportExportOptions(exportOptions);
-  const title = `Obračun - ${safeReportFileName(report.client?.name || "stranka")}`;
+  const title = `Obra\u010dun - ${safeReportFileName(report.client?.name || 'stranka')}`;
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({
-      size: "A4",
+      size: 'A4',
       margin: 46,
-      info: { Title: title, Author: "INDUS URE", Subject: "Obračun opravljenih storitev" }
+      info: { Title: title, Author: 'INDUS URE', Subject: 'Obra\u010dun opravljenih storitev' }
     });
     const chunks = [];
-    doc.on("data", (chunk) => chunks.push(chunk));
-    doc.once("error", reject);
-    doc.once("end", () => resolve(Buffer.concat(chunks)));
+    doc.on('data', (chunk) => chunks.push(chunk));
+    doc.once('error', reject);
+    doc.once('end', () => resolve(Buffer.concat(chunks)));
     try {
-      doc.font(reportPdfFontPath("bold")).fontSize(21).fillColor("#0d536b").text("Obračun opravljenih storitev");
+      doc.font(reportPdfFontPath('bold')).fontSize(21).fillColor('#0d536b').text('Obra\u010dun opravljenih storitev');
       doc.moveDown(0.3);
-      doc.font(reportPdfFontPath()).fontSize(11).fillColor("#263634");
-      reportPdfLine(doc, "Stranka", report.client?.name || "");
-      if (report.client?.email) reportPdfLine(doc, "E-posta", report.client.email);
-      reportPdfLine(doc, "Obdobje", report.from || report.to ? `${report.from ? reportPdfDate(report.from) : "-"} - ${report.to ? reportPdfDate(report.to) : "-"}` : "Celotna evidenca");
+      doc.font(reportPdfFontPath()).fontSize(11).fillColor('#263634');
+      reportPdfLine(doc, 'Stranka', report.client?.name || '');
+      if (report.client?.email) reportPdfLine(doc, 'E-po\u0161ta', report.client.email);
+      if (report.from || report.to) reportPdfLine(doc, 'Obdobje', `${report.from ? reportPdfDate(report.from) : '-'} - ${report.to ? reportPdfDate(report.to) : '-'}`);
       doc.moveDown(0.8);
 
       for (const group of report.groups || []) {
@@ -2125,70 +2151,66 @@ function buildClientReportPdf(db, report, attachments = [], exportOptions = {}) 
         const warranty = Boolean(todo.warranty);
         const hours = warranty ? 0 : group.todos.reduce((sum, item) => sum + todoDurationHours(item), 0);
         const clientKm = warranty ? 0 : Math.max(0, Number(todo.clientKm || 0));
-        const time = options.time === "shown" && todo.start && todo.end ? `  ${todo.start}-${todo.end}` : "";
-        doc.font(reportPdfFontPath("bold")).fontSize(13).fillColor("#143b34").text(`${reportPdfDate(todo.date)}${time}`);
-        doc.font(reportPdfFontPath("bold")).fontSize(12).fillColor("#161f20").text(String(todo.title || "Brez naziva"));
-        doc.font(reportPdfFontPath()).fontSize(10).fillColor("#263634");
-        if (options.worker === "title") reportPdfLine(doc, "Izvajalec", reportPdfAssignees(db, group.todos));
-        if (warranty) reportPdfLine(doc, "Garancija", "Storitev se ne obračunava stranki.");
-        if (hours) reportPdfLine(doc, "Izvedeno", `${hours.toLocaleString("sl-SI", { maximumFractionDigits: 2 })} h`);
-        if (clientKm) reportPdfLine(doc, "Stroski prevoza (obe smeri)", `${reportPdfVehicleLabel(todo.clientVehicle)} - ${clientKm.toLocaleString("sl-SI", { maximumFractionDigits: 1 })} km`);
-        if (todo.notes) reportPdfLine(doc, "Opis del", todo.notes);
-        if (todo.material) reportPdfLine(doc, "Material", todo.material);
+        const time = options.time === 'shown' && todo.start && todo.end ? `  ${todo.start}-${todo.end}` : '';
+        doc.font(reportPdfFontPath('bold')).fontSize(13).fillColor('#143b34').text(`${reportPdfDate(todo.date)}${time}`);
+        doc.font(reportPdfFontPath('bold')).fontSize(12).fillColor('#161f20').text(String(todo.title || 'Brez naziva'));
+        doc.font(reportPdfFontPath()).fontSize(10).fillColor('#263634');
+        if (options.worker === 'title') reportPdfLine(doc, 'Izvajalec', reportPdfAssignees(db, group.todos));
+        if (warranty) reportPdfLine(doc, 'Garancija', 'Storitev se ne obra\u010dunava stranki.');
+        if (hours) reportPdfLine(doc, 'Izvedeno', `${hours.toLocaleString('sl-SI', { maximumFractionDigits: 2 })} h`);
+        if (clientKm) reportPdfLine(doc, 'Stro\u0161ki prevoza (obe smeri)', `${reportPdfVehicleLabel(todo.clientVehicle)} - ${clientKm.toLocaleString('sl-SI', { maximumFractionDigits: 1 })} km`);
+        if (todo.notes) reportPdfLine(doc, 'Opis del', todo.notes);
+        if (todo.material) reportPdfLine(doc, 'Material', todo.material);
         const driveFiles = [...new Map(group.todos.flatMap((item) => item.driveFiles || []).filter((file) => file?.url).map((file) => [file.url, file])).values()];
         for (const file of driveFiles) reportPdfDriveFileLink(doc, file);
         const groupAttachments = attachments.filter((attachment) => attachment.eventId === group.eventId);
         if (groupAttachments.length) reportPdfAttachmentLinks(doc, groupAttachments);
+        reportPdfAttachmentPreviews(doc, groupAttachments);
         doc.moveDown(0.75);
-        doc.strokeColor("#c8d9d5").lineWidth(1).moveTo(doc.page.margins.left, doc.y).lineTo(doc.page.width - doc.page.margins.right, doc.y).stroke();
+        reportPdfEnsureSpace(doc, 20);
+        doc.strokeColor('#a9c5bd').lineWidth(1.4).moveTo(doc.page.margins.left, doc.y).lineTo(doc.page.width - doc.page.margins.right, doc.y).stroke();
         doc.moveDown(0.75);
       }
+
       const clientHoursByWorker = new Map();
+      const travel = { personal: 0, van: 0 };
       const totalClientHours = (report.groups || []).reduce((sum, group) => {
         const representative = group.todos?.[0] || {};
         if (representative.warranty) return sum;
+        const vehicle = representative.clientVehicle === 'van' ? 'van' : 'personal';
+        travel[vehicle] += Math.max(0, Number(representative.clientKm || 0));
         return sum + (group.todos || []).reduce((hours, item) => {
           const duration = todoDurationHours(item);
-          if (options.worker === "title") {
+          if (options.worker === 'title') {
             const label = reportPdfAssigneeTitle(db, item);
             clientHoursByWorker.set(label, (clientHoursByWorker.get(label) || 0) + duration);
           }
           return hours + duration;
         }, 0);
       }, 0);
+      reportPdfEnsureSpace(doc, 105);
       doc.moveDown(0.4);
-      doc.font(reportPdfFontPath("bold")).fontSize(13).fillColor("#0d536b").text("Izvedeno vseh ur");
-      if (options.worker === "title" && clientHoursByWorker.size) {
-        [...clientHoursByWorker.entries()].sort(([left], [right]) => left.localeCompare(right, "sl")).forEach(([label, hours]) => {
-          reportPdfLine(doc, label, `${hours.toLocaleString("sl-SI", { maximumFractionDigits: 2 })} h`);
+      doc.font(reportPdfFontPath('bold')).fontSize(13).fillColor('#0d536b').text('Izvedeno vseh ur');
+      if (options.worker === 'title' && clientHoursByWorker.size) {
+        [...clientHoursByWorker.entries()].sort(([left], [right]) => left.localeCompare(right, 'sl')).forEach(([label, hours]) => {
+          reportPdfLine(doc, label, `${hours.toLocaleString('sl-SI', { maximumFractionDigits: 2 })} h`);
         });
-        reportPdfLine(doc, "Skupaj", `${totalClientHours.toLocaleString("sl-SI", { maximumFractionDigits: 2 })} h`);
-      } else {
-        reportPdfLine(doc, "Skupaj", `${totalClientHours.toLocaleString("sl-SI", { maximumFractionDigits: 2 })} h`);
       }
-      doc.moveDown(0.5);
+      reportPdfLine(doc, 'Skupaj', `${totalClientHours.toLocaleString('sl-SI', { maximumFractionDigits: 2 })} h`);
+      if (travel.personal || travel.van) {
+        doc.moveDown(0.35);
+        doc.font(reportPdfFontPath('bold')).fontSize(13).fillColor('#0d536b').text('Skupaj prevoza');
+        if (travel.personal) reportPdfLine(doc, 'Osebni avto', `${travel.personal.toLocaleString('sl-SI', { maximumFractionDigits: 1 })} km`);
+        if (travel.van) reportPdfLine(doc, 'Kombi', `${travel.van.toLocaleString('sl-SI', { maximumFractionDigits: 1 })} km`);
+        reportPdfLine(doc, 'Skupaj', `${(travel.personal + travel.van).toLocaleString('sl-SI', { maximumFractionDigits: 1 })} km`);
+      }
 
-      for (const [attachmentIndex, attachment] of attachments.entries()) {
-        const image = /^image\/(jpeg|png)$/i.test(String(attachment.mimeType || ""));
-        if (image) {
-          doc.addPage();
-          doc.font(reportPdfFontPath("bold")).fontSize(14).fillColor("#143b34").text(reportPdfAttachmentTitle(attachment, attachmentIndex + 1));
-          doc.moveDown(0.5);
-          try {
-            doc.image(attachment.bytes, {
-              fit: [doc.page.width - doc.page.margins.left - doc.page.margins.right, doc.page.height - doc.page.margins.top - doc.page.margins.bottom - 42],
-              align: "center",
-              valign: "center"
-            });
-          } catch {
-            reportPdfLine(doc, "Priloga", "Slike ni bilo mogoče vgraditi; priložen je izvirnik.");
-          }
-        }
+      for (const attachment of attachments) {
         doc.file(attachment.bytes, {
           name: attachment.filename,
           type: attachment.mimeType,
           description: `Priloga: ${attachment.name}`,
-          relationship: "Supplement"
+          relationship: 'Supplement'
         });
       }
       doc.end();
@@ -2197,7 +2219,6 @@ function buildClientReportPdf(db, report, attachments = [], exportOptions = {}) 
     }
   });
 }
-
 function mimeBase64(value) {
   return Buffer.from(value).toString("base64").replace(/.{1,76}/g, "$&\r\n");
 }
@@ -3623,6 +3644,39 @@ async function restoreBrowserBackup(upload, currentDb) {
   }
 }
 
+async function serverRuntimeStatus() {
+  let disk = { available: false, totalBytes: 0, freeBytes: 0, usedPercent: 0 };
+  try {
+    const stats = await fsp.statfs('/');
+    const blockSize = Number(stats.bsize || stats.frsize || 1);
+    const totalBlocks = Number(stats.blocks || 0);
+    const freeBlocks = Number(stats.bavail || stats.bfree || 0);
+    const totalBytes = totalBlocks * blockSize;
+    const freeBytes = freeBlocks * blockSize;
+    disk = { available: Boolean(totalBytes), totalBytes, freeBytes, usedPercent: totalBytes ? Math.max(0, Math.min(100, (1 - freeBytes / totalBytes) * 100)) : 0 };
+  } catch {}
+  let lastBackup = null;
+  if (DATABASE_URL) {
+    try {
+      const result = await getPgPool().query("select data, finished_at from indus_backup_runs where status = 'success' order by finished_at desc limit 1");
+      const row = result.rows[0];
+      if (row) lastBackup = { finishedAt: row.finished_at, archiveBytes: Math.max(0, Number(row.data?.bytes || 0)), recoveryFile: String(row.data?.recoveryFile || '') };
+    } catch {}
+  }
+  const totalRamBytes = Number(os.totalmem() || 0);
+  const freeRamBytes = Number(os.freemem() || 0);
+  const cores = Math.max(1, Number(os.cpus()?.length || 1));
+  const load1 = Number(os.loadavg?.()[0] || 0);
+  return {
+    cpu: { cores, load1, loadPercent: Math.max(0, Math.min(100, load1 / cores * 100)) },
+    ram: { totalBytes: totalRamBytes, usedBytes: Math.max(0, totalRamBytes - freeRamBytes), usedPercent: totalRamBytes ? Math.max(0, Math.min(100, (1 - freeRamBytes / totalRamBytes) * 100)) : 0 },
+    disk,
+    uptimeSeconds: Math.max(0, Number(os.uptime() || 0)),
+    appUptimeSeconds: Math.max(0, Number(process.uptime() || 0)),
+    lastBackup
+  };
+}
+
 async function backupStatus() {
   if (!DATABASE_URL) return [];
   const result = await getPgPool().query("select status, data, created_at, finished_at from indus_backup_runs order by created_at desc limit 12");
@@ -3744,14 +3798,15 @@ async function runOperationalMonitor() {
     }
   }
   try {
-    const stats = await fsp.statfs(MEDIA_DIR);
+    const stats = await fsp.statfs('/');
     const free = Number(stats.bavail || stats.bfree || 0);
     const total = Number(stats.blocks || 0);
-    if (total && (1 - free / total) >= 0.85) {
-      issues.push({ code: "storage-low", severity: "warning", title: "Na strežniku zmanjkuje prostora", message: "Prostor za priloge je nad 85 % zaseden." });
+    const usedPercent = total ? (1 - free / total) * 100 : 0;
+    if (total && usedPercent >= MONITOR_DISK_WARNING_PERCENT) {
+      issues.push({ code: 'storage-low', severity: 'warning', title: 'Disk stre\u017enika je skoraj poln', message: `Disk stre\u017enika je ${Math.round(usedPercent)} % zaseden (opozorilo pri ${MONITOR_DISK_WARNING_PERCENT} %).` });
     }
   } catch {
-    issues.push({ code: "media-unavailable", severity: "critical", title: "Mapa prilog ni dosegljiva", message: "Strežnik ne more preveriti ali zapisovati prilog." });
+    issues.push({ code: 'storage-unavailable', severity: 'critical', title: 'Diska stre\u017enika ni mogo\u010de preveriti', message: 'Stre\u017enik ne more preveriti prostora na sistemskem disku.' });
   }
   const rssMb = process.memoryUsage().rss / 1024 / 1024;
   if (rssMb > MONITOR_MAX_RSS_MB) {
@@ -3858,6 +3913,17 @@ async function handleApi(req, res) {
     if (url.pathname === "/api/health" && req.method === "GET") {
       if (DATABASE_URL) await getPgPool().query("select 1");
       sendJson(res, 200, { ok: true });
+      return;
+    }
+
+    if (url.pathname === '/api/server-status' && req.method === 'GET') {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      if (user.role !== 'boss') {
+        sendJson(res, 403, { error: 'Status stre\u017enika vidi samo \u0161ef.' });
+        return;
+      }
+      sendJson(res, 200, { status: await serverRuntimeStatus() });
       return;
     }
 
@@ -5505,10 +5571,6 @@ async function handleApi(req, res) {
           sendJson(res, 409, { error: "Ustvarjalec opravila nima veljavnega e-po\u0161tnega naslova." });
           return;
         }
-        if (recipient.id === user.id) {
-          sendJson(res, 409, { error: "Zahtevka ni smiselno po\u0161iljati samemu sebi." });
-          return;
-        }
         const owner = googleDriveOwner(db);
         if (!googleReady() || !googleWorkspaceTokenAvailable(owner)) {
           sendJson(res, 409, { error: "V Nastavitvah kot Bojan najprej ponovno pove\u017ei Google Dokumente, preglednice in Gmail." });
@@ -6005,6 +6067,7 @@ module.exports = {
   clientReportSelection,
   clientReportAttachmentSelection,
   attachmentContentDisposition,
+  serverRuntimeStatus,
   buildClientReportPdf,
   gmailDraftRaw,
   gmailCompletionRequestRaw,

@@ -576,6 +576,34 @@
       text-decoration: none;
     }
 
+    #notificationsBtn { position: relative; }
+    #notificationsCount {
+      display: none;
+      position: absolute;
+      top: 7px;
+      right: 8px;
+      width: 9px;
+      height: 9px;
+      border: 2px solid #f3f7f4;
+      border-radius: 50%;
+      background: #c5343f;
+      box-shadow: 0 0 0 1px rgba(100, 18, 25, .18);
+    }
+    #notificationsCount.has-unread { display: block; }
+
+    .server-status-panel {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      align-items: center;
+      gap: 12px;
+      padding: 10px 13px;
+      background: #f8fbfa;
+    }
+    .server-status-panel strong { color: var(--accent-dark); white-space: nowrap; }
+    .server-status-values { display: flex; flex-wrap: wrap; gap: 7px 13px; color: var(--muted); font-size: 12px; font-weight: 750; }
+    .server-status-values span { white-space: nowrap; }
+    .server-status-values b { color: var(--ink); }
+
     .app-issue-description {
       white-space: pre-wrap;
     }
@@ -3998,6 +4026,11 @@
         <button id="driveReconnectBtn" type="button">Poveži Google Drive</button>
       </section>
 
+      <section class="panel server-status-panel admin-only hidden" id="serverStatusPanel" aria-live="polite">
+        <strong>Stanje stre&#382;nika</strong>
+        <div class="server-status-values" id="serverStatusValues"></div>
+      </section>
+
       <section class="panel search-panel" id="searchPanel"></section>
 
       <section class="panel billing-screen view-hidden">
@@ -4375,6 +4408,7 @@
       </div>
       <div class="modal-body">
         <p class="todo-meta" id="completionRequestTodo"></p>
+        <p class="todo-meta" id="completionRequestRecipient"></p>
         <label>Vprasanje ali komentar
           <textarea id="completionRequestComment" maxlength="2000" placeholder="Napisi, kaj naj delavec dopolni"></textarea>
         </label>
@@ -4849,6 +4883,7 @@
       lastServerSyncAt: "",
       notifications: [],
       googleDriveStatus: null,
+      serverStatus: null,
     };
 
     const $ = (id) => document.getElementById(id);
@@ -5362,7 +5397,7 @@
         showApp();
         await loadAll();
         await openCompletionRequestFromLink();
-        await Promise.all([refreshNotifications(), refreshGoogleDriveConnectionStatus()]);
+        await Promise.all([refreshNotifications(), refreshGoogleDriveConnectionStatus(), refreshServerStatus()]);
         await updateOfflineSyncNotice();
         await flushOfflineTodoQueue();
       } catch (error) {
@@ -5392,7 +5427,7 @@
         state.users = [...new Map([...(directory.users || []), state.user].map((user) => [user.id, user])).values()];
         initializeWorkContext();
         await loadAll();
-        await Promise.all([flushOfflineTodoQueue(), refreshGoogleDriveConnectionStatus()]);
+        await Promise.all([flushOfflineTodoQueue(), refreshGoogleDriveConnectionStatus(), refreshServerStatus()]);
         await updateOfflineSyncNotice();
       } catch (error) {
         if (error.status === 401) recoverExpiredSession().catch(() => {});
@@ -5788,7 +5823,8 @@
       const clientBillsRequest = state.user?.role === "boss"
         ? api("/api/client-bills")
         : Promise.resolve({ clientBills: [] });
-      const [entries, todos, debts, advances, personalPurchases, clients, settings, workerBilling, payrolls, clientBills] = await Promise.all([
+      const serverStatusRequest = state.user?.role === 'boss' ? api('/api/server-status', { recoverSession: false }).catch(() => null) : Promise.resolve(null);
+      const [entries, todos, debts, advances, personalPurchases, clients, settings, workerBilling, payrolls, clientBills, serverStatus] = await Promise.all([
         api("/api/entries"),
         api("/api/todos"),
         api("/api/debts"),
@@ -5798,7 +5834,8 @@
         api("/api/settings"),
         workerBillingRequest,
         api("/api/payrolls"),
-        clientBillsRequest
+        clientBillsRequest,
+        serverStatusRequest
       ]);
       state.entries = entries.entries || [];
       if (canApplyTodoSnapshot(todoRevision, todoSnapshotWasStable)) state.todos = todos.todos || [];
@@ -5811,6 +5848,7 @@
       state.workerBilling = workerBilling.workers || [];
       state.payrolls = payrolls.payrolls || [];
       state.clientBills = clientBills.clientBills || [];
+      if (serverStatus?.status) state.serverStatus = serverStatus.status;
       state.offlineMode = false;
       refreshClientList();
       render();
@@ -6599,6 +6637,7 @@
         renderReport();
         renderBillingView();
         renderWorkerBillingTable();
+        renderServerStatus();
         if ($("dayTimelineDialog").open) renderDayTimeline();
       }
     }
@@ -9848,7 +9887,7 @@
       ["duplicateTodoFromDialog", "duplicateTodoFromDialogFooter"].forEach((id) => $(id).classList.toggle("hidden", !editing || Boolean(state.todoHoursSourceId)));
       ["writeHoursFromTodo", "writeHoursFromTodoFooter"].forEach((id) => $(id).classList.toggle("hidden", !editing || Boolean(state.todoHoursSourceId) || !projectHoursSourceStatuses.has(todoStatus(todo.status).id)));
       const creatorId = String(todo.createdBy || todo.syncUser || "");
-      $("requestTodoCompletion").classList.toggle("hidden", !editing || !isAdminView() || !creatorId || creatorId === state.user?.id);
+      $("requestTodoCompletion").classList.toggle("hidden", !editing || !isAdminView() || !creatorId);
       renderTodoFormAudit(todo);
       renderTodoFormSourceProject(todo);
       ["todoFormPhotoInput", "todoFormCameraInput", "todoFormPdfInput", "todoFormVideoInput"].forEach((id) => { $(id).value = ""; });
@@ -9975,6 +10014,10 @@
       if (!todo) throw new Error("Opravilo ne obstaja več.");
       $("completionRequestDialog").dataset.todoId = todo.id;
       $("completionRequestTodo").textContent = (todo.client ? todo.client + " · " : "") + (todo.title || "Brez naslova");
+      const recipient = state.users.find((user) => user.id === String(todo.createdBy || todo.syncUser || ""));
+      $("completionRequestRecipient").textContent = recipient
+        ? 'Poslano bo: ' + (recipient.name || recipient.id) + (recipient.email ? ' (' + recipient.email + ')' : '')
+        : 'Prejemnika zahtevka ni mogo\u010de dolo\u010diti.';
       $("completionRequestComment").value = "";
       $("completionRequestDialog").showModal();
       requestAnimationFrame(() => $("completionRequestComment").focus());
@@ -10191,7 +10234,7 @@
       const key = reportAttachmentSelectionKey(lines, selection);
       if (state.reportAttachmentSelectionKey !== key) {
         state.reportAttachmentSelectionKey = key;
-        state.reportIncludedAttachmentIds = new Set(availableIds);
+        state.reportIncludedAttachmentIds = new Set();
       } else {
         state.reportIncludedAttachmentIds = new Set([...state.reportIncludedAttachmentIds].filter((id) => availableIds.has(id)));
       }
@@ -11476,7 +11519,9 @@
     function renderNotifications() {
       const count = $("notificationsCount");
       const unread = (state.notifications || []).filter((item) => !item.readAt).length;
-      count.textContent = unread ? `(${unread})` : "";
+      count.textContent = '';
+      count.classList.toggle('has-unread', unread > 0);
+      count.setAttribute('aria-label', unread ? unread + ' novih sistemskih opozoril' : '');
       const list = $("notificationsList");
       if (!list) return;
       if (!(state.notifications || []).length) {
@@ -11493,6 +11538,51 @@
           ${item.readAt ? `<span class="todo-meta">Prebrano</span>` : `<button class="secondary read-notification" type="button">Prebrano</button>`}
         </article>
       `).join("");
+    }
+
+    function formatServerBytes(value) {
+      const bytes = Math.max(0, Number(value || 0));
+      if (bytes < 1024 * 1024) return Math.round(bytes / 1024) + ' KB';
+      if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toLocaleString('sl-SI', { maximumFractionDigits: 1 }) + ' MB';
+      return (bytes / (1024 * 1024 * 1024)).toLocaleString('sl-SI', { maximumFractionDigits: 1 }) + ' GB';
+    }
+
+    function formatServerUptime(seconds) {
+      const totalHours = Math.max(0, Math.floor(Number(seconds || 0) / 3600));
+      const days = Math.floor(totalHours / 24);
+      const hours = totalHours % 24;
+      return days ? days + ' d ' + hours + ' h' : hours + ' h';
+    }
+
+    function renderServerStatus() {
+      const panel = $('serverStatusPanel');
+      const values = $('serverStatusValues');
+      if (!panel || !values) return;
+      const visible = isAdminView() && Boolean(state.serverStatus);
+      panel.classList.toggle('hidden', !visible);
+      if (!visible) return;
+      const status = state.serverStatus;
+      const cpu = status.cpu || {};
+      const ram = status.ram || {};
+      const disk = status.disk || {};
+      const backup = status.lastBackup || null;
+      const cpuText = 'CPU <b>' + reportNumber(cpu.loadPercent, 0) + ' %</b> <small>(' + reportNumber(cpu.load1, 2) + ' / ' + Number(cpu.cores || 1) + ')</small>';
+      const ramText = 'RAM <b>' + reportNumber(ram.usedPercent, 0) + ' %</b> <small>(' + formatServerBytes(ram.usedBytes) + ' / ' + formatServerBytes(ram.totalBytes) + ')</small>';
+      const diskText = 'DISK <b>' + (disk.available ? reportNumber(disk.usedPercent, 0) + ' %' : '-') + '</b>' + (disk.available ? ' <small>(' + formatServerBytes(disk.freeBytes) + ' prosto)</small>' : '');
+      const uptimeText = 'UPTIME <b>' + formatServerUptime(status.uptimeSeconds) + '</b>';
+      const backupText = 'BACKUP <b>' + (backup ? formatServerBytes(backup.archiveBytes) : '-') + '</b>' + (backup?.finishedAt ? ' <small>(' + escapeHtml(formatDateTime(backup.finishedAt)) + ')</small>' : '');
+      values.innerHTML = [cpuText, ramText, diskText, uptimeText, backupText].map((value) => '<span>' + value + '</span>').join('');
+    }
+
+    async function refreshServerStatus() {
+      if (state.user?.role !== 'boss' || state.offlineMode || !navigator.onLine) return;
+      try {
+        const data = await api('/api/server-status', { recoverSession: false });
+        state.serverStatus = data.status || null;
+        renderServerStatus();
+      } catch {
+        // This diagnostic must never block normal work.
+      }
     }
 
     async function refreshNotifications() {

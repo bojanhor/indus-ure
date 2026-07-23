@@ -20,6 +20,7 @@ const {
   clientReportSelection,
   clientReportAttachmentSelection,
   attachmentContentDisposition,
+  serverRuntimeStatus,
   buildClientReportPdf,
   gmailDraftRaw,
   gmailCompletionRequestRaw,
@@ -665,6 +666,25 @@ test("PDF report download permits Unicode customer names", () => {
   assert.match(header, /^attachment; filename="obracun-MIZARSTVO KOSNIK d\.o\.o\.\.pdf";/);
   assert.match(header, /filename\*=UTF-8''obra%C4%8Dun-MIZARSTVO%20KO%C5%A0NIK%20d\.o\.o\.\.pdf$/);
   assert.doesNotMatch(header, /[^\x20-\x7e]/);
+});
+test("server status returns safe CPU, RAM, disk and backup fields", async () => {
+  const status = await serverRuntimeStatus();
+  assert.ok(Number.isFinite(status.cpu.loadPercent));
+  assert.ok(Number.isFinite(status.ram.usedPercent));
+  assert.ok(Number.isFinite(status.uptimeSeconds));
+  assert.equal(typeof status.disk.available, "boolean");
+  assert.ok(status.lastBackup === null || Number.isFinite(status.lastBackup.archiveBytes));
+});
+
+test("client report PDF builds for a Unicode client without a period", async () => {
+  const db = {
+    users: { bojan: { id: "bojan", name: "Bojan", role: "boss", billing: { exportTitle: "Bojan \u017dagar" } } },
+    clients: [{ clientId: "melita", name: "Melita Zupanec", search: "melita" }],
+    todos: [{ id: "melita-work", assignmentGroupId: "melita-event", syncUser: "bojan", status: "execution", date: "2026-07-20", start: "08:00", end: "09:00", title: "Ko\u0161nik \u017d\u0110\u0160\u0106\u010c", clientId: "melita", client: "Melita Zupanec", clientKm: 12, clientVehicle: "van" }]
+  };
+  const report = clientReportSelection(db, { clientId: "melita", eventIds: ["melita-event"] });
+  const pdf = await buildClientReportPdf(db, report, []);
+  assert.equal(pdf.subarray(0, 4).toString(), "%PDF");
 });
 test("preklic obračuna stranki odklene in vrne arhiviran dogodek", () => {
   const db = {

@@ -184,6 +184,14 @@ Nočni backup naredi obnovljiv paket PostgreSQL baze, prilog in kode aplikacije.
 
 Paket ne vsebuje OAuth žetona, aktivnih sej, hashov gesel, ICS povezav ali /etc/indus-ure.env. V isti Drive mapi je vedno datoteka `RESTORE-INDUS-URE.txt` s hitrim postopkom za IT obnovo. Ob obnovi se okoljske skrivnosti vnesejo iz ločenega varnega zapisa in Google Drive se ponovno poveže.
 
+## Samodejno ciscenje starih izdaj
+
+Vsaka objava prek `scripts/deploy.ps1` po uspesnem preklopu namesti
+`/usr/local/sbin/prune-indus-ure-releases` in samodejno obdrzi samo aktivno
+izdajo ter dve najnovejsi povratni izdaji. To preprecuje, da bi stare izdaje
+porabile disk. Za hiter rollback so tako vedno na voljo tri izdaje; dodatnih
+map v `/opt/indus-ure/releases` ne brisi rocno, razen ob izrecnem servisnem
+posegu.
 ## 8. Preverjanje po preklopu
 
 - prijava za Bojana in Ibra;

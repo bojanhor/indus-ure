@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Keep the active release plus the two newest alternatives for a fast rollback.
+# Every candidate is resolved and checked to ensure deletion can only happen
+# inside /opt/indus-ure/releases.
+releases_root="/opt/indus-ure/releases"
+keep_count="${1:-3}"
+
+if ! [[ "$keep_count" =~ ^[0-9]+$ ]] || (( keep_count < 2 )); then
+  echo "Keep count must be an integer of at least 2." >&2
+  exit 64
+fi
+
+current="$(readlink -f -- /opt/indus-ure/current)"
+root_real="$(readlink -f -- "$releases_root")"
+[[ -d "$root_real" && -d "$current" ]] || exit 0
+
+kept=0
+while IFS= read -r -d '' record; do
+  release="${record#*:}"
+  release_real="$(readlink -f -- "$release" 2>/dev/null || true)"
+  [[ -n "$release_real" ]] || continue
+  case "$release_real" in
+    "$root_real"/*) ;;
+    *) continue ;;
+  esac
+  if [[ "$release_real" == "$current" || $kept -lt $keep_count ]]; then
+    ((kept+=1))
+    continue
+  fi
+  rm -rf -- "$release_real"
+  echo "Removed old INDUS URE release: $(basename -- "$release_real")"
+done < <(find "$root_real" -mindepth 1 -maxdepth 1 -type d -printf '%T@:%p\0' | sort -zr)

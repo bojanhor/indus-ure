@@ -40,10 +40,10 @@ try {
   }
 
   if (-not $SkipTests) {
-    Write-Host "[1/6] Testi"
+    Write-Host "[1/8] Testi"
     Invoke-Native npm.cmd test
   } else {
-    Write-Host "[1/6] Testi preskoceni"
+    Write-Host "[1/8] Testi preskoceni"
   }
 
   $fullCommit = (& git rev-parse HEAD).Trim()
@@ -53,14 +53,14 @@ try {
   $release = $fullCommit.Substring(0, 7)
 
   if (-not $SkipPush) {
-    Write-Host "[2/6] Git push $release"
+    Write-Host "[2/8] Git push $release"
     Invoke-Native git push origin HEAD:main
   } else {
-    Write-Host "[2/6] Git push preskocen"
+    Write-Host "[2/8] Git push preskocen"
   }
 
   $archive = Join-Path $env:TEMP "indus-ure-$release.tar.gz"
-  Write-Host "[3/6] Arhiv $release"
+  Write-Host "[3/8] Arhiv $release"
   Invoke-Native git archive --format=tar.gz "--output=$archive" $fullCommit
   $checksum = (Get-FileHash -Algorithm SHA256 -LiteralPath $archive).Hash.ToLowerInvariant()
 
@@ -72,19 +72,22 @@ try {
   )
   $target = "${UserName}@${HostName}"
 
-  Write-Host "[4/7] Prenos"
+  Write-Host "[4/8] Prenos"
   Invoke-Native scp @sshOptions $archive "${target}:/tmp/indus-ure-$release.tar.gz"
 
   $nginxConfig = Join-Path $repoRoot "deploy\nginx-indus-ure.conf"
   $remoteNginxConfig = "/tmp/indus-ure-nginx-$release.conf"
-  Write-Host "[5/7] Nginx pravila"
+  $pruneScript = Join-Path $repoRoot "deploy\prune-indus-ure-releases"
+  $remotePruneScript = "/tmp/indus-ure-prune-$release"
+  Write-Host "[5/8] Nginx in ciscenje izdaj"
   Invoke-Native scp @sshOptions $nginxConfig "${target}:$remoteNginxConfig"
+  Invoke-Native scp @sshOptions $pruneScript "${target}:$remotePruneScript"
 
-  Write-Host "[6/7] Priprava in preklop izdaje"
-  $remoteCommand = "prepare-indus-ure-release $release $checksum && sudo /usr/local/sbin/deploy-indus-ure $release && sudo install -o root -g root -m 0644 $remoteNginxConfig /etc/nginx/conf.d/indus-ure.conf && sudo nginx -t && sudo systemctl reload nginx"
+  Write-Host "[6/8] Priprava in preklop izdaje"
+  $remoteCommand = "prepare-indus-ure-release $release $checksum && sudo /usr/local/sbin/deploy-indus-ure $release && sudo install -o root -g root -m 0644 $remoteNginxConfig /etc/nginx/conf.d/indus-ure.conf && sudo install -o root -g root -m 0755 $remotePruneScript /usr/local/sbin/prune-indus-ure-releases && sudo /usr/local/sbin/prune-indus-ure-releases 3 && sudo nginx -t && sudo systemctl reload nginx"
   Invoke-Native ssh @sshOptions $target $remoteCommand
 
-  Write-Host "[7/7] Preverjanje produkcije"
+  Write-Host "[7/8] Preverjanje produkcije"
   $healthy = $false
   for ($attempt = 1; $attempt -le 10; $attempt++) {
     try {
