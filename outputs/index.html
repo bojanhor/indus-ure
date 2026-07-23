@@ -719,6 +719,9 @@
     .billing-note-panel textarea { width: 100%; min-height: 76px; resize: vertical; border: 1px solid var(--line); border-radius: 8px; padding: 8px 9px; background: #fff; color: var(--ink); font: inherit; }
     .billing-note-panel textarea:disabled { color: var(--ink); background: #f3f6f3; }
     .billing-period-hint { margin: 0; color: #805f00; font-size: 12px; font-weight: 800; }
+    .billing-stale-draft { display: flex; align-items: center; justify-content: space-between; gap: 9px; flex-wrap: wrap; padding: 9px 11px; border: 1px solid #e3c96f; border-radius: 9px; background: #fff9e7; color: #6e5400; font-size: 13px; font-weight: 700; }
+    .billing-stale-draft-actions { display: flex; gap: 7px; flex-wrap: wrap; }
+    .billing-stale-draft button { min-height: 34px; padding: 5px 9px; }
     .billing-day-list { display: grid; gap: 9px; }
     .billing-explorer { display: grid; gap: 7px; margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--line); }
     .billing-payments { display: grid; gap: 6px; }
@@ -2899,15 +2902,19 @@
       gap: 7px;
     }
 
-    .photo-editor-crop-actions {
+    .photo-editor-normal-tools { display: contents; }
+    .photo-editor-normal-tools[hidden] { display: none; }
+    .photo-editor-pending-actions {
       display: inline-flex;
       align-items: center;
-      gap: 5px;
-      padding-left: 2px;
-      border-left: 1px solid var(--line);
+      gap: 6px;
+      min-height: 42px;
+      padding: 4px 0;
     }
 
-    .photo-editor-crop-actions[hidden] { display: none; }
+    .photo-editor-pending-actions[hidden] { display: none; }
+    .photo-editor-pending-label { color: var(--muted); font-size: 12px; font-weight: 800; }
+    .photo-editor-pending-actions button { width: auto; min-width: 94px; padding: 0 12px; font-size: 14px; }
 
     .gesture-zoom-controls .zoom-step {
       width: 44px;
@@ -3784,8 +3791,9 @@
       #photoEditorDialog .photo-editor-text-tools label { display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; }
       #photoEditorDialog .photo-editor-text-tools input[type="range"] { width: 100%; min-width: 0; }
       #photoEditorDialog .gesture-zoom-controls { display: grid; grid-template-columns: 38px minmax(0, 1fr) 38px 38px; gap: 6px; }
-      #photoEditorDialog .photo-editor-crop-actions { display: inline-flex; grid-column: span 2; justify-content: flex-end; }
-      #photoEditorDialog .photo-editor-crop-actions[hidden] { display: none; }
+      #photoEditorDialog .photo-editor-pending-actions { display: inline-flex; grid-column: 1 / -1; justify-content: stretch; }
+      #photoEditorDialog .photo-editor-pending-actions[hidden] { display: none; }
+      #photoEditorDialog .photo-editor-pending-actions button { flex: 1 1 0; min-width: 0; }
       #photoEditorDialog .zoom-value { text-align: center; align-self: center; }
       #photoEditorDialog .photo-editor-canvas-shell { min-width: 0; min-height: 0; max-height: none; padding: 6px; overscroll-behavior: contain; }
       .client-billing-intro { display: grid; gap: 10px; }
@@ -3952,6 +3960,7 @@
             <input id="billingMonth" type="hidden">
             <button class="secondary billing-month-step" id="billingNextMonth" type="button" aria-label="Naslednje obdobje">&rsaquo;</button>
           </div>        </div>
+        <div class="billing-stale-draft hidden" id="billingStaleDraftNotice" role="status"></div>
         <div class="billing-summary" id="billingSummary"></div>
         <div class="billing-payments" id="billingPayments"></div>
         <div class="billing-note-panel" id="billingNotePanel">
@@ -4427,12 +4436,13 @@
     <form method="dialog">
       <div class="modal-head">
         <h3 id="photoEditorTitle">Uredi fotografijo</h3>
-        <div class="modal-head-actions">
+        <div class="modal-head-actions" id="photoEditorHeaderActions">
           <button class="photo-editor-tool primary" id="photoEditorSave" type="button" title="Shrani sliko" aria-label="Shrani sliko">&#10003;</button>
-          <button class="icon-btn" type="submit" title="Zapri brez shranjevanja" aria-label="Zapri brez shranjevanja">&times;</button>
+          <button class="icon-btn" id="photoEditorClose" type="button" title="Zapri brez shranjevanja" aria-label="Zapri brez shranjevanja">&times;</button>
         </div>
       </div>
       <div class="photo-editor-toolbar" role="toolbar" aria-label="Orodja za urejanje slike">
+        <div id="photoEditorNormalTools" class="photo-editor-normal-tools">
         <div class="photo-editor-main-tools" aria-label="Orodja za urejanje slike">
           <label class="photo-editor-color-control" title="Barva črte in besedila" aria-label="Barva črte in besedila">
             <input id="photoEditorColor" type="color" value="#ff2d2d">
@@ -4454,9 +4464,6 @@
           <button class="photo-editor-tool" id="photoEditorZoomIn" type="button" aria-label="Povečaj">&plus;</button>
           <button class="photo-editor-tool" id="photoEditorFit" type="button" title="Prilagodi sliko" aria-label="Prilagodi sliko">&#8862;</button>
         </div>
-        <div class="photo-editor-crop-actions" id="photoEditorCropActions" hidden>
-          <button class="photo-editor-tool primary" id="photoEditorApplyCrop" type="button" title="Uporabi izrez" aria-label="Uporabi izrez">&#10003;</button>
-          <button class="photo-editor-tool" id="photoEditorCancelCrop" type="button" title="Prekliči izrez" aria-label="Prekliči izrez">&times;</button>
         </div>
         <div class="photo-editor-text-editor" id="photoEditorTextEditor" hidden>
           <label class="photo-editor-text-entry">
@@ -4475,6 +4482,11 @@
             </label>
             <button class="photo-editor-tool danger" id="photoEditorDeleteText" type="button" title="Odstrani napis" aria-label="Odstrani napis">&#128465;</button>
           </div>
+        </div>
+        <div class="photo-editor-pending-actions" id="photoEditorPendingActions" hidden>
+          <span class="photo-editor-pending-label" id="photoEditorPendingLabel"></span>
+          <button class="photo-editor-tool primary" id="photoEditorConfirmPending" type="button">Potrdi</button>
+          <button class="photo-editor-tool" id="photoEditorCancelPending" type="button">Povrni</button>
         </div>
       </div>
       <div class="photo-editor-canvas-shell">
@@ -7261,7 +7273,7 @@
     function selectBillingRangeDate(key) {
       const draft = state.billingRangeDraft;
       const latest = latestBillingPeriod(billingWorkerId());
-      const maxDate = latest?.to || billingYesterdayKey();
+      const maxDate = latest?.to || billingTodayKey();
       if (!draft || key > maxDate) return;
       if (!draft.from || draft.to) {
         draft.from = key;
@@ -7279,7 +7291,7 @@
       const draft = state.billingRangeDraft;
       if (!draft) return;
       const latest = latestBillingPeriod(billingWorkerId());
-      const maxDate = latest?.to || billingYesterdayKey();
+      const maxDate = latest?.to || billingTodayKey();
       const [year, month] = String(draft.month).split("-").map(Number);
       const first = new Date(year, month - 1, 1);
       const daysInMonth = new Date(year, month, 0).getDate();
@@ -7305,7 +7317,7 @@
     function applyBillingRangePicker() {
       const draft = state.billingRangeDraft;
       const latest = latestBillingPeriod(billingWorkerId());
-      const maxDate = latest?.to || billingYesterdayKey();
+      const maxDate = latest?.to || billingTodayKey();
       if (!draft?.from || draft.from > maxDate) return;
       $("billingFrom").value = draft.from;
       $("billingTo").value = (draft.to || draft.from) > maxDate ? maxDate : (draft.to || draft.from);
@@ -7315,12 +7327,9 @@
       renderBillingView();
     }
 
-    function billingYesterdayKey(now = new Date()) {
-      const yesterday = new Date(now);
-      yesterday.setDate(yesterday.getDate() - 1);
-      return dateKey(yesterday);
+    function billingTodayKey(now = new Date()) {
+      return dateKey(now);
     }
-
     function billingDateAfter(key) {
       const date = parseDate(key);
       date.setDate(date.getDate() + 1);
@@ -7374,44 +7383,48 @@
         .sort((left, right) => String(right.to).localeCompare(String(left.to)))[0] || null;
     }
 
-    function billingPreviousPayroll(workerId, beforeDate) {
+    function billingPreviousPayroll(workerId, current = {}) {
+      const range = typeof current === "string" ? { from: current, to: current } : (current || {});
       return billingPayrollsForWorker(workerId)
-        .filter((payroll) => payroll.to < beforeDate)
-        .sort((left, right) => String(right.to).localeCompare(String(left.to)))[0] || null;
+        .filter((payroll) => !(payroll.from === range.from && payroll.to === range.to))
+        .filter((payroll) => payroll.to <= String(range.from || ""))
+        .sort((left, right) => String(right.to).localeCompare(String(left.to)) || String(right.from).localeCompare(String(left.from)))[0] || null;
     }
 
-    function billingNextPayroll(workerId, afterDate) {
-      return billingPayrollsForWorker(workerId).find((payroll) => payroll.from > afterDate) || null;
+    function billingNextPayroll(workerId, current = {}) {
+      const range = typeof current === "string" ? { from: current, to: current } : (current || {});
+      return billingPayrollsForWorker(workerId)
+        .filter((payroll) => !(payroll.from === range.from && payroll.to === range.to))
+        .filter((payroll) => payroll.from >= String(range.to || ""))
+        .sort((left, right) => String(left.from).localeCompare(String(right.from)) || String(left.to).localeCompare(String(right.to)))[0] || null;
     }
-
-    // The newest open period starts immediately after the latest completed payroll.
-    // It ends at that month's end, unless the month is still in progress.
+    // The newest period may include today. Each following period intentionally
+    // reuses the previous final day; locked IDs keep all amounts unique.
     function latestBillingPeriod(workerId, now = new Date()) {
-      const yesterday = billingYesterdayKey(now);
+      const today = billingTodayKey(now);
       const previous = latestCompletedPayroll(workerId);
-      const from = previous ? billingDateAfter(previous.to) : `${yesterday.slice(0, 7)}-01`;
-      if (from > yesterday) return null;
-      return { from, to: [billingMonthEnd(from), yesterday].sort()[0] };
+      const from = previous ? previous.to : today.slice(0, 7) + "-01";
+      if (from > today) return null;
+      return { from, to: [billingMonthEnd(from), today].sort()[0] };
     }
-
     function updateBillingRangeControls(range = null) {
       const workerId = billingWorkerId();
       const latest = latestBillingPeriod(workerId);
       const earliest = earliestBillingPayroll(workerId);
       const current = range || { from: $("billingFrom").value, to: $("billingTo").value };
       const selectedPayroll = billingPayrollsForWorker(workerId).find((payroll) => payroll.from === current?.from && payroll.to === current?.to);
-      const normalMaxDate = latest?.to || billingYesterdayKey();
+      const normalMaxDate = latest?.to || billingTodayKey();
       const maxDate = selectedPayroll?.to > normalMaxDate ? selectedPayroll.to : normalMaxDate;
       $("billingFrom").min = earliest?.from || "";
       $("billingTo").min = earliest?.from || "";
       $("billingFrom").max = maxDate;
       $("billingTo").max = maxDate;
       const previous = $("billingPrevMonth");
-      const previousPayroll = billingPreviousPayroll(workerId, current?.from || "");
+      const previousPayroll = billingPreviousPayroll(workerId, current);
       previous.disabled = !previousPayroll;
       previous.title = previous.disabled ? "Starejšega obračuna ni." : "Prejšnji obračun";
       const next = $("billingNextMonth");
-      const nextPayroll = billingNextPayroll(workerId, current?.to || "");
+      const nextPayroll = billingNextPayroll(workerId, current);
       next.disabled = !nextPayroll && (!latest || !current?.to || current.to >= latest.to);
       next.title = next.disabled ? "Novejše obračunsko obdobje še ni na voljo." : "Naslednje obdobje";
     }
@@ -7422,27 +7435,24 @@
       const latest = latestBillingPeriod(workerId);
       const earliest = earliestBillingPayroll(workerId);
       const openPayroll = latestOpenBillingPayroll(workerId);
-      const fallback = openPayroll || latest || (() => {
-        const yesterday = billingYesterdayKey();
-        return { from: `${yesterday.slice(0, 7)}-01`, to: yesterday };
+      const fallback = latest || openPayroll || (() => {
+        const today = billingTodayKey();
+        return { from: `${today.slice(0, 7)}-01`, to: today };
       })();
       const fromInput = $("billingFrom");
       const toInput = $("billingTo");
       const selection = billingRangeSelectionForWorker(workerId);
       const custom = selection.mode === "custom";
+      const openCoversNewestRange = Boolean(openPayroll && (!latest || openPayroll.to >= latest.to));
 
-      // A current open period follows yesterday on every render. Explicit
-      // selections stay pinned; otherwise an interrupted draft wins over the
-      // regular newest-period default.
+      // The automatic view always follows the latest billable day. A deliberate
+      // custom choice, or an open draft that already covers that day, stays put.
       if (custom) {
         fromInput.value = selection.from;
         toInput.value = selection.to;
-      } else if (openPayroll) {
+      } else if (openCoversNewestRange) {
         fromInput.value = openPayroll.from;
         toInput.value = openPayroll.to;
-      } else if (latest) {
-        fromInput.value = latest.from;
-        toInput.value = latest.to;
       } else {
         fromInput.value = fallback.from;
         toInput.value = fallback.to;
@@ -7464,6 +7474,13 @@
       monthInput.value = range.from.slice(0, 7);
       updateBillingRangeControls(range);
       return range;
+    }
+
+    function staleOpenBillingPayroll(workerId) {
+      const latest = latestBillingPeriod(workerId);
+      const open = latestOpenBillingPayroll(workerId);
+      if (!latest || !open || open.to >= latest.to || open.from !== latest.from) return null;
+      return open;
     }
 
     function billingRangeLabel(range) {
@@ -7494,10 +7511,28 @@
       return state.payrolls.find((payroll) => payroll.workerId === workerId && payroll.from === range.from && payroll.to === range.to) || null;
     }
 
+    function lockedBillingTodoIds(workerId) {
+      return new Set(state.payrolls
+        .filter((payroll) => payroll.workerId === workerId && ["archiving", "confirmed", "paid"].includes(payroll.status))
+        .flatMap((payroll) => payroll.lines || [])
+        .map((line) => String(line.todoId || ""))
+        .filter(Boolean));
+    }
+
+    function lockedBillingFinancialIds(workerId, field) {
+      return new Set(state.payrolls
+        .filter((payroll) => payroll.workerId === workerId && ["archiving", "confirmed", "paid"].includes(payroll.status))
+        .flatMap((payroll) => Array.isArray(payroll[field]) ? payroll[field] : [])
+        .map((id) => String(id || ""))
+        .filter(Boolean));
+    }
+
     function billingLiveLines(workerId, range) {
       const kmRate = Number(state.settings.billing?.workerOwnVehicleKmRate ?? state.settings.billing?.kmRate ?? 0);
+      const lockedTodoIds = lockedBillingTodoIds(workerId);
       return state.todos
         .filter((todo) => (todo.syncUser || todo.createdBy) === workerId && payrollPaidTodoStatuses.has(todo.status) && String(todo.date || "") >= range.from && String(todo.date || "") <= range.to)
+        .filter((todo) => !lockedTodoIds.has(String(todo.id || "")))
         .map((todo) => {
           const minutes = payrollMinutesForTodo(todo);
           const hours = minutes / 60;
@@ -7512,13 +7547,14 @@
     }
 
     function billingAdvances(workerId, range) {
-      return (state.advances || []).filter((advance) => advance.person === workerId && advance.date >= range.from && advance.date <= range.to);
+      const lockedIds = lockedBillingFinancialIds(workerId, "advanceIds");
+      return (state.advances || []).filter((advance) => advance.person === workerId && advance.date >= range.from && advance.date <= range.to && !lockedIds.has(String(advance.id || "")));
     }
 
     function billingPersonalPurchases(workerId, range) {
-      return (state.personalPurchases || []).filter((purchase) => purchase.person === workerId && purchase.date >= range.from && purchase.date <= range.to);
+      const lockedIds = lockedBillingFinancialIds(workerId, "personalPurchaseIds");
+      return (state.personalPurchases || []).filter((purchase) => purchase.person === workerId && purchase.date >= range.from && purchase.date <= range.to && !lockedIds.has(String(purchase.id || "")));
     }
-
     function billingDisplayActivities(workerId, range, billedLines) {
       return (billedLines || []).filter((line) => String(line.date || "") >= range.from && String(line.date || "") <= range.to).filter((line) => /^\d{2}:\d{2}$/.test(String(line.start || "")) && /^\d{2}:\d{2}$/.test(String(line.end || ""))).filter((line) => Number(line.minutes || 0) > 0).map((line) => ({ ...line, payable: true })).sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.start).localeCompare(String(b.start)) || String(a.end).localeCompare(String(b.end)));
     }    function billingGapMinutes(previous, next) {
@@ -7564,7 +7600,7 @@
     }
 
     function payrollPeriodEnded(range, now = new Date()) {
-      return Boolean(range?.to && range.to < dateKey(now));
+      return Boolean(range?.to && range.to <= dateKey(now));
     }
 
     function payrollConfirmationHint(range) {
@@ -7597,6 +7633,23 @@
       }));
     }
 
+    function openStaleBillingDraft(payroll) {
+      if (!payroll) return;
+      saveBillingRangeSelection(billingWorkerId(), { from: payroll.from, to: payroll.to });
+      renderBillingView();
+    }
+
+    async function discardStaleBillingDraft(payroll) {
+      if (!payroll || payroll.status !== "draft") return;
+      const label = billingRangeLabel(payroll);
+      if (!await showAppConfirm(`Zavrzem osnutek obračuna ${label}? Opravljene ure in finančni vnosi ostanejo nespremenjeni.`)) return;
+      const data = await api(`/api/payrolls/${encodeURIComponent(payroll.id)}`, { method: "DELETE" });
+      state.payrolls = data.payrolls || state.payrolls;
+      delete state.billingRangeSelections[billingWorkerId()];
+      await loadAll();
+      renderBillingView();
+    }
+
     function renderBillingView() {
       const range = billingRange();
       const admin = isAdminView();
@@ -7604,6 +7657,20 @@
       const worker = billingWorker();
       renderBillingWorkerSelect(workerId);
       const payroll = payrollForBilling(workerId, range);
+      const staleDraft = staleOpenBillingPayroll(workerId);
+      const staleNotice = $("billingStaleDraftNotice");
+      if (staleDraft) {
+        const statusText = staleDraft.status === "archiving"
+          ? "Potrjevanje odprtega obračuna je treba najprej dokončati."
+          : "Osnutek ne vključuje najnovejših ur.";
+        staleNotice.innerHTML = `<span>${escapeHtml(`${statusText} ${billingRangeLabel(staleDraft)}.`)}</span><span class="billing-stale-draft-actions"><button class="secondary" type="button" data-open-stale-payroll>Odpri osnutek</button>${admin && staleDraft.status === "draft" ? '<button class="secondary" type="button" data-discard-stale-payroll>Zavrzi osnutek</button>' : ""}</span>`;
+        staleNotice.classList.remove("hidden");
+        staleNotice.querySelector("[data-open-stale-payroll]").addEventListener("click", () => openStaleBillingDraft(staleDraft));
+        staleNotice.querySelector("[data-discard-stale-payroll]")?.addEventListener("click", () => discardStaleBillingDraft(staleDraft).catch((error) => showNotice(error.message)));
+      } else {
+        staleNotice.classList.add("hidden");
+        staleNotice.replaceChildren();
+      }
       const useSnapshot = Boolean(payroll && ["archiving", "confirmed", "paid"].includes(payroll.status));
       const lines = useSnapshot ? payroll.lines : billingLiveLines(workerId, range);
       const baseTotals = useSnapshot ? { minutes: Number(payroll.minutes || 0), hours: Number(payroll.hours || 0), km: Number(payroll.km || 0), workAmount: Number(payroll.workAmount || 0), kmAmount: Number(payroll.kmAmount || 0), totalAmount: Number(payroll.totalAmount || 0) } : billingLineTotals(lines);
@@ -8300,8 +8367,9 @@
       return `<img src="${escapeHtml(thumbnail)}" alt="Predogled prve strani PDF">${showBadge ? `<span class="pdf-thumbnail-badge">PDF</span>` : ""}`;
     }
 
-    function pointerGestureMetrics(pointers) {
-      const points = [...pointers.values()].slice(0, 2);
+    function pointerGestureMetrics(pointers, predicate = null) {
+      const source = [...pointers.values()];
+      const points = (predicate ? source.filter(predicate) : source).slice(0, 2);
       if (points.length < 2) return null;
       const [first, second] = points;
       return {
@@ -8613,22 +8681,46 @@
       editor.cropRect = normalizePhotoEditorCropRect(next);
     }
 
+    function photoEditorHasPendingOperation(editor = state.photoEditor) {
+      return Boolean(editor && (editor.mode === "crop" || editor.textDraftActive));
+    }
+
+    function photoEditorReturnMode(editor = state.photoEditor) {
+      return editor?.toolReturnMode === "pan" ? "pan" : "draw";
+    }
+
+    function syncPhotoEditorToolUi() {
+      const editor = state.photoEditor;
+      if (!editor) return;
+      const pending = photoEditorHasPendingOperation(editor);
+      const text = selectedPhotoEditorText();
+      const shell = $("photoEditorCanvas").closest(".photo-editor-canvas-shell");
+      $("photoEditorNormalTools").hidden = pending;
+      $("photoEditorHeaderActions").hidden = pending;
+      $("photoEditorPendingActions").hidden = !pending;
+      if (pending) {
+        const crop = editor.mode === "crop";
+        $("photoEditorPendingLabel").textContent = crop ? "Potrdi ali povrni izrez" : "Dodaj ali povrni napis";
+        $("photoEditorConfirmPending").textContent = crop ? "Potrdi izrez" : "Dodaj napis";
+        $("photoEditorCancelPending").textContent = crop ? "Povrni izrez" : "Povrni napis";
+      }
+      shell.classList.toggle("is-text-editing", Boolean(text) && editor.mode === "text" && !pending);
+      shell.classList.toggle("is-pan-mode", editor.mode === "pan");
+      shell.classList.toggle("is-crop-mode", editor.mode === "crop");
+      $("photoEditorDraw").classList.toggle("is-active", editor.mode === "draw");
+      $("photoEditorPan").classList.toggle("is-active", editor.mode === "pan");
+      $("photoEditorCrop").classList.toggle("is-active", editor.mode === "crop");
+    }
+
     function setPhotoEditorTextSelection(textId = "") {
       const editor = state.photoEditor;
       if (!editor) return;
       editor.selectedTextId = textId;
       const text = selectedPhotoEditorText();
       if (text) editor.textDraftActive = false;
+      const pending = photoEditorHasPendingOperation(editor);
       $("photoEditorTextEditor").hidden = !text && !editor.textDraftActive;
-      $("photoEditorTextTools").hidden = !text;
-      $("photoEditorCropActions").hidden = editor.mode !== "crop";
-      const shell = $("photoEditorCanvas").closest(".photo-editor-canvas-shell");
-      shell.classList.toggle("is-text-editing", Boolean(text) && editor.mode === "text");
-      shell.classList.toggle("is-pan-mode", editor.mode === "pan");
-      shell.classList.toggle("is-crop-mode", editor.mode === "crop");
-      $("photoEditorDraw").classList.toggle("is-active", editor.mode === "draw");
-      $("photoEditorPan").classList.toggle("is-active", editor.mode === "pan");
-      $("photoEditorCrop").classList.toggle("is-active", editor.mode === "crop");
+      $("photoEditorTextTools").hidden = !text || pending;
       if (text) {
         $("photoEditorText").value = text.text;
         $("photoEditorTextSize").value = Math.round(Math.max(12, Math.min(160, text.size)));
@@ -8637,6 +8729,7 @@
       } else if (!editor.textDraftActive) {
         $("photoEditorText").value = "";
       }
+      syncPhotoEditorToolUi();
     }
 
     function photoEditorHistoryPush(action) {
@@ -8695,25 +8788,51 @@
       if (canvas.width && shell) setZoomedElementWidth(shell, canvas, canvas.width * zoom / 100, anchor);
     }
 
+    function photoEditorTouchPinchMetrics(editor = state.photoEditor) {
+      if (!editor) return null;
+      return pointerGestureMetrics(editor.pointers, (point) => point.pointerType === "touch");
+    }
+
+    function beginPhotoEditorPinch(editor, shell) {
+      const metrics = photoEditorTouchPinchMetrics(editor);
+      if (!metrics) return false;
+      const textInteraction = editor.textInteraction;
+      if (textInteraction) {
+        const text = selectedPhotoEditorText();
+        if (text) Object.assign(text, textInteraction.before);
+      }
+      const cropInteraction = editor.cropInteraction;
+      if (cropInteraction?.before) editor.cropRect = { ...cropInteraction.before };
+      editor.activeStroke = null;
+      editor.textInteraction = null;
+      editor.cropInteraction = null;
+      editor.pan = null;
+      editor.gestureUsed = true;
+      editor.pinch = { lastDistance: metrics.distance, lastCenter: metrics.center };
+      shell.classList.remove("is-panning");
+      redrawPhotoEditor();
+      return true;
+    }
+
     function queuePhotoEditorPinch(metrics) {
       const editor = state.photoEditor;
-      if (!editor || !metrics) return;
+      if (!editor || !metrics || !editor.pinch) return;
       editor.pendingPinch = metrics;
       if (editor.pinchFrame) return;
       editor.pinchFrame = requestAnimationFrame(() => {
         editor.pinchFrame = 0;
         const next = editor.pendingPinch;
         editor.pendingPinch = null;
-        if (!next || editor.pointers.size < 2) return;
-        if (!editor.pinch) {
-          editor.pinch = { lastDistance: next.distance, lastCenter: next.center };
-          return;
-        }
-        const ratio = Math.max(0.65, Math.min(1.55, next.distance / Math.max(1, editor.pinch.lastDistance)));
+        if (!next || !editor.pinch || !photoEditorTouchPinchMetrics(editor)) return;
+        const previous = editor.pinch;
+        const rawRatio = next.distance / Math.max(1, previous.lastDistance);
+        const ratio = Math.max(0.65, Math.min(1.55, rawRatio));
         const shell = $("photoEditorCanvas").closest(".photo-editor-canvas-shell");
-        setPhotoEditorZoom(editor.zoom * ratio, next.center);
-        shell.scrollLeft -= next.center.x - editor.pinch.lastCenter.x;
-        shell.scrollTop -= next.center.y - editor.pinch.lastCenter.y;
+        // Parallel two-finger movement pans smoothly. Tiny asynchronous distance
+        // changes do not also zoom, which avoids the visual jitter on touch.
+        if (Math.abs(rawRatio - 1) >= 0.012) setPhotoEditorZoom(editor.zoom * ratio, next.center);
+        shell.scrollLeft -= next.center.x - previous.lastCenter.x;
+        shell.scrollTop -= next.center.y - previous.lastCenter.y;
         editor.pinch = { lastDistance: next.distance, lastCenter: next.center };
       });
     }
@@ -8747,6 +8866,7 @@
           textInteraction: null,
           textControlBefore: null,
           textDraftActive: false,
+          toolReturnMode: "draw",
           cropRect: null,
           cropInteraction: null,
           mode: "draw",
@@ -8786,12 +8906,12 @@
       const editor = state.photoEditor;
       const value = $("photoEditorText").value.trim();
       if (!editor || !value) {
-        showNotice("Najprej vpiši besedilo, ki ga želiš dodati na sliko.");
+        showNotice("Najprej vpi\u0161i besedilo, ki ga \u017eeli\u0161 dodati na sliko.");
         return;
       }
       const point = photoEditorVisiblePoint();
       const text = {
-        id: `photo-text-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        id: "photo-text-" + Date.now() + "-" + Math.random().toString(36).slice(2, 8),
         text: value,
         x: point.x,
         y: point.y,
@@ -8803,31 +8923,64 @@
       photoEditorHistoryPush({ type: "text-add", id: text.id });
       editor.mode = "text";
       editor.textDraftActive = false;
+      editor.toolReturnMode = "draw";
       setPhotoEditorTextSelection(text.id);
+      redrawPhotoEditor();
+    }
+
+    function cancelPhotoEditorTextEntry() {
+      const editor = state.photoEditor;
+      if (!editor) return;
+      editor.selectedTextId = "";
+      editor.textDraftActive = false;
+      editor.mode = photoEditorReturnMode(editor);
+      editor.toolReturnMode = "draw";
+      $("photoEditorText").value = "";
+      setPhotoEditorTextSelection();
       redrawPhotoEditor();
     }
 
     function openPhotoEditorTextEntry() {
       const editor = state.photoEditor;
-      if (!editor) return;
-      if (editor.textDraftActive && $("photoEditorText").value.trim()) {
-        addPhotoEditorText();
-        return;
-      }
+      if (!editor || photoEditorHasPendingOperation(editor)) return;
       finishPhotoEditorStroke();
+      editor.toolReturnMode = editor.mode === "pan" ? "pan" : "draw";
       editor.mode = "text";
       editor.cropRect = null;
       editor.cropInteraction = null;
+      editor.selectedTextId = "";
       editor.textDraftActive = true;
+      $("photoEditorText").value = "";
       setPhotoEditorTextSelection();
       redrawPhotoEditor();
       requestAnimationFrame(() => $("photoEditorText").focus({ preventScroll: true }));
     }
 
-    function enterPhotoEditorCropMode() {
+    function confirmPhotoEditorPendingOperation() {
       const editor = state.photoEditor;
       if (!editor) return;
+      if (editor.mode === "crop") {
+        applyPhotoEditorCrop();
+        return;
+      }
+      if (editor.textDraftActive) addPhotoEditorText();
+    }
+
+    function cancelPhotoEditorPendingOperation() {
+      const editor = state.photoEditor;
+      if (!editor) return;
+      if (editor.mode === "crop") {
+        cancelPhotoEditorCrop();
+        return;
+      }
+      if (editor.textDraftActive) cancelPhotoEditorTextEntry();
+    }
+
+    function enterPhotoEditorCropMode() {
+      const editor = state.photoEditor;
+      if (!editor || photoEditorHasPendingOperation(editor)) return;
       finishPhotoEditorStroke();
+      editor.toolReturnMode = editor.mode === "pan" ? "pan" : "draw";
       editor.mode = "crop";
       editor.textDraftActive = false;
       editor.cropInteraction = null;
@@ -8841,7 +8994,8 @@
       if (!editor) return;
       editor.cropRect = null;
       editor.cropInteraction = null;
-      editor.mode = "draw";
+      editor.mode = photoEditorReturnMode(editor);
+      editor.toolReturnMode = "draw";
       setPhotoEditorTextSelection();
       redrawPhotoEditor();
     }
@@ -8858,6 +9012,7 @@
       const editor = state.photoEditor;
       const canvas = $("photoEditorCanvas");
       if (!editor?.cropRect) return;
+      const returnMode = photoEditorReturnMode(editor);
       finishPhotoEditorStroke();
       const crop = normalizePhotoEditorCropRect(editor.cropRect);
       editor.cropRect = null;
@@ -8876,7 +9031,8 @@
       editor.selectedTextId = "";
       editor.textDraftActive = false;
       editor.cropInteraction = null;
-      editor.mode = "draw";
+      editor.mode = returnMode;
+      editor.toolReturnMode = "draw";
       setPhotoEditorTextSelection();
       redrawPhotoEditor();
       requestAnimationFrame(fitPhotoEditorZoom);
@@ -8931,8 +9087,8 @@
     function savePhotoEditor() {
       const editor = state.photoEditor;
       if (!editor) return;
-      if (editor.mode === "crop" && editor.cropRect) {
-        showNotice("Najprej potrdi ali prekliči izrez slike.");
+      if (photoEditorHasPendingOperation(editor)) {
+        showNotice("Najprej potrdi ali povrni trenutno spremembo slike.");
         return;
       }
       finishPhotoEditorStroke();
@@ -11295,8 +11451,8 @@
       const range = billingRange();
       const workerId = billingWorkerId();
       const direction = id === "billingNextMonth" ? 1 : -1;
-      const previousPayroll = billingPreviousPayroll(workerId, range.from);
-      const nextPayroll = billingNextPayroll(workerId, range.to);
+      const previousPayroll = billingPreviousPayroll(workerId, range);
+      const nextPayroll = billingNextPayroll(workerId, range);
       if (direction < 0) {
         if (!previousPayroll) return;
         $("billingFrom").value = previousPayroll.from;
@@ -11314,11 +11470,11 @@
       }
       const latest = latestBillingPeriod(workerId);
       if (!latest || range.to >= latest.to) return;
-      const start = parseDate(range.from);
+      const start = parseDate(range.to);
       const end = parseDate(range.to);
-      const span = Math.round((end - start) / 86400000) + 1;
-      start.setDate(start.getDate() + span);
-      end.setDate(end.getDate() + span);
+      const previousStart = parseDate(range.from);
+      const span = Math.round((end - previousStart) / 86400000) + 1;
+      end.setDate(end.getDate() + Math.max(0, span - 1));
       const nextFrom = dateKey(start);
       const nextTo = [dateKey(end), latest.to].sort()[0];
       if (nextTo < nextFrom) {
@@ -11782,17 +11938,9 @@
       const canvas = event.currentTarget;
       const shell = canvas.closest(".photo-editor-canvas-shell");
       canvas.setPointerCapture(event.pointerId);
-      editor.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
-      if (editor.pointers.size >= 2) {
-        editor.activeStroke = null;
-        editor.textInteraction = null;
-        editor.cropInteraction = null;
-        editor.pan = null;
-        shell.classList.remove("is-panning");
-        editor.gestureUsed = true;
-        redrawPhotoEditor();
-        const metrics = pointerGestureMetrics(editor.pointers);
-        editor.pinch = metrics ? { lastDistance: metrics.distance, lastCenter: metrics.center } : null;
+      editor.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY, pointerType: event.pointerType });
+      if (photoEditorTouchPinchMetrics(editor)) {
+        if (!editor.pinch) beginPhotoEditorPinch(editor, shell);
         return;
       }
       if (editor.gestureUsed) return;
@@ -11848,9 +11996,10 @@
       const editor = state.photoEditor;
       if (!editor?.pointers.has(event.pointerId)) return;
       event.preventDefault();
-      editor.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
-      if (editor.pointers.size >= 2) {
-        queuePhotoEditorPinch(pointerGestureMetrics(editor.pointers));
+      editor.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY, pointerType: event.pointerType });
+      const pinchMetrics = photoEditorTouchPinchMetrics(editor);
+      if (editor.pinch && pinchMetrics) {
+        queuePhotoEditorPinch(pinchMetrics);
         return;
       }
       const cropInteraction = editor.cropInteraction;
@@ -11893,9 +12042,6 @@
     function finishPhotoEditorPointer(event, cancelled = false) {
       const editor = state.photoEditor;
       if (!editor) return;
-      if (editor.pinchFrame) cancelAnimationFrame(editor.pinchFrame);
-      editor.pinchFrame = 0;
-      editor.pendingPinch = null;
       const shell = $("photoEditorCanvas").closest(".photo-editor-canvas-shell");
       if (editor.pan?.pointerId === event.pointerId) {
         editor.pan = null;
@@ -11903,6 +12049,7 @@
       }
       const cropInteraction = editor.cropInteraction;
       if (cropInteraction?.pointerId === event.pointerId) {
+        if (cancelled && cropInteraction.before) editor.cropRect = { ...cropInteraction.before };
         editor.cropInteraction = null;
         redrawPhotoEditor();
       }
@@ -11921,7 +12068,12 @@
         redrawPhotoEditor();
       }
       editor.pointers.delete(event.pointerId);
-      editor.pinch = null;
+      if (editor.pointers.size < 2) {
+        if (editor.pinchFrame) cancelAnimationFrame(editor.pinchFrame);
+        editor.pinchFrame = 0;
+        editor.pendingPinch = null;
+        editor.pinch = null;
+      }
       if (!editor.pointers.size) {
         editor.gestureUsed = false;
         shell.classList.remove("is-panning");
@@ -11932,6 +12084,7 @@
       finishPhotoEditorPointer(event);
     });
     $("photoEditorCanvas").addEventListener("pointercancel", (event) => finishPhotoEditorPointer(event, true));
+    $("photoEditorCanvas").addEventListener("lostpointercapture", (event) => finishPhotoEditorPointer(event, true));
     $("photoEditorCanvas").closest(".photo-editor-canvas-shell").addEventListener("wheel", (event) => {
       const editor = state.photoEditor;
       if (!editor || !event.ctrlKey) return;
@@ -11957,13 +12110,13 @@
       redrawPhotoEditor();
     });
     $("photoEditorCrop").addEventListener("click", enterPhotoEditorCropMode);
-    $("photoEditorApplyCrop").addEventListener("click", applyPhotoEditorCrop);
-    $("photoEditorCancelCrop").addEventListener("click", cancelPhotoEditorCrop);
     $("photoEditorAddText").addEventListener("click", openPhotoEditorTextEntry);
+    $("photoEditorConfirmPending").addEventListener("click", confirmPhotoEditorPendingOperation);
+    $("photoEditorCancelPending").addEventListener("click", cancelPhotoEditorPendingOperation);
     $("photoEditorText").addEventListener("keydown", (event) => {
-      if (event.key !== "Enter") return;
+      if (event.key !== "Enter" || event.isComposing || !state.photoEditor?.textDraftActive) return;
       event.preventDefault();
-      addPhotoEditorText();
+      confirmPhotoEditorPendingOperation();
     });
     $("photoEditorTextSmaller").addEventListener("click", () => changePhotoEditorTextSize(-2));
     $("photoEditorTextLarger").addEventListener("click", () => changePhotoEditorTextSize(2));
@@ -12031,11 +12184,25 @@
       $("photoEditorZoomValue").textContent = "100 %";
       $("photoEditorTextTools").hidden = true;
       $("photoEditorTextEditor").hidden = true;
-      $("photoEditorCropActions").hidden = true;
+      $("photoEditorPendingActions").hidden = true;
       shell.classList.remove("is-text-editing", "is-pan-mode", "is-crop-mode", "is-panning");
     });
+    function requestPhotoEditorClose() {
+      const editor = state.photoEditor;
+      if (photoEditorHasPendingOperation(editor)) {
+        cancelPhotoEditorPendingOperation();
+        return;
+      }
+      $("photoEditorDialog").close();
+    }
+    $("photoEditorClose").addEventListener("click", requestPhotoEditorClose);
+    $("photoEditorDialog").addEventListener("cancel", (event) => {
+      if (!photoEditorHasPendingOperation()) return;
+      event.preventDefault();
+      cancelPhotoEditorPendingOperation();
+    });
     $("photoEditorDialog").addEventListener("click", (event) => {
-      if (event.target === event.currentTarget) event.currentTarget.close();
+      if (event.target === event.currentTarget) requestPhotoEditorClose();
     });
 
     $("attachmentPreviewZoomOut").addEventListener("click", () => {

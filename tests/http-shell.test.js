@@ -20,12 +20,24 @@ test("front-end naročila in foto urejevalnik ohranita dogovorjeni mobilni prika
   assert.match(html, /function attachmentLabel\(photo\) \{[\s\S]*?return "Fotografija";/);
   assert.match(html, /\$\("photoEditorTitle"\)\.textContent = "Uredi fotografijo";/);
   assert.doesNotMatch(html, /\$\("photoEditorTitle"\)\.textContent = `Uredi:/);
+  assert.match(html, /photoEditorPendingActions/);
+  assert.match(html, /function confirmPhotoEditorPendingOperation\(\)/);
+  assert.match(html, /function cancelPhotoEditorPendingOperation\(\)/);
+  assert.match(html, /function beginPhotoEditorPinch\(editor, shell\)/);
+  assert.match(html, /lostpointercapture/);
+  assert.doesNotMatch(html, /photoEditorCropActions|photoEditorApplyCrop|photoEditorCancelCrop/);
 });
 test("obračunsko obdobje samodejno sledi novemu dnevu, ročna izbira pa ostane ločena po delavcu", async () => {
   const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
   assert.match(html, /billingRangeSelections: \{\}/);
   assert.match(html, /function billingRangeSelectionForWorker\(workerId\)/);
-  assert.match(html, /if \(custom\) \{[\s\S]*?else if \(openPayroll\) \{[\s\S]*?else if \(latest\) \{/);
+  assert.match(html, /function billingTodayKey\(now = new Date\(\)\)/);
+  assert.doesNotMatch(html, /billingYesterdayKey/);
+  assert.match(html, /openCoversNewestRange/);
+  assert.match(html, /function staleOpenBillingPayroll\(workerId\)/);
+  assert.match(html, /billingStaleDraftNotice/);
+  assert.match(html, /function lockedBillingFinancialIds\(workerId, field\)/);
+  assert.match(html, /const from = previous \? previous\.to/);
   assert.match(html, /saveBillingRangeSelection\(billingWorkerId\(\), \{ from: \$\("billingFrom"\)\.value, to: \$\("billingTo"\)\.value \}\);/);
   assert.match(html, /saveBillingRangeSelection\(state\.billingWorkerId, \{ from: button\.dataset\.from, to: button\.dataset\.to \}\);/);
 });

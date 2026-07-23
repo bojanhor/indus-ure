@@ -1443,8 +1443,9 @@ function payrollNextDate(key) {
   return [date.getFullYear(), String(date.getMonth() + 1).padStart(2, "0"), String(date.getDate()).padStart(2, "0")].join("-");
 }
 
-// A worker's payroll periods form one uninterrupted timeline. This prevents
-// duplicate, overlapping or skipped periods even if a client bypasses the UI.
+// A worker's payroll periods form a contiguous timeline. The shared boundary
+// day is intentional: the next payroll may begin on the previous payroll's
+// final day, while its already locked lines and finance rows are excluded.
 function payrollSequenceError(db, workerId, rangeInput, excludeId = "") {
   const range = payrollRange(rangeInput);
   if (!range) return "Obračunsko obdobje ni pravilno.";
@@ -1461,13 +1462,13 @@ function payrollSequenceError(db, workerId, rangeInput, excludeId = "") {
   for (let index = 1; index < records.length; index += 1) {
     const previous = records[index - 1];
     const current = records[index];
-    const expectedFrom = payrollNextDate(previous.to);
-    if (current.from < expectedFrom) return "Obračunski obdobji se prekrivata.";
-    if (current.from > expectedFrom) return `Začetek obračuna mora biti ${expectedFrom}, neposredno po prejšnjem obračunu.`;
+    const sharedBoundary = previous.to;
+    const nextDay = payrollNextDate(previous.to);
+    if (current.from < sharedBoundary) return "Obra\u010dunski obdobji se prekrivata ve\u010d kot na skupnem mejnem dnevu.";
+    if (current.from > nextDay) return "Za\u010detek obra\u010duna mora biti " + sharedBoundary + " (skupni mejni dan) ali " + nextDay + ".";
   }
   return "";
 }
-
 function isPayrollMonth(value) {
   const match = /^(\d{4})-(\d{2})$/.exec(String(value || ""));
   return Boolean(match && Number(match[2]) >= 1 && Number(match[2]) <= 12);
@@ -1478,7 +1479,7 @@ function payrollPeriodEnded(value, now = new Date()) {
     if (!range) return false;
     const parts = Object.fromEntries(new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Ljubljana", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(now).filter((part) => part.type !== "literal").map((part) => [part.type, part.value]));
     const today = `${parts.year}-${parts.month}-${parts.day}`;
-    return range.to < today;
+    return range.to <= today;
   }
   const match = /^(\d{4})-(\d{2})$/.exec(String(value || ""));
   if (!match) return false;
@@ -1647,21 +1648,37 @@ function finalizePayrollAmounts(payroll) {
   payroll.remainingAmount = Number((payroll.payoutAmount - payroll.paidAmount).toFixed(2));
   return payroll;
 }
+function lockedPayrollLineTodoIds(db, excludeId = "") {
+  return new Set((db.payrolls || [])
+    .filter((payroll) => payroll.id !== excludeId && ["archiving", "confirmed", "paid"].includes(payroll.status))
+    .flatMap((payroll) => payroll.lines || [])
+    .map((line) => String(line.todoId || ""))
+    .filter(Boolean));
+}
+
+function lockedPayrollFinancialIds(db, field, excludeId = "") {
+  return new Set((db.payrolls || [])
+    .filter((payroll) => payroll.id !== excludeId && ["archiving", "confirmed", "paid"].includes(payroll.status))
+    .flatMap((payroll) => Array.isArray(payroll[field]) ? payroll[field] : [])
+    .map((id) => String(id || ""))
+    .filter(Boolean));
+}
 function buildPayrollSnapshot(db, workerId, rangeInput, previous = {}, note = undefined) {
   const range = payrollRange(rangeInput);
   if (!range) return null;
-  const lockedElsewhere = new Set((db.payrolls || [])
-    .filter((payroll) => payroll.id !== previous.id && ["archiving", "confirmed", "paid"].includes(payroll.status))
-    .flatMap((payroll) => payroll.lines || [])
-    .map((line) => String(line.todoId || "")));
+  const lockedElsewhere = lockedPayrollLineTodoIds(db, previous.id);
+  const lockedAdvanceIds = lockedPayrollFinancialIds(db, "advanceIds", previous.id);
+  const lockedPersonalPurchaseIds = lockedPayrollFinancialIds(db, "personalPurchaseIds", previous.id);
   const lines = (db.todos || [])
     .filter((todo) => (todo.syncUser || todo.createdBy) === workerId && !todo.archivedAt && String(todo.date || "") >= range.from && String(todo.date || "") <= range.to)
     .filter((todo) => !lockedElsewhere.has(String(todo.id || "")))
     .map((todo) => payrollLineForTodo(db, todo, workerId))
     .filter(Boolean)
     .sort((a, b) => a.date.localeCompare(b.date) || a.start.localeCompare(b.start) || a.title.localeCompare(b.title));
-  const advances = payrollAdvances(db, workerId, range);
-  const personalPurchases = payrollPersonalPurchases(db, workerId, range);
+  const advances = payrollAdvances(db, workerId, range)
+    .filter((item) => !lockedAdvanceIds.has(String(item.id || "")));
+  const personalPurchases = payrollPersonalPurchases(db, workerId, range)
+    .filter((item) => !lockedPersonalPurchaseIds.has(String(item.id || "")));
   return normalizePayroll({ ...previous, workerId, ...range, lines, advanceIds: advances.map((item) => item.id), advanceAmount: advances.reduce((total, item) => total + Number(item.amount || 0), 0), personalPurchaseIds: personalPurchases.map((item) => item.id), personalPurchaseAmount: personalPurchases.reduce((total, item) => total + Number(item.amount || 0), 0), note: note === undefined ? previous.note : note }, db);
 }
 
@@ -4192,7 +4209,7 @@ async function handleApi(req, res) {
         return;
       }
       if (!payrollPeriodEnded(range)) {
-        sendJson(res, 409, { error: "Obračun lahko potrdiš šele po koncu izbranega obračunskega meseca." });
+        sendJson(res, 409, { error: "Obračun lahko potrdiš največ do današnjega dne." });
         return;
       }
       const db = await readDbAsync();
@@ -4365,7 +4382,7 @@ async function handleApi(req, res) {
       const current = db.payrolls[index];
       const now = new Date().toISOString();
       if (action === "confirm" && !payrollPeriodEnded(current)) {
-        sendJson(res, 409, { error: "Obračun lahko potrdiš šele po koncu izbranega obračunskega meseca." });
+        sendJson(res, 409, { error: "Obračun lahko potrdiš največ do današnjega dne." });
         return;
       }
       if (action === "confirm") {
