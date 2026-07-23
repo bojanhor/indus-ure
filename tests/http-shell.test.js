@@ -11,6 +11,17 @@ test("Postgres store singleton is initialized before database startup", async ()
   assert.match(serverSource, /let pgStore = null;/);
 });
 
+test("nepooblaščena Google prijava ima splošno zavrnitev in trajni zapis", async () => {
+  const [server, store] = await Promise.all([
+    fs.readFile(path.join(__dirname, "..", "outputs", "server.js"), "utf8"),
+    fs.readFile(path.join(__dirname, "..", "outputs", "postgres-store.js"), "utf8")
+  ]);
+  assert.match(server, /async function recordDeniedGoogleLogin\(email\)/);
+  assert.match(server, /sendText\(res, 403, "Dostop je zavrnjen\.", "text\/plain"\)/);
+  assert.match(server, /insert into indus_access_attempts/);
+  assert.match(store, /create table if not exists indus_access_attempts/);
+});
+
 test("front-end naročila in foto urejevalnik ohranita dogovorjeni mobilni prikaz", async () => {
   const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
   assert.match(html, /function todoOrderingSort\(a, b\) \{[\s\S]*?orderedDifference/);
@@ -39,6 +50,8 @@ test("front-end naročila in foto urejevalnik ohranita dogovorjeni mobilni prika
   assert.match(html, /id="serverStatusBtn"/);
   assert.match(html, /id="serverStatusDialog"/);
   assert.match(html, /todo-card-badges/);
+  assert.match(html, /todo-card-header/);
+  assert.match(html, /todo-ordering-chip/);
   assert.doesNotMatch(html, /serverStatusPanel/);
 });
 test("obračunsko obdobje samodejno sledi novemu dnevu, ročna izbira pa ostane ločena po delavcu", async () => {

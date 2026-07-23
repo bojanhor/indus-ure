@@ -225,6 +225,13 @@ class PostgresStore {
         created_at timestamptz not null default now()
       );
       create index if not exists indus_notifications_user_idx on indus_notifications (user_id, read_at, created_at desc);
+      create table if not exists indus_access_attempts (
+        id text primary key,
+        email text not null,
+        outcome text not null default 'denied',
+        created_at timestamptz not null default now()
+      );
+      create index if not exists indus_access_attempts_created_idx on indus_access_attempts (created_at desc);
       create table if not exists indus_backup_runs (
         id text primary key,
         status text not null,

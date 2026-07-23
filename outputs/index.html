@@ -1368,20 +1368,37 @@
 
     .todo-title-row {
       display: grid;
-      grid-template-columns: 42px max-content minmax(0, 1fr) auto auto;
+      grid-template-columns: 42px minmax(0, 1fr) auto auto;
       grid-template-rows: auto auto;
       gap: 5px 7px;
       align-items: start;
       min-width: 0;
     }
 
-    .todo-card-badges {
+    .todo-card-header {
       grid-column: 2;
       grid-row: 1;
       display: flex;
       flex-wrap: wrap;
+      align-items: flex-start;
+      gap: 4px 7px;
+      min-width: 0;
+    }
+
+    .todo-card-badges {
+      display: flex;
+      flex: 0 1 auto;
+      flex-wrap: wrap;
       gap: 4px;
       min-width: 0;
+    }
+
+    .todo-ordering-chip {
+      border: 1px solid #bfd1c7;
+      background: #e7f0ec;
+      color: #315647;
+      font-weight: 800;
+      white-space: nowrap;
     }
 
     .todo-title-row .drag-handle {
@@ -1395,18 +1412,19 @@
     }
 
     .todo-title-row .todo-client-name {
-      grid-column: 3;
-      grid-row: 1;
+      flex: 1 1 74px;
+      min-width: 58px;
+      padding-top: 2px;
     }
 
     .todo-title-row .todo-details-toggle {
-      grid-column: 4;
+      grid-column: 3;
       grid-row: 1;
       align-self: start;
     }
 
     .todo-title-row .todo-tools {
-      grid-column: 5;
+      grid-column: 4;
       grid-row: 1;
       justify-content: flex-end;
       gap: 4px;
@@ -3757,9 +3775,10 @@
         padding: 8px;
       }
       .todo-title-row {
-        grid-template-columns: 36px max-content minmax(0, 1fr) auto auto;
+        grid-template-columns: 36px minmax(0, 1fr) auto auto;
         gap: 4px 5px;
       }
+      .todo-card-header { gap: 3px 5px; }
       .todo-title-row .todo-tools { gap: 3px; }
       .todo-title-row .todo-edit-icon,
       .todo-title-row .todo-delete-icon { width: 29px; height: 29px; }
@@ -8599,12 +8618,14 @@
           <div class="todo-summary" role="button" tabindex="0" aria-label="Uredi opravilo: ${escapeHtml(todo.title)}">
             <div class="todo-title-row">
               <button class="drag-handle" type="button" ${reorderable ? "" : "disabled"} title="Povleci za vrstni red (na telefonu pridr&#382;i)" aria-label="Povleci za vrstni red (na telefonu pridr&#382;i)">::</button>
-              <div class="todo-card-badges">
-                ${todoUsesOrderConfirmation(todo) ? `<button class="todo-ordered-toggle" type="button" aria-pressed="${Boolean(todo.ordered)}" title="${todo.ordered ? "Ozna&#269;eno kot naro&#269;eno" : "Ozna&#269;i kot naro&#269;eno"}" aria-label="${todo.ordered ? "Ozna&#269;eno kot naro&#269;eno" : "Ozna&#269;i kot naro&#269;eno"}"><span aria-hidden="true">&#10003;</span></button>` : ""}
-                <span class="todo-chip todo-status-chip todo-status-color ${todoStatusClass(todo.status)}">${todoStatus(todo.status).label}</span>
-                ${todoUsesTextOrdering(todo) && !manualOrderingStatusIds.has(todo.status) ? '<span class="todo-chip">naro&#269;i</span>' : ""}
+              <div class="todo-card-header">
+                <div class="todo-card-badges">
+                  ${todoUsesOrderConfirmation(todo) ? `<button class="todo-ordered-toggle" type="button" aria-pressed="${Boolean(todo.ordered)}" title="${todo.ordered ? "Ozna&#269;eno kot naro&#269;eno" : "Ozna&#269;i kot naro&#269;eno"}" aria-label="${todo.ordered ? "Ozna&#269;eno kot naro&#269;eno" : "Ozna&#269;i kot naro&#269;eno"}"><span aria-hidden="true">&#10003;</span></button>` : ""}
+                  <span class="todo-chip todo-status-chip todo-status-color ${todoStatusClass(todo.status)}">${todoStatus(todo.status).label}</span>
+                  ${todoUsesTextOrdering(todo) && !manualOrderingStatusIds.has(todo.status) ? '<span class="todo-chip todo-ordering-chip">naro&#269;i</span>' : ""}
+                </div>
+                <div class="todo-client-name">${escapeHtml(todo.client || "")}</div>
               </div>
-              <div class="todo-client-name">${escapeHtml(todo.client || "")}</div>
               ${hasExpandedDetails ? `<button class="todo-details-toggle${attachmentCount ? " has-attachments" : ""}" type="button" aria-expanded="${detailsExpanded}" aria-controls="todo-details-${escapeHtml(todo.id)}" title="${todoDetailsToggleLabel(detailsExpanded, attachmentCount)}" aria-label="${todoDetailsToggleLabel(detailsExpanded, attachmentCount)}">${attachmentCount ? '<span class="todo-attachment-indicator" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7.2 10.8 5.5-5.5a3.1 3.1 0 1 1 4.4 4.4l-7.4 7.4a4.5 4.5 0 0 1-6.4-6.4l7-7"></path></svg></span>' : ""}<svg class="todo-details-chevron" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 7 6 6 6-6"></path></svg></button>` : ""}
               <div class="todo-tools">
                 <button class="todo-edit-icon edit-todo" type="button" title="Uredi opravilo" aria-label="Uredi opravilo">

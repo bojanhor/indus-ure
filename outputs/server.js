@@ -3927,6 +3927,31 @@ async function collapseUnreadOperationalAlerts() {
   return result.rowCount || 0;
 }
 
+function deniedGoogleLoginCode(email) {
+  return `denied-google-login-${crypto.createHash("sha256").update(String(email || "").toLowerCase()).digest("hex").slice(0, 20)}`;
+}
+
+async function recordDeniedGoogleLogin(email) {
+  const normalizedEmail = String(email || "").trim().toLowerCase().slice(0, 254);
+  if (!normalizedEmail) return;
+  if (DATABASE_URL) {
+    try {
+      await getPgPool().query(
+        "insert into indus_access_attempts (id, email, outcome) values ($1, $2, $3)",
+        [crypto.randomUUID(), normalizedEmail, "denied"]
+      );
+      await getPgPool().query("delete from indus_access_attempts where created_at < now() - interval '180 days'");
+    } catch (error) {
+      console.error(`Zavrnjene Google prijave ni bilo mogoče zapisati: ${error.message || error}`);
+    }
+  }
+  await recordOperationalAlert({
+    code: deniedGoogleLoginCode(normalizedEmail),
+    severity: "warning",
+    title: "Dostop zavrnjen",
+    message: `Zavrnjen je bil poskus prijave z Google računom ${normalizedEmail}.`
+  });
+}
 async function recordOperationalAlert({ code, severity = "warning", title, message }) {
   const last = Number(monitorAlertCooldowns.get(code) || 0);
   if (Date.now() - last < 6 * 60 * 60 * 1000) return false;
@@ -4309,7 +4334,8 @@ async function handleApi(req, res) {
         const db = await readDbAsync();
         const user = userByEmail(db, email);
         if (!user) {
-          sendText(res, 403, "Ta Google račun nima dostopa do INDUS URE. Dovoljena sta samo Ibro in Bojan.", "text/plain");
+          await recordDeniedGoogleLogin(email);
+          sendText(res, 403, "Dostop je zavrnjen.", "text/plain");
           return;
         }
         const sessionToken = createSession(db, user.id);
