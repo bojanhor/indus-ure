@@ -143,3 +143,17 @@ test("lokalna testna instanca omogoča ločeno prijavo samo v testnem načinu", 
     await fs.rm(dataDir, { recursive: true, force: true });
   }
 });
+
+test("completion request UI and authenticated link flow are present", async () => {
+  const [server, html] = await Promise.all([
+    fs.readFile(path.join(__dirname, "..", "outputs", "server.js"), "utf8"),
+    fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8")
+  ]);
+  assert.match(server, /TODO_COMPLETION_REQUEST_TTL_MS/);
+  assert.match(server, /\/completion-request\$/);
+  assert.match(server, /gmailCompletionRequestRaw/);
+  assert.match(html, /id="completionRequestDialog"/);
+  assert.match(html, /function openCompletionRequestFromLink\(\)/);
+  assert.match(html, /requestTodoCompletion/);
+  assert.match(html, /params\.set\("return_to", returnTo\)/);
+});

@@ -21,6 +21,8 @@ const {
   clientReportAttachmentSelection,
   buildClientReportPdf,
   gmailDraftRaw,
+  gmailCompletionRequestRaw,
+  cleanTodoCompletionRequests,
   cancelClientBill,
   clientBillLockForTodos,
   reconcileTodoArchives,
@@ -741,4 +743,59 @@ test("arhivski cleanup po poteku hrambe izbriše cel dogodek, priloge in osirote
   assert.deepEqual(db.todos.map((todo) => todo.id), ["new-project", "partial-ibro", "partial-bojan"]);
   assert.equal(db.attachments[attachmentId], undefined);
   assert.deepEqual(db.clients.map((client) => client.clientId), ["current-client"]);
+});
+
+test("completion request is private to its recipient and expires", () => {
+  const now = Date.now();
+  const tokenHash = "a".repeat(64);
+  const requests = cleanTodoCompletionRequests([
+    {
+      id: "valid-request",
+      tokenHash,
+      recipientUserId: "ibro",
+      recipientEmail: "ibro@example.test",
+      requestedBy: "bojan",
+      requestedByName: "Bojan",
+      comment: "Prosim dopolni opis.",
+      createdAt: new Date(now).toISOString(),
+      expiresAt: now + 60_000
+    },
+    {
+      id: "expired-request",
+      tokenHash: "b".repeat(64),
+      recipientUserId: "ibro",
+      recipientEmail: "ibro@example.test",
+      requestedBy: "bojan",
+      expiresAt: now - 1
+    }
+  ], now);
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].recipientUserId, "ibro");
+
+  const delegatedTodo = {
+    id: "delegated",
+    syncUser: "bojan",
+    createdBy: "ibro",
+    title: "Dopolni zapis",
+    photos: [],
+    driveFiles: [],
+    completionRequests: requests
+  };
+  assert.equal(canManageTodo(worker, delegatedTodo), true);
+  const visible = visibleTodosForUser({ todos: [delegatedTodo], attachments: [] }, worker);
+  assert.equal(visible.length, 1);
+  assert.equal(Object.hasOwn(visible[0], "completionRequests"), false);
+});
+
+test("completion request email has recipient, subject and encoded body", () => {
+  const raw = gmailCompletionRequestRaw({
+    to: "ibro@example.test",
+    subject: "Dopolnitev opravila",
+    text: "Odpri opravilo: https://example.test/?todo=t1&completion=secret"
+  });
+  const message = Buffer.from(raw, "base64url").toString("utf8");
+  assert.match(message, /To: ibro@example\.test/);
+  assert.match(message, /Subject: =\?UTF-8\?B\?/);
+  const body = message.trim().split("\r\n\r\n").at(-1).replace(/\r\n/g, "");
+  assert.match(Buffer.from(body, "base64").toString("utf8"), /completion=secret/);
 });

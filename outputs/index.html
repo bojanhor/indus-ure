@@ -2664,6 +2664,8 @@
     }
 
     #todoDialog { width: min(820px, calc(100vw - 26px)); max-height: calc(100dvh - 20px); overflow-y: auto; }
+    #completionRequestDialog { width: min(560px, calc(100vw - 26px)); }
+    #completionRequestDialog textarea { min-height: 130px; resize: vertical; }
     .todo-form-footer-actions {
       display: flex;
       align-items: center;
@@ -4309,10 +4311,30 @@
           <button class="danger footer-danger hidden" id="deleteTodoFromDialogFooter" type="button">Izbriši</button>
           <button class="secondary hidden" id="duplicateTodoFromDialogFooter" type="button">Podvoji</button>
           <button class="secondary hidden" id="writeHoursFromTodoFooter" type="button">Vpis ur</button>
+          <button class="secondary hidden" id="requestTodoCompletion" type="button">Zahtevaj dopolnitev</button>
           <button class="secondary" id="cancelTodoDialogFooter" type="button">Prekliči</button>
           <button class="primary" id="saveTodoDialogFooter" type="submit">Shrani</button>
         </div>
 
+      </div>
+    </form>
+  </dialog>
+  <dialog id="completionRequestDialog">
+    <form method="dialog" id="completionRequestForm">
+      <div class="modal-head">
+        <h3>Zahtevek za dopolnitev</h3>
+        <button class="icon-btn" id="closeCompletionRequestDialog" type="button" title="Zapri" aria-label="Zapri">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="todo-meta" id="completionRequestTodo"></p>
+        <label>Vprasanje ali komentar
+          <textarea id="completionRequestComment" maxlength="2000" placeholder="Napisi, kaj naj delavec dopolni"></textarea>
+        </label>
+        <p class="todo-meta">Povezava velja 14 dni in po prijavi odpre to opravilo.</p>
+        <div class="modal-actions">
+          <button class="secondary" id="cancelCompletionRequestDialog" type="button">Prekliči</button>
+          <button class="primary" type="submit">Pošlji zahtevek</button>
+        </div>
       </div>
     </form>
   </dialog>
@@ -4881,6 +4903,8 @@
     }
     async function requestGoogleLoginUrl(automatic = false) {
       const params = new URLSearchParams();
+      const returnTo = location.pathname + location.search + location.hash;
+      if (returnTo.startsWith("/")) params.set("return_to", returnTo);
       if (automatic) params.set("automatic", "1");
       const loginHint = localStorage.getItem(googleEmailKey) || "";
       if (automatic && loginHint) params.set("login_hint", loginHint);
@@ -4892,6 +4916,35 @@
       const data = text ? JSON.parse(text) : null;
       if (!response.ok || !data?.url) throw new Error(data?.error || "Google prijave ni bilo mogoče zagnati.");
       return data;
+    }
+
+    function clearCompletionRequestLink() {
+      const current = new URL(location.href);
+      current.searchParams.delete("todo");
+      current.searchParams.delete("completion");
+      current.searchParams.delete("login");
+      history.replaceState(history.state, "", current.pathname + current.search + current.hash);
+    }
+
+    async function openCompletionRequestFromLink() {
+      const current = new URL(location.href);
+      const todoId = String(current.searchParams.get("todo") || "");
+      const token = String(current.searchParams.get("completion") || "");
+      if (!todoId || !token || !state.user || state.offlineMode) return;
+      try {
+        const data = await api("/api/todos/" + encodeURIComponent(todoId) + "/completion-request?token=" + encodeURIComponent(token), { recoverSession: false });
+        const index = state.todos.findIndex((todo) => todo.id === data.todo.id);
+        if (index >= 0) state.todos[index] = data.todo;
+        else state.todos.unshift(data.todo);
+        clearCompletionRequestLink();
+        renderTodos();
+        renderCalendar();
+        await openTodoDialog(data.todo);
+        const comment = String(data.request?.comment || "").trim();
+        showNotice("Odprt je zahtevek od " + (data.request?.requestedByName || "šefa") + (comment ? ": " + comment : "."));
+      } catch (error) {
+        showNotice(error.message || "Zahtevka za dopolnitev ni bilo mogoče odpreti.");
+      }
     }
 
     function recoverExpiredSession() {
@@ -5238,6 +5291,7 @@
         initializeWorkContext();
         showApp();
         await loadAll();
+        await openCompletionRequestFromLink();
         await Promise.all([refreshNotifications(), refreshGoogleDriveConnectionStatus()]);
         await updateOfflineSyncNotice();
         await flushOfflineTodoQueue();
@@ -9691,6 +9745,8 @@
       ["deleteTodoFromDialog", "deleteTodoFromDialogFooter"].forEach((id) => $(id).classList.toggle("hidden", !editing));
       ["duplicateTodoFromDialog", "duplicateTodoFromDialogFooter"].forEach((id) => $(id).classList.toggle("hidden", !editing || Boolean(state.todoHoursSourceId)));
       ["writeHoursFromTodo", "writeHoursFromTodoFooter"].forEach((id) => $(id).classList.toggle("hidden", !editing || Boolean(state.todoHoursSourceId) || !projectHoursSourceStatuses.has(todoStatus(todo.status).id)));
+      const creatorId = String(todo.createdBy || todo.syncUser || "");
+      $("requestTodoCompletion").classList.toggle("hidden", !editing || !isAdminView() || !creatorId || creatorId === state.user?.id);
       renderTodoFormAudit(todo);
       renderTodoFormSourceProject(todo);
       ["todoFormPhotoInput", "todoFormCameraInput", "todoFormPdfInput", "todoFormVideoInput"].forEach((id) => { $(id).value = ""; });
@@ -9810,6 +9866,35 @@
         todoDialogSaveInFlight = false;
       }
     }
+    function openCompletionRequestDialog() {
+      const todoId = $("todoFormId").value;
+      const todo = state.todos.find((item) => item.id === todoId);
+      if (!todo) throw new Error("Opravilo ne obstaja več.");
+      $("completionRequestDialog").dataset.todoId = todo.id;
+      $("completionRequestTodo").textContent = (todo.client ? todo.client + " · " : "") + (todo.title || "Brez naslova");
+      $("completionRequestComment").value = "";
+      $("completionRequestDialog").showModal();
+      requestAnimationFrame(() => $("completionRequestComment").focus());
+    }
+
+    async function submitCompletionRequest() {
+      const dialog = $("completionRequestDialog");
+      const todoId = String(dialog.dataset.todoId || "");
+      if (!todoId) throw new Error("Opravilo ni izbrano.");
+      const submit = $("completionRequestForm button.primary");
+      submit.disabled = true;
+      try {
+        const data = await api("/api/todos/" + encodeURIComponent(todoId) + "/completion-request", {
+          method: "POST",
+          body: JSON.stringify({ comment: $("completionRequestComment").value.trim() })
+        });
+        dialog.close();
+        showNotice("Zahtevek je poslan na " + data.email + ".");
+      } finally {
+        submit.disabled = false;
+      }
+    }
+
     async function openHoursTodoFromCurrent() {
       const sourceId = $("todoFormId").value;
       const source = state.todos.find((todo) => todo.id === sourceId);
@@ -11719,6 +11804,17 @@
       await openTodoDialog(source);
     });
     ["writeHoursFromTodo", "writeHoursFromTodoFooter"].forEach((id) => $(id).addEventListener("click", () => openHoursTodoFromCurrent().catch((error) => showNotice(error.message))));
+    $("requestTodoCompletion").addEventListener("click", () => {
+      try { openCompletionRequestDialog(); } catch (error) { showNotice(error.message); }
+    });
+    ["closeCompletionRequestDialog", "cancelCompletionRequestDialog"].forEach((id) => $(id).addEventListener("click", () => $("completionRequestDialog").close()));
+    $("completionRequestForm").addEventListener("submit", (event) => {
+      event.preventDefault();
+      submitCompletionRequest().catch((error) => showNotice(error.message));
+    });
+    $("completionRequestDialog").addEventListener("click", (event) => {
+      if (event.target === event.currentTarget) $("completionRequestDialog").close();
+    });
     document.querySelectorAll("[data-create-drive]").forEach((button) => {
       button.addEventListener("click", () => createTodoGoogleDriveFile(button.dataset.createDrive).catch((error) => showNotice(error.message)));
     });
@@ -11988,6 +12084,7 @@
       restoreBackupFromFile(file).catch((error) => showNotice(error.message));
     });
     $("todoDialog").addEventListener("close", releaseTodoEditLockForDialog);
+    $("todoDialog").addEventListener("close", () => { if ($("completionRequestDialog").open) $("completionRequestDialog").close(); });
     $("todoDialog").addEventListener("close", () => { state.todoDialogReturnDayDate = ""; });
     $("todoDialog").addEventListener("close", () => {
       const sourceId = state.todoHoursSourceId;

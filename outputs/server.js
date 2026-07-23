@@ -397,6 +397,7 @@ const defaultUsers = {
 const pendingGoogleLogins = new Map();
 const pendingGoogleConnections = new Map();
 const ENTRY_EDIT_LOCK_TTL_MS = 90_000;
+const TODO_COMPLETION_REQUEST_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 const entryEditLocks = new Map();
 const TODO_EDIT_LOCK_TTL_MS = 90_000;
 const todoEditLocks = new Map();
@@ -875,6 +876,11 @@ function normalizeDb(db = {}) {
       next.userOrderBuckets = orderBuckets;
       changed = true;
     }
+    const completionRequests = cleanTodoCompletionRequests(next.completionRequests);
+    if (JSON.stringify(next.completionRequests || []) !== JSON.stringify(completionRequests)) {
+      next.completionRequests = completionRequests;
+      changed = true;
+    }
     if (typeof next.urgent !== "boolean") {
       next.urgent = false;
       changed = true;
@@ -1135,6 +1141,16 @@ function absoluteBaseUrl(req) {
   return `${proto}://${host}`;
 }
 
+function validEmailAddress(value) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || "").trim());
+}
+
+function safeAppReturnTo(value) {
+  const path = String(value || "").trim();
+  if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\")) return "/";
+  return path.slice(0, 2_000);
+}
+
 function sendText(res, status, text, type) {
   res.writeHead(status, securityHeaders({
     "Content-Type": type.includes("charset=") ? type : `${type}; charset=utf-8`,
@@ -1206,11 +1222,15 @@ function visibleTodosForUser(db, user) {
   const todos = db.todos || [];
   const visible = user.role === "boss"
     ? todos
-    : todos.filter((todo) => (todo.syncUser || todo.createdBy) === user.id);
-  return visible.map((todo) => hydrateTodoAttachments(db, {
-    ...todo,
-    assigneeIds: todoAssignmentAssigneeIds(db, todo)
-  }));
+    : todos.filter((todo) => todo.syncUser === user.id || todo.createdBy === user.id);
+  return visible.map((todo) => {
+    const hydrated = hydrateTodoAttachments(db, {
+      ...todo,
+      assigneeIds: todoAssignmentAssigneeIds(db, todo)
+    });
+    const { completionRequests, ...publicTodo } = hydrated;
+    return publicTodo;
+  });
 }
 
 function hydrateDebtAttachments(db, debt) {
@@ -1385,7 +1405,7 @@ function releaseTodoAssignmentEditLock(db, todo, user, lockToken = "", now = Dat
 function canManageTodo(user, todo) {
   if (!todo) return false;
   if (user.role === "boss") return true;
-  return (todo.syncUser || todo.createdBy) === user.id;
+  return todo.syncUser === user.id || todo.createdBy === user.id;
 }
 function sourceTodoForNewEntry(db, user, entry) {
   const sourceTodoId = String(entry.sourceTodoId || "");
@@ -2218,6 +2238,20 @@ function gmailDraftRaw({ to, pdf, pdfFilename, attachments = [] }) {
   return Buffer.from(parts.join("\r\n")).toString("base64url");
 }
 
+function gmailCompletionRequestRaw({ to, subject, text }) {
+  const encodedSubject = `=?UTF-8?B?${Buffer.from(String(subject || ""), "utf8").toString("base64")}?=`;
+  const parts = [
+    `To: ${to}`,
+    `Subject: ${encodedSubject}`,
+    "MIME-Version: 1.0",
+    "Content-Type: text/plain; charset=utf-8",
+    "Content-Transfer-Encoding: base64",
+    "",
+    mimeBase64(String(text || ""))
+  ];
+  return Buffer.from(parts.join("\r\n")).toString("base64url");
+}
+
 function clientReportFilename(client) {
   const suffix = safeReportFileName(client?.name || "stranka").replace(/\s+/g, "-");
   return `obračun-${suffix || "stranka"}.pdf`;
@@ -2614,6 +2648,31 @@ function cleanTodoUserOrderBuckets(input) {
     .filter(([userId, bucket]) => userId && ["sorted", "unsorted"].includes(bucket)));
 }
 
+function cleanTodoCompletionRequests(input, now = Date.now()) {
+  const seen = new Set();
+  return (Array.isArray(input) ? input : [])
+    .map((request) => ({
+      id: String(request?.id || "").trim(),
+      tokenHash: String(request?.tokenHash || "").trim().toLowerCase(),
+      recipientUserId: cleanUserId(request?.recipientUserId),
+      recipientEmail: String(request?.recipientEmail || "").trim().toLowerCase(),
+      requestedBy: cleanUserId(request?.requestedBy),
+      requestedByName: String(request?.requestedByName || "").trim().slice(0, 120),
+      comment: String(request?.comment || "").trim().slice(0, 2_000),
+      createdAt: String(request?.createdAt || ""),
+      expiresAt: Number(request?.expiresAt || 0)
+    }))
+    .filter((request) => request.id
+      && /^[a-f0-9]{64}$/.test(request.tokenHash)
+      && request.recipientUserId
+      && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(request.recipientEmail)
+      && request.requestedBy
+      && request.expiresAt > now
+      && !seen.has(request.id)
+      && (seen.add(request.id) || true))
+    .slice(-20);
+}
+
 function cleanTodo(input) {
   const status = input.status === "billing" ? "execution" : TODO_STATUSES.has(input.status) ? input.status : "open";
   const isMeal = status === "meal";
@@ -2632,6 +2691,7 @@ function cleanTodo(input) {
     order: Number.isFinite(Number(input.order)) ? Number(input.order) : 0,
     // Older tasks without this field are intentionally shown as sorted.
     userOrderBuckets: cleanTodoUserOrderBuckets(input.userOrderBuckets),
+    completionRequests: cleanTodoCompletionRequests(input.completionRequests),
     urgent: isMeal || isTimeEntry || input.status === "billing" ? false : Boolean(input.urgent),
     ordered: ORDER_TODO_STATUSES.has(status) && Boolean(input.ordered),
     warranty: input.status === "execution" && Boolean(input.warranty),
@@ -3334,7 +3394,8 @@ function serveStatic(req, res) {
 
 function cleanupPendingGoogleStates() {
   const cutoff = Date.now() - 10 * 60 * 1000;
-  for (const [state, startedAt] of pendingGoogleLogins) {
+  for (const [state, pending] of pendingGoogleLogins) {
+    const startedAt = typeof pending === "number" ? pending : Number(pending?.startedAt || 0);
     if (startedAt < cutoff) pendingGoogleLogins.delete(state);
   }
   for (const [state, pending] of pendingGoogleConnections) {
@@ -3881,7 +3942,10 @@ async function handleApi(req, res) {
       }
       cleanupPendingGoogleStates();
       const state = `login:${crypto.randomBytes(24).toString("hex")}`;
-      pendingGoogleLogins.set(state, Date.now());
+      pendingGoogleLogins.set(state, {
+        startedAt: Date.now(),
+        returnTo: safeAppReturnTo(url.searchParams.get("return_to"))
+      });
       const auth = googleClient(req);
       const automatic = url.searchParams.get("automatic") === "1";
       const requestedLoginHint = String(url.searchParams.get("login_hint") || "").trim().toLowerCase();
@@ -3944,8 +4008,9 @@ async function handleApi(req, res) {
         return;
       }
       if (token.startsWith("login:")) {
-        const startedAt = pendingGoogleLogins.get(token);
+        const pendingLogin = pendingGoogleLogins.get(token);
         pendingGoogleLogins.delete(token);
+        const startedAt = typeof pendingLogin === "number" ? pendingLogin : Number(pendingLogin?.startedAt || 0);
         if (!startedAt || Date.now() - startedAt > 10 * 60 * 1000) {
           sendText(res, 401, "Prijava je potekla. Vrni se na INDUS URE in poskusi znova.", "text/plain");
           return;
@@ -3966,7 +4031,7 @@ async function handleApi(req, res) {
         const sessionToken = createSession(db, user.id);
         await writeDbAsync(db);
         setSessionCookie(req, res, sessionToken);
-        const destination = new URL("/", absoluteBaseUrl(req));
+        const destination = new URL(safeAppReturnTo(pendingLogin?.returnTo), absoluteBaseUrl(req));
         destination.searchParams.set("login", "ok");
         res.writeHead(303, securityHeaders({ Location: destination.toString(), "Cache-Control": "no-store" }));
         res.end();
@@ -5380,6 +5445,125 @@ async function handleApi(req, res) {
       return;
     }
 
+    const todoCompletionRequestMatch = url.pathname.match(/^\/api\/todos\/([^/]+)\/completion-request$/);
+    if (todoCompletionRequestMatch) {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      const id = decodeURIComponent(todoCompletionRequestMatch[1]);
+      const db = await readDbAsync();
+      const todo = (db.todos || []).find((item) => item.id === id);
+      if (!todo) {
+        sendJson(res, 404, { error: "Opravilo ne obstaja." });
+        return;
+      }
+
+      if (req.method === "GET") {
+        const token = String(url.searchParams.get("token") || "");
+        const tokenHash = sessionTokenHash(token);
+        const request = cleanTodoCompletionRequests(todo.completionRequests)
+          .find((item) => item.tokenHash === tokenHash);
+        if (!request) {
+          sendJson(res, 403, { error: "Povezava za dopolnitev ni veljavna ali je potekla." });
+          return;
+        }
+        if (request.recipientUserId !== user.id || !canManageTodo(user, todo)) {
+          sendJson(res, 403, { error: "Ta povezava je namenjena drugemu uporabniku." });
+          return;
+        }
+        const visible = visibleTodosForUser({ ...db, todos: [todo] }, user)[0];
+        sendJson(res, 200, {
+          todo: visible,
+          request: {
+            requestedByName: request.requestedByName || request.requestedBy,
+            comment: request.comment,
+            expiresAt: request.expiresAt
+          }
+        });
+        return;
+      }
+
+      if (req.method === "POST") {
+        if (user.role !== "boss" || String(user.email || "").toLowerCase() !== GOOGLE_DRIVE_OWNER_EMAIL) {
+          sendJson(res, 403, { error: "Zahtevek za dopolnitev lahko po\u0161lje samo Bojan." });
+          return;
+        }
+        const recipientUserId = cleanUserId(todo.createdBy || todo.syncUser);
+        const recipient = db.users?.[recipientUserId];
+        if (!recipient || !validEmailAddress(recipient.email)) {
+          sendJson(res, 409, { error: "Ustvarjalec opravila nima veljavnega e-po\u0161tnega naslova." });
+          return;
+        }
+        if (recipient.id === user.id) {
+          sendJson(res, 409, { error: "Zahtevka ni smiselno po\u0161iljati samemu sebi." });
+          return;
+        }
+        const owner = googleDriveOwner(db);
+        if (!googleReady() || !googleWorkspaceTokenAvailable(owner)) {
+          sendJson(res, 409, { error: "V Nastavitvah kot Bojan najprej ponovno pove\u017ei Google Dokumente, preglednice in Gmail." });
+          return;
+        }
+        const body = await readBody(req);
+        const comment = String(body.comment || "").trim().slice(0, 2_000);
+        const rawToken = crypto.randomBytes(32).toString("base64url");
+        const expiresAt = Date.now() + TODO_COMPLETION_REQUEST_TTL_MS;
+        const link = new URL("/", absoluteBaseUrl(req));
+        link.searchParams.set("todo", todo.id);
+        link.searchParams.set("completion", rawToken);
+        const due = new Date(expiresAt).toLocaleString("sl-SI");
+        const text = [
+          (user.name || "Bojan") + " prosi za dopolnitev opravila.",
+          "",
+          "Opravilo: " + (todo.title || "Brez naslova"),
+          todo.client ? "Stranka: " + todo.client : "",
+          comment ? "Vprašanje / komentar:\n" + comment : "",
+          "",
+          "Odpri opravilo in ga dopolni:",
+          link.toString(),
+          "",
+          "Povezava velja do " + due + ". Za odpiranje se prijavi s svojim Google računom INDUS URE."
+        ].filter((line, index, lines) => line || (index > 0 && lines[index - 1])).join("\n");
+        try {
+          const { google } = require("googleapis");
+          const gmail = google.gmail({ version: "v1", auth: googleClient(req, owner.google.tokens) });
+          await gmail.users.messages.send({
+            userId: "me",
+            requestBody: {
+              raw: gmailCompletionRequestRaw({
+                to: recipient.email,
+                subject: "Dopolnitev opravila: " + (todo.title || "INDUS URE"),
+                text
+              })
+            }
+          });
+        } catch (error) {
+          console.error("Zahtevka za dopolnitev ni bilo mogo\u010de poslati:", error.message || error);
+          sendJson(res, 502, { error: "E-po\u0161te ni bilo mogo\u010de poslati. V Nastavitvah ponovno pove\u017ei Google ra\u010dun in poskusi znova." });
+          return;
+        }
+        todo.completionRequests = [
+          ...cleanTodoCompletionRequests(todo.completionRequests),
+          {
+            id: crypto.randomUUID(),
+            tokenHash: sessionTokenHash(rawToken),
+            recipientUserId: recipient.id,
+            recipientEmail: String(recipient.email).toLowerCase(),
+            requestedBy: user.id,
+            requestedByName: user.name || user.id,
+            comment,
+            createdAt: new Date().toISOString(),
+            expiresAt
+          }
+        ].slice(-20);
+        todo.history = [...(todo.history || []), audit(user, "poslan zahtevek za dopolnitev: " + (recipient.name || recipient.id))];
+        await writeDbAsync(db);
+        sendJson(res, 201, { ok: true, email: recipient.email, expiresAt });
+        return;
+      }
+
+      sendJson(res, 405, { error: "Ta metoda ni podprta." });
+      return;
+    }
+
     const todoTimeMatch = url.pathname.match(/^\/api\/todos\/([^/]+)\/time$/);
     if (todoTimeMatch && req.method === "POST") {
       const user = await requireUser(req, res);
@@ -5810,6 +5994,8 @@ module.exports = {
   clientReportAttachmentSelection,
   buildClientReportPdf,
   gmailDraftRaw,
+  gmailCompletionRequestRaw,
+  cleanTodoCompletionRequests,
   archivePayrollTodos,
   cancelClientBill,
   clientBillLockForTodos,
