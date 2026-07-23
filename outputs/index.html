@@ -387,6 +387,26 @@
       min-width: 0;
     }
 
+    .active-work-context {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      min-height: 34px;
+      padding: 6px 9px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #f3f7f4;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .active-work-context strong {
+      color: var(--ink);
+      font-size: 12px;
+    }
+
     .tools {
       display: flex;
       gap: 10px;
@@ -1050,6 +1070,22 @@
 
     .todo-order-section span { font-size: 14px; }
     .todo-order-section small { color: var(--muted); font-size: 11px; font-weight: 700; }
+    .todo-order-section-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      min-height: 32px;
+      padding: 2px 4px;
+      border: 0;
+      background: transparent;
+      color: inherit;
+      font: inherit;
+      text-align: left;
+      cursor: pointer;
+    }
+    .todo-order-section-toggle:hover,
+    .todo-order-section-toggle:focus-visible { color: var(--accent-dark); }
+    .todo-order-section-chevron { width: 15px; color: var(--accent-dark); }
     .todo-order-drop-zone { min-height: 36px; }
 
 
@@ -3575,10 +3611,15 @@
       .drive-connection-banner button { width: 100%; }
       .topbar-view-row {
         display: grid;
-        grid-template-columns: minmax(0, 1fr) 44px;
+        grid-template-columns: minmax(0, 1fr) auto 44px;
         position: relative;
         gap: 8px;
       }
+      .active-work-context {
+        min-height: 48px;
+        padding: 6px 7px;
+      }
+      .active-work-context > span { display: none; }
       .tools-menu > summary {
         width: 44px;
         height: 48px;
@@ -3890,6 +3931,7 @@
 
             <button class="view-btn legacy-report-button" id="reportViewBtn" type="button">Arhiv poro&#269;il</button>
           </div>
+          <div class="active-work-context" id="activeWorkContext" title="Aktivni pogled"><span>Pogled:</span><strong id="activeWorkContextLabel"></strong></div>
           <details class="tools-menu" id="toolsMenu">
             <summary class="account-btn settings-menu-button" title="Nastavitve in orodja" aria-label="Nastavitve in orodja">
               <svg class="settings-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
@@ -4651,6 +4693,7 @@
     const loggedInHistoryStateKey = "indusUreLoggedIn";
     const modalHistoryStateKey = "indusUreModal";
     const workContextKey = "indus-ure-work-context";
+    const todoSectionCollapseKey = "indus-ure-todo-section-collapse";
     const todoSortModeKey = "indus-ure-todo-sort-mode";
     const calendarCompletedFilterKey = "indus-ure-calendar-show-completed";
     const billingWorkerKey = "indus-ure-billing-worker";
@@ -4844,6 +4887,27 @@
     function loadCalendarCompletedFilter() {
       state.showCompletedCalendarTodos = localStorage.getItem(calendarCompletedFilterStorageKey()) === "true";
       if ($("calendarCompletedFilter")) $("calendarCompletedFilter").checked = state.showCompletedCalendarTodos;
+    }
+
+    function todoSectionCollapseStorageKey() {
+      const userId = state.user?.id || "anonymous";
+      const context = state.workContext || "worker:" + userId;
+      return todoSectionCollapseKey + ":" + userId + ":" + context;
+    }
+
+    function collapsedTodoSections() {
+      try {
+        const saved = JSON.parse(localStorage.getItem(todoSectionCollapseStorageKey()) || "[]");
+        return new Set(Array.isArray(saved) ? saved.filter((item) => typeof item === "string") : []);
+      } catch {
+        return new Set();
+      }
+    }
+
+    function setTodoSectionCollapsed(section, collapsed) {
+      const saved = collapsedTodoSections();
+      if (collapsed) saved.add(section); else saved.delete(section);
+      localStorage.setItem(todoSectionCollapseStorageKey(), JSON.stringify([...saved]));
     }
 
     function closeToolsMenu() {
@@ -5641,6 +5705,9 @@
     function applyWorkContextUi() {
       const admin = isAdminView();
       const worker = activeWorker();
+      const contextName = admin ? "Šef" : (worker?.name || "Delavec");
+      $("activeWorkContextLabel").textContent = contextName;
+      $("activeWorkContext").title = "Aktivni pogled: " + contextName;
       document.body.classList.toggle("admin-view", admin);
       $("userRole").textContent = admin ? "Šef - administracija" : `${worker?.name || "Delavec"} - delavec`;
       document.querySelectorAll(".admin-only").forEach((element) => element.classList.toggle("hidden", !admin));
@@ -8302,14 +8369,31 @@
         ordering: ["Naroči", "Naročila in opravila za v avto"],
         completed: ["Zaključeno", "Zaključena opravila po datumu"]
       };
-      const [label, detail] = labels[bucket] || labels.sorted;
+      const pair = labels[bucket] || labels.sorted;
+      const label = pair[0];
+      const detail = pair[1];
       const reorderBucket = ["sorted", "unsorted"].includes(bucket);
-      section.className = `todo-order-section${reorderBucket ? " todo-order-drop-zone" : ""}`;
+      const collapsible = bucket === "ordering";
+      section.className = "todo-order-section" + (reorderBucket ? " todo-order-drop-zone" : "");
       if (reorderBucket) {
         section.dataset.todoDropBucket = bucket;
         section.dataset.todoDropPlacement = "before";
       }
-      section.innerHTML = `<span>${label}</span><small>${detail}</small>`;
+      if (collapsible) {
+        const collapsed = collapsedTodoSections().has(bucket);
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "todo-order-section-toggle";
+        button.setAttribute("aria-expanded", String(!collapsed));
+        button.innerHTML = '<span class="todo-order-section-chevron" aria-hidden="true">' + (collapsed ? "▸" : "▾") + '</span><span>' + escapeHtml(label) + '</span><small>' + escapeHtml(detail) + '</small>';
+        button.addEventListener("click", () => {
+          setTodoSectionCollapsed(bucket, !collapsed);
+          renderTodos();
+        });
+        section.appendChild(button);
+      } else {
+        section.innerHTML = "<span>" + escapeHtml(label) + "</span><small>" + escapeHtml(detail) + "</small>";
+      }
       items.appendChild(section);
     }
 
@@ -8396,6 +8480,7 @@
       const showManualSections = state.todoSortMode === "manual";
       let completedGroupKey = "";
       let currentManualCategory = "";
+      const collapsedManualSections = collapsedTodoSections();
 
       todos.forEach((todo) => {
         const groupKey = todo.clientId || normalizeText(todo.client) || "__brez_stranke__";
@@ -8407,12 +8492,14 @@
           group.innerHTML = `<span>${escapeHtml(todo.client || "Brez stranke")}</span><span>${completedTodoGroupCount(todos, todo)} opravil &middot; ${groupHours.toLocaleString("sl-SI", { maximumFractionDigits: 2 })} h</span>`;
           items.appendChild(group);
         }
+        let manualCategory = "";
         if (showManualSections) {
-          const manualCategory = todoManualCategory(todo);
+          manualCategory = todoManualCategory(todo);
           if (manualCategory !== currentManualCategory) {
             appendTodoOrderSection(items, manualCategory);
             currentManualCategory = manualCategory;
           }
+          if (manualCategory === "ordering" && collapsedManualSections.has("ordering")) return;
         }
         const item = document.createElement("div");
         const reorderable = state.todoSortMode === "manual" && !todo.done && !todo.urgent;
