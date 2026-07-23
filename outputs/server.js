@@ -3853,11 +3853,19 @@ async function serverRuntimeStatus() {
     disk = { available: Boolean(totalBytes), totalBytes, freeBytes, usedPercent: totalBytes ? Math.max(0, Math.min(100, (1 - freeBytes / totalBytes) * 100)) : 0 };
   } catch {}
   let lastBackup = null;
+  let attachments = { count: 0, totalBytes: 0 };
   if (DATABASE_URL) {
     try {
       const result = await getPgPool().query("select data, finished_at from indus_backup_runs where status = 'success' order by finished_at desc limit 1");
       const row = result.rows[0];
       if (row) lastBackup = { finishedAt: row.finished_at, archiveBytes: Math.max(0, Number(row.data?.bytes || 0)), recoveryFile: String(row.data?.recoveryFile || '') };
+    } catch {}
+  }
+  if (DATABASE_URL) {
+    try {
+      const result = await getPgPool().query("select count(*)::int as count, coalesce(sum(byte_size), 0)::bigint as total_bytes from indus_attachments");
+      const row = result.rows[0] || {};
+      attachments = { count: Math.max(0, Number(row.count || 0)), totalBytes: Math.max(0, Number(row.total_bytes || 0)) };
     } catch {}
   }
   const totalRamBytes = Number(os.totalmem() || 0);
@@ -3868,6 +3876,7 @@ async function serverRuntimeStatus() {
     cpu: { cores, load1, loadPercent: Math.max(0, Math.min(100, load1 / cores * 100)) },
     ram: { totalBytes: totalRamBytes, usedBytes: Math.max(0, totalRamBytes - freeRamBytes), usedPercent: totalRamBytes ? Math.max(0, Math.min(100, (1 - freeRamBytes / totalRamBytes) * 100)) : 0 },
     disk,
+    attachments,
     uptimeSeconds: Math.max(0, Number(os.uptime() || 0)),
     appUptimeSeconds: Math.max(0, Number(process.uptime() || 0)),
     lastBackup

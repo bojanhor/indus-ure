@@ -673,6 +673,8 @@ test("server status returns safe CPU, RAM, disk and backup fields", async () => 
   assert.ok(Number.isFinite(status.ram.usedPercent));
   assert.ok(Number.isFinite(status.uptimeSeconds));
   assert.equal(typeof status.disk.available, "boolean");
+  assert.ok(Number.isFinite(status.attachments.count));
+  assert.ok(Number.isFinite(status.attachments.totalBytes));
   assert.ok(status.lastBackup === null || Number.isFinite(status.lastBackup.archiveBytes));
 });
 
