@@ -5023,7 +5023,7 @@
       return data;
     }
 
-    function clearCompletionRequestLink() {
+    function clearTodoLink() {
       const current = new URL(location.href);
       current.searchParams.delete("todo");
       current.searchParams.delete("completion");
@@ -5031,27 +5031,40 @@
       history.replaceState(history.state, "", current.pathname + current.search + current.hash);
     }
 
-    async function openCompletionRequestFromLink() {
+    async function openTodoFromLink() {
       const current = new URL(location.href);
       const todoId = String(current.searchParams.get("todo") || "");
       const token = String(current.searchParams.get("completion") || "");
-      if (!todoId || !token || !state.user || state.offlineMode) return;
+      if (!todoId || !state.user || state.offlineMode) return;
       try {
-        const data = await api("/api/todos/" + encodeURIComponent(todoId) + "/completion-request?token=" + encodeURIComponent(token), { recoverSession: false });
-        const index = state.todos.findIndex((todo) => todo.id === data.todo.id);
-        if (index >= 0) state.todos[index] = data.todo;
-        else state.todos.unshift(data.todo);
-        clearCompletionRequestLink();
+        let todo;
+        let notice = "";
+        if (token) {
+          const data = await api("/api/todos/" + encodeURIComponent(todoId) + "/completion-request?token=" + encodeURIComponent(token), { recoverSession: false });
+          todo = data.todo;
+          const comment = String(data.request?.comment || "").trim();
+          notice = "Odprt je zahtevek od " + (data.request?.requestedByName || "\u0161efa") + (comment ? ": " + comment : ".");
+        } else {
+          const data = await api("/api/todos/" + encodeURIComponent(todoId), { recoverSession: false });
+          todo = data.todo;
+        }
+        const index = state.todos.findIndex((item) => item.id === todo.id);
+        if (index >= 0) state.todos[index] = todo;
+        else state.todos.unshift(todo);
+        clearTodoLink();
         renderTodos();
         renderCalendar();
-        await openTodoDialog(data.todo);
-        const comment = String(data.request?.comment || "").trim();
-        showNotice("Odprt je zahtevek od " + (data.request?.requestedByName || "šefa") + (comment ? ": " + comment : "."));
+        await openTodoDialog(todo);
+        if (notice) showNotice(notice);
       } catch (error) {
-        showNotice(error.message || "Zahtevka za dopolnitev ni bilo mogoče odpreti.");
+        showNotice(error.message || "Opravila ni bilo mogo\u010de odpreti.");
       }
     }
-
+    // Compatibility wrapper: old completion-request links and new report links
+    // intentionally use the same authenticated task-opening flow.
+    async function openCompletionRequestFromLink() {
+      return openTodoFromLink();
+    }
     function recoverExpiredSession() {
       if (sessionRecoveryPromise) return sessionRecoveryPromise;
       sessionRecoveryPromise = (async () => {
@@ -5396,7 +5409,7 @@
         initializeWorkContext();
         showApp();
         await loadAll();
-        await openCompletionRequestFromLink();
+        await openTodoFromLink();
         await Promise.all([refreshNotifications(), refreshGoogleDriveConnectionStatus(), refreshServerStatus()]);
         await updateOfflineSyncNotice();
         await flushOfflineTodoQueue();
@@ -6210,7 +6223,7 @@
         return data;
       } catch (error) {
         if (!isNetworkError(error)) throw error;
-        const localTodo = { ...todo, start, end, date, offlinePending: true };
+        const localTodo = { ...todo, start, end, date, hoursNeedsReview: false, offlinePending: true };
         await queueOfflineTodo({ kind: "update", todoId: localTodo.id, todo: localTodo, baseUpdatedAt: todo.updatedAt || "" });
         if (isCurrentTodoRevision(todoRevision)) {
           const index = state.todos.findIndex((item) => item.id === todo.id);
@@ -6973,7 +6986,7 @@
 
     function isDayTimelineHoursWarning(todo) {
       const warning = state.dayTimelineHoursWarning;
-      return Boolean(warning && (warning.todoId === todo.id || (warning.assignmentGroupId && warning.assignmentGroupId === todo.assignmentGroupId)));
+      return Boolean(todo?.hoursNeedsReview || (warning && (warning.todoId === todo.id || (warning.assignmentGroupId && warning.assignmentGroupId === todo.assignmentGroupId))));
     }
 
     function resolveDayTimelineHoursWarning(todo) {
@@ -9954,7 +9967,7 @@
         }
         showNotice("Za vpis ur nastavi uro od in do. Dodan je prvi prost enourni termin, ki ga lahko takoj popraviš v dnevnem pogledu.");
         const slot = firstFreeDayTimelineSlot(todo.date);
-        const data = await saveTodoToServer({ ...todo, ...slot });
+        const data = await saveTodoToServer({ ...todo, ...slot, hoursNeedsReview: true });
         if (todo.status === "execution" && !meal) rememberClientVehicle(clientVehicle);
         const saved = (data.todos || []).filter((item) => {
           const sameSlot = item.date === todo.date && item.start === slot.start && item.end === slot.end && item.title === todo.title;

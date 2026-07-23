@@ -891,6 +891,11 @@ function normalizeDb(db = {}) {
       changed = true;
     }
     const completed = next.status === "execution";
+    const hoursNeedsReview = TIME_ENTRY_TODO_STATUSES.has(next.status) && Boolean(next.hoursNeedsReview);
+    if (next.hoursNeedsReview !== hoursNeedsReview) {
+      next.hoursNeedsReview = hoursNeedsReview;
+      changed = true;
+    }
     if (completed && next.urgent) {
       next.urgent = false;
       changed = true;
@@ -2219,17 +2224,129 @@ function buildClientReportPdf(db, report, attachments = [], exportOptions = {}) 
     }
   });
 }
+function workerDigestBaseUrl() {
+  return PUBLIC_BASE_URL || `http://127.0.0.1:${PORT}`;
+}
+
+function workerDigestTodoUrl(todoId) {
+  return `${workerDigestBaseUrl()}/?todo=${encodeURIComponent(String(todoId || ""))}`;
+}
+
+function workerDigestMinutes(value) {
+  const match = /^(\d{2}):(\d{2})$/.exec(String(value || ""));
+  return match ? Number(match[1]) * 60 + Number(match[2]) : null;
+}
+
+function workerDigestGapLabel(value) {
+  const minutes = Math.max(0, Math.round(Number(value) || 0));
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const remainder = minutes % 60;
+  return remainder ? `${hours} h ${remainder} min` : `${hours} h`;
+}
+
+function workerDailyDigestSnapshot(db, workerId, date) {
+  const worker = db.users?.[workerId] || null;
+  if (!worker || !isDateKey(date)) return null;
+  const payroll = buildPayrollSnapshot(db, workerId, { from: date, to: date }) || { lines: [] };
+  const warnings = (db.todos || [])
+    .filter((todo) => (todo.syncUser || todo.createdBy) === workerId && todo.date === date && PAYROLL_PAID_TODO_STATUSES.has(todo.status))
+    .filter((todo) => Boolean(todo.hoursNeedsReview) || !payrollMinutesForTodo(db, todo))
+    .sort((left, right) => String(left.start || "").localeCompare(String(right.start || "")) || String(left.title || "").localeCompare(String(right.title || "")))
+    .map((todo) => ({ id: String(todo.id || ""), title: String(todo.title || "Brez naziva"), start: String(todo.start || ""), end: String(todo.end || "") }));
+  return {
+    workerId,
+    workerName: String(worker.name || workerId),
+    email: String(worker.email || "").trim().toLowerCase(),
+    date,
+    lines: payroll.lines || [],
+    warnings
+  };
+}
+
+function workerDailyReportFilename(report) {
+  const worker = safeReportFileName(report?.workerName || "delavec").replace(/\s+/g, "-");
+  return `dnevni-povzetek-${worker || "delavec"}-${report?.date || "dan"}.pdf`;
+}
+
+function buildWorkerDailyReportPdf(db, report) {
+  const snapshot = report || {};
+  const title = `Dnevni povzetek ur - ${safeReportFileName(snapshot.workerName || "delavec")}`;
+  return new Promise((resolve, reject) => {
+    const doc = new PDFDocument({
+      size: "A4",
+      margin: 46,
+      info: { Title: title, Author: "INDUS URE", Subject: "Dnevni povzetek ur" }
+    });
+    const chunks = [];
+    doc.on("data", (chunk) => chunks.push(chunk));
+    doc.once("error", reject);
+    doc.once("end", () => resolve(Buffer.concat(chunks)));
+    try {
+      doc.font(reportPdfFontPath("bold")).fontSize(21).fillColor("#0d536b").text("Dnevni povzetek ur");
+      doc.moveDown(0.3);
+      doc.font(reportPdfFontPath()).fontSize(11).fillColor("#263634");
+      reportPdfLine(doc, "Delavec", snapshot.workerName || "");
+      reportPdfLine(doc, "Datum", reportPdfDate(snapshot.date));
+      doc.moveDown(0.75);
+
+      const lines = [...(snapshot.lines || [])].sort((left, right) => String(left.start || "").localeCompare(String(right.start || "")) || String(left.end || "").localeCompare(String(right.end || "")) || String(left.title || "").localeCompare(String(right.title || "")));
+      let previous = null;
+      for (const line of lines) {
+        const startMinutes = workerDigestMinutes(line.start);
+        const previousEnd = workerDigestMinutes(previous?.end);
+        if (previous && startMinutes !== null && previousEnd !== null && startMinutes > previousEnd) {
+          reportPdfEnsureSpace(doc, 28);
+          doc.font(reportPdfFontPath("bold")).fontSize(10).fillColor("#0d536b").text(`\u2195 Razmak med vnosi: ${workerDigestGapLabel(startMinutes - previousEnd)}`);
+          doc.moveDown(0.25);
+        }
+        reportPdfEnsureSpace(doc, 88);
+        const url = workerDigestTodoUrl(line.todoId);
+        doc.font(reportPdfFontPath("bold")).fontSize(13).fillColor("#143b34").text(`${line.start}-${line.end}`, { continued: true });
+        doc.font(reportPdfFontPath("bold")).fontSize(12).fillColor("#161f20").text(`  ${line.title || "Brez naziva"}`, { link: url, underline: true });
+        doc.font(reportPdfFontPath()).fontSize(10).fillColor("#263634");
+        if (line.client) reportPdfLine(doc, "Stranka", line.client);
+        reportPdfLine(doc, "Vpisane ure", `${Number(line.hours || 0).toLocaleString("sl-SI", { maximumFractionDigits: 2 })} h`);
+        reportPdfLine(doc, "Urna postavka", `${Number(line.hourlyRate || 0).toLocaleString("sl-SI", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR/h`);
+        if (Number(line.km || 0)) reportPdfLine(doc, "Kilometrina", `${Number(line.km || 0).toLocaleString("sl-SI", { maximumFractionDigits: 1 })} km`);
+        doc.moveDown(0.4);
+        doc.strokeColor("#a9c5bd").lineWidth(1.2).moveTo(doc.page.margins.left, doc.y).lineTo(doc.page.width - doc.page.margins.right, doc.y).stroke();
+        doc.moveDown(0.5);
+        previous = line;
+      }
+
+      for (const warning of snapshot.warnings || []) {
+        reportPdfEnsureSpace(doc, 45);
+        const url = workerDigestTodoUrl(warning.id);
+        doc.font(reportPdfFontPath("bold")).fontSize(11).fillColor("#b3261e").text(`\u26a0 Popravi delovne ure: ${warning.title}`, { link: url, underline: true });
+        doc.font(reportPdfFontPath()).fontSize(10).fillColor("#263634").text("Za ta vpis manjka ali je ozna\u010dena kot potrebna preveritev ura prihoda oziroma odhoda.");
+        doc.moveDown(0.35);
+      }
+
+      const totals = payrollTotals(lines);
+      reportPdfEnsureSpace(doc, 90);
+      doc.moveDown(0.35);
+      doc.font(reportPdfFontPath("bold")).fontSize(13).fillColor("#0d536b").text("Povzetek dneva");
+      reportPdfLine(doc, "Ure", `${Number(totals.hours || 0).toLocaleString("sl-SI", { maximumFractionDigits: 2 })} h`);
+      reportPdfLine(doc, "Delo", `${Number(totals.workAmount || 0).toLocaleString("sl-SI", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR`);
+      reportPdfLine(doc, "Kilometrina", `${Number(totals.km || 0).toLocaleString("sl-SI", { maximumFractionDigits: 1 })} km - ${Number(totals.kmAmount || 0).toLocaleString("sl-SI", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR`);
+      reportPdfLine(doc, "Skupaj", `${Number(totals.totalAmount || 0).toLocaleString("sl-SI", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR`);
+      doc.end();
+    } catch (error) {
+      reject(error);
+    }
+  });
+}
 function mimeBase64(value) {
   return Buffer.from(value).toString("base64").replace(/.{1,76}/g, "$&\r\n");
 }
 
-function gmailDraftRaw({ to, pdf, pdfFilename, attachments = [] }) {
+function gmailPdfDraftRaw({ to, subject, text, pdf, pdfFilename, attachments = [] }) {
   const boundary = `indus-ure-${crypto.randomBytes(18).toString("hex")}`;
-  const text = "Pozdravljeni, v prilogi vam pošiljam obračun opravljenih storitev in porabljenega materiala.\n\nZa pojasnila sem seveda na voljo.";
-  const subject = `=?UTF-8?B?${Buffer.from("Obračun", "utf8").toString("base64")}?=`;
+  const encodedSubject = `=?UTF-8?B?${Buffer.from(String(subject || ""), "utf8").toString("base64")}?=`;
   const parts = [
     `To: ${to}`,
-    `Subject: ${subject}`,
+    `Subject: ${encodedSubject}`,
     "MIME-Version: 1.0",
     `Content-Type: multipart/mixed; boundary=\"${boundary}\"`,
     "",
@@ -2237,7 +2354,7 @@ function gmailDraftRaw({ to, pdf, pdfFilename, attachments = [] }) {
     "Content-Type: text/plain; charset=utf-8",
     "Content-Transfer-Encoding: base64",
     "",
-    mimeBase64(text),
+    mimeBase64(String(text || "")),
     `--${boundary}`,
     `Content-Type: application/pdf; name=\"${pdfFilename}\"`,
     "Content-Transfer-Encoding: base64",
@@ -2259,6 +2376,27 @@ function gmailDraftRaw({ to, pdf, pdfFilename, attachments = [] }) {
   return Buffer.from(parts.join("\r\n")).toString("base64url");
 }
 
+function gmailDraftRaw({ to, pdf, pdfFilename, attachments = [] }) {
+  return gmailPdfDraftRaw({
+    to,
+    pdf,
+    pdfFilename,
+    attachments,
+    subject: "Obra\u010dun",
+    text: "Pozdravljeni, v prilogi vam po\u0161iljam obra\u010dun opravljenih storitev in porabljenega materiala.\n\nZa pojasnila sem seveda na voljo."
+  });
+}
+
+function gmailWorkerDigestDraftRaw({ to, workerName, date, pdf, pdfFilename }) {
+  const readableDate = reportPdfDate(date);
+  return gmailPdfDraftRaw({
+    to,
+    pdf,
+    pdfFilename,
+    subject: `Dnevni povzetek ur - ${workerName} - ${readableDate}`,
+    text: `Pozdravljeni,\n\nv prilogi je dnevni povzetek vpisanih ur za ${readableDate}. Povezave v PDF-ju odprejo isto opravilo v INDUS URE.\n\nLep pozdrav.`
+  });
+}
 function gmailCompletionRequestRaw({ to, subject, text }) {
   const encodedSubject = `=?UTF-8?B?${Buffer.from(String(subject || ""), "utf8").toString("base64")}?=`;
   const parts = [
@@ -2731,6 +2869,7 @@ function cleanTodo(input) {
     syncUser: cleanUserId(input.syncUser),
     sourceProjectTodoId: String(input.sourceProjectTodoId || "").trim().slice(0, 100),
     done: input.status === "execution",
+    hoursNeedsReview: isTimeEntry && Boolean(input.hoursNeedsReview),
     billingHourlyRate: nonnegativeNumber(input.billingHourlyRate, null, 10_000),
     billingKm: isMeal ? 0 : nonnegativeNumber(input.billingKm, null, 1_000_000),
     clientKm: isMeal ? 0 : nonnegativeNumber(input.clientKm, null, 1_000_000),
@@ -2988,7 +3127,10 @@ function buildCalendarIcs(db, { userId = "", combined = false } = {}) {
 }
 
 function googleRedirectUri(req) {
-  return GOOGLE_REDIRECT_URI || `${absoluteBaseUrl(req)}/api/google/callback`;
+  if (GOOGLE_REDIRECT_URI) return GOOGLE_REDIRECT_URI;
+  if (PUBLIC_BASE_URL) return `${PUBLIC_BASE_URL}/api/google/callback`;
+  if (req?.headers) return `${absoluteBaseUrl(req)}/api/google/callback`;
+  return `http://127.0.0.1:${PORT}/api/google/callback`;
 }
 
 function googleClient(req, tokens) {
@@ -3023,6 +3165,61 @@ function googleWorkspaceTokenAvailable(user) {
     && Number(user.google?.driveScopeVersion || 0) === GOOGLE_DRIVE_SCOPE_VERSION;
 }
 
+function workerDigestPreviousDate(now = new Date()) {
+  const value = new Date(`${serverDateKey(now)}T00:00:00.000Z`);
+  value.setUTCDate(value.getUTCDate() - 1);
+  return value.toISOString().slice(0, 10);
+}
+
+async function runDailyWorkerDigest({ date = "", dryRun = false } = {}) {
+  const reportDate = isDateKey(date) ? String(date) : workerDigestPreviousDate();
+  const db = await readDbAsync();
+  const workers = Object.values(db.users || {})
+    .filter((user) => ["boss", "worker"].includes(user?.role) && validEmailAddress(user?.email))
+    .sort((left, right) => String(left.name || left.id).localeCompare(String(right.name || right.id), "sl"));
+  const reports = workers.map((worker) => workerDailyDigestSnapshot(db, worker.id, reportDate)).filter((report) => report && (report.lines.length || report.warnings.length));
+  if (dryRun) return { date: reportDate, dryRun: true, reports: reports.map((report) => ({ workerId: report.workerId, email: report.email, lines: report.lines.length, warnings: report.warnings.length })) };
+
+  const owner = googleDriveOwner(db);
+  if (!googleReady() || !googleWorkspaceTokenAvailable(owner)) {
+    const error = "Bojan mora v Nastavitvah ponovno povezati Google Dokumente, preglednice in Gmail.";
+    await recordOperationalAlert({ code: "worker-digest-google-unavailable", severity: "warning", title: "No\u010dni povzetki ur niso pripravljeni", message: error });
+    throw new Error(error);
+  }
+  const { google } = require("googleapis");
+  const gmail = google.gmail({ version: "v1", auth: googleClient({ headers: {}, socket: {} }, owner.google.tokens) });
+  const drafted = [];
+  const errors = [];
+  for (const report of reports) {
+    try {
+      const pdf = await buildWorkerDailyReportPdf(db, report);
+      const pdfFilename = workerDailyReportFilename(report);
+      const draft = await gmail.users.drafts.create({
+        userId: "me",
+        requestBody: {
+          message: {
+            raw: gmailWorkerDigestDraftRaw({
+              to: report.email,
+              workerName: report.workerName,
+              date: report.date,
+              pdf,
+              pdfFilename
+            })
+          }
+        }
+      });
+      drafted.push({ workerId: report.workerId, email: report.email, draftId: String(draft.data?.id || ""), lines: report.lines.length, warnings: report.warnings.length });
+    } catch (error) {
+      errors.push(`${report.workerName}: ${error.message || error}`);
+    }
+  }
+  if (errors.length) {
+    const message = errors.join("; ").slice(0, 1_500);
+    await recordOperationalAlert({ code: `worker-digest-failed-${reportDate}`, severity: "warning", title: "No\u010dni povzetek ur ni v celoti pripravljen", message });
+    throw new Error(message);
+  }
+  return { date: reportDate, drafted, skipped: workers.length - reports.length };
+}
 // A saved OAuth token is not proof that Google still accepts it. Check the
 // token with a read-only Drive request before showing the connection as ready.
 async function googleDriveConnectionStatus(req, db) {
@@ -5684,6 +5881,7 @@ async function handleApi(req, res) {
         start,
         end,
         date,
+        hoursNeedsReview: false,
         updatedBy: user.id,
         updatedByName: user.name,
         updatedAt: now,
@@ -5695,7 +5893,19 @@ async function handleApi(req, res) {
       return;
     }
     const todoMatch = url.pathname.match(/^\/api\/todos\/([^/]+)$/);
-    if (todoMatch && req.method === "PUT") {
+    if (todoMatch && req.method === "GET") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      const id = decodeURIComponent(todoMatch[1]);
+      const db = await readDbAsync();
+      const todo = visibleTodosForUser(db, user).find((item) => item.id === id);
+      if (!todo) {
+        sendJson(res, 404, { error: "Opravilo ne obstaja ali ni na voljo." });
+        return;
+      }
+      sendJson(res, 200, { todo });
+      return;
+    }    if (todoMatch && req.method === "PUT") {
       const user = await requireUser(req, res);
       if (!user) return;
       const id = decodeURIComponent(todoMatch[1]);
@@ -6069,7 +6279,12 @@ module.exports = {
   attachmentContentDisposition,
   serverRuntimeStatus,
   buildClientReportPdf,
+  buildWorkerDailyReportPdf,
+  workerDailyDigestSnapshot,
+  workerDailyReportFilename,
+  runDailyWorkerDigest,
   gmailDraftRaw,
+  gmailWorkerDigestDraftRaw,
   gmailCompletionRequestRaw,
   cleanTodoCompletionRequests,
   archivePayrollTodos,

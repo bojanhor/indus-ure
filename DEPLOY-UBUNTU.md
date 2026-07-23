@@ -184,6 +184,18 @@ Nočni backup naredi obnovljiv paket PostgreSQL baze, prilog in kode aplikacije.
 
 Paket ne vsebuje OAuth žetona, aktivnih sej, hashov gesel, ICS povezav ali /etc/indus-ure.env. V isti Drive mapi je vedno datoteka `RESTORE-INDUS-URE.txt` s hitrim postopkom za IT obnovo. Ob obnovi se okoljske skrivnosti vnesejo iz ločenega varnega zapisa in Google Drive se ponovno poveže.
 
+## Nocni osnutki povzetkov ur
+
+Vsak dan ob 01:00 (Europe/Ljubljana) `indus-ure-worker-digest.timer` pripravi Gmail osnutek samo za delavca, ki je prejsnji dan vpisal ure ali ima oznacen vpis za preveritev ur. Osnutek se ne poslje samodejno. PDF uporablja isto obracunsko logiko kot aplikacija, prikaze ure prihoda/odhoda, razmake med vnosi in povezave, ki odprejo isto opravilo v aplikaciji.
+
+Rocno preverjanje brez izdelave Gmail osnutkov:
+
+```bash
+sudo -u indus-ure /usr/bin/node /opt/indus-ure/current/scripts/daily-worker-digest.js --dry-run
+systemctl status indus-ure-worker-digest.timer --no-pager
+```
+
+Ce Gmail dovoljenje ni vec veljavno, aplikacija ustvari sistemsko opozorilo za Bojana; v Nastavitvah je treba ponovno povezati Google Dokumente, preglednice in Gmail.
 ## Samodejno ciscenje starih izdaj
 
 Vsaka objava prek `scripts/deploy.ps1` po uspesnem preklopu namesti

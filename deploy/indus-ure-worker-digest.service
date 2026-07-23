@@ -1,0 +1,20 @@
+[Unit]
+Description=Create INDUS URE daily worker report Gmail drafts
+After=network-online.target postgresql.service indus-ure.service
+Wants=network-online.target
+Requires=postgresql.service
+
+[Service]
+Type=oneshot
+User=indus-ure
+Group=indus-ure
+WorkingDirectory=/opt/indus-ure/current
+EnvironmentFile=/etc/indus-ure.env
+ExecStart=/usr/local/sbin/indus-ure-worker-digest
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/indus-ure
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6

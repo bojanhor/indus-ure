@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+exec /usr/bin/node /opt/indus-ure/current/scripts/daily-worker-digest.js

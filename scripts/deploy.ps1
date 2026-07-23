@@ -79,12 +79,21 @@ try {
   $remoteNginxConfig = "/tmp/indus-ure-nginx-$release.conf"
   $pruneScript = Join-Path $repoRoot "deploy\prune-indus-ure-releases"
   $remotePruneScript = "/tmp/indus-ure-prune-$release"
-  Write-Host "[5/8] Nginx in ciscenje izdaj"
+  $workerDigestWrapper = Join-Path $repoRoot "deploy\indus-ure-worker-digest"
+  $workerDigestService = Join-Path $repoRoot "deploy\indus-ure-worker-digest.service"
+  $workerDigestTimer = Join-Path $repoRoot "deploy\indus-ure-worker-digest.timer"
+  $remoteWorkerDigestWrapper = "/tmp/indus-ure-worker-digest-$release"
+  $remoteWorkerDigestService = "/tmp/indus-ure-worker-digest-$release.service"
+  $remoteWorkerDigestTimer = "/tmp/indus-ure-worker-digest-$release.timer"
+  Write-Host "[5/8] Nginx, nocni povzetki in ciscenje izdaj"
   Invoke-Native scp @sshOptions $nginxConfig "${target}:$remoteNginxConfig"
   Invoke-Native scp @sshOptions $pruneScript "${target}:$remotePruneScript"
+  Invoke-Native scp @sshOptions $workerDigestWrapper "${target}:$remoteWorkerDigestWrapper"
+  Invoke-Native scp @sshOptions $workerDigestService "${target}:$remoteWorkerDigestService"
+  Invoke-Native scp @sshOptions $workerDigestTimer "${target}:$remoteWorkerDigestTimer"
 
   Write-Host "[6/8] Priprava in preklop izdaje"
-  $remoteCommand = "prepare-indus-ure-release $release $checksum && sudo /usr/local/sbin/deploy-indus-ure $release && sudo install -o root -g root -m 0644 $remoteNginxConfig /etc/nginx/conf.d/indus-ure.conf && sudo install -o root -g root -m 0755 $remotePruneScript /usr/local/sbin/prune-indus-ure-releases && sudo /usr/local/sbin/prune-indus-ure-releases 3 && sudo nginx -t && sudo systemctl reload nginx"
+  $remoteCommand = "prepare-indus-ure-release $release $checksum && sudo /usr/local/sbin/deploy-indus-ure $release && sudo install -o root -g root -m 0644 $remoteNginxConfig /etc/nginx/conf.d/indus-ure.conf && sudo install -o root -g root -m 0755 $remotePruneScript /usr/local/sbin/prune-indus-ure-releases && sudo install -o root -g root -m 0755 $remoteWorkerDigestWrapper /usr/local/sbin/indus-ure-worker-digest && sudo install -o root -g root -m 0644 $remoteWorkerDigestService /etc/systemd/system/indus-ure-worker-digest.service && sudo install -o root -g root -m 0644 $remoteWorkerDigestTimer /etc/systemd/system/indus-ure-worker-digest.timer && sudo systemctl daemon-reload && sudo systemctl enable --now indus-ure-worker-digest.timer && sudo systemctl is-active --quiet indus-ure-worker-digest.timer && sudo /usr/local/sbin/prune-indus-ure-releases 3 && sudo nginx -t && sudo systemctl reload nginx"
   Invoke-Native ssh @sshOptions $target $remoteCommand
 
   Write-Host "[7/8] Preverjanje produkcije"

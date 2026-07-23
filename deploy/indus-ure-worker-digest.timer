@@ -1,0 +1,10 @@
+[Unit]
+Description=Create INDUS URE daily worker report drafts at 01:00
+
+[Timer]
+OnCalendar=*-*-* 01:00:00 Europe/Ljubljana
+Persistent=true
+Unit=indus-ure-worker-digest.service
+
+[Install]
+WantedBy=timers.target
