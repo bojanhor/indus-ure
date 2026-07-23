@@ -27,6 +27,22 @@ powershell -ExecutionPolicy Bypass -File .\scripts\deploy-test.ps1 -IdentityFile
 3. V Firefoxu preveri prijavo šefa in delavca, dodajanje/urejanje/vpis ur, koledar, priloge, drag-and-drop in ozek prikaz.
 4. Šele nato objavi običajno produkcijsko izdajo z `deploy.ps1`.
 
+## Avtomatiziran klik-test
+
+Za osnovni, ponovljiv test uporabniškega toka ne uporablja produkcije ali oddaljene testne instance. Ukaz spodaj sam zažene kratkotrajni strežnik na `127.0.0.1`, s prazno začasno bazo in z lokalno testno prijavo; po testu proces in podatke izbriše.
+
+```powershell
+npm.cmd run test:e2e
+```
+
+Prvič je treba namestiti brskalnik, ki ga uporablja Playwright:
+
+```powershell
+npx.cmd playwright install chromium
+```
+
+Trenutno avtomatsko preveri Ibrov vpis ur prek prave forme ter Bojanov prikaz in potrditev obračuna za iste ure. Za pregled z odprtim oknom uporabi `npm.cmd run test:e2e:headed`.
+
 Za pregled stanja na strežniku:
 
 ```bash
