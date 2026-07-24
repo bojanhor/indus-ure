@@ -52,6 +52,10 @@ test("front-end naročila in foto urejevalnik ohranita dogovorjeni mobilni prika
   assert.match(html, /todo-card-badges/);
   assert.match(html, /todo-card-header/);
   assert.match(html, /todo-ordering-chip/);
+  assert.match(html, /\.todo-card-badges \.todo-chip \{\s*min-height: 38px;/);
+  assert.match(html, /\.todo-title-row \.todo-tools \{[\s\S]*?flex-direction: column;/);
+  assert.match(html, /\.main,\s*\.sidebar \{ padding: 8px; \}/);
+  assert.match(html, /\.todo-title-row \.todo-client-name \{[\s\S]*?flex: 1 1 0;/);
   assert.doesNotMatch(html, /serverStatusPanel/);
 });
 test("obračunsko obdobje samodejno sledi novemu dnevu, ročna izbira pa ostane ločena po delavcu", async () => {
