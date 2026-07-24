@@ -846,6 +846,7 @@ test("uvoženi dogodki ostanejo ločeni od ur in obračunov", () => {
 test("edited imported event is promoted to normal on save", () => {
   const previous = cleanTodo({ title: "Imported calendar", status: "open", imported: true, date: "2026-07-20", notes: "source" });
   assert.equal(importedTodoWasEdited(previous, { ...previous }), false);
+  assert.equal(importedTodoWasEdited(previous, { ...previous, billingHourlyRate: 15, billingKm: 0, clientKm: 0, clientVehicle: "personal" }), false);
   assert.equal(importedTodoWasEdited(previous, { ...previous, title: "Edited calendar" }), true);
   assert.equal(importedTodoWasEdited(previous, { ...previous }, { assignmentsChanged: true }), true);
   const promoted = todoForUserRole(boss, { users: { bojan: { id: "bojan", billing: { hourlyRate: 15 } } }, settings: {} }, previous, { ...previous, title: "Edited calendar", promoteImported: true });

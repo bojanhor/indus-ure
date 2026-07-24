@@ -2595,6 +2595,9 @@ function defaultHourlyRateForUser(db, userId) {
 }
 
 function todoEditableSnapshot(todo) {
+  const status = String(todo?.status || "");
+  const isTimeEntry = TIME_ENTRY_TODO_STATUSES.has(status);
+  const isCompleted = status === "execution";
   const files = (items) => (Array.isArray(items) ? items : []).map((item) => ({
     id: String(item?.id || ""),
     attachmentId: String(item?.attachmentId || ""),
@@ -2608,10 +2611,10 @@ function todoEditableSnapshot(todo) {
   return JSON.stringify({
     title: String(todo?.title || ""), date: String(todo?.date || ""), start: String(todo?.start || ""), end: String(todo?.end || ""),
     client: String(todo?.client || ""), clientId: String(todo?.clientId || ""), notes: String(todo?.notes || ""), material: String(todo?.material || ""),
-    status: String(todo?.status || ""), urgent: Boolean(todo?.urgent), ordered: Boolean(todo?.ordered), warranty: Boolean(todo?.warranty),
-    sourceProjectTodoId: String(todo?.sourceProjectTodoId || ""), billingHourlyRate: nonnegativeNumber(todo?.billingHourlyRate, null, 10_000),
-    billingKm: nonnegativeNumber(todo?.billingKm, null, 1_000_000), clientKm: nonnegativeNumber(todo?.clientKm, null, 1_000_000),
-    clientVehicle: todoVehicle(todo?.clientVehicle), driveFiles: files(todo?.driveFiles), photos: files(todo?.photos)
+    status, urgent: Boolean(todo?.urgent), ordered: Boolean(todo?.ordered), warranty: isCompleted && Boolean(todo?.warranty),
+    sourceProjectTodoId: String(todo?.sourceProjectTodoId || ""), billingHourlyRate: isTimeEntry ? nonnegativeNumber(todo?.billingHourlyRate, null, 10_000) : null,
+    billingKm: isTimeEntry ? nonnegativeNumber(todo?.billingKm, null, 1_000_000) : null, clientKm: isCompleted ? nonnegativeNumber(todo?.clientKm, null, 1_000_000) : null,
+    clientVehicle: isCompleted ? todoVehicle(todo?.clientVehicle) : "", driveFiles: files(todo?.driveFiles), photos: files(todo?.photos)
   });
 }
 
