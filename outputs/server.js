@@ -868,6 +868,18 @@ function normalizeDb(db = {}) {
       next.status = "open";
       changed = true;
     }
+    const normalizedDate = isDateKey(next.date) ? String(next.date) : "";
+    if (next.date !== normalizedDate) {
+      next.date = normalizedDate;
+      changed = true;
+    }
+    const normalizedEndDate = normalizedDate
+      ? (isDateKey(next.endDate) && String(next.endDate) >= normalizedDate ? String(next.endDate) : normalizedDate)
+      : "";
+    if (next.endDate !== normalizedEndDate) {
+      next.endDate = normalizedEndDate;
+      changed = true;
+    }
     if (typeof next.order !== "number") {
       next.order = index + 1;
       changed = true;
@@ -2609,7 +2621,7 @@ function todoEditableSnapshot(todo) {
     thumbnailData: String(item?.thumbnailData || "")
   }));
   return JSON.stringify({
-    title: String(todo?.title || ""), date: String(todo?.date || ""), start: String(todo?.start || ""), end: String(todo?.end || ""),
+    title: String(todo?.title || ""), date: String(todo?.date || ""), endDate: String(todo?.endDate || todo?.date || ""), start: String(todo?.start || ""), end: String(todo?.end || ""),
     client: String(todo?.client || ""), clientId: String(todo?.clientId || ""), notes: String(todo?.notes || ""), material: String(todo?.material || ""),
     status, urgent: Boolean(todo?.urgent), ordered: Boolean(todo?.ordered), warranty: isCompleted && Boolean(todo?.warranty),
     sourceProjectTodoId: String(todo?.sourceProjectTodoId || ""), billingHourlyRate: isTimeEntry ? nonnegativeNumber(todo?.billingHourlyRate, null, 10_000) : null,
@@ -2887,6 +2899,7 @@ function cleanTodo(input) {
   return {
     title: isMeal ? "Malica" : String(input.title || "").trim(),
     date: String(input.date || ""),
+    endDate: String(input.endDate || input.date || ""),
     start: roundTimeToQuarterHour(input.start),
     end: roundTimeToQuarterHour(input.end),
     client: isMeal ? "" : String(input.client || "").trim(),
@@ -3018,6 +3031,9 @@ function validateTodo(todo, { requireClientId = false } = {}) {
   if (!todo.title) return "Manjka opis opravila.";
   if (requireClientId && todo.client && !todo.clientId) return "Stranke ni bilo mogoče identificirati.";
   if (todo.date && !/^\d{4}-\d{2}-\d{2}$/.test(todo.date)) return "Datum opravila ni pravilen.";
+  if (todo.endDate && !/^\d{4}-\d{2}-\d{2}$/.test(todo.endDate)) return "Datum do opravila ni pravilen.";
+  if (todo.endDate && !todo.date) return "Za datum do vnesi tudi datum od.";
+  if (todo.date && todo.endDate && todo.endDate < todo.date) return "Datum do ne more biti pred datumom od.";
   if (Boolean(todo.start) !== Boolean(todo.end)) return "Vnesi obe uri: od in do.";
   if ((todo.start || todo.end) && !todo.date) return "Za opravilo z uro vnesi tudi datum.";
   if (todo.start && (!/^\d{2}:\d{2}$/.test(todo.start) || !/^\d{2}:\d{2}$/.test(todo.end))) return "Čas opravila ni pravilen.";
@@ -3025,6 +3041,7 @@ function validateTodo(todo, { requireClientId = false } = {}) {
     const label = todo.status === "meal" ? "malico" : todo.status === "drive" ? "vo\u017enjo" : todo.status === "purchase" ? "nabavo" : "zaklju\u010deno opravilo";
     return `Za ${label} vnesi datum ter uro od in do.`;
   }
+  if (todo.start && todo.end && todo.endDate && todo.endDate !== todo.date) return "Opravilo z uro je lahko samo za en dan. Za večdnevno opravilo pusti uri prazni.";
   if (todo.start && todo.end <= todo.start) return "Ura do mora biti kasneje kot ura od.";
   if ((todo.photos || []).some((photo) => !validTodoAttachmentDataUrl(photo.data) && !validTodoAttachmentId(photo.attachmentId))) return "Priloga ni veljavna slika ali PDF.";
   if ((todo.photos || []).reduce((total, photo) => total + String(photo.data || "").length, 0) > MAX_TODO_ATTACHMENTS_DATA_LENGTH) return "Priloge so skupaj prevelike.";
@@ -3071,6 +3088,23 @@ function addDays(date, days) {
     String(parsed.getMonth() + 1).padStart(2, "0"),
     String(parsed.getDate()).padStart(2, "0")
   ].join("");
+}
+
+function todoEndDate(todo) {
+  const date = String(todo?.date || "");
+  const endDate = String(todo?.endDate || "");
+  return date && isDateKey(endDate) && endDate >= date ? endDate : date;
+}
+
+function shiftDateKey(date, days) {
+  if (!isDateKey(date)) return "";
+  const parsed = new Date(`${date}T00:00:00`);
+  parsed.setDate(parsed.getDate() + Number(days || 0));
+  return [
+    parsed.getFullYear(),
+    String(parsed.getMonth() + 1).padStart(2, "0"),
+    String(parsed.getDate()).padStart(2, "0")
+  ].join("-");
 }
 
 function foldIcsLine(line) {
@@ -3150,10 +3184,12 @@ function buildCalendarIcs(db, { userId = "", combined = false } = {}) {
       todo.createdByName ? `Dodal: ${todo.createdByName}` : ""
     ].filter(Boolean).join("\n");
     lines.push("BEGIN:VEVENT", `UID:todo-${combined ? (todo.assignmentGroupId || todo.id) : todo.id}@indus-ure`, `DTSTAMP:${stamp}`);
+    const endDate = todoEndDate(todo);
     if (todo.start && todo.end) {
-      lines.push(`DTSTART;TZID=Europe/Ljubljana:${icsDateTime(todo.date, todo.start)}`, `DTEND;TZID=Europe/Ljubljana:${icsDateTime(todo.date, todo.end)}`);
+      lines.push(`DTSTART;TZID=Europe/Ljubljana:${icsDateTime(todo.date, todo.start)}`, `DTEND;TZID=Europe/Ljubljana:${icsDateTime(endDate, todo.end)}`);
     } else {
-      lines.push(`DTSTART;VALUE=DATE:${icsDate(todo.date)}`, `DTEND;VALUE=DATE:${addDays(todo.date, 1)}`);
+      // RFC 5545 uses an exclusive end date for all-day events.
+      lines.push(`DTSTART;VALUE=DATE:${icsDate(todo.date)}`, `DTEND;VALUE=DATE:${addDays(endDate, 1)}`);
     }
     lines.push(`SUMMARY:${icsEscape(`${todo.urgent ? "NUJNO: " : ""}TODO: ${todo.title}`)}`, `DESCRIPTION:${icsEscape(description)}`, "END:VEVENT");
   }
@@ -5929,7 +5965,10 @@ async function handleApi(req, res) {
       const start = roundTimeToQuarterHour(body.start);
       const end = roundTimeToQuarterHour(body.end);
       const date = isDateKey(body.date) ? String(body.date) : previousTodo.date;
-      const validation = validateTodo({ ...previousTodo, date, start, end });
+      const previousDate = String(previousTodo.date || "");
+      const dayShift = previousDate && date ? Math.round((new Date(`${date}T00:00:00`) - new Date(`${previousDate}T00:00:00`)) / 86400000) : 0;
+      const endDate = shiftDateKey(todoEndDate(previousTodo), dayShift) || date;
+      const validation = validateTodo({ ...previousTodo, date, endDate, start, end });
       if (validation) {
         sendJson(res, 400, { error: validation });
         return;
@@ -5952,6 +5991,7 @@ async function handleApi(req, res) {
         start,
         end,
         date,
+        endDate,
         hoursNeedsReview: false,
         updatedBy: user.id,
         updatedByName: user.name,

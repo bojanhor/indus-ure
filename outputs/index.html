@@ -2750,8 +2750,16 @@
 
     .todo-client-field {
       display: grid;
+      grid-column: 1 / -1;
       gap: 6px;
       min-width: 0;
+    }
+
+    .todo-date-range-field {
+      grid-column: 1 / -1;
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
     }
 
     .todo-client-input-row {
@@ -3938,6 +3946,7 @@
         grid-template-columns: 1fr;
       }
       .modal-grid,
+      .todo-date-range-field,
       .boss-panel,
       .month-debt-grid,
       .todo-layout,
@@ -4430,12 +4439,19 @@
               </div>
               <div class="client-autocomplete-list hidden" id="todoFormClientSuggestions" role="listbox"></div>
             </div>
-          </div>          <label>Datum
-            <span class="date-input-with-clear">
-              <input id="todoFormDate" type="date">
-              <button class="date-clear-button" id="clearTodoFormDate" type="button" title="Odstrani datum" aria-label="Odstrani datum">&times;</button>
-            </span>
-          </label>
+          </div>
+          <div class="todo-date-range-field">
+            <label>Datum od
+              <span class="date-input-with-clear">
+                <input id="todoFormDate" type="date">
+                <button class="date-clear-button" id="clearTodoFormDate" type="button" title="Odstrani datum" aria-label="Odstrani datum">&times;</button>
+              </span>
+            </label>
+            <label>Datum do
+              <input id="todoFormEndDate" type="date" aria-describedby="todoFormEndDateHint">
+              <small id="todoFormEndDateHint">Privzeto isti dan. Spremeni samo za večdnevno opravilo.</small>
+            </label>
+          </div>
           <label>Ura od
             <input id="todoFormStart" type="time" step="900">
           </label>
@@ -6470,6 +6486,27 @@
       return new Date(y, m - 1, d);
     }
 
+    function isDateKey(value) {
+      return /^\d{4}-\d{2}-\d{2}$/.test(String(value || ""));
+    }
+
+    function todoEndDate(todo) {
+      const date = String(todo?.date || "");
+      const endDate = String(todo?.endDate || "");
+      return date && isDateKey(endDate) && endDate >= date ? endDate : date;
+    }
+
+    function todoOccursOnDate(todo, date) {
+      return Boolean(todo?.date && date >= todo.date && date <= todoEndDate(todo));
+    }
+
+    function shiftDateKey(date, days) {
+      if (!isDateKey(date)) return "";
+      const parsed = parseDate(date);
+      parsed.setDate(parsed.getDate() + Number(days || 0));
+      return dateKey(parsed);
+    }
+
     function minutes(time) {
       if (!time) return 0;
       const [h, m] = time.split(":").map(Number);
@@ -6619,12 +6656,24 @@
         showNotice("Vpiši ime opravila.");
         return false;
       }
+      if (todo.endDate && !todo.date) {
+        showNotice("Za datum do vnesi tudi datum od.");
+        return false;
+      }
+      if (todo.date && todo.endDate && todo.endDate < todo.date) {
+        showNotice("Datum do ne more biti pred datumom od.");
+        return false;
+      }
       if (Boolean(todo.start) !== Boolean(todo.end)) {
         showNotice("Vnesi obe uri: od in do.");
         return false;
       }
       if ((todo.start || todo.end) && !todo.date) {
         showNotice("Za opravilo z uro vnesi tudi datum.");
+        return false;
+      }
+      if (todo.start && todo.end && todo.endDate && todo.endDate !== todo.date) {
+        showNotice("Opravilo z uro je lahko samo za en dan. Za večdnevno opravilo pusti uri prazni.");
         return false;
       }
       if (["execution", "meal"].includes(todo.status) && (!todo.date || !todo.start || !todo.end)) {
@@ -6810,8 +6859,9 @@
 
     function todoDateTimeLabel(todo) {
       if (!todo.date) return "";
-      const label = formatDate(todo.date);
-      return todo.start && todo.end ? `${label}, ${todo.start}-${todo.end}` : label;
+      const endDate = todoEndDate(todo);
+      if (todo.start && todo.end) return `${formatDate(todo.date)}, ${todo.start}-${todo.end}`;
+      return endDate > todo.date ? `${formatDate(todo.date)} – ${formatDate(endDate)}` : formatDate(todo.date);
     }
 
     function render() {
@@ -6897,7 +6947,7 @@
       if (drag.pointerType === "touch") navigator.vibrate?.(12);
     }
 
-    function beginMonthTodoPointerDrag(event, item, todo) {
+    function beginMonthTodoPointerDrag(event, item, todo, originDate = todo.date) {
       if (!event.isPrimary || (event.pointerType === "mouse" && event.button !== 0)) return;
       clearMonthTodoPointerDrag();
       const rect = item.getBoundingClientRect();
@@ -6906,6 +6956,7 @@
         pointerType: event.pointerType,
         item,
         todo,
+        originDate,
         startX: event.clientX,
         startY: event.clientY,
         clientX: event.clientX,
@@ -6942,12 +6993,14 @@
       const wasActive = drag.active;
       const targetDate = drag.targetDate;
       const todo = drag.todo;
+      const originDate = drag.originDate || todo.date;
       if (wasActive) event.preventDefault();
       clearMonthTodoPointerDrag();
       if (!wasActive) return;
       lastMonthTodoDragAt = Date.now();
-      if (!targetDate || targetDate === todo.date) return;
-      saveTodoToServer({ ...todo, date: targetDate }).catch((error) => showNotice(error.message));
+      if (!targetDate || targetDate === originDate) return;
+      const dayShift = Math.round((parseDate(targetDate) - parseDate(originDate)) / 86400000);
+      saveTodoToServer({ ...todo, date: targetDate, endDate: shiftDateKey(todoEndDate(todo), dayShift) || targetDate }).catch((error) => showNotice(error.message));
     }
 
     function cancelMonthTodoPointerDrag(event) {
@@ -7023,7 +7076,7 @@
         day.appendChild(head);
 
         todos
-          .filter((todo) => todo.date === key && !monthlyHiddenTodoStatusIds.has(todo.status))
+          .filter((todo) => todoOccursOnDate(todo, key) && !monthlyHiddenTodoStatusIds.has(todo.status))
           .sort(calendarDayTodoSort)
           .forEach((todo) => {
             const item = document.createElement("button");
@@ -7034,7 +7087,7 @@
             const client = todoClientCalendarName(todo, "Brez stranke");
             const title = `${todo.urgent ? "NUJNO \u00b7 " : ""}${todo.title || "Brez naslova"}`;
             item.innerHTML = `<span class="day-todo-time">${time}</span><span class="day-todo-client">${escapeHtml(client)}</span><span class="day-todo-title">${escapeHtml(title)}</span>${settlementIndicators}`;
-            item.addEventListener("pointerdown", (event) => beginMonthTodoPointerDrag(event, item, todo));
+            item.addEventListener("pointerdown", (event) => beginMonthTodoPointerDrag(event, item, todo, key));
             item.addEventListener("click", (event) => {
               if (Date.now() - lastMonthTodoDragAt < 450) {
                 event.preventDefault();
@@ -7127,7 +7180,7 @@
 
     function dayTimelineTodos() {
       if (!state.dayTimelineDate) return [];
-      return calendarTodos({ includeArchived: state.dayTimelineIncludeArchived }).filter((todo) => todo.date === state.dayTimelineDate).map((todo) => {
+      return calendarTodos({ includeArchived: state.dayTimelineIncludeArchived }).filter((todo) => todoOccursOnDate(todo, state.dayTimelineDate)).map((todo) => {
         const draft = state.dayTimelineDrafts.get(todo.id);
         return draft ? { ...todo, ...draft } : todo;
       }).sort((a, b) => {
@@ -9940,11 +9993,24 @@
       button.textContent = source ? `Odpri in uredi: ${source.title || "opravilo"}` : "Izvorno opravilo ni več na voljo";
     }
 
+    function syncTodoFormEndDate({ force = false } = {}) {
+      const date = $("todoFormDate").value;
+      const endDate = $("todoFormEndDate");
+      if (!date) {
+        endDate.value = "";
+        endDate.dataset.auto = "true";
+        return;
+      }
+      if (force || !endDate.value || endDate.value < date || endDate.dataset.auto === "true") endDate.value = date;
+      endDate.dataset.auto = String(endDate.value === date);
+    }
+
     function applyMealDefaults() {
       const now = new Date();
       const startMinutes = Math.min(23 * 60, Math.round((now.getHours() * 60 + now.getMinutes()) / 15) * 15);
       $("todoFormTask").value = "Malica";
       if (!$("todoFormDate").value) $("todoFormDate").value = dateKey(now);
+      syncTodoFormEndDate({ force: true });
       $("todoFormStart").value = dayTimelineTime(startMinutes);
       $("todoFormEnd").value = dayTimelineTime(startMinutes + 45);
       $("todoFormClient").value = "";
@@ -10041,6 +10107,8 @@
       $("todoFormStart").value = todo.start || "";
       $("todoFormEnd").value = todo.end || "";
       $("todoFormDate").value = todo.date || "";
+      $("todoFormEndDate").value = todo.date ? todoEndDate(todo) : "";
+      $("todoFormEndDate").dataset.auto = String(!todo.date || todoEndDate(todo) === todo.date);
       $("todoFormClient").value = client?.search || todo.client || $("reportClient").value || "";
       hideTodoClientSuggestions();
       $("todoFormTask").value = todo.title || "";
@@ -10097,6 +10165,7 @@
         throw new Error("Počakaj, da se nalaganje videa konča, nato shrani opravilo.");
       }
       normalizeTodoFormTimes();
+      syncTodoFormEndDate();
       const id = $("todoFormId").value;
       const existing = id ? state.todos.find((todo) => todo.id === id) : null;
       const client = findTodoClient($("todoFormClient").value);
@@ -10113,6 +10182,7 @@
         start: $("todoFormStart").value,
         end: $("todoFormEnd").value,
         date: $("todoFormDate").value,
+        endDate: $("todoFormEndDate").value,
         client: meal ? "" : client?.name || normalizeClientName($("todoFormClient").value),
         clientId: meal ? "" : client?.clientId || client?.id || "",
         title: meal ? "Malica" : $("todoFormTask").value.trim(),
@@ -12146,8 +12216,17 @@
     ["closeTodoDialog", "cancelTodoDialogFooter"].forEach((id) => $(id).addEventListener("click", () => $("todoDialog").close()));
 
     ["todoFormStart", "todoFormEnd"].forEach((id) => $(id).addEventListener("change", normalizeTodoFormTimes));
+    $("todoFormDate").addEventListener("change", () => syncTodoFormEndDate());
+    $("todoFormEndDate").addEventListener("change", () => {
+      const date = $("todoFormDate").value;
+      const endDate = $("todoFormEndDate");
+      if (!date || !endDate.value || endDate.value < date) endDate.value = date;
+      endDate.dataset.auto = String(!date || endDate.value === date);
+    });
     $("clearTodoFormDate").addEventListener("click", () => {
       $("todoFormDate").value = "";
+      $("todoFormEndDate").value = "";
+      $("todoFormEndDate").dataset.auto = "true";
       $("todoFormStart").value = "";
       $("todoFormEnd").value = "";
       $("todoFormDate").focus();

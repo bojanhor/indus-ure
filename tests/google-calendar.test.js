@@ -6,6 +6,7 @@ const test = require("node:test");
 const {
   GOOGLE_DRIVE_SCOPE_VERSION,
   buildCalendarIcs,
+  cleanTodo,
   cleanTodoDriveFiles,
   videoMimeType,
   createSession,
@@ -110,6 +111,27 @@ test("video sprejme tudi datoteko brez MIME vrste", () => {
 test("zaključeno opravilo se brez datuma in ur zavrne", () => {
   assert.equal(validateTodo({ title: "Delo", status: "execution", date: "", start: "", end: "" }), "Za zaključeno opravilo vnesi datum ter uro od in do.");
   assert.equal(validateTodo({ title: "Delo", status: "execution", date: "2026-07-20", start: "08:00", end: "09:00" }), "");
+});
+
+test("večdnevno opravilo ohrani datum do, starejša opravila pa se varno obravnavajo kot enodnevna", () => {
+  const todo = cleanTodo({ title: "Montaža", status: "open", date: "2026-07-20", endDate: "2026-07-23" });
+  assert.equal(todo.endDate, "2026-07-23");
+  assert.equal(validateTodo(todo), "");
+  assert.equal(
+    validateTodo({ title: "Ure", status: "execution", date: "2026-07-20", endDate: "2026-07-23", start: "08:00", end: "12:00" }),
+    "Opravilo z uro je lahko samo za en dan. Za večdnevno opravilo pusti uri prazni."
+  );
+
+  const database = { users: {}, entries: [], todos: [{ id: "legacy", title: "Staro", date: "2026-07-20", status: "open" }], debts: [], clients: [] };
+  normalizeDb(database);
+  assert.equal(database.todos[0].endDate, "2026-07-20");
+
+  const ics = buildCalendarIcs({
+    entries: [],
+    todos: [{ id: "span", assignmentGroupId: "span", title: "Več dni", date: "2026-07-20", endDate: "2026-07-23", status: "open", syncUser: "ibro" }]
+  }, { userId: "ibro", combined: false });
+  assert.match(ics, /DTSTART;VALUE=DATE:20260720/);
+  assert.match(ics, /DTEND;VALUE=DATE:20260724/);
 });
 
 test("seja ima ločen HttpOnly token ter CSRF vrednost v strežniški bazi", () => {

@@ -68,6 +68,16 @@ test("front-end naročila in foto urejevalnik ohranita dogovorjeni mobilni prika
   assert.match(html, /\.todo-title-row \.todo-client-name \{[\s\S]*?flex: 1 1 0;/);
   assert.doesNotMatch(html, /serverStatusPanel/);
 });
+test("večdnevno opravilo ima ločen datum do in se prikaže skozi cel razpon", async () => {
+  const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  assert.match(html, /id="todoFormEndDate"/);
+  assert.match(html, /function todoEndDate\(todo\)/);
+  assert.match(html, /function todoOccursOnDate\(todo, date\)/);
+  assert.match(html, /todoOccursOnDate\(todo, key\)/);
+  assert.match(html, /endDate: \$\("todoFormEndDate"\)\.value/);
+  assert.match(html, /function syncTodoFormEndDate/);
+});
+
 test("obračunsko obdobje samodejno sledi novemu dnevu, ročna izbira pa ostane ločena po delavcu", async () => {
   const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
   assert.match(html, /billingRangeSelections: \{\}/);
