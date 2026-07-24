@@ -38,7 +38,7 @@ try {
   Write-Host "[3/5] Prenos"
   Invoke-Native scp @sshOptions $archive "${target}:/tmp/indus-ure-$release.tar.gz"
   Write-Host "[4/5] Preklop lokalne testne izdaje"
-  Invoke-Native ssh @sshOptions $target "prepare-indus-ure-release $release $checksum && sudo /usr/local/sbin/deploy-indus-ure-test $release"
+  Invoke-Native ssh @sshOptions $target "prepare-indus-ure-release $release $checksum && sudo /usr/local/sbin/deploy-indus-ure-test $release && rm -rf /tmp/indus-ure-$release-deploy"
   Write-Host "[5/5] Preverjanje testne instance"
   $healthUrl = "$($TestUrl.TrimEnd('/'))/api/health"
   $response = Invoke-WebRequest -Uri $healthUrl -TimeoutSec 15
