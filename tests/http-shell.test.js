@@ -42,6 +42,13 @@ test("front-end naročila in foto urejevalnik ohranita dogovorjeni mobilni prika
   assert.match(html, /function dayTimelineDragAutoScrollVelocity\(clientY\)/);
   assert.match(html, /todoTextOrderMarker/);
   assert.match(html, /id="activeWorkContext"/);
+  assert.match(html, /id="toolsMenuNotificationsCount"/);
+  assert.match(html, /todoSortModes = \["manual", "client", "date", "order", "completed", "open", "in_progress", "imported"\]/);
+  assert.match(html, /function isImportedTodo\(todo\)/);
+  assert.match(html, /state\.todoSortMode === "imported" \? isImportedTodo\(todo\) : !isImportedTodo\(todo\)/);
+  assert.match(html, /!isImportedTodo\(todo\) && \(includeArchived \|\| !todo\.archivedAt\)/);
+  assert.match(html, /@media \(min-width: 1600px\)[\s\S]*?width: min\(100%, 1540px\)/);
+  assert.match(html, /\$\("activeWorkContext"\)\.addEventListener\("click"/);
   assert.match(html, /todoSectionCollapseStorageKey/);
   assert.match(html, /todo-order-section-toggle/);
   assert.match(html, /#todoFormNotes,[\s\S]*?#todoFormMaterial \{[\s\S]*?overflow-y: hidden;/);

@@ -69,6 +69,13 @@ test("ICS ostane samo za branje in ne zahteva Google Calendar", () => {
   assert.doesNotMatch(ics, /googleapis/i);
 });
 
+test("uvoženi dogodki niso v ICS koledarju", () => {
+  const ics = buildCalendarIcs({
+    entries: [],
+    todos: [{ id: "imported", assignmentGroupId: "imported", title: "Zunanji dogodek", date: "2026-07-20", start: "08:00", end: "09:00", status: "open", imported: true, syncUser: "ibro" }]
+  }, { userId: "ibro", combined: false });
+  assert.doesNotMatch(ics, /Zunanji dogodek/);
+});
 test("skupni koledar ohrani dogodek, dokler ima vsaj en izvajalec neobračunan vnos", () => {
   const ics = buildCalendarIcs({
     users: { ibro: { name: "Ibro" }, maja: { name: "Maja" } },

@@ -886,6 +886,11 @@ function normalizeDb(db = {}) {
       next.urgent = false;
       changed = true;
     }
+    const imported = !TIME_ENTRY_TODO_STATUSES.has(next.status) && Boolean(next.imported);
+    if (next.imported !== imported) {
+      next.imported = imported;
+      changed = true;
+    }
     if (next.done && next.status !== "execution") {
       next.status = "execution";
       changed = true;
@@ -1737,7 +1742,7 @@ function buildPayrollSnapshot(db, workerId, rangeInput, previous = {}, note = un
   const lockedAdvanceIds = lockedPayrollFinancialIds(db, "advanceIds", previous.id);
   const lockedPersonalPurchaseIds = lockedPayrollFinancialIds(db, "personalPurchaseIds", previous.id);
   const lines = withDailyCommuteInPayroll(db, workerId, (db.todos || [])
-    .filter((todo) => (todo.syncUser || todo.createdBy) === workerId && !todo.archivedAt && String(todo.date || "") >= range.from && String(todo.date || "") <= range.to)
+    .filter((todo) => !todo.imported && (todo.syncUser || todo.createdBy) === workerId && !todo.archivedAt && String(todo.date || "") >= range.from && String(todo.date || "") <= range.to)
     .filter((todo) => !lockedElsewhere.has(String(todo.id || "")))
     .map((todo) => payrollLineForTodo(db, todo, workerId))
     .filter(Boolean)
@@ -1766,7 +1771,7 @@ function todoBillingEventId(todo) {
 }
 
 function todoRequiresClientBilling(todo) {
-  return Boolean(todo && todo.status === "execution" && String(todo.clientId || todo.client || "").trim());
+  return Boolean(todo && !todo.imported && todo.status === "execution" && String(todo.clientId || todo.client || "").trim());
 }
 
 function clientBillIsConfirmed(bill) {
@@ -2607,6 +2612,7 @@ function todoForUserRole(user, db, previous, todo) {
       billingHourlyRate: isPaidTime ? previousRate ?? defaultRate : previousRate,
       billingKm: isMeal ? 0 : isPaidTime ? nonnegativeNumber(todo.billingKm, previousKm, 1_000_000) : previousKm,
       warranty: isMeal ? false : isCompleted ? Boolean(todo.warranty) : previousWarranty,
+      imported: Boolean(previous?.imported),
       clientKm: isMeal ? 0 : canSetClientMileage ? nonnegativeNumber(todo.clientKm, previousClientKm, 1_000_000) : previousClientKm,
       clientVehicle: isMeal ? "personal" : canSetClientMileage ? requestedClientVehicle : previousClientVehicle,
       clientKmRate: 0
@@ -2617,6 +2623,7 @@ function todoForUserRole(user, db, previous, todo) {
     billingHourlyRate: isPaidTime ? nonnegativeNumber(todo.billingHourlyRate, previousRate ?? defaultRate, 10_000) : previousRate,
     billingKm: isMeal ? 0 : isPaidTime ? nonnegativeNumber(todo.billingKm, previousKm, 1_000_000) : previousKm,
     warranty: isMeal ? false : isCompleted ? Boolean(todo.warranty) : previousWarranty,
+    imported: !isPaidTime && Boolean(todo.imported),
     clientKm: isMeal ? 0 : canSetClientMileage ? nonnegativeNumber(todo.clientKm, previousClientKm, 1_000_000) : previousClientKm,
     clientVehicle: isMeal ? "personal" : requestedClientVehicle,
     clientKmRate: 0
@@ -2864,6 +2871,7 @@ function cleanTodo(input) {
     userOrderBuckets: cleanTodoUserOrderBuckets(input.userOrderBuckets),
     completionRequests: cleanTodoCompletionRequests(input.completionRequests),
     urgent: isMeal || isTimeEntry || input.status === "billing" ? false : Boolean(input.urgent),
+    imported: !isTimeEntry && Boolean(input.imported),
     ordered: ORDER_TODO_STATUSES.has(status) && Boolean(input.ordered),
     warranty: input.status === "execution" && Boolean(input.warranty),
     syncUser: cleanUserId(input.syncUser),
@@ -3051,7 +3059,7 @@ function foldIcsLine(line) {
 function buildCalendarIcs(db, { userId = "", combined = false } = {}) {
   const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
   const entries = (db.entries || []).filter((entry) => combined || !userId || (entry.syncUser || entry.createdBy) === userId);
-  const assignedTodos = (db.todos || []).filter((todo) => combined || !userId || (todo.syncUser || todo.createdBy) === userId);
+  const assignedTodos = (db.todos || []).filter((todo) => !todo.imported && (combined || !userId || (todo.syncUser || todo.createdBy) === userId));
   const todos = combined
     ? [...assignedTodos.reduce((groups, todo) => {
       const key = todo.assignmentGroupId || todo.id;
@@ -6322,6 +6330,7 @@ module.exports = {
   gmailWorkerDigestDraftRaw,
   gmailCompletionRequestRaw,
   cleanTodoCompletionRequests,
+  cleanTodo,
   archivePayrollTodos,
   cancelClientBill,
   clientBillLockForTodos,

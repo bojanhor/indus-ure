@@ -25,6 +25,7 @@ const {
   gmailDraftRaw,
   gmailCompletionRequestRaw,
   cleanTodoCompletionRequests,
+  cleanTodo,
   cancelClientBill,
   clientBillLockForTodos,
   reconcileTodoArchives,
@@ -827,4 +828,17 @@ test("completion request email has recipient, subject and encoded body", () => {
   assert.match(message, /Subject: =\?UTF-8\?B\?/);
   const body = message.trim().split("\r\n\r\n").at(-1).replace(/\r\n/g, "");
   assert.match(Buffer.from(body, "base64").toString("utf8"), /completion=secret/);
+});
+test("uvoženi dogodki ostanejo ločeni od ur in obračunov", () => {
+  const imported = cleanTodo({ title: "Uvožen koledar", status: "open", imported: true, date: "2026-07-20" });
+  const timeEntry = cleanTodo({ title: "Ne sme biti uvožen vpis ur", status: "execution", imported: true, date: "2026-07-20", start: "08:00", end: "09:00" });
+  assert.equal(imported.imported, true);
+  assert.equal(timeEntry.imported, false);
+
+  const billingDb = {
+    users: { ibro: { id: "ibro", billing: { hourlyRate: 15 } } },
+    settings: { billing: { workerOwnVehicleKmRate: 0.22 } }, payrolls: [],
+    todos: [{ id: "imported-work", syncUser: "ibro", status: "execution", imported: true, date: "2026-07-20", start: "08:00", end: "09:00", title: "Zunanji zapis" }]
+  };
+  assert.equal(buildPayrollSnapshot(billingDb, "ibro", { from: "2026-07-01", to: "2026-07-31" }, { id: "draft", status: "draft" }).lines.length, 0);
 });

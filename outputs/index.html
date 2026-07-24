@@ -111,6 +111,15 @@
       grid-template-columns: 1fr;
     }
 
+    /* Na zelo širokih zaslonih naj ostanejo upravljalniki v dosegljivi širini. */
+    @media (min-width: 1600px) {
+      .app {
+        width: min(100%, 1540px);
+        margin-inline: auto;
+        box-shadow: 0 0 0 1px rgba(37, 66, 71, 0.08), 0 18px 52px rgba(21, 44, 49, 0.10);
+      }
+    }
+
     .offline-sync-notice {
       position: fixed;
       right: 14px;
@@ -400,6 +409,7 @@
       font-size: 11px;
       font-weight: 800;
       white-space: nowrap;
+      cursor: pointer;
     }
 
     .active-work-context strong {
@@ -457,6 +467,7 @@
       height: 42px;
       justify-content: center;
       padding: 0;
+      position: relative;
     }
 
     .settings-icon {
@@ -590,6 +601,19 @@
       box-shadow: 0 0 0 1px rgba(100, 18, 25, .18);
     }
     #notificationsCount.has-unread { display: block; }
+    #toolsMenuNotificationsCount {
+      display: none;
+      position: absolute;
+      top: 5px;
+      right: 5px;
+      width: 9px;
+      height: 9px;
+      border: 2px solid #f3f7f4;
+      border-radius: 50%;
+      background: #c5343f;
+      box-shadow: 0 0 0 1px rgba(100, 18, 25, .18);
+    }
+    #toolsMenuNotificationsCount.has-unread { display: block; }
 
     .server-status-values { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; color: var(--muted); font-size: 13px; font-weight: 750; }
     .server-status-values span { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 5px 10px; min-width: 0; padding: 9px 10px; border: 1px solid var(--line); border-radius: 8px; background: #f8fbfa; }
@@ -1400,6 +1424,7 @@
       line-height: 1.05;
     }
 
+    .todo-imported-chip { background: #dbe8f0; color: #174f67; border: 1px solid #7eaec3; }
     .todo-ordering-chip {
       border: 1px solid #bfd1c7;
       background: #e7f0ec;
@@ -4013,13 +4038,14 @@
 
             <button class="view-btn legacy-report-button" id="reportViewBtn" type="button">Arhiv poro&#269;il</button>
           </div>
-          <div class="active-work-context" id="activeWorkContext" title="Aktivni pogled"><span>Pogled:</span><strong id="activeWorkContextLabel"></strong></div>
+          <button class="active-work-context" id="activeWorkContext" type="button" title="Izberi pogled"><span>Pogled:</span><strong id="activeWorkContextLabel"></strong></button>
           <details class="tools-menu" id="toolsMenu">
             <summary class="account-btn settings-menu-button" title="Nastavitve in orodja" aria-label="Nastavitve in orodja">
               <svg class="settings-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
                 <path d="M4 6h16M4 12h16M4 18h16"></path>
                 <circle cx="9" cy="6" r="2"></circle><circle cx="15" cy="12" r="2"></circle><circle cx="8" cy="18" r="2"></circle>
               </svg>
+              <span id="toolsMenuNotificationsCount" aria-label="Nova sistemska opozorila"></span>
             </summary>
             <div class="tools-menu-panel" role="group" aria-label="Nastavitve in orodja">
               <div class="tools-menu-brand">
@@ -4186,6 +4212,7 @@
                   <option value="completed">ZAKLJU&#268;ENO</option>
                   <option value="open">&#268;AKA</option>
                   <option value="in_progress">V TEKU</option>
+                  <option value="imported">UVOŽENO</option>
                 </select>
               </label>
             </div>
@@ -4369,6 +4396,11 @@
         <label class="todo-form-urgent" id="todoFormUrgentField">
           <input id="todoFormUrgent" type="checkbox">
           NUJNO
+        </label>
+        <label class="todo-form-urgent hidden admin-only" id="todoFormImportedField">
+          <input id="todoFormImported" type="checkbox">
+          UVOŽENO
+          <small>Uvožen zapis je prikazan samo v filtru UVOŽENO in se ne vključi v koledar ali obračune.</small>
         </label>
         <div class="todo-form-billing" id="todoFormClientBilling">
           <div class="modal-grid">
@@ -4792,7 +4824,7 @@
     const todoSortModeKey = "indus-ure-todo-sort-mode";
     const calendarCompletedFilterKey = "indus-ure-calendar-show-completed";
     const billingWorkerKey = "indus-ure-billing-worker";
-    const todoSortModes = ["manual", "client", "date", "order", "completed", "open", "in_progress"];
+    const todoSortModes = ["manual", "client", "date", "order", "completed", "open", "in_progress", "imported"];
     const timeEntryStatusIds = new Set(["execution", "meal", "drive", "purchase"]);
     const monthlyHiddenTodoStatusIds = new Set(["meal", "drive"]);
     const payrollPaidTodoStatuses = new Set(timeEntryStatusIds);
@@ -5807,8 +5839,12 @@
       return state.todos.filter((todo) => (todo.syncUser || todo.createdBy) === workerId);
     }
 
+    function isImportedTodo(todo) {
+      return Boolean(todo?.imported);
+    }
+
     function calendarTodos({ includeArchived = false } = {}) {
-      return uniqueTodosByEventId(contextTodos()).filter((todo) => includeArchived || !todo.archivedAt);
+      return uniqueTodosByEventId(contextTodos()).filter((todo) => !isImportedTodo(todo) && (includeArchived || !todo.archivedAt));
     }
 
     function applyWorkContextUi() {
@@ -6127,7 +6163,7 @@
     }
     function advanceProjectOptions() {
       const query = $("advanceProjectSearch")?.value.trim().toLocaleLowerCase("sl") || "";
-      return uniqueTodosByEventId(state.todos).filter((todo) => ["execution", "open", "in_progress", "internal"].includes(todo.status)).filter((todo) => !query || `${todo.title} ${todoClientSearchText(todo)} ${todo.notes}`.toLocaleLowerCase("sl").includes(query)).sort((a, b) => String(a.title).localeCompare(String(b.title), "sl"));
+      return uniqueTodosByEventId(state.todos).filter((todo) => !isImportedTodo(todo) && ["execution", "open", "in_progress", "internal"].includes(todo.status)).filter((todo) => !query || `${todo.title} ${todoClientSearchText(todo)} ${todo.notes}`.toLocaleLowerCase("sl").includes(query)).sort((a, b) => String(a.title).localeCompare(String(b.title), "sl"));
     }
 
     function renderAdvanceProjects() {
@@ -6639,7 +6675,8 @@
     }
 
     function sortedTodosForMode(todos = contextTodos()) {
-      let list = [...todos];
+      let list = [...todos].filter((todo) => state.todoSortMode === "imported" ? isImportedTodo(todo) : !isImportedTodo(todo));
+      if (state.todoSortMode === "imported") return list.sort(todoDateSort);
       if (state.todoSortMode === "date") return list.filter((todo) => todo.date && !timeEntryStatusIds.has(todo.status)).sort(todoDateSort);
       if (state.todoSortMode === "order") return list.filter((todo) => todoNeedsOrdering(todo)).sort(todoOrderingSort);
       if (state.todoSortMode === "open") return list.filter((todo) => todo.status === "open").sort(todoManualBucketSort);
@@ -7873,7 +7910,7 @@
       const kmRate = Number(state.settings.billing?.workerOwnVehicleKmRate ?? state.settings.billing?.kmRate ?? 0);
       const lockedTodoIds = lockedBillingTodoIds(workerId);
       const lines = state.todos
-        .filter((todo) => (todo.syncUser || todo.createdBy) === workerId && payrollPaidTodoStatuses.has(todo.status) && String(todo.date || "") >= range.from && String(todo.date || "") <= range.to)
+        .filter((todo) => !isImportedTodo(todo) && (todo.syncUser || todo.createdBy) === workerId && payrollPaidTodoStatuses.has(todo.status) && String(todo.date || "") >= range.from && String(todo.date || "") <= range.to)
         .filter((todo) => !lockedTodoIds.has(String(todo.id || "")))
         .map((todo) => {
           const minutes = payrollMinutesForTodo(todo);
@@ -8632,6 +8669,7 @@
                 <div class="todo-card-badges">
                   ${todoUsesOrderConfirmation(todo) ? `<button class="todo-ordered-toggle" type="button" aria-pressed="${Boolean(todo.ordered)}" title="${todo.ordered ? "Ozna&#269;eno kot naro&#269;eno" : "Ozna&#269;i kot naro&#269;eno"}" aria-label="${todo.ordered ? "Ozna&#269;eno kot naro&#269;eno" : "Ozna&#269;i kot naro&#269;eno"}"><span aria-hidden="true">&#10003;</span></button>` : ""}
                   <span class="todo-chip todo-status-chip todo-status-color ${todoStatusClass(todo.status)}">${todoStatus(todo.status).label}</span>
+                  ${isImportedTodo(todo) ? '<span class="todo-chip todo-imported-chip">Uvo&#382;eno</span>' : ""}
                   ${todoUsesTextOrdering(todo) && !manualOrderingStatusIds.has(todo.status) ? '<span class="todo-chip todo-ordering-chip">naro&#269;i</span>' : ""}
                 </div>
                 <div class="todo-client-name">${escapeHtml(todo.client || "")}</div>
@@ -9869,6 +9907,7 @@
       $("todoFormBilling").classList.toggle("hidden", !showWorkerMileage);
       $("todoFormHourlyRateField").classList.toggle("hidden", !showHourlyRate);
       $("todoFormWarrantyField").classList.toggle("hidden", !showWorkerMileage);
+      $("todoFormImportedField").classList.toggle("hidden", !isAdminView() || timeEntry);
       $("todoFormUrgentField").classList.toggle("hidden", timeEntry);
       if (timeEntry) $("todoFormUrgent").checked = false;
     }
@@ -9932,6 +9971,7 @@
       $("todoFormUrgent").checked = Boolean(todo.urgent);
       $("todoFormOrdered").checked = todoOrderStatusIds.has(todoStatus(todo.status || "open").id) && Boolean(todo.ordered);
       $("todoFormWarranty").checked = Boolean(todo.warranty);
+      $("todoFormImported").checked = Boolean(todo.imported);
       updateTodoFormStatus();
        autosizeTodoNarrativeFields();
        if (state.todoMealEntry && !editing) applyMealDefaults();
@@ -10002,6 +10042,7 @@
         assigneeIds,
         syncUser: existing?.syncUser || assigneeIds[0] || activeWorkerId(),
         urgent: timeEntryStatusIds.has($("todoFormStatus").value) ? false : $("todoFormUrgent").checked,
+        imported: isAdminView() ? Boolean($("todoFormImported").checked) : Boolean(existing?.imported),
         ordered: todoOrderStatusIds.has($("todoFormStatus").value) && $("todoFormOrdered").checked,
         warranty: $("todoFormStatus").value === "execution" && Boolean($("todoFormWarranty").checked),
         sourceProjectTodoId: existing?.sourceProjectTodoId || state.todoHoursSourceId || state.todoDraftSourceProjectTodoId || "",
@@ -10369,6 +10410,7 @@
       const from = $("reportFrom").value;
       const to = $("reportTo").value;
       return uniqueTodosByEventId(state.todos)
+        .filter((todo) => !isImportedTodo(todo))
         .filter(reportTodoIsCompleted)
         .filter((todo) => Boolean(todo.clientId || todo.client))
         .filter(reportTodoVisibleInClientBilling)
@@ -11589,10 +11631,13 @@
 
     function renderNotifications() {
       const count = $("notificationsCount");
+      const menuCount = $("toolsMenuNotificationsCount");
       const unread = (state.notifications || []).filter((item) => !item.readAt).length;
-      count.textContent = '';
-      count.classList.toggle('has-unread', unread > 0);
-      count.setAttribute('aria-label', unread ? unread + ' novih sistemskih opozoril' : '');
+      [count, menuCount].filter(Boolean).forEach((badge) => {
+        badge.textContent = '';
+        badge.classList.toggle('has-unread', unread > 0);
+        badge.setAttribute('aria-label', unread ? unread + ' novih sistemskih opozoril' : '');
+      });
       const list = $("notificationsList");
       if (!list) return;
       if (!(state.notifications || []).length) {
@@ -11803,6 +11848,12 @@
     });
     document.addEventListener("keydown", (event) => {
       if (event.key === "Escape") closeToolsMenu();
+    });
+    $("activeWorkContext").addEventListener("click", () => {
+      const menu = $("toolsMenu");
+      menu.open = true;
+      keepToolsMenuInViewport();
+      if (state.user?.role === "boss") requestAnimationFrame(() => $("workContextSelect").focus());
     });
     $("workContextSelect").addEventListener("change", (event) => setWorkContext(event.target.value));
     $("todoSortMode").value = state.todoSortMode;
