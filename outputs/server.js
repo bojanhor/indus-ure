@@ -2322,6 +2322,7 @@ function payrollLineForTodo(db, todo, workerId = "") {
     end: String(todo.end || ""),
     title: String(todo.title || "").slice(0, 300),
     client: String(todo.client || "").slice(0, 240),
+    status: String(todo.status || ""),
     minutes,
     hours,
     hourlyRate,
@@ -2352,7 +2353,9 @@ function withDailyCommuteInPayroll(db, workerId, lines = []) {
     // A remote entry is paid normally, but it cannot trigger the daily commute.
     // Do not mark its date as used so the first later on-site entry still gets
     // the one return journey reimbursement.
-    const addCommute = !Boolean(line.workFromHome) && !appliedDates.has(line.date);
+    // A meal is paid time but never represents a journey to work.  It must
+    // neither receive the daily commute nor consume that day's commute slot.
+    const addCommute = line.status !== "meal" && !Boolean(line.workFromHome) && !appliedDates.has(line.date);
     if (addCommute) appliedDates.add(line.date);
     const lineCommuteKm = addCommute ? commuteKm : 0;
     const km = Number((workerKm + lineCommuteKm).toFixed(2));

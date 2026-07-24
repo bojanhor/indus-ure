@@ -463,6 +463,25 @@ test("delo od doma ohrani ročno kilometrino, vendar ne sproži poti v službo",
   assert.equal(payroll.km, 20);
 });
 
+test("malica sama ne sproži poti v službo", () => {
+  const db = {
+    users: { ibro: { id: "ibro", billing: { hourlyRate: 20, commuteKmOneWay: 7 } } },
+    settings: { billing: { workerOwnVehicleKmRate: 0.22, mealPaidMinutes: 45 } },
+    payrolls: [],
+    todos: [
+      { id: "meal-only", syncUser: "ibro", status: "meal", date: "2026-07-20", start: "08:00", end: "09:00", title: "Malica" },
+      { id: "meal-before-work", syncUser: "ibro", status: "meal", date: "2026-07-21", start: "08:00", end: "09:00", title: "Malica" },
+      { id: "onsite-after-meal", syncUser: "ibro", status: "execution", date: "2026-07-21", start: "10:00", end: "11:00", title: "Teren" }
+    ]
+  };
+  const payroll = buildPayrollSnapshot(db, "ibro", { from: "2026-07-20", to: "2026-07-21" }, { status: "draft" });
+  assert.deepEqual(payroll.lines.map((line) => [line.todoId, line.minutes, line.commuteKm, line.km]), [
+    ["meal-only", 45, 0, 0],
+    ["meal-before-work", 45, 0, 0],
+    ["onsite-after-meal", 60, 14, 14]
+  ]);
+});
+
 test("vnos ur ohrani oznako dela od doma, navadno opravilo pa je nima", () => {
   const timeEntry = cleanTodo({ title: "Vpis ur", status: "execution", date: "2026-07-20", start: "08:00", end: "09:00", workFromHome: true });
   const regularTodo = cleanTodo({ title: "Projekt", status: "open", workFromHome: true });

@@ -6753,7 +6753,9 @@
       return lines.map((line) => {
         const workerKm = Number(line.workerKm ?? line.km ?? 0);
         // Delo od doma se normalno plača, ne sme pa sprožiti poti dom–fabrika.
-        const addCommute = !Boolean(line.workFromHome) && !appliedDates.has(line.date);
+        // Malica je plačan čas, vendar sama po sebi ne pomeni poti v službo.
+        // Ne sme dobiti kilometrine in ne sme porabiti dnevne poti za teren.
+        const addCommute = line.status !== "meal" && !Boolean(line.workFromHome) && !appliedDates.has(line.date);
         if (addCommute) appliedDates.add(line.date);
         const commuteKm = addCommute ? dailyCommuteKm : 0;
         const km = Number((workerKm + commuteKm).toFixed(2));
@@ -8902,7 +8904,7 @@
           const workerKm = Number(todo.billingKm || 0);
           const workAmount = Number((hours * hourlyRate).toFixed(2));
           const kmAmount = Number((workerKm * kmRate).toFixed(2));
-          return { todoId: todo.id, assignmentGroupId: todo.assignmentGroupId || todo.id, workerId, date: todo.date, start: todo.start, end: todo.end, title: todo.title, client: todo.client, minutes, hours, hourlyRate, workerKm, workFromHome: Boolean(todo.workFromHome), commuteKm: 0, km: workerKm, kmRate, workAmount, kmAmount, totalAmount: Number((workAmount + kmAmount).toFixed(2)) };
+          return { todoId: todo.id, assignmentGroupId: todo.assignmentGroupId || todo.id, workerId, date: todo.date, start: todo.start, end: todo.end, title: todo.title, client: todo.client, status: todo.status, minutes, hours, hourlyRate, workerKm, workFromHome: Boolean(todo.workFromHome), commuteKm: 0, km: workerKm, kmRate, workAmount, kmAmount, totalAmount: Number((workAmount + kmAmount).toFixed(2)) };
         })
         .filter((line) => line.hours > 0)
         .sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.start).localeCompare(String(b.start)) || String(a.title).localeCompare(String(b.title)));
