@@ -1229,6 +1229,10 @@
       opacity: 0.45;
     }
 
+    html.todo-drag-active {
+      overscroll-behavior-y: contain;
+    }
+
     .todo-drag-ghost {
       position: fixed;
       z-index: 1200;
@@ -2193,6 +2197,57 @@
       display: block;
     }
 
+    .client-edit-contacts {
+      grid-column: 1 / -1;
+      display: grid;
+      gap: 9px;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: var(--soft);
+    }
+
+    .client-edit-contacts-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .client-edit-contacts-head strong { font-size: 14px; }
+    .client-edit-contacts-head small { display: block; color: var(--muted); font-size: 12px; font-weight: 600; }
+
+    .client-edit-contact-list { display: grid; gap: 8px; }
+
+    .client-edit-contact-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 38px;
+      gap: 8px;
+      align-items: end;
+    }
+
+    .client-edit-contact-remove {
+      min-width: 38px;
+      min-height: 38px;
+      padding: 0;
+      color: #9b3033;
+      border-color: #e6b8bb;
+      background: #fff7f7;
+      font-size: 20px;
+      line-height: 1;
+    }
+
+    .client-edit-danger-row {
+      display: flex;
+      justify-content: flex-end;
+      margin-top: 14px;
+      padding-top: 12px;
+      border-top: 1px solid var(--line);
+    }
+
+    .client-edit-delete-hint { margin: 8px 0 0; color: var(--muted); font-size: 12px; line-height: 1.35; }
+
     .day-todo {
       position: relative;
       width: 100%;
@@ -2209,6 +2264,62 @@
     .day-todo.done {
       opacity: 0.55;
       text-decoration: line-through;
+    }
+
+    /* Večdnevni dogodki dobijo skupno, po vrsticah poravnano stezo. Posamezna
+       nadaljevanja se stikajo čez rob dneva, naslov pa ostane le na začetku. */
+    .day-multiday-lanes {
+      display: grid;
+      gap: 3px;
+      margin: 0 -9px 7px;
+    }
+
+    .day-multiday-slot {
+      min-height: 29px;
+    }
+
+    .day-multiday-event {
+      display: block;
+      width: 100%;
+      min-height: 29px;
+      padding: 5px 8px;
+      border: 1px solid currentColor;
+      border-radius: 0;
+      color: #263238;
+      font: inherit;
+      font-size: 11px;
+      font-weight: 800;
+      line-height: 1.05;
+      text-align: left;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+      cursor: pointer;
+    }
+
+    .day-multiday-event.is-span-start {
+      border-top-left-radius: 7px;
+      border-bottom-left-radius: 7px;
+    }
+
+    .day-multiday-event.is-span-end {
+      border-top-right-radius: 7px;
+      border-bottom-right-radius: 7px;
+    }
+
+    .day-multiday-event.is-span-continuation {
+      border-left-width: 0;
+      padding-left: 0;
+    }
+
+    .day-multiday-event:not(.is-span-end) {
+      border-right-width: 0;
+    }
+
+    .day-multiday-event-title {
+      display: block;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
 
     .day-todo.month-drag-armed { cursor: grab; }
@@ -2753,6 +2864,59 @@
       grid-column: 1 / -1;
       gap: 6px;
       min-width: 0;
+    }
+
+    .todo-client-contact-field {
+      grid-column: 1 / -1;
+      display: grid;
+      gap: 8px;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: #f7faf8;
+    }
+
+    .todo-client-contact-head,
+    .todo-client-contact-row,
+    .todo-client-contact-picker-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+    }
+
+    .todo-client-contact-head { justify-content: space-between; }
+    .todo-client-contact-head strong { font-size: 0.92rem; }
+    .todo-client-contact-picker {
+      display: grid;
+      gap: 5px;
+      padding: 7px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #fff;
+    }
+    .todo-client-contact-picker-row { padding: 5px 4px; }
+    .todo-client-contact-picker-row input { width: 18px; height: 18px; min-height: 0; margin: 0; }
+    .todo-client-contact-picker-row span { min-width: 0; overflow-wrap: anywhere; }
+    .todo-client-contact-picker-row small { margin-left: auto; color: var(--muted); overflow-wrap: anywhere; }
+    .todo-client-contact-selected { display: grid; gap: 5px; }
+    .todo-client-contact-row {
+      justify-content: space-between;
+      padding: 6px 8px;
+      border-radius: 6px;
+      background: #e9f1ed;
+    }
+    .todo-client-contact-row > span { min-width: 0; overflow-wrap: anywhere; }
+    .todo-client-contact-actions { display: flex; gap: 5px; flex: 0 0 auto; }
+    .todo-client-contact-actions a,
+    .todo-client-contact-actions button {
+      display: inline-grid;
+      place-items: center;
+      width: 34px;
+      min-width: 34px;
+      min-height: 34px;
+      padding: 0;
+      text-decoration: none;
     }
 
     .todo-date-range-field {
@@ -3878,6 +4042,10 @@
         overflow: hidden;
         text-overflow: ellipsis;
       }
+      .day-multiday-lanes { margin-inline: -4px; margin-bottom: 4px; }
+      .day-multiday-slot,
+      .day-multiday-event { min-height: 25px; }
+      .day-multiday-event { padding: 4px 3px; font-size: 9px; }
       .day-todo .day-todo-time,
       .day-todo .day-todo-client,
       .day-todo .day-todo-title { display: block; font-size: 9px; line-height: 1.1; overflow-wrap: anywhere; }
@@ -4388,6 +4556,7 @@
           <button class="icon-btn day-timeline-date-nav" id="nextDayTimeline" type="button" title="Naslednji dan" aria-label="Naslednji dan">&rsaquo;</button>
         </div>
         <div class="modal-head-actions">
+          <button class="primary" id="saveDayTimeline" type="button" disabled>Shrani</button>
           <button class="icon-btn" id="closeDayTimeline" type="submit" title="Prekliči spremembe" aria-label="Prekliči spremembe in zapri dnevni pregled">&times;</button>
         </div>
       </div>
@@ -4440,6 +4609,14 @@
               <div class="client-autocomplete-list hidden" id="todoFormClientSuggestions" role="listbox"></div>
             </div>
           </div>
+          <section class="todo-client-contact-field hidden" id="todoFormClientContactsField" aria-label="Kontaktne osebe stranke">
+            <div class="todo-client-contact-head">
+              <strong>Kontaktna oseba</strong>
+              <button class="secondary quick-client-button" id="todoFormClientContactPickerToggle" type="button" title="Izberi kontaktno osebo" aria-label="Izberi kontaktno osebo">&#128100;+</button>
+            </div>
+            <div class="todo-client-contact-picker hidden" id="todoFormClientContactPicker"></div>
+            <div class="todo-client-contact-selected" id="todoFormClientContactSelected"></div>
+          </section>
           <div class="todo-date-range-field">
             <label>Datum od
               <span class="date-input-with-clear">
@@ -4518,6 +4695,11 @@
             </label>
           </div>
         </div>
+        <label class="todo-form-warranty hidden" id="todoFormWorkFromHomeField">
+          <input id="todoFormWorkFromHome" type="checkbox">
+          <span>Delo od doma</span>
+          <small>Pot dom–fabrika se za ta vpis ne prišteje samodejno.</small>
+        </label>
         <label class="todo-form-warranty" id="todoFormWarrantyField">
           <input id="todoFormWarranty" type="checkbox">
           <span>Garancija</span>
@@ -4650,9 +4832,16 @@
           <label>E-po&#353;ta
             <input id="clientEditEmail" type="email">
           </label>
-          <label>Telefon
-            <input id="clientEditPhone" type="tel">
-          </label>
+          <section class="client-edit-contacts" aria-labelledby="clientEditContactsTitle">
+            <div class="client-edit-contacts-head">
+              <div>
+                <strong id="clientEditContactsTitle">Kontaktne osebe in telefonske številke</strong>
+                <small>Pri več številkah je ime kontaktne osebe obvezno.</small>
+              </div>
+              <button class="secondary" id="addClientEditContact" type="button">+ Dodaj kontakt</button>
+            </div>
+            <div class="client-edit-contact-list" id="clientEditContacts"></div>
+          </section>
           <label>Naslov
             <input id="clientEditAddress">
           </label>
@@ -4671,6 +4860,10 @@
               <option value="true">DA</option>
             </select>
           </label>
+        </div>
+        <p class="client-edit-delete-hint" id="clientEditDeleteHint" aria-live="polite"></p>
+        <div class="client-edit-danger-row hidden" id="clientEditDeleteArea">
+          <button class="danger" id="deleteClientEdit" type="button">Izbriši stranko</button>
         </div>
         <div class="actions">
           <button class="secondary" id="cancelClientEdit" type="button">Prekli&#269;i</button>
@@ -5009,7 +5202,9 @@
       dayTimelineDate: "",
       dayTimelineIncludeArchived: false,
       dayTimelineDrafts: new Map(),
+      dayTimelineSaving: false,
       dayTimelineHoursWarning: null,
+      dayTimelineHoursPendingSourceId: "",
       dayTimelineHoursResolvedSourceId: "",
       todoHoursFixingTime: false,
       dayTimelineMinuteHeight: 1,
@@ -5019,6 +5214,9 @@
       dayTimelineSuppressClick: false,
       todoDialogPhotos: [],
       todoDialogDriveFiles: [],
+      todoDialogClientContactIds: [],
+      todoDialogClientContactClientId: "",
+      todoDialogClientContactPickerOpen: false,
       photoEditor: null,
       reportClient: "",
       reportClientSort: "recent",
@@ -6148,8 +6346,10 @@
       const appliedDates = new Set();
       return lines.map((line) => {
         const workerKm = Number(line.workerKm ?? line.km ?? 0);
-        const commuteKm = appliedDates.has(line.date) ? 0 : dailyCommuteKm;
-        appliedDates.add(line.date);
+        // Delo od doma se normalno plača, ne sme pa sprožiti poti dom–fabrika.
+        const addCommute = !Boolean(line.workFromHome) && !appliedDates.has(line.date);
+        if (addCommute) appliedDates.add(line.date);
+        const commuteKm = addCommute ? dailyCommuteKm : 0;
         const km = Number((workerKm + commuteKm).toFixed(2));
         const kmAmount = Number((km * Number(line.kmRate || 0)).toFixed(2));
         return {
@@ -6569,8 +6769,7 @@
     function findClient(value) {
       const input = normalizeText(value);
       if (!input) return null;
-      return allClientRecords().find((client) => [client.clientId, client.id, client.name, client.search, client.taxId]
-        .filter(Boolean)
+      return allClientRecords().find((client) => clientSearchFields(client)
         .some((field) => normalizeText(field) === input)) || null;
     }
 
@@ -6579,8 +6778,7 @@
       if (exact) return exact;
       const input = normalizeText(value);
       if (!input) return null;
-      const matches = (state.clients || []).filter((client) => client.clientId && client.search
-        && normalizeText(client.search).includes(input));
+      const matches = allClientRecords().filter((client) => client.clientId && clientMatches(client, input));
       return matches.length === 1 ? matches[0] : null;
     }
 
@@ -6644,7 +6842,65 @@
       if (!item) return;
       $("todoFormClient").value = item.value;
       hideTodoClientSuggestions();
+      syncTodoFormClientContacts();
       $("todoFormClient").focus();
+    }
+
+    function todoFormClientContacts(client) {
+      const contacts = Array.isArray(client?.contacts) ? client.contacts : [];
+      return contacts.filter((contact) => String(contact?.id || "").trim() && String(contact?.phone || "").trim());
+    }
+
+    function todoFormSelectedClient() {
+      return findTodoClient($("todoFormClient").value);
+    }
+
+    function renderTodoFormClientContacts() {
+      const field = $("todoFormClientContactsField");
+      const picker = $("todoFormClientContactPicker");
+      const selected = $("todoFormClientContactSelected");
+      const client = todoFormSelectedClient();
+      const clientId = String(client?.clientId || client?.id || "");
+      const contacts = todoFormClientContacts(client);
+      if (clientId !== state.todoDialogClientContactClientId) {
+        state.todoDialogClientContactClientId = clientId;
+        state.todoDialogClientContactIds = [];
+        state.todoDialogClientContactPickerOpen = false;
+      }
+      field.classList.toggle("hidden", !contacts.length);
+      if (!contacts.length) {
+        picker.classList.add("hidden");
+        picker.innerHTML = "";
+        selected.innerHTML = "";
+        return;
+      }
+      const selectedIds = new Set(state.todoDialogClientContactIds);
+      picker.classList.toggle("hidden", !state.todoDialogClientContactPickerOpen);
+      picker.innerHTML = contacts.map((contact) => `
+        <label class="todo-client-contact-picker-row">
+          <input type="checkbox" data-todo-client-contact-id="${escapeHtml(contact.id)}" ${selectedIds.has(contact.id) ? "checked" : ""}>
+          <span><strong>${escapeHtml(contact.name || "Kontakt")}</strong></span>
+          <small>${escapeHtml(contact.phone)}</small>
+        </label>
+      `).join("");
+      const selectedContacts = contacts.filter((contact) => selectedIds.has(contact.id));
+      selected.innerHTML = selectedContacts.map((contact) => `
+        <div class="todo-client-contact-row">
+          <span><strong>${escapeHtml(contact.name || "Kontakt")}</strong> · ${escapeHtml(contact.phone)}</span>
+          <span class="todo-client-contact-actions">
+            <a class="secondary" href="tel:${escapeHtml(String(contact.phone).replace(/[^0-9+]/g, ""))}" title="Pokliči ${escapeHtml(contact.name || contact.phone)}" aria-label="Pokliči ${escapeHtml(contact.name || contact.phone)}">&#9742;</a>
+            <button class="secondary" type="button" data-remove-todo-client-contact-id="${escapeHtml(contact.id)}" title="Odstrani kontakt" aria-label="Odstrani kontakt">&times;</button>
+          </span>
+        </div>
+      `).join("");
+    }
+
+    function syncTodoFormClientContacts({ preserve = false } = {}) {
+      const client = todoFormSelectedClient();
+      const clientId = String(client?.clientId || client?.id || "");
+      if (!preserve && clientId !== state.todoDialogClientContactClientId) state.todoDialogClientContactIds = [];
+      state.todoDialogClientContactClientId = clientId;
+      renderTodoFormClientContacts();
     }
 
     function validateTodo(todo) {
@@ -6888,6 +7144,88 @@
         || todoSort(a, b);
     }
 
+    function todoIsMultiDayCalendarSpan(todo) {
+      return Boolean(todo?.date && todoEndDate(todo) > todo.date && !todo.start && !todo.end);
+    }
+
+    function monthMultiDayLayout(todos, gridStart, dayCount = 42) {
+      const visibleStart = dateKey(gridStart);
+      const visibleEnd = shiftDateKey(visibleStart, dayCount - 1);
+      const spans = todos
+        .filter((todo) => todoIsMultiDayCalendarSpan(todo) && todo.date <= visibleEnd && todoEndDate(todo) >= visibleStart)
+        .sort((a, b) => String(a.date).localeCompare(String(b.date))
+          || String(todoEndDate(b)).localeCompare(String(todoEndDate(a)))
+          || todoSort(a, b));
+      const laneEnds = [];
+      const spanByTodoId = new Map();
+      spans.forEach((todo) => {
+        let lane = laneEnds.findIndex((endDate) => endDate < todo.date);
+        if (lane < 0) lane = laneEnds.length;
+        laneEnds[lane] = todoEndDate(todo);
+        spanByTodoId.set(todo.id, lane);
+      });
+
+      const byDate = new Map();
+      const laneCounts = Array.from({ length: Math.ceil(dayCount / 7) }, () => 0);
+      spans.forEach((todo) => {
+        const lane = spanByTodoId.get(todo.id);
+        const firstDate = todo.date > visibleStart ? todo.date : visibleStart;
+        const lastDate = todoEndDate(todo) < visibleEnd ? todoEndDate(todo) : visibleEnd;
+        for (let key = firstDate; key && key <= lastDate; key = shiftDateKey(key, 1)) {
+          const entries = byDate.get(key) || [];
+          entries.push({ todo, lane });
+          byDate.set(key, entries);
+          const offset = Math.round((parseDate(key) - gridStart) / 86_400_000);
+          if (offset >= 0 && offset < dayCount) {
+            const weekIndex = Math.floor(offset / 7);
+            laneCounts[weekIndex] = Math.max(laneCounts[weekIndex], lane + 1);
+          }
+        }
+      });
+      return { byDate, laneCounts, todoIds: new Set(spans.map((todo) => todo.id)) };
+    }
+
+    function appendMonthMultiDayLanes(day, key, weekIndex, layout) {
+      const laneCount = layout.laneCounts[weekIndex] || 0;
+      if (!laneCount) return;
+      const entriesByLane = new Map((layout.byDate.get(key) || []).map((entry) => [entry.lane, entry]));
+      const lanes = document.createElement('div');
+      lanes.className = 'day-multiday-lanes';
+      lanes.style.gridTemplateRows = `repeat(${laneCount}, minmax(29px, auto))`;
+      for (let lane = 0; lane < laneCount; lane += 1) {
+        const slot = document.createElement('div');
+        slot.className = 'day-multiday-slot';
+        const entry = entriesByLane.get(lane);
+        if (entry) {
+          const { todo } = entry;
+          const actualStart = todo.date === key;
+          const actualEnd = todoEndDate(todo) === key;
+          const item = document.createElement('button');
+          item.type = 'button';
+          item.className = `day-multiday-event todo-status-color ${todoStatusClass(todo.status)} ${actualStart ? 'is-span-start' : 'is-span-continuation'} ${actualEnd ? 'is-span-end' : ''}`;
+          const title = `${todo.urgent ? `NUJNO ${String.fromCharCode(183)} ` : ''}${todo.title || 'Brez naslova'}`;
+          item.setAttribute('aria-label', `${title}; ${todoDateTimeLabel(todo)}`);
+          if (actualStart) {
+            const titleElement = document.createElement('span');
+            titleElement.className = 'day-multiday-event-title';
+            titleElement.textContent = title;
+            item.appendChild(titleElement);
+          }
+          item.addEventListener('pointerdown', (event) => beginMonthTodoPointerDrag(event, item, todo, key));
+          item.addEventListener('click', (event) => {
+            if (Date.now() - lastMonthTodoDragAt < 450) {
+              event.preventDefault();
+              event.stopPropagation();
+              return;
+            }
+            openTodoDialog(todo);
+          });
+          slot.appendChild(item);
+        }
+        lanes.appendChild(slot);
+      }
+      day.appendChild(lanes);
+    }
     const MONTH_TODO_DRAG_HOLD_MS = 350;
     const MONTH_TODO_DRAG_CANCEL_DISTANCE = 12;
     let monthTodoPointerDrag = null;
@@ -7008,87 +7346,88 @@
       clearMonthTodoPointerDrag();
     }
     function renderMonth() {
-      const calendar = $("calendar");
-      calendar.innerHTML = "";
+      const calendar = $('calendar');
+      calendar.innerHTML = '';
       const entries = contextEntries();
-      const todos = calendarTodos().filter((todo) => state.showCompletedCalendarTodos || todo.status !== "execution");
+      const todos = calendarTodos().filter((todo) => state.showCompletedCalendarTodos || todo.status !== 'execution');
       const todayDate = new Date();
-      $("todayDayNumber").textContent = todayDate.getDate();
-      $("todayBtn").setAttribute("aria-label", `Danes, ${todayDate.toLocaleDateString("sl-SI")}`);
+      $('todayDayNumber').textContent = todayDate.getDate();
+      $('todayBtn').setAttribute('aria-label', `Danes, ${todayDate.toLocaleDateString('sl-SI')}`);
 
       const year = state.current.getFullYear();
       const month = state.current.getMonth();
-      $("monthTitle").textContent = `${monthNames[month]} ${year}`;
+      $('monthTitle').textContent = `${monthNames[month]} ${year}`;
 
       const first = new Date(year, month, 1);
       const startOffset = (first.getDay() + 6) % 7;
       const gridStart = new Date(year, month, 1 - startOffset);
+      const multiDayLayout = monthMultiDayLayout(todos, gridStart);
       const today = dateKey(new Date());
 
-      for (let i = 0; i < 42; i++) {
+      for (let i = 0; i < 42; i += 1) {
         const dayDate = new Date(gridStart);
         dayDate.setDate(gridStart.getDate() + i);
         const key = dateKey(dayDate);
-        const day = document.createElement("div");
-        day.className = "day";
+        const day = document.createElement('div');
+        day.className = 'day';
         day.dataset.date = key;
-        if (dayDate.getMonth() !== month) day.classList.add("other");
-        if (key === today) day.classList.add("today");
-        if (entries.some((entry) => entry.date === key && entry.status === "vacation")) {
-          day.classList.add("has-vacation");
+        if (dayDate.getMonth() !== month) day.classList.add('other');
+        if (key === today) day.classList.add('today');
+        if (entries.some((entry) => entry.date === key && entry.status === 'vacation')) {
+          day.classList.add('has-vacation');
         }
 
-        const head = document.createElement("div");
-        head.className = "day-head";
+        const head = document.createElement('div');
+        head.className = 'day-head';
         head.dataset.date = key;
-        head.setAttribute("role", "button");
+        head.setAttribute('role', 'button');
         head.tabIndex = 0;
-        head.setAttribute("aria-label", `Odpri dnevni pregled za ${dayDate.toLocaleDateString("sl-SI")}`);
-        head.addEventListener("click", () => openDayTimeline(key));
-        head.addEventListener("keydown", (event) => {
-          if (event.key === "Enter" || event.key === " ") {
+        head.setAttribute('aria-label', `Odpri dnevni pregled za ${dayDate.toLocaleDateString('sl-SI')}`);
+        head.addEventListener('click', () => openDayTimeline(key));
+        head.addEventListener('keydown', (event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
             event.preventDefault();
             openDayTimeline(key);
           }
         });
 
         head.innerHTML = `<span class="day-number">${dayDate.getDate()}</span>`;
-        const editHint = document.createElement("button");
-        editHint.className = "day-edit-hint";
-        editHint.type = "button";
-        editHint.textContent = "▦";
-        editHint.title = "Odpri dnevni pregled";
-        editHint.setAttribute("aria-label", "Odpri dnevni pregled");
-        editHint.addEventListener("click", (event) => { event.stopPropagation(); openDayTimeline(key); });
+        const editHint = document.createElement('button');
+        editHint.className = 'day-edit-hint';
+        editHint.type = 'button';
+        editHint.textContent = String.fromCharCode(9638);
+        editHint.title = 'Odpri dnevni pregled';
+        editHint.setAttribute('aria-label', 'Odpri dnevni pregled');
+        editHint.addEventListener('click', (event) => { event.stopPropagation(); openDayTimeline(key); });
         head.appendChild(editHint);
 
         if (!isAdminView()) {
-          const add = document.createElement("button");
-          add.addEventListener("click", (event) => event.stopPropagation());
-          add.className = "quick-add";
-          add.type = "button";
-          add.textContent = "+";
-          add.title = `Dodaj opravilo za ${activeWorker()?.name || "delavca"}`;
-          add.addEventListener("click", () => startTodoForDate(key));
+          const add = document.createElement('button');
+          add.addEventListener('click', (event) => event.stopPropagation());
+          add.className = 'quick-add';
+          add.type = 'button';
+          add.textContent = '+';
+          add.title = `Dodaj opravilo za ${activeWorker()?.name || 'delavca'}`;
+          add.addEventListener('click', () => startTodoForDate(key));
           head.appendChild(add);
-
         }
         day.appendChild(head);
+        appendMonthMultiDayLanes(day, key, Math.floor(i / 7), multiDayLayout);
 
         todos
-          .filter((todo) => todoOccursOnDate(todo, key) && !monthlyHiddenTodoStatusIds.has(todo.status))
+          .filter((todo) => todoOccursOnDate(todo, key) && !multiDayLayout.todoIds.has(todo.id) && !monthlyHiddenTodoStatusIds.has(todo.status))
           .sort(calendarDayTodoSort)
           .forEach((todo) => {
-            const item = document.createElement("button");
-            item.type = "button";
+            const item = document.createElement('button');
+            item.type = 'button';
             const settlementIndicators = dayTodoSettlementIndicators(todo);
-            item.className = `day-todo todo-status-color ${todoStatusClass(todo.status)} ${todo.done ? "done" : ""} ${settlementIndicators ? "has-settlements" : ""}`;
-            const time = todo.start && todo.end ? `${escapeHtml(todo.start)}&ndash;${escapeHtml(todo.end)}` : "Brez ure";
-            const client = todoClientCalendarName(todo, "Brez stranke");
-            const title = `${todo.urgent ? "NUJNO \u00b7 " : ""}${todo.title || "Brez naslova"}`;
+            item.className = `day-todo todo-status-color ${todoStatusClass(todo.status)} ${todo.done ? 'done' : ''} ${settlementIndicators ? 'has-settlements' : ''}`;
+            const time = todo.start && todo.end ? `${escapeHtml(todo.start)}&ndash;${escapeHtml(todo.end)}` : 'Brez ure';
+            const client = todoClientCalendarName(todo, 'Brez stranke');
+            const title = `${todo.urgent ? `NUJNO ${String.fromCharCode(183)} ` : ''}${todo.title || 'Brez naslova'}`;
             item.innerHTML = `<span class="day-todo-time">${time}</span><span class="day-todo-client">${escapeHtml(client)}</span><span class="day-todo-title">${escapeHtml(title)}</span>${settlementIndicators}`;
-            item.addEventListener("pointerdown", (event) => beginMonthTodoPointerDrag(event, item, todo, key));
-            item.addEventListener("click", (event) => {
+            item.addEventListener('pointerdown', (event) => beginMonthTodoPointerDrag(event, item, todo, key));
+            item.addEventListener('click', (event) => {
               if (Date.now() - lastMonthTodoDragAt < 450) {
                 event.preventDefault();
                 event.stopPropagation();
@@ -7102,7 +7441,6 @@
         calendar.appendChild(day);
       }
     }
-
     function dayTimelineMinutes(value) {
       const match = /^(\d{2}):(\d{2})$/.exec(String(value || ""));
       if (!match) return null;
@@ -7180,10 +7518,10 @@
 
     function dayTimelineTodos() {
       if (!state.dayTimelineDate) return [];
-      return calendarTodos({ includeArchived: state.dayTimelineIncludeArchived }).filter((todo) => todoOccursOnDate(todo, state.dayTimelineDate)).map((todo) => {
+      return calendarTodos({ includeArchived: state.dayTimelineIncludeArchived }).map((todo) => {
         const draft = state.dayTimelineDrafts.get(todo.id);
         return draft ? { ...todo, ...draft } : todo;
-      }).sort((a, b) => {
+      }).filter((todo) => todoOccursOnDate(todo, state.dayTimelineDate)).sort((a, b) => {
         const startDifference = (dayTimelineMinutes(a.start) ?? Infinity) - (dayTimelineMinutes(b.start) ?? Infinity);
         return startDifference || (dayTimelineMinutes(a.end) ?? Infinity) - (dayTimelineMinutes(b.end) ?? Infinity) || a.title.localeCompare(b.title, "sl");
       });
@@ -7217,14 +7555,82 @@
 
     function resolveDayTimelineHoursWarning(todo) {
       if (!isDayTimelineHoursWarning(todo)) return;
-      state.dayTimelineHoursResolvedSourceId = state.dayTimelineHoursWarning.sourceId;
+      state.dayTimelineHoursPendingSourceId = state.dayTimelineHoursWarning?.sourceId || state.dayTimelineHoursPendingSourceId;
       state.dayTimelineHoursWarning = null;
+    }
+
+    function saveDayTimelineDraft(todo, start, end, date) {
+      const targetDate = String(date || todo.date || "");
+      const previousDate = String(todo.date || "");
+      const dayShift = previousDate && targetDate
+        ? Math.round((new Date(`${targetDate}T00:00:00`) - new Date(`${previousDate}T00:00:00`)) / 86400000)
+        : 0;
+      const endDate = shiftDateKey(todoEndDate(todo), dayShift) || targetDate;
+      const changed = start !== todo.start || end !== todo.end || targetDate !== previousDate || endDate !== todoEndDate(todo);
+      if (!changed) state.dayTimelineDrafts.delete(todo.id);
+      else {
+        state.dayTimelineDrafts.set(todo.id, {
+          start,
+          end,
+          date: targetDate,
+          endDate,
+          hoursNeedsReview: false,
+          baseUpdatedAt: String(todo.updatedAt || "")
+        });
+      }
+      // A missing-hours warning is resolved only after the user actually
+      // changes a time slot. Merely opening the timeline must not dismiss it.
+      if (changed) resolveDayTimelineHoursWarning(todo);
+    }
+
+    async function saveDayTimelineDrafts() {
+      if (!state.dayTimelineDrafts.size || state.dayTimelineSaving) return;
+      const button = $("saveDayTimeline");
+      const closeButton = $("closeDayTimeline");
+      const day = state.dayTimelineDate;
+      const draftIds = new Set(state.dayTimelineDrafts.keys());
+      const items = [...state.dayTimelineDrafts.entries()].map(([id, draft]) => ({
+        id,
+        start: draft.start,
+        end: draft.end,
+        date: draft.date,
+        baseUpdatedAt: draft.baseUpdatedAt || ""
+      }));
+      const editLockTokens = state.todoEditLock ? { [state.todoEditLock.todoId]: state.todoEditLock.token } : {};
+      state.dayTimelineSaving = true;
+      button.disabled = true;
+      closeButton.disabled = true;
+      try {
+        const data = await api("/api/todos/time-batch", {
+          method: "POST",
+          body: JSON.stringify({ items, editLockTokens })
+        });
+        state.todos = data.todos || state.todos;
+        state.todoRevision += 1;
+        // Remove precisely the submitted drafts. New changes are blocked while
+        // saving, but this also keeps the operation correct if that changes.
+        draftIds.forEach((id) => state.dayTimelineDrafts.delete(id));
+        if (state.dayTimelineHoursPendingSourceId) {
+          state.dayTimelineHoursResolvedSourceId = state.dayTimelineHoursPendingSourceId;
+          state.dayTimelineHoursPendingSourceId = "";
+        }
+        refreshClientList();
+        render();
+        if ($("dayTimelineDialog").open && state.dayTimelineDate === day) renderDayTimeline();
+        showNotice("Spremembe dnevnega pogleda so shranjene.");
+      } finally {
+        state.dayTimelineSaving = false;
+        if ($("dayTimelineDialog").open) {
+          $("saveDayTimeline").disabled = state.dayTimelineDrafts.size === 0;
+          closeButton.disabled = false;
+        }
+      }
     }
 
     async function openTodoFromDayTimeline(todo) {
       if (!todo) return;
-      if (state.dayTimelineDrafts.size) {
-        showNotice("Najprej shrani ali preklici spremembe dnevne časovnice.");
+      if (state.dayTimelineSaving || state.dayTimelineDrafts.size) {
+        showNotice(state.dayTimelineSaving ? "Dnevni pogled se še shranjuje." : "Najprej shrani ali prekliči spremembe dnevne časovnice.");
         return;
       }
       state.todoDialogReturnDayDate = state.dayTimelineDate;
@@ -7234,8 +7640,8 @@
     }
 
     async function openNewTodoFromDayTimeline(clientY) {
-      if (state.dayTimelineDrafts.size) {
-        showNotice("Najprej shrani ali preklici spremembe dnevne časovnice.");
+      if (state.dayTimelineSaving || state.dayTimelineDrafts.size) {
+        showNotice(state.dayTimelineSaving ? "Dnevni pogled se še shranjuje." : "Najprej shrani ali prekliči spremembe dnevne časovnice.");
         return;
       }
       if (isAdminView()) {
@@ -7246,6 +7652,7 @@
       const clickedMinute = (clientY - timelineRect.top) / state.dayTimelineMinuteHeight;
       const startMinute = Math.max(0, Math.min(1380, Math.floor(clickedMinute / 15) * 15));
       const endMinute = startMinute + 60;
+      state.todoDialogReturnDayDate = state.dayTimelineDate;
       $("dayTimelineDialog").close();
       await new Promise((resolve) => setTimeout(resolve, 0));
       await openTodoDialog({
@@ -7284,9 +7691,12 @@
         year: "numeric"
       });
       $("dayTimelineZoomValue").textContent = Math.round(state.dayTimelineMinuteHeight * 100) + " %";
+      $("saveDayTimeline").disabled = state.dayTimelineSaving || state.dayTimelineDrafts.size === 0;
 
       const todos = dayTimelineTodos();
-      const allDay = todos.filter((todo) => !todo.start || !todo.end).sort(todoSort);
+      // Date ranges are all-day planning tasks. They never expose clock drag
+      // handles in the daily timeline, even when an older import still has a time.
+      const allDay = todos.filter((todo) => todoIsMultiDayCalendarSpan(todo) || !todo.start || !todo.end).sort(todoSort);
       const allDayShell = $("dayAllDay");
       const allDayItems = $("dayAllDayItems");
       allDayShell.classList.toggle("hidden", !allDay.length);
@@ -7323,7 +7733,7 @@
       const eventsLayer = document.createElement("div");
       eventsLayer.className = "day-timeline-events";
       eventsLayer.id = "dayTimelineEvents";
-      const layouts = dayTimelineLayouts(todos);
+      const layouts = dayTimelineLayouts(todos.filter((todo) => !todoIsMultiDayCalendarSpan(todo) && todo.start && todo.end));
       layouts.forEach((layout) => {
         const { todo, startMinute, endMinute, lane, laneCount } = layout;
         const client = todoClientCalendarName(todo);
@@ -7452,13 +7862,17 @@
     }
 
     function openDayTimeline(date, { includeArchived = false } = {}) {
+      const dialog = $("dayTimelineDialog");
+      if (dialog.open && date !== state.dayTimelineDate && (state.dayTimelineSaving || state.dayTimelineDrafts.size)) {
+        showNotice(state.dayTimelineSaving ? "Dnevni pogled se še shranjuje." : "Najprej shrani ali prekliči spremembe dnevne časovnice.");
+        return;
+      }
       state.dayTimelineDate = date;
       state.dayTimelineIncludeArchived = Boolean(includeArchived);
       state.dayTimelineInteraction = null;
       state.dayTimelinePointers.clear();
       state.dayTimelineGesture = null;
       renderDayTimeline();
-      const dialog = $("dayTimelineDialog");
       if (!dialog.open) dialog.showModal();
       requestAnimationFrame(() => {
         const scroll = $("dayTimelineScroll");
@@ -7469,6 +7883,10 @@
     }
 
     function navigateDayTimeline(dayOffset) {
+      if (state.dayTimelineSaving || state.dayTimelineDrafts.size) {
+        showNotice(state.dayTimelineSaving ? "Dnevni pogled se še shranjuje." : "Najprej shrani ali prekliči spremembe dnevne časovnice.");
+        return;
+      }
       const date = parseDate(state.dayTimelineDate);
       if (!date) return;
       date.setDate(date.getDate() + dayOffset);
@@ -7476,6 +7894,7 @@
     }
 
     function beginDayTimelineEventPointer(event, todo) {
+      if (state.dayTimelineSaving || todoIsMultiDayCalendarSpan(todo)) return;
       if (event.pointerType === "mouse" && event.button !== 0) return;
       const eventElement = event.currentTarget;
       const resizeHandle = event.target.closest(".day-resize-handle");
@@ -7488,10 +7907,14 @@
       const startMinute = dayTimelineMinutes(todo.start);
       const endMinute = dayTimelineMinutes(todo.end);
       if (startMinute === null || endMinute === null) return;
-      const touchHoldRequired = event.pointerType === "touch" && mode === "move";
-      event.preventDefault();
-      event.stopPropagation();
-      try { eventElement.setPointerCapture?.(event.pointerId); } catch { /* Firefox touch capture can be unavailable. */ }
+      // Touch must be held before *any* event drag or resize starts. A normal
+      // swipe therefore remains a timeline scroll instead of a surprise edit.
+      const touchHoldRequired = event.pointerType === "touch";
+      if (!touchHoldRequired) {
+        event.preventDefault();
+        event.stopPropagation();
+        try { eventElement.setPointerCapture?.(event.pointerId); } catch { /* Firefox capture can be unavailable. */ }
+      }
       state.dayTimelineInteraction = {
         pointerId: event.pointerId,
         pointerType: event.pointerType,
@@ -7515,7 +7938,6 @@
         touchReady: !touchHoldRequired,
         touchHoldRequired,
         holdTimer: null,
-        lockPromise: null,
         element: eventElement
       };
       if (touchHoldRequired) {
@@ -7523,9 +7945,26 @@
         interaction.holdTimer = setTimeout(() => {
           if (state.dayTimelineInteraction !== interaction) return;
           interaction.touchReady = true;
+          state.dayTimelinePointers.delete(interaction.pointerId);
+          const remainingPointer = [...state.dayTimelinePointers.entries()][0];
+          if (remainingPointer) {
+            state.dayTimelineGesture = {
+              type: "pan",
+              pointerId: remainingPointer[0],
+              startX: remainingPointer[1].x,
+              startY: remainingPointer[1].y,
+              lastX: remainingPointer[1].x,
+              lastY: remainingPointer[1].y,
+              moved: true
+            };
+          } else {
+            state.dayTimelineGesture = null;
+            $("dayTimelineScroll").classList.remove("is-panning");
+          }
+          try { interaction.element.setPointerCapture?.(interaction.pointerId); } catch { /* Firefox capture can be unavailable. */ }
           interaction.element.classList.add("is-drag-ready");
           navigator.vibrate?.(10);
-        }, 220);
+        }, 400);
       }
     }
 
@@ -7613,12 +8052,12 @@
       interaction.currentX = event.clientX;
       interaction.currentY = event.clientY;
       if (!interaction.touchReady) {
-        event.preventDefault();
-        event.stopPropagation();
-        interaction.startX = event.clientX;
-        interaction.startY = event.clientY;
-        interaction.currentX = event.clientX;
-        interaction.currentY = event.clientY;
+        if (Math.hypot(event.clientX - interaction.startX, event.clientY - interaction.startY) > 9) {
+          clearTimeout(interaction.holdTimer);
+          state.dayTimelineInteraction = null;
+        }
+        // Do not prevent the event: the parent timeline receives this move and
+        // uses it as an ordinary scroll gesture.
         return;
       }
       const deltaX = event.clientX - interaction.startX;
@@ -7629,7 +8068,6 @@
       if (!interaction.moved) {
         interaction.moved = true;
         interaction.element.classList.add("is-moving");
-        interaction.lockPromise = acquireTodoEditLockForDialog(interaction.todoId);
         interaction.autoScrollAt = performance.now();
         interaction.autoScrollFrame = requestAnimationFrame(tickDayTimelineEventAutoScroll);
       }
@@ -7652,23 +8090,13 @@
         return;
       }
       if (!todo) { renderDayTimeline(); return; }
-      const locked = await interaction.lockPromise;
-      if (!locked) { renderDayTimeline(); return; }
-      try {
-        await saveTodoTimeToServer(
-          todo,
-          dayTimelineTime(interaction.startMinute),
-          dayTimelineTime(interaction.endMinute),
-          interaction.targetDate
-        );
-        resolveDayTimelineHoursWarning(todo);
-        clearTodoEditLockState();
-        renderDayTimeline();
-      } catch (error) {
-        await releaseTodoEditLockForDialog();
-        renderDayTimeline();
-        throw error;
-      }
+      saveDayTimelineDraft(
+        todo,
+        dayTimelineTime(interaction.startMinute),
+        dayTimelineTime(interaction.endMinute),
+        interaction.targetDate
+      );
+      renderDayTimeline();
     }
 
     function dayTimelinePointerMetrics() {
@@ -7681,11 +8109,13 @@
     }
 
     function startDayTimelineViewportPointer(event) {
-      if (event.target.closest(".day-timeline-event")) return;
+      const eventCard = event.target.closest(".day-timeline-event");
+      const touchCandidate = state.dayTimelineInteraction;
+      if (eventCard && !(touchCandidate && touchCandidate.pointerId === event.pointerId && touchCandidate.pointerType === "touch" && !touchCandidate.touchReady)) return;
       if (event.pointerType === "mouse" && event.button !== 0) return;
       event.preventDefault();
       const scroll = $("dayTimelineScroll");
-      scroll.setPointerCapture?.(event.pointerId);
+      if (!eventCard) scroll.setPointerCapture?.(event.pointerId);
       state.dayTimelinePointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
       scroll.classList.add("is-panning");
       const metrics = dayTimelinePointerMetrics();
@@ -7756,9 +8186,7 @@
         $("dayTimelineScroll").classList.remove("is-panning");
       }
       if (horizontalSwipe && !remaining) {
-        const date = parseDate(state.dayTimelineDate);
-        date.setDate(date.getDate() + (event.clientX < gesture.startX ? 1 : -1));
-        openDayTimeline(dateKey(date), { includeArchived: state.dayTimelineIncludeArchived });
+        navigateDayTimeline(event.clientX < gesture.startX ? 1 : -1);
       } else if (isEmptyTap && !remaining) {
         openNewTodoFromDayTimeline(event.clientY).catch((error) => showNotice(error.message));
       }
@@ -8053,7 +8481,7 @@
           const workerKm = Number(todo.billingKm || 0);
           const workAmount = Number((hours * hourlyRate).toFixed(2));
           const kmAmount = Number((workerKm * kmRate).toFixed(2));
-          return { todoId: todo.id, assignmentGroupId: todo.assignmentGroupId || todo.id, workerId, date: todo.date, start: todo.start, end: todo.end, title: todo.title, client: todo.client, minutes, hours, hourlyRate, workerKm, commuteKm: 0, km: workerKm, kmRate, workAmount, kmAmount, totalAmount: Number((workAmount + kmAmount).toFixed(2)) };
+          return { todoId: todo.id, assignmentGroupId: todo.assignmentGroupId || todo.id, workerId, date: todo.date, start: todo.start, end: todo.end, title: todo.title, client: todo.client, minutes, hours, hourlyRate, workerKm, workFromHome: Boolean(todo.workFromHome), commuteKm: 0, km: workerKm, kmRate, workAmount, kmAmount, totalAmount: Number((workAmount + kmAmount).toFixed(2)) };
         })
         .filter((line) => line.hours > 0)
         .sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.start).localeCompare(String(b.start)) || String(a.title).localeCompare(String(b.title)));
@@ -8473,7 +8901,7 @@
         <div class="client-row">
           <div>
             <strong>${escapeHtml(client.name)}</strong>
-            <span class="todo-meta">${escapeHtml([client.search, client.taxId, client.email, client.phone, client.address, client.postal, client.city].filter(Boolean).join(" | "))}</span>
+            <span class="todo-meta">${escapeHtml([client.search, client.taxId, client.email, clientContactSummary(client), client.address, client.postal, client.city].filter(Boolean).join(" | "))}</span>
             <span class="todo-meta">Dav&#269;na / ID: ${escapeHtml(client.clientId || "MANJKA ALI JE PODVOJENA")}</span>
             ${client.syncError ? `<span class="todo-meta error">${escapeHtml(client.syncError)}</span>` : ""}
           </div>
@@ -8569,6 +8997,92 @@
 
     }
 
+    function clientContactId() {
+      return window.crypto?.randomUUID?.() || "";
+    }
+
+    function normalizeClientContactDraft(contact = {}) {
+      return {
+        id: String(contact?.id || "").trim() || clientContactId(),
+        name: String(contact?.name || contact?.contact || "").trim(),
+        phone: String(contact?.phone || contact?.number || "").trim()
+      };
+    }
+
+    function clientEditContactDrafts({ includeBlank = false } = {}) {
+      const rows = [...$("clientEditContacts").querySelectorAll(".client-edit-contact-row")].map((row) => ({
+        id: String(row.dataset.contactId || "").trim() || clientContactId(),
+        name: row.querySelector(".client-edit-contact-name")?.value.trim() || "",
+        phone: row.querySelector(".client-edit-contact-phone")?.value.trim() || ""
+      }));
+      return includeBlank ? rows : rows.filter((contact) => contact.name || contact.phone);
+    }
+
+    function renderClientEditContacts(contacts = []) {
+      const list = $("clientEditContacts");
+      const rows = (contacts.length ? contacts : [{}]).map(normalizeClientContactDraft);
+      list.replaceChildren();
+      rows.forEach((contact, index) => {
+        const row = document.createElement("div");
+        row.className = "client-edit-contact-row";
+        row.dataset.contactId = contact.id;
+
+        const nameLabel = document.createElement("label");
+        nameLabel.textContent = index === 0 ? "Kontaktna oseba" : "Kontaktna oseba *";
+        const name = document.createElement("input");
+        name.type = "text";
+        name.className = "client-edit-contact-name";
+        name.autocomplete = "name";
+        name.placeholder = index === 0 ? "Neobvezno pri eni številki" : "Ime in priimek";
+        name.value = contact.name;
+        nameLabel.appendChild(name);
+
+        const phoneLabel = document.createElement("label");
+        phoneLabel.textContent = "Telefon";
+        const phone = document.createElement("input");
+        phone.type = "tel";
+        phone.className = "client-edit-contact-phone";
+        phone.autocomplete = "tel";
+        phone.placeholder = "npr. 041 123 456";
+        phone.value = contact.phone;
+        phoneLabel.appendChild(phone);
+
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "client-edit-contact-remove";
+        remove.title = "Odstrani kontakt";
+        remove.setAttribute("aria-label", "Odstrani kontakt");
+        remove.textContent = "×";
+        remove.addEventListener("click", () => {
+          const next = clientEditContactDrafts({ includeBlank: true }).filter((item) => item.id !== contact.id);
+          renderClientEditContacts(next);
+        });
+
+        row.append(nameLabel, phoneLabel, remove);
+        list.appendChild(row);
+      });
+    }
+
+    function contactsForClientEdit(client = {}) {
+      const contacts = Array.isArray(client.contacts) ? client.contacts : [];
+      if (contacts.length) return contacts;
+      return client.phone ? [{ name: "", phone: client.phone }] : [{}];
+    }
+
+    function validateClientEditContacts() {
+      const contacts = clientEditContactDrafts();
+      const incomplete = contacts.find((contact) => contact.name && !contact.phone);
+      if (incomplete) throw new Error("Pri kontaktni osebi manjka telefonska številka.");
+      if (contacts.length > 1 && contacts.some((contact) => !contact.name)) {
+        throw new Error("Pri več telefonskih številkah vpiši ime vsake kontaktne osebe.");
+      }
+      return contacts;
+    }
+
+    function canDeleteClient() {
+      return state.user?.role === "boss";
+    }
+
     function openClientEditDialog(clientId) {
       const client = allClientRecords().find((item) => item.clientId === clientId || item.id === clientId);
       if (!client) {
@@ -8580,12 +9094,17 @@
       $("clientEditSearch").value = client.search || client.name || "";
       $("clientEditTax").value = client.taxId || "";
       $("clientEditEmail").value = client.email || "";
-      $("clientEditPhone").value = client.phone || "";
       $("clientEditAddress").value = client.address || "";
       $("clientEditCity").value = client.city || "";
       $("clientEditPostal").value = client.postal || "";
       $("clientEditCountry").value = client.country || "Slovenija";
       $("clientEditVatPayer").value = client.vatPayer ? "true" : "false";
+      renderClientEditContacts(contactsForClientEdit(client));
+      const deletionAllowed = canDeleteClient() && Boolean(client.clientId || client.id);
+      $("clientEditDeleteArea").classList.toggle("hidden", !deletionAllowed);
+      $("clientEditDeleteHint").textContent = deletionAllowed
+        ? "Brisanje je mogoče samo, kadar stranka nima aktivnih opravil ali vnosov."
+        : "";
       $("clientEditDialog").showModal();
       requestAnimationFrame(() => $("clientEditName").focus());
     }
@@ -8601,14 +9120,16 @@
       if (taxId && !/^(?=.{8,20}$)(?=.*\d)[A-Z0-9]+$/.test(taxId)) {
         throw new Error("Vpiši veljavno davčno številko.");
       }
-      const data = await saveClientToServer({
+      const contacts = validateClientEditContacts();
+      await saveClientToServer({
         ...existing,
         clientId,
         name,
         search,
         taxId,
         email: $("clientEditEmail").value.trim(),
-        phone: $("clientEditPhone").value.trim(),
+        phone: contacts[0]?.phone || "",
+        contacts,
         address: $("clientEditAddress").value.trim(),
         city: $("clientEditCity").value.trim(),
         postal: $("clientEditPostal").value.trim(),
@@ -8617,7 +9138,29 @@
       });
       $("clientEditDialog").close();
       showNotice("Spremembe stranke so shranjene v bazi INDUS URE.");
+    }
 
+    async function deleteClientFromDialog() {
+      const clientId = String($("clientEditId").value || "").trim();
+      if (!clientId || !canDeleteClient()) return;
+      if (!await showAppConfirm("Izbrišem stranko? Brisanje ni mogoče, če ima še aktivna opravila ali vnose.")) return;
+      try {
+        const data = await api(`/api/clients/${encodeURIComponent(clientId)}`, { method: "DELETE" });
+        state.clients = Array.isArray(data?.clients)
+          ? data.clients
+          : (state.clients || []).filter((client) => String(client.clientId || client.id || "") !== clientId);
+        refreshClientList();
+        renderSearch();
+        renderClients();
+        $("clientEditDialog").close();
+        showNotice("Stranka je izbrisana iz baze.");
+      } catch (error) {
+        if (Number(error?.status) === 409) {
+          showNotice("Stranke ni mogoče izbrisati, ker ima aktivna opravila ali vnose. Najprej jih zapri, prestavi ali izbriši.");
+          return;
+        }
+        throw error;
+      }
     }
     function todoAttachmentCount(todo) {
       return (todo.photos || []).length + (todo.driveFiles || []).length;
@@ -9993,18 +10536,41 @@
       button.textContent = source ? `Odpri in uredi: ${source.title || "opravilo"}` : "Izvorno opravilo ni več na voljo";
     }
 
-    function syncTodoFormEndDate({ force = false } = {}) {
-      const date = $("todoFormDate").value;
-      const endDate = $("todoFormEndDate");
-      if (!date) {
-        endDate.value = "";
-        endDate.dataset.auto = "true";
-        return;
+    function syncTodoFormDateRangeControls() {
+      const date = $('todoFormDate').value;
+      const endDate = $('todoFormEndDate');
+      const isTimeEntry = timeEntryStatusIds.has($('todoFormStatus').value);
+      if (isTimeEntry && date && endDate.value !== date) {
+        endDate.value = date;
+        endDate.dataset.auto = 'true';
       }
-      if (force || !endDate.value || endDate.value < date || endDate.dataset.auto === "true") endDate.value = date;
-      endDate.dataset.auto = String(endDate.value === date);
+      const multiDay = Boolean(date && endDate.value && endDate.value > date);
+      ['todoFormStart', 'todoFormEnd'].forEach((id) => {
+        const field = $(id);
+        field.disabled = multiDay;
+        field.closest('label').classList.toggle('hidden', multiDay);
+        if (multiDay) field.value = '';
+      });
+      endDate.disabled = Boolean(isTimeEntry && date);
+      endDate.closest('label').classList.toggle('date-range-locked', Boolean(isTimeEntry && date));
+      $('todoFormEndDateHint').textContent = isTimeEntry
+        ? 'Vpis ur je vedno isti dan.'
+        : 'Privzeto isti dan. Spremeni samo za večdnevno opravilo.';
     }
 
+    function syncTodoFormEndDate({ force = false } = {}) {
+      const date = $('todoFormDate').value;
+      const endDate = $('todoFormEndDate');
+      if (!date) {
+        endDate.value = '';
+        endDate.dataset.auto = 'true';
+        syncTodoFormDateRangeControls();
+        return;
+      }
+      if (force || !endDate.value || endDate.value < date || endDate.dataset.auto === 'true') endDate.value = date;
+      endDate.dataset.auto = String(endDate.value === date);
+      syncTodoFormDateRangeControls();
+    }
     function applyMealDefaults() {
       const now = new Date();
       const startMinutes = Math.min(23 * 60, Math.round((now.getHours() * 60 + now.getMinutes()) / 15) * 15);
@@ -10014,6 +10580,10 @@
       $("todoFormStart").value = dayTimelineTime(startMinutes);
       $("todoFormEnd").value = dayTimelineTime(startMinutes + 45);
       $("todoFormClient").value = "";
+      state.todoDialogClientContactIds = [];
+      state.todoDialogClientContactClientId = "";
+      state.todoDialogClientContactPickerOpen = false;
+      renderTodoFormClientContacts();
       $("todoFormNotes").value = "";
       $("todoFormMaterial").value = "";
       state.todoDialogPhotos = [];
@@ -10038,6 +10608,8 @@
           ? ($("todoFormId").value ? "Uredi vpis ur" : "Novo zaključeno opravilo")
           : $("todoFormId").value ? "Uredi opravilo" : "Novo opravilo";
       ["todoFormClientField", "todoFormAssigneeField", "todoFormAttachments"].forEach((id) => $(id).classList.toggle("hidden", meal));
+      if (meal) $("todoFormClientContactsField").classList.add("hidden");
+      else syncTodoFormClientContacts({ preserve: true });
       const logisticsStatus = todoLogisticsStatusIds.has($("todoFormStatus").value);
       ["todoFormTask", "todoFormNotes"].forEach((id) => $(id).closest("label").classList.toggle("hidden", meal));
       $("todoFormMaterialField").classList.toggle("hidden", meal || logisticsStatus);
@@ -10053,10 +10625,13 @@
       $("todoFormClientBilling").classList.toggle("hidden", !showClientMileage);
       $("todoFormBilling").classList.toggle("hidden", !showWorkerMileage);
       $("todoFormHourlyRateField").classList.toggle("hidden", !showHourlyRate);
+      $("todoFormWorkFromHomeField").classList.toggle("hidden", !showWorkerMileage);
+      if (!showWorkerMileage) $("todoFormWorkFromHome").checked = false;
       $("todoFormWarrantyField").classList.toggle("hidden", !showWorkerMileage);
       $("todoFormImportedField").classList.add("hidden");
       $("todoFormUrgentField").classList.toggle("hidden", timeEntry);
       if (timeEntry) $("todoFormUrgent").checked = false;
+      syncTodoFormDateRangeControls();
     }
 
     function renderTodoTaskSuggestions() {
@@ -10110,6 +10685,11 @@
       $("todoFormEndDate").value = todo.date ? todoEndDate(todo) : "";
       $("todoFormEndDate").dataset.auto = String(!todo.date || todoEndDate(todo) === todo.date);
       $("todoFormClient").value = client?.search || todo.client || $("reportClient").value || "";
+      state.todoDialogClientContactClientId = String(client?.clientId || client?.id || "");
+      state.todoDialogClientContactIds = Array.isArray(todo.clientContactIds)
+        ? todo.clientContactIds.map((id) => String(id || "")).filter(Boolean)
+        : [];
+      state.todoDialogClientContactPickerOpen = false;
       hideTodoClientSuggestions();
       $("todoFormTask").value = todo.title || "";
       renderTodoTaskSuggestions();
@@ -10120,8 +10700,10 @@
       $("todoFormUrgent").checked = Boolean(todo.urgent);
       $("todoFormOrdered").checked = todoOrderStatusIds.has(todoStatus(todo.status || "open").id) && Boolean(todo.ordered);
       $("todoFormWarranty").checked = Boolean(todo.warranty);
+      $("todoFormWorkFromHome").checked = Boolean(todo.workFromHome);
       $("todoFormImported").checked = Boolean(todo.imported);
       updateTodoFormStatus();
+      syncTodoFormClientContacts({ preserve: true });
        autosizeTodoNarrativeFields();
        if (state.todoMealEntry && !editing) applyMealDefaults();
       const draftAssignees = todo._hoursAssigneeIds?.length
@@ -10200,6 +10782,8 @@
         done: $("todoFormStatus").value === "execution",
         billingHourlyRate: hourlyRate,
         billingKm,
+        workFromHome: Boolean($("todoFormWorkFromHome").checked),
+        clientContactIds: meal ? [] : [...state.todoDialogClientContactIds],
         clientKm: meal ? 0 : clientKm,
         clientVehicle: meal ? "personal" : clientVehicle,
         driveFiles: state.todoDialogDriveFiles,
@@ -11051,8 +11635,16 @@
       drag.targetId = targetId;
       drag.targetBucket = targetBucket;
       drag.targetPlacement = targetPlacement;
+      drag.hasDropTarget = Boolean(targetElement);
       updateTodoPointerDragGhost(drag);
       updateTodoPointerDragIndicator(drag);
+    }
+
+    function todoPointerDragScrollBounds() {
+      const scroller = document.scrollingElement || document.documentElement;
+      const viewportHeight = window.visualViewport?.height || window.innerHeight;
+      const currentTop = Math.max(0, Number(window.scrollY || scroller.scrollTop || 0));
+      return { currentTop, maxTop: Math.max(0, scroller.scrollHeight - viewportHeight) };
     }
 
     function todoPointerDragScrollVelocity(clientY) {
@@ -11061,7 +11653,8 @@
       const bottomDistance = Math.max(0, clientY - (window.innerHeight - edge));
       const direction = topDistance ? -1 : bottomDistance ? 1 : 0;
       const proximity = Math.min(1, Math.max(topDistance, bottomDistance) / edge);
-      if (!direction) return 0;
+      const { currentTop, maxTop } = todoPointerDragScrollBounds();
+      if (!direction || (direction < 0 && currentTop <= 0) || (direction > 0 && currentTop >= maxTop - 1)) return 0;
       return direction * (TODO_DRAG_AUTOSCROLL_SLOW_PX_PER_SECOND
         + (TODO_DRAG_AUTOSCROLL_FAST_PX_PER_SECOND - TODO_DRAG_AUTOSCROLL_SLOW_PX_PER_SECOND) * proximity ** 2);
     }
@@ -11071,13 +11664,16 @@
       const velocity = todoPointerDragScrollVelocity(todoPointerDrag.clientY);
       if (velocity) {
         const elapsed = Math.min(50, Math.max(0, timestamp - todoPointerDrag.autoScrollAt));
-        window.scrollBy(0, velocity * elapsed / 1000);
-        updateTodoPointerDragTarget(todoPointerDrag.clientX, todoPointerDrag.clientY);
+        const { currentTop, maxTop } = todoPointerDragScrollBounds();
+        const nextTop = Math.max(0, Math.min(maxTop, currentTop + velocity * elapsed / 1000));
+        if (Math.abs(nextTop - currentTop) >= 0.5) {
+          window.scrollTo(0, nextTop);
+          updateTodoPointerDragTarget(todoPointerDrag.clientX, todoPointerDrag.clientY);
+        }
       }
       todoPointerDrag.autoScrollAt = timestamp;
       todoPointerDrag.autoScrollFrame = requestAnimationFrame(tickTodoPointerDragAutoScroll);
     }
-
     function clearTodoPointerDrag() {
       const drag = todoPointerDrag;
       if (!drag) return null;
@@ -11086,6 +11682,7 @@
       todoPointerDrag = null;
       if (drag.handle.hasPointerCapture?.(drag.pointerId)) drag.handle.releasePointerCapture(drag.pointerId);
       drag.handle.classList.remove("drag-armed");
+      document.documentElement.classList.remove("todo-drag-active");
       clearTodoDragVisuals();
       return drag;
     }
@@ -11096,6 +11693,7 @@
       drag.holdTimer = 0; drag.active = true;
       drag.handle.classList.remove("drag-armed");
       drag.item.classList.add("dragging");
+      document.documentElement.classList.add("todo-drag-active");
       const sourceRect = drag.item.getBoundingClientRect();
       drag.ghostElement = document.createElement("div");
       drag.ghostElement.className = "todo-drag-ghost";
@@ -11127,7 +11725,7 @@
         handle: event.currentTarget, item, pointerType: event.pointerType, active: false, startX: event.clientX, startY: event.clientY,
         grabOffsetX: event.clientX - itemRect.left, grabOffsetY: event.clientY - itemRect.top, ghostAnchorX: 0, ghostAnchorY: 0,
         clientX: event.clientX, clientY: event.clientY, autoScrollFrame: 0, autoScrollAt: performance.now(), holdTimer: 0,
-        ghostElement: null, indicatorElement: null
+        ghostElement: null, indicatorElement: null, hasDropTarget: false
       };
       try { event.currentTarget.setPointerCapture?.(event.pointerId); } catch {}
       if (isTouch) {
@@ -11149,8 +11747,8 @@
     function finishTodoPointerDrag(event) {
       if (!todoPointerDrag || todoPointerDrag.pointerId !== event.pointerId) return;
       event.preventDefault();
-      const { sourceId, targetId, targetPlacement, targetBucket, active } = clearTodoPointerDrag();
-      if (!active) return;
+      const { sourceId, targetId, targetPlacement, targetBucket, active, hasDropTarget } = clearTodoPointerDrag();
+      if (!active || !hasDropTarget) return;
       reorderTodos(sourceId, targetId, targetPlacement, targetBucket).catch((error) => showNotice(error.message));
     }
 
@@ -11219,9 +11817,53 @@
         .trim();
     }
 
+    function clientContactRecords(client = {}) {
+      const records = Array.isArray(client?.contacts) ? client.contacts : [];
+      const seen = new Set();
+      const contacts = [];
+      const add = (contact = {}) => {
+        const name = String(contact?.name || contact?.contact || "").trim();
+        const phone = String(contact?.phone || contact?.number || "").trim();
+        if (!name && !phone) return;
+        const id = String(contact?.id || "").trim();
+        const key = id ? `id:${id}` : `value:${normalizeText(name)}\u0000${normalizeText(phone)}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        contacts.push({ id, name, phone });
+      };
+      records.forEach(add);
+      const legacyPhone = String(client?.phone || "").trim();
+      if (legacyPhone && !contacts.some((contact) => String(contact.phone || "").replace(/\s+/g, "") === legacyPhone.replace(/\s+/g, ""))) {
+        add({ phone: legacyPhone });
+      }
+      return contacts;
+    }
+
+    function clientContactSummary(client = {}) {
+      return clientContactRecords(client)
+        .map((contact) => contact.name && contact.phone ? `${contact.name} · ${contact.phone}` : (contact.phone || contact.name))
+        .filter(Boolean)
+        .join(" | ");
+    }
+
+    function clientSearchFields(client = {}) {
+      return [
+        client.clientId,
+        client.id,
+        client.name,
+        client.search,
+        client.taxId,
+        client.email,
+        client.phone,
+        clientContactSummary(client),
+        ...clientContactRecords(client).flatMap((contact) => [contact.name, contact.phone])
+      ].filter(Boolean);
+    }
+
     function clientMatches(client, query) {
-      const haystack = normalizeText(`${client.name} ${client.search} ${client.email || ""} ${client.phone || ""}`);
-      return haystack.includes(normalizeText(query));
+      const needle = normalizeText(query);
+      return Boolean(needle) && clientSearchFields(client)
+        .some((field) => normalizeText(field).includes(needle));
     }
 
     function allClientRecords() {
@@ -11238,6 +11880,10 @@
         const mergedSearch = normalizeText(previousSearch) === normalizeText(nextSearch)
           ? previousSearch || nextSearch
           : [previousSearch, nextSearch].filter(Boolean).join(" ");
+        const combinedContacts = clientContactRecords({ contacts: [
+          ...(existing?.contacts || []),
+          ...clientContactRecords(source)
+        ] });
         map.set(key, {
           name: existing?.name || clean,
           search: mergedSearch,
@@ -11245,10 +11891,13 @@
           id: existing?.id || source.clientId || source.id || "",
           taxId: existing?.taxId || source.taxId || "",
           email: existing?.email || source.email || "",
-          phone: existing?.phone || source.phone || "",
+          phone: existing?.phone || source.phone || combinedContacts[0]?.phone || "",
+          contacts: combinedContacts,
           address: existing?.address || source.address || "",
           city: existing?.city || source.city || "",
           postal: existing?.postal || source.postal || "",
+          country: existing?.country || source.country || "",
+          vatPayer: existing?.vatPayer ?? source.vatPayer ?? false,
           syncError: existing?.syncError || source.syncError || ""
         });
       };
@@ -12222,6 +12871,7 @@
       const endDate = $("todoFormEndDate");
       if (!date || !endDate.value || endDate.value < date) endDate.value = date;
       endDate.dataset.auto = String(!date || endDate.value === date);
+      syncTodoFormDateRangeControls();
     });
     $("clearTodoFormDate").addEventListener("click", () => {
       $("todoFormDate").value = "";
@@ -12229,6 +12879,7 @@
       $("todoFormEndDate").dataset.auto = "true";
       $("todoFormStart").value = "";
       $("todoFormEnd").value = "";
+      syncTodoFormDateRangeControls();
       $("todoFormDate").focus();
     });
     $("todoFormStatusChoices").addEventListener("click", (event) => {
@@ -12250,7 +12901,10 @@
       if (assignees.length === 1) hourlyRate.value = workerDefaultHourlyRate(assignees[0]);
     });
     $("todoFormClient").addEventListener("focus", renderTodoClientSuggestions);
-    $("todoFormClient").addEventListener("input", renderTodoClientSuggestions);
+    $("todoFormClient").addEventListener("input", () => {
+      renderTodoClientSuggestions();
+      syncTodoFormClientContacts();
+    });
     $("todoFormClient").addEventListener("keydown", (event) => {
       if (event.key === "ArrowDown" || event.key === "ArrowUp") {
         event.preventDefault();
@@ -12269,6 +12923,26 @@
       if (!option) return;
       event.preventDefault();
       chooseTodoClientSuggestion(Number(option.dataset.index));
+    });
+    $("todoFormClientContactPickerToggle").addEventListener("click", () => {
+      if (!todoFormSelectedClient()) return;
+      state.todoDialogClientContactPickerOpen = !state.todoDialogClientContactPickerOpen;
+      renderTodoFormClientContacts();
+    });
+    $("todoFormClientContactPicker").addEventListener("change", (event) => {
+      const input = event.target.closest("[data-todo-client-contact-id]");
+      if (!input) return;
+      const id = String(input.dataset.todoClientContactId || "");
+      const selected = new Set(state.todoDialogClientContactIds);
+      if (input.checked) selected.add(id); else selected.delete(id);
+      state.todoDialogClientContactIds = [...selected];
+      renderTodoFormClientContacts();
+    });
+    $("todoFormClientContactSelected").addEventListener("click", (event) => {
+      const button = event.target.closest("[data-remove-todo-client-contact-id]");
+      if (!button) return;
+      state.todoDialogClientContactIds = state.todoDialogClientContactIds.filter((id) => id !== button.dataset.removeTodoClientContactId);
+      renderTodoFormClientContacts();
     });
     $("todoForm").addEventListener("submit", (event) => {
       event.preventDefault();
@@ -12497,6 +13171,16 @@
     ["clientsList", "clientsSearchResults"].forEach((id) => $(id).addEventListener("click", handleClientListClick));
     $("closeClientEdit").addEventListener("click", () => $("clientEditDialog").close());
     $("cancelClientEdit").addEventListener("click", () => $("clientEditDialog").close());
+    $("addClientEditContact").addEventListener("click", () => {
+      renderClientEditContacts([...clientEditContactDrafts({ includeBlank: true }), { id: clientContactId(), name: "", phone: "" }]);
+      const rows = $("clientEditContacts").querySelectorAll(".client-edit-contact-row");
+      rows[rows.length - 1]?.querySelector(".client-edit-contact-name")?.focus();
+    });
+    $("deleteClientEdit").addEventListener("click", () => {
+      const button = $("deleteClientEdit");
+      button.disabled = true;
+      deleteClientFromDialog().catch((error) => showNotice(error.message)).finally(() => { button.disabled = false; });
+    });
     $("clientEditForm").addEventListener("submit", (event) => {
       event.preventDefault();
       const button = $("saveClientEdit");
@@ -12522,6 +13206,9 @@
     $("dayTimelineZoomOut").addEventListener("click", () => setDayTimelineZoom(state.dayTimelineMinuteHeight / 1.25));
     $("dayTimelineZoomIn").addEventListener("click", () => setDayTimelineZoom(state.dayTimelineMinuteHeight * 1.25));
     $("dayTimelineFit").addEventListener("click", fitDayTimeline);
+    $("saveDayTimeline").addEventListener("click", () => {
+      saveDayTimelineDrafts().catch((error) => showNotice(error.message));
+    });
     $("prevDayTimeline").addEventListener("click", () => navigateDayTimeline(-1));
     $("nextDayTimeline").addEventListener("click", () => navigateDayTimeline(1));
     $("dayTimelineScroll").addEventListener("wheel", (event) => {
@@ -12543,6 +13230,11 @@
     document.addEventListener("pointercancel", (event) => {
       finishDayTimelineEventPointer(event, true).catch(() => {});
     });
+    $("dayTimelineDialog").addEventListener("cancel", (event) => {
+      if (!state.dayTimelineSaving) return;
+      event.preventDefault();
+      showNotice("Dnevni pogled se še shranjuje.");
+    });
     $("dayTimelineDialog").addEventListener("close", () => {
       const interaction = state.dayTimelineInteraction;
       state.dayTimelineInteraction = null;
@@ -12552,9 +13244,11 @@
       state.dayTimelineGesture = null;
       $("dayTimelineScroll").classList.remove("is-panning");
       state.dayTimelineDrafts.clear();
-      const hoursWarning = state.dayTimelineHoursWarning;
-      const hoursSourceId = hoursWarning?.sourceId || state.dayTimelineHoursResolvedSourceId;
+      // X intentionally discards drafts. Only a successfully saved correction
+      // may continue into the project-completion question.
+      const hoursSourceId = state.dayTimelineHoursResolvedSourceId;
       state.dayTimelineHoursWarning = null;
+      state.dayTimelineHoursPendingSourceId = "";
       state.dayTimelineHoursResolvedSourceId = "";
       if (hoursSourceId) {
         state.todoHoursCompletionSourceId = hoursSourceId;
@@ -12580,7 +13274,16 @@
     });
     $("todoDialog").addEventListener("close", releaseTodoEditLockForDialog);
     $("todoDialog").addEventListener("close", () => { if ($("completionRequestDialog").open) $("completionRequestDialog").close(); });
-    $("todoDialog").addEventListener("close", () => { state.todoDialogReturnDayDate = ""; });
+    $("todoDialog").addEventListener("close", () => {
+      const returnDayDate = state.todoDialogReturnDayDate;
+      state.todoDialogReturnDayDate = "";
+      // A normal edit/cancel from daily view returns to the same day. Hour-entry
+      // flows have their own completion path immediately below.
+      if (!returnDayDate || state.todoHoursSourceId || state.todoHoursFixingTime) return;
+      setTimeout(() => {
+        if (!$("todoDialog").open && !$("dayTimelineDialog").open) openDayTimeline(returnDayDate);
+      }, 0);
+    });
     $("todoDialog").addEventListener("close", () => {
       const sourceId = state.todoHoursSourceId;
       state.todoHoursSourceId = "";

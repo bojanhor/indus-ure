@@ -44,19 +44,49 @@ function normalizedClientSource(value) {
   return source ? "legacy-import" : "local";
 }
 
+// Phone numbers belong to people, not merely to a company. Keep the old
+// singular `phone` field as a compatibility mirror of the first entry while
+// allowing the API to store a proper, ordered contact list.
+function normalizeClientContacts(value, legacyPhone = "") {
+  const source = Array.isArray(value)
+    ? value
+    : (legacyPhone ? [{ name: "", phone: legacyPhone }] : []);
+  const seen = new Set();
+  return source
+    .map((item) => ({
+      // A UUID makes a selected person stable even if their name or number is
+      // later corrected on the client record.
+      id: isStableClientId(item?.id) ? String(item.id).trim() : createClientId(),
+      name: String(item?.name || item?.contact || "").trim().replace(/\s+/g, " ").slice(0, 160),
+      phone: String(item?.phone || item?.number || "").trim().replace(/\s+/g, " ").slice(0, 80)
+    }))
+    .filter((item) => item.phone)
+    .filter((item) => {
+      const key = `${normalizedText(item.name)}\u0000${item.phone.replace(/\s+/g, "")}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, 12);
+}
+
 function normalizeStoredClient(client = {}) {
   const taxId = taxIdFromClient(client);
   const legacyId = String(client.clientId || client.id || "").trim();
   const clientId = isStableClientId(legacyId) ? legacyId : createClientId();
   const importIssue = String(client.syncError || client.importIssue || "").trim();
   const source = normalizedClientSource(client.source || (client.sheetRow ? "legacy-import" : ""));
+  const contacts = normalizeClientContacts(client.contacts, client.phone);
   return {
     id: clientId,
     clientId,
     name: String(client.name || client.search || "").trim(),
     search: String(client.search || client.name || "").trim(),
     email: String(client.email || "").trim(),
-    phone: String(client.phone || "").trim(),
+    // `phone` remains for old browsers and exports. New callers should use
+    // `contacts`, whose first row is mirrored here.
+    phone: contacts[0]?.phone || "",
+    contacts,
     address: String(client.address || "").trim(),
     city: String(client.city || "").trim(),
     postal: String(client.postal || "").trim(),
@@ -85,6 +115,7 @@ module.exports = {
   isStableClientId,
   isUsableTaxId,
   normalizeStoredClient,
+  normalizeClientContacts,
   normalizeTaxId,
   normalizedText,
   resolveStableClientId,

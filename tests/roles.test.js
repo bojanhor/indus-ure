@@ -443,6 +443,35 @@ test("obračun naredi nespremenljiv posnetek ur posameznega delavca", () => {
   assert.deepEqual(payrollForUser(db, db.users.ibro).map((payroll) => payroll.id), ["p-1"]);
   assert.equal(payrollForUser(db, db.users.bojan).length, 1);
 });
+test("delo od doma ohrani ročno kilometrino, vendar ne sproži poti v službo", () => {
+  const db = {
+    users: { ibro: { id: "ibro", billing: { hourlyRate: 20, commuteKmOneWay: 7 } } },
+    settings: { billing: { workerOwnVehicleKmRate: 0.22 } },
+    payrolls: [],
+    todos: [
+      { id: "remote-first", syncUser: "ibro", status: "execution", date: "2026-07-20", start: "08:00", end: "09:00", title: "Od doma", billingKm: 3, workFromHome: true },
+      { id: "onsite-later", syncUser: "ibro", status: "execution", date: "2026-07-20", start: "10:00", end: "11:00", title: "Na terenu", billingKm: 1, workFromHome: false },
+      { id: "remote-only", syncUser: "ibro", status: "execution", date: "2026-07-21", start: "08:00", end: "09:00", title: "Samo doma", billingKm: 2, workFromHome: true }
+    ]
+  };
+  const payroll = buildPayrollSnapshot(db, "ibro", { from: "2026-07-20", to: "2026-07-21" }, { status: "draft" });
+  assert.deepEqual(payroll.lines.map((line) => [line.workerKm, line.commuteKm, line.km, line.workFromHome]), [
+    [3, 0, 3, true],
+    [1, 14, 15, false],
+    [2, 0, 2, true]
+  ]);
+  assert.equal(payroll.km, 20);
+});
+
+test("vnos ur ohrani oznako dela od doma, navadno opravilo pa je nima", () => {
+  const timeEntry = cleanTodo({ title: "Vpis ur", status: "execution", date: "2026-07-20", start: "08:00", end: "09:00", workFromHome: true });
+  const regularTodo = cleanTodo({ title: "Projekt", status: "open", workFromHome: true });
+  assert.equal(timeEntry.workFromHome, true);
+  assert.equal(regularTodo.workFromHome, false);
+  const roleResult = todoForUserRole(worker, { users: { ibro: { id: "ibro", billing: { hourlyRate: 20 } } }, settings: {} }, timeEntry, { ...timeEntry, workFromHome: true });
+  assert.equal(roleResult.workFromHome, true);
+});
+
 test("pot v sluzbo se obracuna enkrat na dejanski delovni dan", () => {
   const db = {
     users: { ibro: { id: "ibro", billing: { hourlyRate: 20, commuteKmOneWay: 7 } } },

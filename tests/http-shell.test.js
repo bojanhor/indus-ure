@@ -92,6 +92,33 @@ test("obračunsko obdobje samodejno sledi novemu dnevu, ročna izbira pa ostane 
   assert.match(html, /saveBillingRangeSelection\(billingWorkerId\(\), \{ from: \$\("billingFrom"\)\.value, to: \$\("billingTo"\)\.value \}\);/);
   assert.match(html, /saveBillingRangeSelection\(state\.billingWorkerId, \{ from: button\.dataset\.from, to: button\.dataset\.to \}\);/);
 });
+test("večdnevno opravilo dobi povezani mesečni trak in varne kontrole vnosa", async () => {
+  const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  assert.match(html, /function todoIsMultiDayCalendarSpan\(todo\)/);
+  assert.match(html, /function monthMultiDayLayout\(todos, gridStart, dayCount = 42\)/);
+  assert.match(html, /function appendMonthMultiDayLanes\(day, key, weekIndex, layout\)/);
+  assert.match(html, /day-multiday-event-title/);
+  assert.match(html, /is-span-continuation/);
+  assert.match(html, /!multiDayLayout\.todoIds\.has\(todo\.id\)/);
+  assert.match(html, /function syncTodoFormDateRangeControls\(\)/);
+  assert.match(html, /field\.disabled = multiDay;/);
+  assert.match(html, /endDate\.disabled = Boolean\(isTimeEntry && date\)/);
+  assert.match(html, /function todoPointerDragScrollBounds\(\)/);
+  assert.match(html, /hasDropTarget: false/);
+  assert.match(html, /if \(!active \|\| !hasDropTarget\) return;/);
+});
+test("imenik strank podpira več stabilnih kontaktov in varno brisanje", async () => {
+  const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  assert.match(html, /id="clientEditContacts"/);
+  assert.match(html, /id="addClientEditContact"/);
+  assert.match(html, /function clientEditContactDrafts\(/);
+  assert.match(html, /contacts\.length > 1 && contacts\.some\(\(contact\) => !contact\.name\)/);
+  assert.match(html, /function clientContactRecords\(/);
+  assert.match(html, /function clientSearchFields\(/);
+  assert.match(html, /function deleteClientFromDialog\(\)/);
+  assert.match(html, /\/api\/clients\/\$\{encodeURIComponent\(clientId\)\}/);
+  assert.match(html, /function canDeleteClient\(\)[\s\S]*?state\.user\?\.role === "boss"/);
+});
 function request(port, pathname, { method = "GET", headers = {}, body = "" } = {}) {
   return new Promise((resolve, reject) => {
     const request = http.request({ host: "127.0.0.1", port, path: pathname, method, headers }, (response) => {

@@ -11,7 +11,17 @@ const {
   normalizeTaxId,
   resolveStableClientId
 } = require("../outputs/client-identity");
-const { normalizeDb, pruneUnusedAdHocClients, validateTodo } = require("../outputs/server");
+const {
+  normalizeDb,
+  pruneUnusedAdHocClients,
+  validateTodo,
+  cleanClient,
+  validateClient,
+  clientDeletionBlocker,
+  deleteClientIfSafe,
+  canDeleteClient,
+  applyTodoClientContactSelection
+} = require("../outputs/server");
 
 const serverPath = path.join(__dirname, "../outputs/server.js");
 const storePath = path.join(__dirname, "../outputs/postgres-store.js");
@@ -49,6 +59,168 @@ test("iskanje stranke vedno vrne njen lokalni ID", () => {
   assert.equal(resolveStableClientId(clients, "ne obstaja"), "");
 });
 
+test("telefon stranke se varno prevede v stabilne kontakte", () => {
+  const legacy = normalizeStoredClient({ name: "ABC", phone: "+386 40 111 222" });
+  assert.equal(legacy.contacts.length, 1);
+  assert.equal(legacy.contacts[0].name, "");
+  assert.equal(legacy.contacts[0].phone, "+386 40 111 222");
+  assert.equal(isStableClientId(legacy.contacts[0].id), true);
+  assert.equal(legacy.phone, "+386 40 111 222");
+
+  const invalid = cleanClient({
+    name: "ABC",
+    contacts: [{ phone: "+386 40 111 222" }, { name: "Ana", phone: "+386 40 222 333" }]
+  });
+  assert.match(validateClient(invalid), /ime kontakta/);
+
+  const valid = cleanClient({
+    name: "ABC",
+    contacts: [{ name: "Ana", phone: "+386 40 111 222" }, { name: "Bine", phone: "+386 40 222 333" }]
+  });
+  assert.equal(validateClient(valid), "");
+  assert.equal(valid.phone, "+386 40 111 222");
+  assert.equal(isStableClientId(valid.contacts[0].id), true);
+
+  const preserved = cleanClient({ name: "ABC", phone: "+386 40 999 999" }, { existingClient: valid });
+  assert.equal(preserved.contacts[0].id, valid.contacts[0].id);
+  assert.equal(preserved.contacts[0].phone, "+386 40 999 999");
+  assert.equal(preserved.contacts[1].id, valid.contacts[1].id);
+});
+
+test("posodobitev stranke brez ID-jev kontaktov ohrani izbrane osebe", () => {
+  const clientId = createClientId();
+  const existing = normalizeStoredClient({
+    clientId,
+    name: "ABC",
+    contacts: [{ name: "Ana", phone: "+386 40 111 222" }, { name: "Bine", phone: "+386 40 222 333" }]
+  });
+  const updateWithoutIds = cleanClient({
+    clientId,
+    name: "ABC",
+    contacts: existing.contacts.map(({ name, phone }) => ({ name, phone }))
+  }, { existingClient: existing });
+  assert.deepEqual(updateWithoutIds.contacts.map((contact) => contact.id), existing.contacts.map((contact) => contact.id));
+
+  const correctedName = cleanClient({
+    clientId,
+    name: "ABC",
+    contacts: [{ name: "Ana Novak", phone: existing.contacts[0].phone }, { name: "Bine", phone: existing.contacts[1].phone }]
+  }, { existingClient: existing });
+  assert.equal(correctedName.contacts[0].id, existing.contacts[0].id);
+  const selected = applyTodoClientContactSelection(
+    { clients: [correctedName] },
+    { clientId, client: "ABC", clientContactIds: [existing.contacts[0].id] },
+    { strict: true }
+  );
+  assert.equal(selected.error, "");
+  assert.deepEqual(selected.todo.clientContactIds, [existing.contacts[0].id]);
+});
+test("opravilo shrani samo ID-je kontaktov iz izbrane stranke", () => {
+  const clientId = createClientId();
+  const client = normalizeStoredClient({
+    clientId,
+    name: "ABC",
+    contacts: [{ name: "Ana", phone: "+386 40 111 222" }, { name: "Bine", phone: "+386 40 222 333" }]
+  });
+  const todo = { clientId, client: "ABC", clientContactIds: [client.contacts[1].id], clientContacts: [{ name: "Ponarejeno", phone: "000" }] };
+  const selected = applyTodoClientContactSelection({ clients: [client] }, todo, { strict: true });
+  assert.equal(selected.error, "");
+  assert.deepEqual(selected.todo.clientContactIds, [client.contacts[1].id]);
+  assert.deepEqual(selected.todo.clientContacts, [{ id: client.contacts[1].id, name: "Bine", phone: "+386 40 222 333" }]);
+
+  const rejected = applyTodoClientContactSelection({ clients: [client] }, { ...todo, clientContactIds: [createClientId()] }, { strict: true });
+  assert.match(rejected.error, /ne pripada/);
+});
+
+test("stranke z aktivnimi dogodki ni mogoče izbrisati", () => {
+  const clientId = createClientId();
+  const database = {
+    clients: [normalizeStoredClient({ clientId, name: "ABC", search: "abc" })],
+    todos: [{ id: "open", clientId, client: "ABC", status: "open" }],
+    entries: []
+  };
+  const blocker = clientDeletionBlocker(database, clientId);
+  assert.equal(blocker.status, 409);
+  assert.deepEqual(blocker.activeTodoIds, ["open"]);
+  assert.equal(deleteClientIfSafe(database, clientId).deleted, false);
+  assert.equal(canDeleteClient({ role: "worker" }), false);
+  assert.equal(canDeleteClient({ role: "boss" }), true);
+
+  database.todos[0].archivedAt = "2026-07-20T12:00:00.000Z";
+  const deleted = deleteClientIfSafe(database, clientId);
+  assert.equal(deleted.deleted, true);
+  assert.equal(database.clients.length, 0);
+});
+
+test("točna enkratna migracija Ane Kepic preusmeri reference na Tina Petrnel", () => {
+  const sourceId = createClientId();
+  const targetId = createClientId();
+  const database = {
+    users: {},
+    entries: [{ id: "legacy-entry", clientId: sourceId, client: "GOSTINSTVO IN TURIZEM ANA KEPIC S.P.", date: "2026-07-20", start: "08:00", end: "09:00", status: "unbilled" }],
+    todos: [{ id: "task-1", assignmentGroupId: "event-1", title: "Servis", clientId: sourceId, client: "GOSTINSTVO IN TURIZEM ANA KEPIC S.P.", status: "execution", syncUser: "ibro", date: "2026-07-20", start: "08:00", end: "09:00" }],
+    debts: [],
+    payrolls: [],
+    clientBills: [{ id: "bill-1", clientId: sourceId, clientName: "GOSTINSTVO IN TURIZEM ANA KEPIC S.P.", eventIds: ["event-1"], lines: [{ eventId: "event-1", todoIds: ["task-1"], title: "Servis" }] }],
+    clients: [
+      normalizeStoredClient({ clientId: sourceId, name: "GOSTINSTVO IN TURIZEM ANA KEPIC S.P.", search: "Tilkova ani sobe kepic" }),
+      // The migration target is deliberately stored only with `s.p.` here;
+      // matching against `tina petrnel sp` must still find it.
+      normalizeStoredClient({ clientId: targetId, name: "TINA PETRNEL s.p.", search: "Tina" })
+    ]
+  };
+  normalizeDb(database);
+  assert.deepEqual(database.clients.map((client) => client.clientId), [targetId]);
+  assert.equal(database.todos[0].clientId, targetId);
+  assert.equal(database.entries[0].clientId, targetId);
+  assert.equal(database.clientBills[0].clientId, targetId);
+  assert.equal(database.clientBills[0].clientName, "TINA PETRNEL s.p.");
+  // The next normalization is intentionally a no-op: the source client no
+  // longer exists, so a restored/updated database cannot be double-migrated.
+  assert.equal(normalizeDb(database).changed, false);
+});
+test("migracija Ane Kepic preusmeri tudi stari davcni ID in kontakt", () => {
+  const targetId = createClientId();
+  const sourceTaxId = "SI12345678";
+  const sourceContactId = createClientId();
+  const database = {
+    users: {},
+    entries: [],
+    debts: [],
+    payrolls: [],
+    clientBills: [],
+    todos: [{
+      id: "legacy-tax-reference",
+      assignmentGroupId: "legacy-tax-reference",
+      title: "Servis",
+      clientId: sourceTaxId,
+      client: "GOSTINSTVO IN TURIZEM ANA KEPIC S.P.",
+      clientContactIds: [sourceContactId],
+      clientContacts: [{ id: sourceContactId, name: "Ana", phone: "+386 40 111 222" }],
+      status: "execution",
+      syncUser: "ibro",
+      date: "2026-07-20",
+      start: "08:00",
+      end: "09:00"
+    }],
+    clients: [
+      {
+        clientId: sourceTaxId,
+        name: "GOSTINSTVO IN TURIZEM ANA KEPIC S.P.",
+        search: "Ana Kepic",
+        taxId: sourceTaxId,
+        contacts: [{ id: sourceContactId, name: "Ana", phone: "+386 40 111 222" }]
+      },
+      normalizeStoredClient({ clientId: targetId, name: "TINA PETRNEL s.p.", search: "Tina" })
+    ]
+  };
+  normalizeDb(database);
+  assert.deepEqual(database.clients.map((client) => client.clientId), [targetId]);
+  assert.equal(database.todos[0].clientId, targetId);
+  assert.deepEqual(database.todos[0].clientContactIds, [sourceContactId]);
+  assert.equal(database.clients[0].contacts.some((contact) => contact.id === sourceContactId), true);
+  assert.equal(applyTodoClientContactSelection({ clients: database.clients }, database.todos[0], { strict: true }).error, "");
+});
 test("normalizacija obdrži reference opravil na lokalno stranko", () => {
   const id = createClientId();
   const database = {

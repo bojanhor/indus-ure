@@ -10,8 +10,11 @@ const PDFDocument = require("pdfkit");
 const { PostgresStore } = require("./postgres-store");
 const {
   isUsableTaxId,
+  isStableClientId,
   normalizeStoredClient,
-  normalizeTaxId
+  normalizeClientContacts,
+  normalizeTaxId,
+  normalizedText
 } = require("./client-identity");
 
 const PORT = Number(process.env.PORT || 8123);
@@ -334,6 +337,232 @@ function pruneUnusedTodoAttachments(db) {
   }
   return changed;
 }
+const CLIENT_REFERENCE_MIGRATIONS = Object.freeze([
+  Object.freeze({
+    from: "GOSTINSTVO IN TURIZEM ANA KEPIC S.P.",
+    to: "tina petrnel sp"
+  })
+]);
+
+function clientIdentityTexts(client = {}) {
+  return [client.clientId, client.id, client.name, client.search, client.taxId]
+    .map(normalizedText)
+    .filter(Boolean);
+}
+
+function clientMatchesReference(item, client) {
+  if (!item || !client?.clientId) return false;
+  const referenceId = String(item.clientId || "").trim();
+  // Older rows can still contain a tax number, alias, or imported name in
+  // `clientId`. Treat all recorded identities as a match so a client merge
+  // cannot delete its source record while leaving legacy references orphaned.
+  if (referenceId) return clientIdentityTexts(client).includes(normalizedText(referenceId));
+  const referenceText = normalizedText(item.client || item.clientName || "");
+  return Boolean(referenceText && clientIdentityTexts(client).includes(referenceText));
+}
+
+function migrationClientText(value) {
+  // The business name may be stored as `s.p.`, `sp`, or with extra spacing.
+  // This normalization is used only by the explicit migration list above.
+  return normalizedText(value).replace(/[\s._,\-/]+/g, "");
+}
+
+function clientByMigrationText(clients, value) {
+  const wanted = migrationClientText(value);
+  if (!wanted) return null;
+  return (clients || []).find((client) => clientIdentityTexts(client).some((text) => migrationClientText(text) === wanted)) || null;
+}
+
+function cleanTodoClientContactIds(value) {
+  const source = Array.isArray(value) ? value : [];
+  return [...new Set(source
+    .map((id) => String(id || "").trim())
+    .filter(isStableClientId))]
+    .slice(0, 12);
+}
+
+function cleanTodoClientContactSnapshots(value) {
+  return (Array.isArray(value) ? value : [])
+    .map((contact) => ({
+      name: String(contact?.name || contact?.contact || "").trim().replace(/\s+/g, " ").slice(0, 160),
+      phone: String(contact?.phone || contact?.number || "").trim().replace(/\s+/g, " ").slice(0, 80)
+    }))
+    .filter((contact) => contact.phone)
+    .slice(0, 12);
+}
+
+function contactPhoneKey(value) {
+  return String(value || "").replace(/[^0-9+]/g, "");
+}
+
+function todoClientContactSelection(client, contactIds, legacyContacts = []) {
+  const selectedIds = cleanTodoClientContactIds(contactIds);
+  const available = normalizeClientContacts(client?.contacts, client?.phone);
+  const byId = new Map(available.map((contact) => [contact.id, contact]));
+  const invalidContactIds = selectedIds.filter((id) => !byId.has(id));
+  let resolvedIds = selectedIds.filter((id) => byId.has(id));
+  let invalidLegacyContacts = 0;
+  if (!resolvedIds.length && !selectedIds.length && legacyContacts.length) {
+    for (const requested of cleanTodoClientContactSnapshots(legacyContacts)) {
+      const phone = contactPhoneKey(requested.phone);
+      const match = available.find((contact) => contactPhoneKey(contact.phone) === phone
+        && (!requested.name || normalizedText(contact.name) === normalizedText(requested.name)));
+      if (!match) {
+        invalidLegacyContacts += 1;
+        continue;
+      }
+      if (!resolvedIds.includes(match.id)) resolvedIds.push(match.id);
+    }
+  }
+  return {
+    clientContactIds: resolvedIds,
+    clientContacts: resolvedIds.map((id) => byId.get(id)).filter(Boolean).map((contact) => ({ id: contact.id, name: contact.name, phone: contact.phone })),
+    invalidContactIds,
+    invalidLegacyContacts
+  };
+}
+
+function applyTodoClientContactSelection(db, todo, { strict = false } = {}) {
+  const requestedIds = cleanTodoClientContactIds(todo.clientContactIds);
+  const legacyContacts = cleanTodoClientContactSnapshots(todo.clientContacts);
+  const hasSelection = requestedIds.length || legacyContacts.length;
+  const client = (db.clients || []).find((item) => String(item.clientId || item.id || "") === String(todo.clientId || "")) || null;
+  if (!client) {
+    if (strict && hasSelection) return { error: "Kontakt se lahko izbere samo pri izbrani stranki." };
+    return { todo: { ...todo, clientContactIds: [], clientContacts: [] }, error: "" };
+  }
+  const selection = todoClientContactSelection(client, requestedIds, legacyContacts);
+  if (strict && (selection.invalidContactIds.length || selection.invalidLegacyContacts)) {
+    return { error: "Izbrani kontakt ne pripada izbrani stranki." };
+  }
+  return {
+    todo: {
+      ...todo,
+      clientContactIds: selection.clientContactIds,
+      clientContacts: selection.clientContacts
+    },
+    error: ""
+  };
+}
+
+function clientContactMatchKey(contact = {}) {
+  return `${normalizedText(contact.name || contact.contact || "")}\u0000${contactPhoneKey(contact.phone || contact.number || "")}`;
+}
+
+function mergeMigratedClientContacts(sourceClient, targetClient) {
+  const sourceContacts = normalizeClientContacts(sourceClient?.contacts, sourceClient?.phone);
+  const mergedContacts = normalizeClientContacts(targetClient?.contacts, targetClient?.phone).map((contact) => ({ ...contact }));
+  const contactIdMap = new Map();
+  for (const sourceContact of sourceContacts) {
+    const sourcePhone = contactPhoneKey(sourceContact.phone);
+    const matching = mergedContacts.find((contact) => contact.id === sourceContact.id)
+      || mergedContacts.find((contact) => clientContactMatchKey(contact) === clientContactMatchKey(sourceContact))
+      || (sourcePhone ? mergedContacts.find((contact) => contactPhoneKey(contact.phone) === sourcePhone) : null);
+    if (matching) {
+      contactIdMap.set(sourceContact.id, matching.id);
+      continue;
+    }
+    const id = mergedContacts.some((contact) => contact.id === sourceContact.id) ? crypto.randomUUID() : sourceContact.id;
+    mergedContacts.push({ ...sourceContact, id });
+    contactIdMap.set(sourceContact.id, id);
+  }
+  const contacts = normalizeClientContacts(mergedContacts);
+  const before = JSON.stringify({ contacts: targetClient.contacts || [], phone: targetClient.phone || "" });
+  targetClient.contacts = contacts;
+  targetClient.phone = contacts[0]?.phone || "";
+  return { contactIdMap, changed: before !== JSON.stringify({ contacts: targetClient.contacts, phone: targetClient.phone }) };
+}
+
+function rerouteClientReference(item, fromClient, toClient, contactIdMap = new Map()) {
+  if (!clientMatchesReference(item, fromClient)) return false;
+  item.clientId = toClient.clientId;
+  if (Object.hasOwn(item, "client") || item.client) item.client = toClient.name;
+  if (Object.hasOwn(item, "clientName") || item.clientName) item.clientName = toClient.name;
+  if (Array.isArray(item.clientContactIds)) {
+    item.clientContactIds = cleanTodoClientContactIds(item.clientContactIds.map((id) => contactIdMap.get(String(id)) || id));
+  }
+  if (Array.isArray(item.clientContacts)) {
+    item.clientContacts = item.clientContacts.map((contact) => ({
+      ...contact,
+      id: contactIdMap.get(String(contact?.id || "")) || contact?.id || ""
+    }));
+  }
+  return true;
+}
+
+// Explicit, one-off client merges. They are deliberately idempotent: no record
+// is changed until both exact client identities exist, and after the source is
+// removed a later boot is a no-op. This lets a release safely repair a restored
+// database too, without relying on an SSH-only manual SQL command.
+function applyClientReferenceMigrations(db) {
+  let changed = false;
+  const applied = [];
+  for (const migration of CLIENT_REFERENCE_MIGRATIONS) {
+    const source = clientByMigrationText(db.clients, migration.from);
+    const target = clientByMigrationText(db.clients, migration.to);
+    if (!source || !target || source.clientId === target.clientId) continue;
+    // Preserve selected people on historical tasks before deleting the source
+    // client: contacts either keep their UUID or are mapped to the equivalent
+    // target contact by name/phone.
+    const contactMerge = mergeMigratedClientContacts(source, target);
+    let references = 0;
+    for (const item of db.todos || []) if (rerouteClientReference(item, source, target, contactMerge.contactIdMap)) references += 1;
+    for (const item of db.entries || []) if (rerouteClientReference(item, source, target, contactMerge.contactIdMap)) references += 1;
+    for (const bill of db.clientBills || []) if (rerouteClientReference(bill, source, target, contactMerge.contactIdMap)) references += 1;
+    for (const payroll of db.payrolls || []) {
+      for (const line of payroll?.lines || []) {
+        if (!clientMatchesReference(line, source)) continue;
+        line.clientId = target.clientId;
+        line.client = target.name;
+        references += 1;
+      }
+    }
+    db.clients = (db.clients || []).filter((client) => client.clientId !== source.clientId);
+    changed = true;
+    applied.push({ fromClientId: source.clientId, toClientId: target.clientId, references, contactsMerged: contactMerge.changed });
+  }
+  return { changed, applied };
+}
+
+function activeClientTodoReferences(db, client) {
+  return (db.todos || []).filter((todo) => !todo.archivedAt && clientMatchesReference(todo, client));
+}
+
+function activeClientEntryReferences(db, client) {
+  // `entries` are legacy calendar records. They have no archive marker, so an
+  // open or unbilled record is still a live reference that must not be orphaned.
+  return (db.entries || []).filter((entry) => !entry.archivedAt && entry.status !== "billed" && clientMatchesReference(entry, client));
+}
+
+function clientDeletionBlocker(db, clientId) {
+  const id = String(clientId || "").trim();
+  const client = (db.clients || []).find((item) => String(item.clientId || item.id || "") === id) || null;
+  if (!client) return { client: null, error: "Stranka ne obstaja.", status: 404, activeTodoIds: [], activeEntryIds: [] };
+  const activeTodos = activeClientTodoReferences(db, client);
+  const activeEntries = activeClientEntryReferences(db, client);
+  if (activeTodos.length || activeEntries.length) {
+    return {
+      client,
+      error: `Stranke ni mogo\u010de izbrisati, dokler ima ${activeTodos.length + activeEntries.length} aktivnih dogodkov.`,
+      status: 409,
+      activeTodoIds: activeTodos.map((item) => String(item.id || "")).filter(Boolean),
+      activeEntryIds: activeEntries.map((item) => String(item.id || "")).filter(Boolean)
+    };
+  }
+  return { client, error: "", status: 200, activeTodoIds: [], activeEntryIds: [] };
+}
+
+function deleteClientIfSafe(db, clientId) {
+  const blocker = clientDeletionBlocker(db, clientId);
+  if (blocker.error) return { ...blocker, deleted: false };
+  db.clients = (db.clients || []).filter((client) => client.clientId !== blocker.client.clientId);
+  return { ...blocker, deleted: true };
+}
+
+function canDeleteClient(user) {
+  return user?.role === "boss";
+}
+
 function pruneUnusedAdHocClients(db) {
   const used = new Set();
   for (const item of [...(db.todos || []), ...(db.entries || [])]) {
@@ -723,6 +952,7 @@ function normalizeDb(db = {}) {
   if (JSON.stringify(db.clients) !== clientsBeforeNormalization) {
     changed = true;
   }
+  if (applyClientReferenceMigrations(db).changed) changed = true;
 
   const clientByText = new Map();
   for (const client of db.clients) {
@@ -913,6 +1143,11 @@ function normalizeDb(db = {}) {
       next.hoursNeedsReview = hoursNeedsReview;
       changed = true;
     }
+    const workFromHome = TIME_ENTRY_TODO_STATUSES.has(next.status) && Boolean(next.workFromHome);
+    if (next.workFromHome !== workFromHome) {
+      next.workFromHome = workFromHome;
+      changed = true;
+    }
     if (completed && next.urgent) {
       next.urgent = false;
       changed = true;
@@ -948,6 +1183,11 @@ function normalizeDb(db = {}) {
         changed = true;
       }
     }
+    const clientContactsBefore = JSON.stringify({ ids: next.clientContactIds || [], contacts: next.clientContacts || [] });
+    const resolvedContactSelection = applyTodoClientContactSelection(db, next);
+    next.clientContactIds = resolvedContactSelection.todo.clientContactIds;
+    next.clientContacts = resolvedContactSelection.todo.clientContacts;
+    if (JSON.stringify({ ids: next.clientContactIds, contacts: next.clientContacts }) !== clientContactsBefore) changed = true;
     if (typeof next.googleEventId !== "string") {
       next.googleEventId = "";
       changed = true;
@@ -1585,6 +1825,7 @@ function payrollLineForTodo(db, todo, workerId = "") {
     hours,
     hourlyRate,
     workerKm,
+    workFromHome: Boolean(todo.workFromHome),
     commuteKm: 0,
     km: workerKm,
     kmRate,
@@ -1607,7 +1848,10 @@ function withDailyCommuteInPayroll(db, workerId, lines = []) {
   const appliedDates = new Set();
   return lines.map((line) => {
     const workerKm = nonnegativeNumber(line.workerKm, nonnegativeNumber(line.km, 0, 1_000_000), 1_000_000);
-    const addCommute = !appliedDates.has(line.date);
+    // A remote entry is paid normally, but it cannot trigger the daily commute.
+    // Do not mark its date as used so the first later on-site entry still gets
+    // the one return journey reimbursement.
+    const addCommute = !Boolean(line.workFromHome) && !appliedDates.has(line.date);
     if (addCommute) appliedDates.add(line.date);
     const lineCommuteKm = addCommute ? commuteKm : 0;
     const km = Number((workerKm + lineCommuteKm).toFixed(2));
@@ -1615,6 +1859,7 @@ function withDailyCommuteInPayroll(db, workerId, lines = []) {
     return {
       ...line,
       workerKm,
+      workFromHome: Boolean(line.workFromHome),
       commuteKm: lineCommuteKm,
       km,
       kmAmount,
@@ -1674,6 +1919,7 @@ function normalizePayroll(input, db) {
       hours,
       hourlyRate,
       workerKm,
+      workFromHome: Boolean(line?.workFromHome),
       commuteKm,
       km,
       kmRate,
@@ -2622,10 +2868,10 @@ function todoEditableSnapshot(todo) {
   }));
   return JSON.stringify({
     title: String(todo?.title || ""), date: String(todo?.date || ""), endDate: String(todo?.endDate || todo?.date || ""), start: String(todo?.start || ""), end: String(todo?.end || ""),
-    client: String(todo?.client || ""), clientId: String(todo?.clientId || ""), notes: String(todo?.notes || ""), material: String(todo?.material || ""),
+    client: String(todo?.client || ""), clientId: String(todo?.clientId || ""), clientContactIds: cleanTodoClientContactIds(todo?.clientContactIds), clientContacts: cleanTodoClientContactSnapshots(todo?.clientContacts), notes: String(todo?.notes || ""), material: String(todo?.material || ""),
     status, urgent: Boolean(todo?.urgent), ordered: Boolean(todo?.ordered), warranty: isCompleted && Boolean(todo?.warranty),
     sourceProjectTodoId: String(todo?.sourceProjectTodoId || ""), billingHourlyRate: isTimeEntry ? nonnegativeNumber(todo?.billingHourlyRate, null, 10_000) : null,
-    billingKm: isTimeEntry ? nonnegativeNumber(todo?.billingKm, null, 1_000_000) : null, clientKm: isCompleted ? nonnegativeNumber(todo?.clientKm, null, 1_000_000) : null,
+    billingKm: isTimeEntry ? nonnegativeNumber(todo?.billingKm, null, 1_000_000) : null, workFromHome: isTimeEntry && Boolean(todo?.workFromHome), clientKm: isCompleted ? nonnegativeNumber(todo?.clientKm, null, 1_000_000) : null,
     clientVehicle: isCompleted ? todoVehicle(todo?.clientVehicle) : "", driveFiles: files(todo?.driveFiles), photos: files(todo?.photos)
   });
 }
@@ -2651,6 +2897,7 @@ function todoForUserRole(user, db, previous, todo) {
       ...todo,
       billingHourlyRate: isPaidTime ? previousRate ?? defaultRate : previousRate,
       billingKm: isMeal ? 0 : isPaidTime ? nonnegativeNumber(todo.billingKm, previousKm, 1_000_000) : previousKm,
+      workFromHome: isPaidTime && Boolean(todo.workFromHome),
       warranty: isMeal ? false : isCompleted ? Boolean(todo.warranty) : previousWarranty,
       imported: preserveImported,
       clientKm: isMeal ? 0 : canSetClientMileage ? nonnegativeNumber(todo.clientKm, previousClientKm, 1_000_000) : previousClientKm,
@@ -2662,6 +2909,7 @@ function todoForUserRole(user, db, previous, todo) {
     ...todo,
     billingHourlyRate: isPaidTime ? nonnegativeNumber(todo.billingHourlyRate, previousRate ?? defaultRate, 10_000) : previousRate,
     billingKm: isMeal ? 0 : isPaidTime ? nonnegativeNumber(todo.billingKm, previousKm, 1_000_000) : previousKm,
+    workFromHome: isPaidTime && Boolean(todo.workFromHome),
     warranty: isMeal ? false : isCompleted ? Boolean(todo.warranty) : previousWarranty,
     imported: !isPaidTime && preserveImported,
     clientKm: isMeal ? 0 : canSetClientMileage ? nonnegativeNumber(todo.clientKm, previousClientKm, 1_000_000) : previousClientKm,
@@ -2904,6 +3152,10 @@ function cleanTodo(input) {
     end: roundTimeToQuarterHour(input.end),
     client: isMeal ? "" : String(input.client || "").trim(),
     clientId: isMeal ? "" : String(input.clientId || "").trim(),
+    clientContactIds: isMeal ? [] : cleanTodoClientContactIds(input.clientContactIds),
+    // These are only a display snapshot; the API re-derives them from the
+    // selected contact IDs and the resolved client before persistence.
+    clientContacts: isMeal ? [] : cleanTodoClientContactSnapshots(input.clientContacts),
     notes: isMeal ? "" : String(input.notes || "").trim(),
     material: isMeal ? "" : String(input.material || "").trim(),
     status,
@@ -2919,6 +3171,7 @@ function cleanTodo(input) {
     sourceProjectTodoId: String(input.sourceProjectTodoId || "").trim().slice(0, 100),
     done: input.status === "execution",
     hoursNeedsReview: isTimeEntry && Boolean(input.hoursNeedsReview),
+    workFromHome: isTimeEntry && Boolean(input.workFromHome),
     billingHourlyRate: nonnegativeNumber(input.billingHourlyRate, null, 10_000),
     billingKm: isMeal ? 0 : nonnegativeNumber(input.billingKm, null, 1_000_000),
     clientKm: isMeal ? 0 : nonnegativeNumber(input.clientKm, null, 1_000_000),
@@ -2941,29 +3194,72 @@ function cleanTodo(input) {
       .slice(0, 8))
   };
 }
-function cleanClient(input) {
+function reconcileClientContacts(inputContacts, existingContacts = []) {
+  const rawContacts = Array.isArray(inputContacts) ? inputContacts : [];
+  const incoming = normalizeClientContacts(rawContacts);
+  const existing = normalizeClientContacts(existingContacts);
+  const usedExistingIds = new Set();
+  const rawForContact = (contact) => rawContacts.find((item) => clientContactMatchKey(item) === clientContactMatchKey(contact)) || {};
+  return normalizeClientContacts(incoming.map((contact) => {
+    const raw = rawForContact(contact);
+    const requestedId = isStableClientId(raw?.id) ? String(raw.id).trim() : "";
+    const sameId = requestedId ? existing.find((item) => item.id === requestedId && !usedExistingIds.has(item.id)) : null;
+    const samePerson = existing.find((item) => !usedExistingIds.has(item.id) && clientContactMatchKey(item) === clientContactMatchKey(contact));
+    const phone = contactPhoneKey(contact.phone);
+    const samePhone = phone ? existing.filter((item) => !usedExistingIds.has(item.id) && contactPhoneKey(item.phone) === phone) : [];
+    const match = sameId || samePerson || (samePhone.length === 1 ? samePhone[0] : null);
+    if (match) {
+      usedExistingIds.add(match.id);
+      return { ...contact, id: match.id };
+    }
+    // A client update must not accept an arbitrary new UUID as a way to
+    // replace another person's identity. Newly added contacts get a server ID.
+    return requestedId ? { ...contact, id: crypto.randomUUID() } : contact;
+  }));
+}
+
+function cleanClient(input = {}, { existingClient = null } = {}) {
   const taxId = normalizeTaxId(input.taxId || input.clientId || input.id);
   const requestedId = String(input.clientId || input.id || "").trim();
+  const hasContacts = Array.isArray(input.contacts);
+  const hasLegacyPhone = Object.hasOwn(input, "phone");
+  const existingContacts = normalizeClientContacts(existingClient?.contacts, existingClient?.phone);
+  let contacts;
+  if (hasContacts) {
+    contacts = reconcileClientContacts(input.contacts, existingContacts);
+  } else if (hasLegacyPhone) {
+    const primaryPhone = String(input.phone || "").trim();
+    if (!primaryPhone) {
+      contacts = [];
+    } else if (existingContacts.length) {
+      contacts = [{ ...existingContacts[0], phone: primaryPhone }, ...existingContacts.slice(1)];
+    } else {
+      contacts = normalizeClientContacts([{ name: "", phone: primaryPhone }]);
+    }
+  } else {
+    contacts = existingContacts;
+  }
   return normalizeStoredClient({
     id: requestedId,
     clientId: requestedId,
     name: String(input.name || "").trim(),
     search: String(input.search || input.name || "").trim(),
     email: String(input.email || "").trim(),
-    phone: String(input.phone || "").trim(),
+    phone: contacts[0]?.phone || "",
+    contacts,
     address: String(input.address || "").trim(),
     city: String(input.city || "").trim(),
     postal: String(input.postal || "").trim(),
     country: String(input.country || "").trim(),
     taxId,
     vatPayer: Boolean(input.vatPayer),
-    source: input.source || (taxId ? "local" : "ad-hoc"),
-    needsReview: input.needsReview === undefined ? !taxId : Boolean(input.needsReview),
-    createdBy: input.createdBy || "system",
-    createdAt: input.createdAt
+    source: input.source || existingClient?.source || (taxId ? "local" : "ad-hoc"),
+    needsReview: input.needsReview === undefined ? (existingClient?.needsReview ?? !taxId) : Boolean(input.needsReview),
+    createdBy: input.createdBy || existingClient?.createdBy || "system",
+    createdAt: input.createdAt || existingClient?.createdAt,
+    updatedAt: input.updatedAt || existingClient?.updatedAt
   });
 }
-
 function cleanDebt(input) {
   return {
     month: String(input.month || "").trim(),
@@ -3016,10 +3312,13 @@ function validateAdvance(advance, db) {
 
 function validateClient(client) {
   if (!client.name) return "Manjka naziv stranke.";
-  if (client.taxId && !isUsableTaxId(client.taxId)) return "Davčna številka ni veljavna.";
+  if (client.taxId && !isUsableTaxId(client.taxId)) return "Dav\u010dna \u0161tevilka ni veljavna.";
+  const contacts = normalizeClientContacts(client.contacts, client.phone);
+  if (contacts.length > 1 && contacts.some((contact) => !contact.name)) {
+    return "Ob ve\u010d telefonskih \u0161tevilkah vpi\u0161i ime kontakta pri vsaki.";
+  }
   return "";
 }
-
 function validateDebt(debt) {
   if (!/^\d{4}-\d{2}$/.test(debt.month)) return "Mesec dolga ni pravilen.";
   if (!Number.isFinite(debt.amount) || debt.amount <= 0) return "Vnesi znesek dolga.";
@@ -5415,27 +5714,37 @@ async function handleApi(req, res) {
     if (url.pathname === "/api/clients" && req.method === "POST") {
       const user = await requireUser(req, res);
       if (!user) return;
-      let client = cleanClient(await readBody(req));
+      const body = await readBody(req);
+      const requested = cleanClient(body);
+      const db = await readDbAsync();
+      const clientText = [requested.name, requested.search].map((value) => String(value || "").trim().toLowerCase());
+      const existingIndex = db.clients.findIndex((row) => row.clientId === requested.clientId
+        || (requested.taxId && row.taxId === requested.taxId)
+        || [row.name, row.search].some((value) => clientText.includes(String(value || "").trim().toLowerCase())));
+      const existingClient = existingIndex >= 0 ? db.clients[existingIndex] : null;
+      let client = cleanClient(body, { existingClient });
       const validation = validateClient(client);
       if (validation) {
         sendJson(res, 400, { error: validation });
         return;
       }
-      const db = await readDbAsync();
-      const current = db.users[user.id];
-      const clientText = [client.name, client.search].map((value) => String(value || "").trim().toLowerCase());
-      const existingIndex = db.clients.findIndex((row) => row.clientId === client.clientId
-        || (client.taxId && row.taxId === client.taxId)
-        || [row.name, row.search].some((value) => clientText.includes(String(value || "").trim().toLowerCase())));
-      if (existingIndex >= 0) {
+      const now = new Date().toISOString();
+      if (existingClient) {
         client = normalizeStoredClient({
-          ...db.clients[existingIndex],
+          ...existingClient,
           ...client,
-          id: db.clients[existingIndex].clientId,
-          clientId: db.clients[existingIndex].clientId
+          id: existingClient.clientId,
+          clientId: existingClient.clientId,
+          updatedAt: now
         });
         db.clients[existingIndex] = client;
       } else {
+        client = normalizeStoredClient({
+          ...client,
+          createdBy: user.id,
+          createdAt: now,
+          updatedAt: now
+        });
         db.clients.push(client);
       }
       await writeDbAsync(db);
@@ -5443,6 +5752,28 @@ async function handleApi(req, res) {
       return;
     }
 
+    const clientMatch = url.pathname.match(/^\/api\/clients\/([^/]+)$/);
+    if (clientMatch && req.method === "DELETE") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      if (!canDeleteClient(user)) {
+        sendJson(res, 403, { error: "Samo \u0161ef lahko izbri\u0161e stranko." });
+        return;
+      }
+      const db = await readDbAsync();
+      const result = deleteClientIfSafe(db, decodeURIComponent(clientMatch[1]));
+      if (!result.deleted) {
+        sendJson(res, result.status || 409, {
+          error: result.error || "Stranke ni mogo\u010de izbrisati.",
+          activeTodoIds: result.activeTodoIds || [],
+          activeEntryIds: result.activeEntryIds || []
+        });
+        return;
+      }
+      await writeDbAsync(db);
+      sendJson(res, 200, { clients: db.clients, deletedClientId: result.client.clientId });
+      return;
+    }
     if (url.pathname === "/api/billing-locks" && req.method === "POST") {
       const user = await requireUser(req, res);
       if (!user) return;
@@ -5533,6 +5864,12 @@ async function handleApi(req, res) {
       const now = new Date().toISOString();
       const db = await readDbAsync();
       todo = attachResolvedClient(db, todo, { createAdHoc: true, user });
+      const contactSelection = applyTodoClientContactSelection(db, todo, { strict: true });
+      if (contactSelection.error) {
+        sendJson(res, 400, { error: contactSelection.error });
+        return;
+      }
+      todo = contactSelection.todo;
       const resolvedValidation = validateTodo(todo, { requireClientId: true });
       if (resolvedValidation) {
         sendJson(res, 400, { error: resolvedValidation });
@@ -5942,6 +6279,112 @@ async function handleApi(req, res) {
       return;
     }
 
+    if (url.pathname === "/api/todos/time-batch" && req.method === "POST") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      const body = await readBody(req);
+      const requestedItems = Array.isArray(body.items) ? body.items : [];
+      const requestedLockTokens = body.editLockTokens && typeof body.editLockTokens === "object" && !Array.isArray(body.editLockTokens)
+        ? body.editLockTokens
+        : {};
+      if (!requestedItems.length || requestedItems.length > 100) {
+        sendJson(res, 400, { error: "Za shranjevanje časovnice izberi od 1 do 100 dogodkov." });
+        return;
+      }
+      const seenIds = new Set();
+      if (requestedItems.some((item) => {
+        const id = String(item?.id || "").trim();
+        if (!id || seenIds.has(id)) return true;
+        seenIds.add(id);
+        return false;
+      })) {
+        sendJson(res, 400, { error: "Dnevni pogled vsebuje podvojen ali neveljaven dogodek." });
+        return;
+      }
+      const db = await readDbAsync();
+      const operations = [];
+      const operationByAssignmentId = new Map();
+      for (const requested of requestedItems) {
+        const previousTodo = (db.todos || []).find((item) => item.id === String(requested.id || ""));
+        if (!previousTodo || !canManageTodo(user, previousTodo)) {
+          sendJson(res, 403, { error: "Eno od opravil v dnevnem pogledu ne obstaja več ali ga ne smeš spreminjati." });
+          return;
+        }
+        const assignmentItems = todoAssignmentItems(db, previousTodo);
+        const lockTokens = [...new Set(assignmentItems
+          .map((item) => String(requestedLockTokens[String(item.id || "")] || "").trim())
+          .filter(Boolean))];
+        if (lockTokens.length > 1) {
+          sendJson(res, 400, { error: "Za skupno opravilo je poslanih več različnih zaklepov." });
+          return;
+        }
+        const editLockToken = lockTokens[0] || "";
+        const editLock = todoAssignmentEditLockConflict(db, previousTodo, user, editLockToken);
+        if (editLock) {
+          sendJson(res, 409, { error: `Opravilo trenutno ureja ${editLock.lockedByName || editLock.lockedById}.`, lock: editLock });
+          return;
+        }
+        const baseUpdatedAt = String(requested.baseUpdatedAt || "");
+        if (!baseUpdatedAt || baseUpdatedAt !== String(previousTodo.updatedAt || "")) {
+          sendJson(res, 409, { error: "Opravilo je bilo medtem spremenjeno na drugi napravi." });
+          return;
+        }
+        const start = roundTimeToQuarterHour(requested.start);
+        const end = roundTimeToQuarterHour(requested.end);
+        const date = isDateKey(requested.date) ? String(requested.date) : previousTodo.date;
+        const previousDate = String(previousTodo.date || "");
+        const dayShift = previousDate && date ? Math.round((new Date(`${date}T00:00:00`) - new Date(`${previousDate}T00:00:00`)) / 86400000) : 0;
+        const endDate = shiftDateKey(todoEndDate(previousTodo), dayShift) || date;
+        const validation = validateTodo({ ...previousTodo, date, endDate, start, end });
+        if (validation) {
+          sendJson(res, 400, { error: validation });
+          return;
+        }
+        const payrollLock = payrollLockForTodos(db, assignmentItems);
+        if (payrollLock) {
+          sendJson(res, 403, { error: `Opravilo je del potrjenega obračuna za ${db.users?.[payrollLock.workerId]?.name || payrollLock.workerId} (${payrollLock.month}). Šef ga mora najprej ponovno odpreti.` });
+          return;
+        }
+        const clientBillLock = clientBillLockForTodos(db, assignmentItems);
+        if (clientBillLock) {
+          sendJson(res, 403, { error: `Opravilo je že v potrjenem obračunu stranki ${clientBillLock.clientName} in ga ni več mogoče spreminjati.` });
+          return;
+        }
+        const assignmentIds = assignmentItems.map((item) => String(item.id || "")).filter(Boolean);
+        const overlapping = assignmentIds.map((id) => operationByAssignmentId.get(id)).find(Boolean);
+        if (overlapping && (overlapping.start !== start || overlapping.end !== end || overlapping.date !== date)) {
+          sendJson(res, 400, { error: "Isto skupno opravilo je v dnevnem pogledu spremenjeno na dva različna načina." });
+          return;
+        }
+        if (!overlapping) {
+          const operation = { previousTodo, assignmentIds, start, end, date, endDate };
+          operations.push(operation);
+          assignmentIds.forEach((id) => operationByAssignmentId.set(id, operation));
+        }
+      }
+      const now = new Date().toISOString();
+      db.todos = db.todos.map((item) => {
+        const operation = operationByAssignmentId.get(String(item.id || ""));
+        if (!operation) return item;
+        const action = operation.date === item.date ? "prestavljen v časovnici" : `prestavljen na ${operation.date} v časovnici`;
+        return {
+          ...item,
+          start: operation.start,
+          end: operation.end,
+          date: operation.date,
+          endDate: operation.endDate,
+          hoursNeedsReview: false,
+          updatedBy: user.id,
+          updatedByName: user.name,
+          updatedAt: now,
+          history: [...(item.history || []), audit(user, action)]
+        };
+      });
+      await writeDbAsync(db);
+      sendJson(res, 200, { todos: visibleTodosForUser(db, user) });
+      return;
+    }
+
     const todoTimeMatch = url.pathname.match(/^\/api\/todos\/([^/]+)\/time$/);
     if (todoTimeMatch && req.method === "POST") {
       const user = await requireUser(req, res);
@@ -6030,6 +6473,12 @@ async function handleApi(req, res) {
       }
       const db = await readDbAsync();
       todo = attachResolvedClient(db, todo, { createAdHoc: true, user });
+      const contactSelection = applyTodoClientContactSelection(db, todo, { strict: true });
+      if (contactSelection.error) {
+        sendJson(res, 400, { error: contactSelection.error });
+        return;
+      }
+      todo = contactSelection.todo;
       const resolvedValidation = validateTodo(todo, { requireClientId: true });
       if (resolvedValidation) {
         sendJson(res, 400, { error: resolvedValidation });
@@ -6426,6 +6875,16 @@ module.exports = {
   payrollPeriodEnded,
   payrollMinutesForTodo,
   pruneUnusedAdHocClients,
+  cleanClient,
+  validateClient,
+  activeClientTodoReferences,
+  activeClientEntryReferences,
+  clientDeletionBlocker,
+  deleteClientIfSafe,
+  canDeleteClient,
+  applyTodoClientContactSelection,
+  todoClientContactSelection,
+  applyClientReferenceMigrations,
   releaseEntryEditLock,
   releaseTodoEditLock,
   syncUserForRequest,

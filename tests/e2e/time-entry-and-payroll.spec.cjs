@@ -98,4 +98,39 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
       await context.close();
     }
   });
+  test("multi-day task is a continuous monthly span without an untimed label", async ({ browser }) => {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    try {
+      await localLogin(page, "ibro");
+      const span = await page.evaluate(() => {
+        const start = new Date();
+        start.setHours(12, 0, 0, 0);
+        start.setDate(start.getDate() - ((start.getDay() + 6) % 7));
+        const end = new Date(start);
+        end.setDate(end.getDate() + 7);
+        const key = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+        return { start: key(start), end: key(end) };
+      });
+      const title = "PW večdnevno opravilo";
+      await page.locator("#newTodoButton").click();
+      await page.locator("#todoFormTask").fill(title);
+      await page.locator("#todoFormDate").fill(span.start);
+      await page.locator("#todoFormEndDate").fill(span.end);
+      await page.locator("#todoFormEndDate").blur();
+      await expect(page.locator("#todoFormStart")).toBeDisabled();
+      await expect(page.locator("#todoFormStart").locator("xpath=..")).toBeHidden();
+      await page.locator("#saveTodoDialog").click();
+      await expect(page.locator("#todoDialog")).toBeHidden();
+
+      await page.locator("#calendarViewBtn").click();
+      const startSpan = page.locator(`.day[data-date="${span.start}"] .day-multiday-event.is-span-start`);
+      const continuation = page.locator(`.day[data-date="${span.end}"] .day-multiday-event.is-span-continuation`);
+      await expect(startSpan).toHaveText(title);
+      await expect(continuation).toHaveText("");
+      expect(await page.locator(".day-multiday-event").evaluateAll((items) => items.every((item) => !item.textContent.includes("Brez ure")))).toBeTruthy();
+    } finally {
+      await context.close();
+    }
+  });
 });
