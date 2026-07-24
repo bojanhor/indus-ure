@@ -9907,7 +9907,7 @@
       $("todoFormBilling").classList.toggle("hidden", !showWorkerMileage);
       $("todoFormHourlyRateField").classList.toggle("hidden", !showHourlyRate);
       $("todoFormWarrantyField").classList.toggle("hidden", !showWorkerMileage);
-      $("todoFormImportedField").classList.toggle("hidden", !isAdminView() || timeEntry);
+      $("todoFormImportedField").classList.add("hidden");
       $("todoFormUrgentField").classList.toggle("hidden", timeEntry);
       if (timeEntry) $("todoFormUrgent").checked = false;
     }
@@ -10042,7 +10042,7 @@
         assigneeIds,
         syncUser: existing?.syncUser || assigneeIds[0] || activeWorkerId(),
         urgent: timeEntryStatusIds.has($("todoFormStatus").value) ? false : $("todoFormUrgent").checked,
-        imported: isAdminView() ? Boolean($("todoFormImported").checked) : Boolean(existing?.imported),
+        imported: Boolean(existing?.imported),
         ordered: todoOrderStatusIds.has($("todoFormStatus").value) && $("todoFormOrdered").checked,
         warranty: $("todoFormStatus").value === "execution" && Boolean($("todoFormWarranty").checked),
         sourceProjectTodoId: existing?.sourceProjectTodoId || state.todoHoursSourceId || state.todoDraftSourceProjectTodoId || "",

@@ -2594,6 +2594,30 @@ function defaultHourlyRateForUser(db, userId) {
   );
 }
 
+function todoEditableSnapshot(todo) {
+  const files = (items) => (Array.isArray(items) ? items : []).map((item) => ({
+    id: String(item?.id || ""),
+    attachmentId: String(item?.attachmentId || ""),
+    fileId: String(item?.fileId || ""),
+    url: String(item?.url || ""),
+    name: String(item?.name || ""),
+    comment: String(item?.comment || ""),
+    data: String(item?.data || ""),
+    thumbnailData: String(item?.thumbnailData || "")
+  }));
+  return JSON.stringify({
+    title: String(todo?.title || ""), date: String(todo?.date || ""), start: String(todo?.start || ""), end: String(todo?.end || ""),
+    client: String(todo?.client || ""), clientId: String(todo?.clientId || ""), notes: String(todo?.notes || ""), material: String(todo?.material || ""),
+    status: String(todo?.status || ""), urgent: Boolean(todo?.urgent), ordered: Boolean(todo?.ordered), warranty: Boolean(todo?.warranty),
+    sourceProjectTodoId: String(todo?.sourceProjectTodoId || ""), billingHourlyRate: nonnegativeNumber(todo?.billingHourlyRate, null, 10_000),
+    billingKm: nonnegativeNumber(todo?.billingKm, null, 1_000_000), clientKm: nonnegativeNumber(todo?.clientKm, null, 1_000_000),
+    clientVehicle: todoVehicle(todo?.clientVehicle), driveFiles: files(todo?.driveFiles), photos: files(todo?.photos)
+  });
+}
+
+function importedTodoWasEdited(previous, next, { assignmentsChanged = false } = {}) {
+  return Boolean(previous?.imported) && (assignmentsChanged || todoEditableSnapshot(previous) !== todoEditableSnapshot(next));
+}
 function todoForUserRole(user, db, previous, todo) {
   const previousRate = nonnegativeNumber(previous?.billingHourlyRate, null, 10_000);
   const previousWarranty = Boolean(previous?.warranty);
@@ -2606,13 +2630,14 @@ function todoForUserRole(user, db, previous, todo) {
   const isPaidTime = TIME_ENTRY_TODO_STATUSES.has(todo.status);
   const canSetClientMileage = isCompleted;
   const defaultRate = defaultHourlyRateForUser(db, todo.syncUser || previous?.syncUser || user.id);
+  const preserveImported = Boolean(previous?.imported) && !Boolean(todo.promoteImported);
   if (user.role !== "boss") {
     return {
       ...todo,
       billingHourlyRate: isPaidTime ? previousRate ?? defaultRate : previousRate,
       billingKm: isMeal ? 0 : isPaidTime ? nonnegativeNumber(todo.billingKm, previousKm, 1_000_000) : previousKm,
       warranty: isMeal ? false : isCompleted ? Boolean(todo.warranty) : previousWarranty,
-      imported: Boolean(previous?.imported),
+      imported: preserveImported,
       clientKm: isMeal ? 0 : canSetClientMileage ? nonnegativeNumber(todo.clientKm, previousClientKm, 1_000_000) : previousClientKm,
       clientVehicle: isMeal ? "personal" : canSetClientMileage ? requestedClientVehicle : previousClientVehicle,
       clientKmRate: 0
@@ -2623,7 +2648,7 @@ function todoForUserRole(user, db, previous, todo) {
     billingHourlyRate: isPaidTime ? nonnegativeNumber(todo.billingHourlyRate, previousRate ?? defaultRate, 10_000) : previousRate,
     billingKm: isMeal ? 0 : isPaidTime ? nonnegativeNumber(todo.billingKm, previousKm, 1_000_000) : previousKm,
     warranty: isMeal ? false : isCompleted ? Boolean(todo.warranty) : previousWarranty,
-    imported: !isPaidTime && Boolean(todo.imported),
+    imported: !isPaidTime && preserveImported,
     clientKm: isMeal ? 0 : canSetClientMileage ? nonnegativeNumber(todo.clientKm, previousClientKm, 1_000_000) : previousClientKm,
     clientVehicle: isMeal ? "personal" : requestedClientVehicle,
     clientKmRate: 0
@@ -6021,6 +6046,8 @@ async function handleApi(req, res) {
         sendJson(res, 400, { error: "Vnos ur se vpisuje posebej za enega delavca." });
         return;
       }
+      const assignmentsChanged = [...currentAssigneeIds].sort().join(",") !== [...assigneeIds].sort().join(",");
+      const promoteImported = importedTodoWasEdited(previousTodo, todo, { assignmentsChanged });
       const desiredAssignees = new Set(assigneeIds);
       const existingByAssignee = new Map();
       const removedTodos = [];
@@ -6037,7 +6064,6 @@ releaseTodoAssignmentEditLock(db, previousTodo, user, editLockToken);
       const now = new Date().toISOString();
       const sharedPhotos = stampTodoPhotos(todo, user);
       const sharedDriveFiles = stampTodoDriveFiles(todo, user);
-      const assignmentsChanged = [...currentAssigneeIds].sort().join(",") !== [...assigneeIds].sort().join(",");
       const assigneeNames = assigneeIds.map((assigneeId) => db.users[assigneeId]?.name || assigneeId).join(", ");
       const updatedGroup = [];
 
@@ -6047,6 +6073,7 @@ releaseTodoAssignmentEditLock(db, previousTodo, user, editLockToken);
           const isOpenedTodo = existing.id === previousTodo.id;
           const adjusted = todoForUserRole(user, db, existing, {
             ...todo,
+            promoteImported,
             syncUser: assigneeId,
             billingHourlyRate: isOpenedTodo ? todo.billingHourlyRate : existing.billingHourlyRate,
             billingKm: isOpenedTodo ? todo.billingKm : existing.billingKm
@@ -6072,6 +6099,7 @@ releaseTodoAssignmentEditLock(db, previousTodo, user, editLockToken);
 
         const assignedTodo = todoForUserRole(user, db, null, {
           ...todo,
+          promoteImported,
           syncUser: assigneeId,
           billingHourlyRate: null,
           billingKm: null
@@ -6343,6 +6371,7 @@ module.exports = {
   canManageTodo,
   sourceTodoForNewEntry,
   defaultHourlyRateForUser,
+  importedTodoWasEdited,
   entryForUserRole,
   createSession,
   normalizeDb,

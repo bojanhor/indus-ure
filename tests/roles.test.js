@@ -35,6 +35,7 @@ const {
   sourceTodoForNewEntry,
   entryForUserRole,
   defaultHourlyRateForUser,
+  importedTodoWasEdited,
   normalizeDb,
   normalizePayroll,
   payrollForUser,
@@ -841,4 +842,12 @@ test("uvoženi dogodki ostanejo ločeni od ur in obračunov", () => {
     todos: [{ id: "imported-work", syncUser: "ibro", status: "execution", imported: true, date: "2026-07-20", start: "08:00", end: "09:00", title: "Zunanji zapis" }]
   };
   assert.equal(buildPayrollSnapshot(billingDb, "ibro", { from: "2026-07-01", to: "2026-07-31" }, { id: "draft", status: "draft" }).lines.length, 0);
+});
+test("edited imported event is promoted to normal on save", () => {
+  const previous = cleanTodo({ title: "Imported calendar", status: "open", imported: true, date: "2026-07-20", notes: "source" });
+  assert.equal(importedTodoWasEdited(previous, { ...previous }), false);
+  assert.equal(importedTodoWasEdited(previous, { ...previous, title: "Edited calendar" }), true);
+  assert.equal(importedTodoWasEdited(previous, { ...previous }, { assignmentsChanged: true }), true);
+  const promoted = todoForUserRole(boss, { users: { bojan: { id: "bojan", billing: { hourlyRate: 15 } } }, settings: {} }, previous, { ...previous, title: "Edited calendar", promoteImported: true });
+  assert.equal(promoted.imported, false);
 });
