@@ -93,13 +93,34 @@ test("časovna serija shrani premik datuma in zaokrožene ure atomarno", { timeo
         start: "08:00",
         end: "09:00",
         syncUser: "bojan",
-        assigneeIds: ["bojan"]
+        assigneeIds: ["bojan"],
+        clientMutationId: "4a5f94c7-a5a1-4c1a-b0b8-17b2b5394c89"
       })
     });
     assert.equal(create.status, 200, create.body);
     const created = JSON.parse(create.body).todos.find((todo) => todo.title === "Premik v dnevnem pogledu");
     assert.ok(created?.id, "Ustvarjeni vnos ur mora biti vrnjen prijavljenemu uporabniku.");
     assert.ok(created.updatedAt, "Vnos mora imeti optimistični čas spremembe.");
+
+    const replay = await request(port, "/api/todos", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        title: "Premik v dnevnem pogledu",
+        status: "execution",
+        date: "2026-07-21",
+        endDate: "2026-07-21",
+        start: "08:00",
+        end: "09:00",
+        syncUser: "bojan",
+        assigneeIds: ["bojan"],
+        clientMutationId: "4a5f94c7-a5a1-4c1a-b0b8-17b2b5394c89"
+      })
+    });
+    assert.equal(replay.status, 200, replay.body);
+    const replayData = JSON.parse(replay.body);
+    assert.equal(replayData.idempotent, true, "Ponovljen zahtevek po izgubljenem odgovoru mora vrniti prvi rezultat.");
+    assert.equal(replayData.todos.filter((todo) => todo.title === "Premik v dnevnem pogledu").length, 1, "Ponovljen create ne sme podvojiti opravila.");
 
     const batch = await request(port, "/api/todos/time-batch", {
       method: "POST",

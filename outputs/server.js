@@ -114,6 +114,8 @@ const MAX_TODO_THUMBNAIL_DATA_LENGTH = 100_000;
 // limit so a slow or malicious upload cannot exhaust the server disk.
 const MAX_VIDEO_BYTES = Math.min(500 * 1024 * 1024, Math.max(20 * 1024 * 1024, Number(process.env.MAX_VIDEO_BYTES || process.env.MAX_DRIVE_VIDEO_BYTES || 200 * 1024 * 1024)));
 const PENDING_ATTACHMENT_TTL_MS = 12 * 60 * 60 * 1000;
+const TODO_CREATE_RECEIPT_TTL_MS = 90 * 24 * 60 * 60 * 1000;
+const MAX_TODO_CREATE_RECEIPTS = 10_000;
 
 
 function validImageDataUrl(value, maxEncodedLength) {
@@ -853,6 +855,13 @@ function normalizeDb(db = {}) {
     }
   }
 
+  const hasTodoCreateReceipts = db.todoCreateReceipts && typeof db.todoCreateReceipts === "object" && !Array.isArray(db.todoCreateReceipts);
+  const normalizedTodoCreateReceipts = normalizeTodoCreateReceipts(db.todoCreateReceipts, db.users);
+  if (!hasTodoCreateReceipts || JSON.stringify(db.todoCreateReceipts) !== JSON.stringify(normalizedTodoCreateReceipts)) {
+    db.todoCreateReceipts = normalizedTodoCreateReceipts;
+    changed = true;
+  }
+
   if (!Array.isArray(db.entries)) {
     db.entries = [];
     changed = true;
@@ -1340,6 +1349,7 @@ function initialDatabaseState() {
     billingLocks: [],
     payrolls: [],
     clientBills: [],
+    todoCreateReceipts: {},
     settings: {},
     calendarToken: crypto.randomBytes(24).toString("hex"),
     syncRevision: 0
@@ -3139,6 +3149,50 @@ function cleanTodoCompletionRequests(input, now = Date.now()) {
     .slice(-20);
 }
 
+function cleanClientMutationId(value) {
+  const id = String(value || "").trim().toLowerCase();
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id) ? id : "";
+}
+
+function stableJsonForHash(value) {
+  if (Array.isArray(value)) return `[${value.map(stableJsonForHash).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableJsonForHash(value[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function todoCreateRequestHash(input = {}) {
+  const request = input && typeof input === "object" && !Array.isArray(input) ? { ...input } : {};
+  delete request.clientMutationId;
+  delete request.baseUpdatedAt;
+  return crypto.createHash("sha256").update(stableJsonForHash(request)).digest("hex");
+}
+
+function todoCreateReceiptKey(userId, mutationId) {
+  return `${cleanUserId(userId)}:${cleanClientMutationId(mutationId)}`;
+}
+
+function normalizeTodoCreateReceipts(input, users, now = Date.now()) {
+  const source = input && typeof input === "object" && !Array.isArray(input) ? input : {};
+  const oldest = now - TODO_CREATE_RECEIPT_TTL_MS;
+  const receipts = [];
+  for (const receipt of Object.values(source)) {
+    const userId = cleanUserId(receipt?.userId);
+    const mutationId = cleanClientMutationId(receipt?.mutationId);
+    const requestHash = String(receipt?.requestHash || "").toLowerCase();
+    const createdAt = String(receipt?.createdAt || "");
+    const createdAtMs = Date.parse(createdAt);
+    const assignmentGroupId = String(receipt?.assignmentGroupId || "").trim().slice(0, 100);
+    const todoIds = [...new Set((Array.isArray(receipt?.todoIds) ? receipt.todoIds : []).map((id) => String(id || "").trim()).filter(Boolean))].slice(0, 20);
+    const assigneeIds = [...new Set((Array.isArray(receipt?.assigneeIds) ? receipt.assigneeIds : []).map(cleanUserId).filter((id) => Boolean(users?.[id])))].slice(0, 20);
+    if (!userId || !users?.[userId] || !mutationId || receipt?.kind !== "todo-create" || !/^[a-f0-9]{64}$/.test(requestHash) || !Number.isFinite(createdAtMs) || createdAtMs < oldest || createdAtMs > now + 60_000 || !assignmentGroupId || !todoIds.length || !assigneeIds.length) continue;
+    receipts.push({ userId, mutationId, kind: "todo-create", requestHash, assignmentGroupId, todoIds, assigneeIds, createdAt });
+  }
+  receipts.sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt));
+  return Object.fromEntries(receipts.slice(0, MAX_TODO_CREATE_RECEIPTS).map((receipt) => [todoCreateReceiptKey(receipt.userId, receipt.mutationId), receipt]));
+}
+
 function cleanTodo(input) {
   const status = input.status === "billing" ? "execution" : TODO_STATUSES.has(input.status) ? input.status : "open";
   const isMeal = status === "meal";
@@ -4157,6 +4211,7 @@ function restoredBrowserState(current, metadata) {
     ...current,
     users,
     sessions: {},
+    todoCreateReceipts: {},
     entries: snapshot.entries || [],
     todos: snapshot.todos || [],
     attachments: snapshot.attachments || {},
@@ -5855,6 +5910,23 @@ async function handleApi(req, res) {
       const user = await requireUser(req, res);
       if (!user) return;
       const body = await readBody(req);
+      const clientMutationId = cleanClientMutationId(body.clientMutationId);
+      const requestHash = clientMutationId ? todoCreateRequestHash(body) : "";
+      const db = await readDbAsync();
+      const receiptKey = clientMutationId ? todoCreateReceiptKey(user.id, clientMutationId) : "";
+      const receipt = receiptKey ? db.todoCreateReceipts?.[receiptKey] : null;
+      if (receipt) {
+        if (receipt.requestHash !== requestHash) {
+          sendJson(res, 409, { code: "mutation_id_reused", error: "Isti identifikator ustvarjanja je bil \u017ee uporabljen za drugo opravilo." });
+          return;
+        }
+        sendJson(res, 200, {
+          todos: visibleTodosForUser(db, user),
+          assignedTo: receipt.assigneeIds.map((id) => publicDirectoryUser(db.users[id])).filter(Boolean),
+          idempotent: true
+        });
+        return;
+      }
       let todo = cleanTodo(body);
       const validation = validateTodo(todo);
       if (validation) {
@@ -5862,7 +5934,6 @@ async function handleApi(req, res) {
         return;
       }
       const now = new Date().toISOString();
-      const db = await readDbAsync();
       todo = attachResolvedClient(db, todo, { createAdHoc: true, user });
       const contactSelection = applyTodoClientContactSelection(db, todo, { strict: true });
       if (contactSelection.error) {
@@ -5885,11 +5956,13 @@ async function handleApi(req, res) {
         return;
       }
       const assignmentGroupId = crypto.randomUUID();
+      const createdTodoIds = [];
       assigneeIds.forEach((assigneeId, index) => {
         const assignee = db.users[assigneeId];
         const assignedTodo = todoForUserRole(user, db, null, { ...todo, syncUser: assigneeId });
+        const assignedTodoId = crypto.randomUUID();
         db.todos.push({
-          id: crypto.randomUUID(),
+          id: assignedTodoId,
           ...assignedTodo,
           assignmentGroupId,
           photos: stampTodoPhotos(todo, user),
@@ -5905,7 +5978,20 @@ async function handleApi(req, res) {
           updatedAt: now,
           history: [audit(user, `dodano opravilo za ${assignee?.name || assigneeId}`)]
         });
+        createdTodoIds.push(assignedTodoId);
       });
+      if (receiptKey) {
+        db.todoCreateReceipts[receiptKey] = {
+          userId: user.id,
+          mutationId: clientMutationId,
+          kind: "todo-create",
+          requestHash,
+          assignmentGroupId,
+          todoIds: createdTodoIds,
+          assigneeIds,
+          createdAt: now
+        };
+      }
       await writeDbAsync(db);
       sendJson(res, 200, {
         todos: visibleTodosForUser(db, user),

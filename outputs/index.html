@@ -5470,6 +5470,8 @@
     const offlineDbVersion = 3;
     const offlineSnapshotStore = "snapshots";
     let offlineSnapshotTimer = 0;
+    let offlineTodoRetryTimer = 0;
+    let offlineTodoRetryDelayMs = 1_500;
 
     function offlineTodoDb() {
       return new Promise((resolve, reject) => {
@@ -5498,6 +5500,46 @@
       return offlineStoreRequest("todoOps", "readonly", (store) => store.getAll());
     }
 
+    async function pendingOfflineTodoOpsForCurrentUser() {
+      if (!state.user?.id) return [];
+      return (await offlineTodoOps()).filter((item) => item.userId === state.user.id && !item.conflict);
+    }
+
+    function clearOfflineTodoRetry() {
+      if (!offlineTodoRetryTimer) return;
+      clearTimeout(offlineTodoRetryTimer);
+      offlineTodoRetryTimer = 0;
+    }
+
+    function offlineTodoRetryDelayFor(operations, fallback = offlineTodoRetryDelayMs) {
+      const retryAt = (operations || [])
+        .map((item) => Number(item?.retryAt || 0))
+        .filter((value) => Number.isFinite(value) && value > Date.now())
+        .sort((left, right) => left - right)[0] || 0;
+      return Math.max(Math.max(0, Number(fallback) || 0), retryAt ? retryAt - Date.now() : 0);
+    }
+
+    function scheduleOfflineTodoRetry(delay = offlineTodoRetryDelayMs) {
+      if (offlineTodoRetryTimer || !state.user || !navigator.onLine) return;
+      offlineTodoRetryTimer = window.setTimeout(async () => {
+        offlineTodoRetryTimer = 0;
+        try {
+          await reconnectAfterOffline();
+          const pending = await pendingOfflineTodoOpsForCurrentUser();
+          if (pending.length && navigator.onLine) {
+            offlineTodoRetryDelayMs = Math.min(60_000, Math.max(1_500, offlineTodoRetryDelayMs * 2));
+            scheduleOfflineTodoRetry(offlineTodoRetryDelayFor(pending));
+          } else {
+            offlineTodoRetryDelayMs = 1_500;
+          }
+        } catch {
+          if (navigator.onLine) {
+            offlineTodoRetryDelayMs = Math.min(60_000, Math.max(1_500, offlineTodoRetryDelayMs * 2));
+            scheduleOfflineTodoRetry();
+          }
+        }
+      }, Math.max(0, Number(delay) || 0));
+    }
     async function putOfflineTodoOp(operation) {
       return offlineStoreRequest("todoOps", "readwrite", (store) => store.put(operation));
     }
@@ -5601,6 +5643,7 @@
       refreshClientList();
       render();
       await updateOfflineSyncNotice();
+      if (navigator.onLine) scheduleOfflineTodoRetry(1_500);
       return true;
     }
 
@@ -5621,9 +5664,15 @@
         ? `Brez povezave. Prikaz je iz ${formatDateTime((await usableOfflineSnapshot())?.savedAt || new Date().toISOString())}. `
         : "";
       if (conflicts) {
-        notice.textContent = `${localPrefix}${conflicts} sprememba potrebuje pregled po povezavi.`;
+        const reason = String(ops.find((item) => item.conflict && item.lastError)?.lastError || "").trim();
+        notice.textContent = `${localPrefix}${conflicts} sprememba${conflicts === 1 ? "" : "e"} potrebuje${conflicts === 1 ? "" : "jo"} pregled${reason ? `: ${reason}` : "."}`;
       } else if (ops.length) {
-        notice.textContent = `${localPrefix}${ops.length} sprememba${ops.length === 1 ? "" : "e"} čaka na povezavo${pendingAttachments ? "; med njimi so tudi priloge" : ""}.`;
+        const transport = state.offlineMode || !navigator.onLine
+          ? "\u010caka na povezavo."
+          : state.offlineTodoSyncing
+            ? "Sinhroniziram."
+            : "Povezava je na voljo; prenos bom samodejno ponovil.";
+        notice.textContent = `${localPrefix}${ops.length} sprememba${ops.length === 1 ? "" : "e"} \u0161e ni varno prenesena. ${transport}${pendingAttachments ? " Med njimi so tudi priloge." : ""}`;
       } else if (state.offlineMode) {
         notice.textContent = `${localPrefix}Nove spremembe opravil, ur in prilog bodo poslane samodejno, ko se povezava vrne.`;
       }
@@ -5640,27 +5689,39 @@
           Object.assign(existing, operation);
         }
         existing.hasAttachments = Boolean((existing.todo?.photos || []).some((photo) => photo.data));
+        existing.attempts = 0;
+        existing.lastError = "";
+        delete existing.retryAt;
         await putOfflineTodoOp(existing);
       } else {
-        const queued = { ...operation, userId: state.user.id, createdAt: new Date().toISOString() };
+        const queued = { ...operation, userId: state.user.id, createdAt: new Date().toISOString(), attempts: 0, lastError: "" };
         if (queued.kind === "create") delete queued.todo?.id;
         queued.hasAttachments = Boolean((queued.todo?.photos || []).some((photo) => photo.data));
         await putOfflineTodoOp(queued);
       }
+      offlineTodoRetryDelayMs = 1_500;
       saveOfflineSnapshotSoon();
       await updateOfflineSyncNotice();
+      scheduleOfflineTodoRetry();
     }
 
     async function flushOfflineTodoQueue() {
-      if (state.offlineTodoSyncing || !state.user || !state.token || state.offlineMode || !navigator.onLine) return;
+      if (state.offlineTodoSyncing || !state.user || !state.token || state.offlineMode || !navigator.onLine) return false;
       state.offlineTodoSyncing = true;
+      let retryNeeded = false;
       try {
-        const ops = (await offlineTodoOps()).filter((item) => item.userId === state.user.id && !item.conflict).sort((a, b) => a.id - b.id);
+        const pending = await pendingOfflineTodoOpsForCurrentUser();
+        const ops = pending
+          .filter((item) => !Number(item.retryAt || 0) || Number(item.retryAt) <= Date.now())
+          .sort((a, b) => a.id - b.id);
+        if (!ops.length) return false;
         for (const op of ops) {
           try {
-            if (op.kind === "reorder") await api("/api/todos/reorder", { method: "POST", body: JSON.stringify({ todoIds: op.todoIds || [], orderUserId: op.orderUserId || state.user?.id || "", bucketById: op.bucketById || {} }) });
-            else if (op.kind === "create") await api("/api/todos", { method: "POST", body: JSON.stringify(op.todo) });
-            else {
+            if (op.kind === "reorder") {
+              await api("/api/todos/reorder", { method: "POST", body: JSON.stringify({ todoIds: op.todoIds || [], orderUserId: op.orderUserId || state.user?.id || "", bucketById: op.bucketById || {} }) });
+            } else if (op.kind === "create") {
+              await api("/api/todos", { method: "POST", body: JSON.stringify(op.todo) });
+            } else {
               const lock = await api(todoLockUrl(op.todoId), { method: "POST", body: JSON.stringify({}) });
               try {
                 if (op.kind === "update") await api(`/api/todos/${op.todoId}`, { method: "PUT", body: JSON.stringify({ ...op.todo, baseUpdatedAt: op.baseUpdatedAt, editLockToken: lock.lockToken }) });
@@ -5670,21 +5731,51 @@
               }
             }
             await removeOfflineTodoOp(op.id);
+            offlineTodoRetryDelayMs = 1_500;
           } catch (error) {
-            if (isNetworkError(error)) break;
-            if (error.status === 409) {
-              op.conflict = true;
+            const status = Number(error?.status || 0);
+            const lockExpiresAt = Date.parse(String(error?.lock?.expiresAt || ""));
+            const waitingForLock = status === 409 && Number.isFinite(lockExpiresAt) && lockExpiresAt > Date.now();
+            if (isNetworkError(error) || status >= 500 || waitingForLock) {
+              op.attempts = Math.max(0, Number(op.attempts || 0)) + 1;
+              op.lastError = "";
+              op.retryAt = waitingForLock
+                ? lockExpiresAt + 500
+                : Date.now() + Math.min(60_000, 1_500 * (2 ** Math.min(op.attempts, 5)));
               await putOfflineTodoOp(op);
+              retryNeeded = true;
+              break;
             }
+            op.conflict = true;
+            op.lastError = String(error?.message || "Spremembe ni bilo mogo\u010de varno prenesti.");
+            op.failedAt = new Date().toISOString();
+            await putOfflineTodoOp(op);
           }
         }
-        if (navigator.onLine && !state.offlineMode) await loadTodos();
+        if (navigator.onLine && !state.offlineMode) {
+          try {
+            await loadTodos();
+          } catch (error) {
+            if (isNetworkError(error)) retryNeeded = true;
+            else throw error;
+          }
+        }
+        return !retryNeeded;
       } finally {
         state.offlineTodoSyncing = false;
         saveOfflineSnapshotSoon();
+        const remaining = await pendingOfflineTodoOpsForCurrentUser().catch(() => []);
+        if (remaining.length && navigator.onLine) {
+          if (retryNeeded) offlineTodoRetryDelayMs = Math.min(60_000, Math.max(1_500, offlineTodoRetryDelayMs * 2));
+          scheduleOfflineTodoRetry(offlineTodoRetryDelayFor(remaining));
+        } else if (!remaining.length) {
+          clearOfflineTodoRetry();
+          offlineTodoRetryDelayMs = 1_500;
+        }
         await updateOfflineSyncNotice();
       }
     }
+
     async function refreshSessionSecurityContext() {
       const me = await api("/api/me", { recoverSession: false, csrfRetried: true });
       state.token = "cookie";
@@ -5696,10 +5787,50 @@
       return me;
     }
 
+    const apiRequestTimeoutMs = 15_000;
+    const apiAttachmentRequestTimeoutMs = 180_000;
+
+    function apiTimeoutForRequest(path, requestOptions = {}) {
+      const method = String(requestOptions.method || "GET").toUpperCase();
+      const bodySize = typeof requestOptions.body === "string" ? requestOptions.body.length : 0;
+      if (["POST", "PUT"].includes(method) && /^\/api\/todos(?:\/|$|\?)/.test(String(path)) && bodySize >= 100_000) return apiAttachmentRequestTimeoutMs;
+      return apiRequestTimeoutMs;
+    }
+
+    async function fetchWithTimeout(path, options = {}, timeoutMs = apiRequestTimeoutMs) {
+      const controller = new AbortController();
+      const signal = options.signal;
+      const abortFromCaller = () => controller.abort(signal?.reason);
+      let timedOut = false;
+      if (signal) {
+        if (signal.aborted) abortFromCaller();
+        else signal.addEventListener("abort", abortFromCaller, { once: true });
+      }
+      const timeout = window.setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+      }, Math.max(1_000, Number(timeoutMs) || apiRequestTimeoutMs));
+      try {
+        return await fetch(path, { ...options, signal: controller.signal });
+      } catch (cause) {
+        if (timedOut) {
+          const error = new Error("Stre\u017enik se predolgo ni odzval.");
+          error.name = "TimeoutError";
+          error.timeout = true;
+          error.cause = cause;
+          throw error;
+        }
+        throw cause;
+      } finally {
+        clearTimeout(timeout);
+        if (signal) signal.removeEventListener("abort", abortFromCaller);
+      }
+    }
+
     async function api(path, options = {}) {
-      const { recoverSession = true, csrfRetried = false, ...requestOptions } = options;
+      const { recoverSession = true, csrfRetried = false, requestTimeoutMs = 0, ...requestOptions } = options;
       if (state.offlineMode && !navigator.onLine) {
-        const error = new Error("Ni povezave s strežnikom.");
+        const error = new Error("Ni povezave s stre\u017enikom.");
         error.status = 0;
         throw error;
       }
@@ -5712,10 +5843,11 @@
       const hadSession = Boolean(state.token && state.token !== "offline");
       let response;
       try {
-        response = await fetch(path, { ...requestOptions, headers, credentials: "same-origin" });
+        response = await fetchWithTimeout(path, { ...requestOptions, headers, credentials: "same-origin" }, requestTimeoutMs || apiTimeoutForRequest(path, requestOptions));
       } catch (cause) {
-        const error = new Error("Povezava s strežnikom ni uspela.");
+        const error = new Error(cause?.timeout ? cause.message : "Povezava s stre\u017enikom ni uspela.");
         error.status = 0;
+        error.timeout = Boolean(cause?.timeout);
         error.cause = cause;
         throw error;
       }
@@ -5736,11 +5868,13 @@
         const error = new Error(data?.error || "Napaka pri povezavi.");
         error.status = response.status;
         error.code = String(data?.code || "");
+        error.lock = data?.lock || null;
+        error.retryAfterMs = Number(data?.retryAfterMs || 0);
         throw error;
       }
+      state.lastServerSyncAt = new Date().toISOString();
       return data;
     }
-
     function setGoogleDriveConnectionBanner(status) {
       const banner = $("driveConnectionBanner");
       if (!banner) return;
@@ -5803,10 +5937,10 @@
       }
     }
     async function reconnectAfterOffline() {
-      if (!state.user || !navigator.onLine) return;
+      if (!state.user || !navigator.onLine) return false;
       if (!state.offlineMode) {
         await flushOfflineTodoQueue();
-        return;
+        return true;
       }
       try {
         const me = await api("/api/me", { recoverSession: false });
@@ -5820,13 +5954,23 @@
         const directory = await api("/api/users");
         state.users = [...new Map([...(directory.users || []), state.user].map((user) => [user.id, user])).values()];
         initializeWorkContext();
+        await flushOfflineTodoQueue();
         await loadAll();
-        await Promise.all([flushOfflineTodoQueue(), refreshGoogleDriveConnectionStatus(), refreshServerStatus()]);
+        await Promise.all([refreshGoogleDriveConnectionStatus(), refreshServerStatus()]);
         await updateOfflineSyncNotice();
+        return true;
       } catch (error) {
+        if (isNetworkError(error)) {
+          state.offlineMode = true;
+          await updateOfflineSyncNotice().catch(() => {});
+          scheduleOfflineTodoRetry();
+          return false;
+        }
         if (error.status === 401) recoverExpiredSession().catch(() => {});
+        throw error;
       }
     }
+
     function loggedInHistoryState(value) {
       const current = history.state && typeof history.state === "object" ? history.state : {};
       return { ...current, [loggedInHistoryStateKey]: value };
@@ -6264,7 +6408,7 @@
       if (state.syncRevision) headers["If-None-Match"] = `"indus-${state.syncRevision}"`;
       let response;
       try {
-        response = await fetch("/api/sync-state", { headers, credentials: "same-origin" });
+        response = await fetchWithTimeout("/api/sync-state", { headers, credentials: "same-origin" });
       } catch {
         return;
       }
@@ -6286,9 +6430,14 @@
     }
 
     async function autoRefreshSharedData() {
-      if (!state.token || !state.user || state.offlineMode || document.visibilityState !== "visible" || state.sharedDataRefreshing || uiIsBeingEdited()) return;
+      if (!state.token || !state.user || document.visibilityState !== "visible" || state.sharedDataRefreshing || uiIsBeingEdited()) return;
       state.sharedDataRefreshing = true;
       try {
+        if (state.offlineMode) {
+          if (navigator.onLine) await reconnectAfterOffline();
+          return;
+        }
+        await flushOfflineTodoQueue();
         await checkServerChanges();
       } catch {} finally {
         state.sharedDataRefreshing = false;
@@ -6563,15 +6712,18 @@
 
     async function saveTodoToServer(todo) {
       const todoRevision = beginTodoMutation();
-      if (todo.id && state.todoEditLock?.todoId === todo.id) await pauseTodoLockHeartbeat();
-      const method = todo.id ? "PUT" : "POST";
-      const path = todo.id ? `/api/todos/${todo.id}` : "/api/todos";
-      const editLockToken = todo.id && state.todoEditLock?.todoId === todo.id
+      const creating = !todo.id || String(todo.id).startsWith("offline-");
+      const clientMutationId = creating ? String(todo.clientMutationId || crypto.randomUUID()) : "";
+      const requestTodo = creating ? { ...todo, clientMutationId } : todo;
+      if (!creating && requestTodo.id && state.todoEditLock?.todoId === requestTodo.id) await pauseTodoLockHeartbeat();
+      const method = creating ? "POST" : "PUT";
+      const path = creating ? "/api/todos" : `/api/todos/${requestTodo.id}`;
+      const editLockToken = !creating && requestTodo.id && state.todoEditLock?.todoId === requestTodo.id
         ? state.todoEditLock.token
         : "";
-      const payload = editLockToken ? { ...todo, editLockToken } : todo;
+      const payload = editLockToken ? { ...requestTodo, editLockToken } : requestTodo;
       try {
-        const data = await api(path, { method, body: JSON.stringify({ ...payload, baseUpdatedAt: todo.updatedAt || "" }) });
+        const data = await api(path, { method, body: JSON.stringify({ ...payload, baseUpdatedAt: requestTodo.updatedAt || "" }) });
         if (isCurrentTodoRevision(todoRevision)) {
           state.todos = data.todos;
           refreshClientList();
@@ -6580,10 +6732,10 @@
         return data;
       } catch (error) {
         if (!isNetworkError(error)) throw error;
-        const localTodo = todo.id ? { ...todo, offlinePending: true } : { ...todo, id: "offline-" + crypto.randomUUID(), offlinePending: true };
-        await queueOfflineTodo({ kind: todo.id ? "update" : "create", todoId: localTodo.id, todo: { ...todo }, baseUpdatedAt: todo.updatedAt || "" });
+        const localTodo = creating ? { ...requestTodo, id: requestTodo.id || "offline-" + crypto.randomUUID(), offlinePending: true } : { ...requestTodo, offlinePending: true };
+        await queueOfflineTodo({ kind: creating ? "create" : "update", todoId: localTodo.id, todo: { ...requestTodo }, baseUpdatedAt: requestTodo.updatedAt || "" });
         if (isCurrentTodoRevision(todoRevision)) {
-          const index = state.todos.findIndex((item) => item.id === todo.id);
+          const index = state.todos.findIndex((item) => item.id === requestTodo.id);
           if (index >= 0) state.todos[index] = localTodo;
           else state.todos.unshift(localTodo);
           refreshClientList();
@@ -6594,6 +6746,7 @@
         finishTodoMutation();
       }
     }
+
     async function saveTodoTimeToServer(todo, start, end, date = todo.date) {
       const editLockToken = state.todoEditLock?.todoId === todo.id ? state.todoEditLock.token : "";
       if (!editLockToken) throw new Error("Opravila pred premikom ni bilo mogoče zakleniti.");
@@ -12071,6 +12224,15 @@
           }
         } catch (error) {
           if (state.todoEditLock?.todoId !== current.todoId || state.todoEditLock?.token !== current.token) return;
+          if (isNetworkError(error)) {
+            if (state.todoLockHeartbeat) clearInterval(state.todoLockHeartbeat);
+            state.todoLockHeartbeat = null;
+            state.offlineMode = true;
+            scheduleOfflineTodoRetry();
+            updateOfflineSyncNotice().catch(() => {});
+            showNotice("Stre\u017enik trenutno ni dosegljiv. Urejanje lahko nadaljuje\u0161; sprememba se bo poslala samodejno.");
+            return;
+          }
           clearTodoEditLockState();
           if ($("todoDialog").open) $("todoDialog").close();
           showNotice(error.message);
@@ -12089,6 +12251,7 @@
       try {
         if (state.offlineMode || !navigator.onLine) {
           state.todoEditLock = { todoId, token: `offline-${crypto.randomUUID()}`, expiresAt: new Date(state.sessionExpiresAt || Date.now()).toISOString() };
+          scheduleOfflineTodoRetry();
           return true;
         }
         const current = state.todoEditLock?.todoId === todoId ? state.todoEditLock : null;
@@ -12101,13 +12264,20 @@
         state.todoLockHeartbeat = setInterval(renewTodoEditLock, 20_000);
         return true;
       } catch (error) {
+        if (isNetworkError(error)) {
+          state.offlineMode = true;
+          state.todoEditLock = { todoId, token: `offline-${crypto.randomUUID()}`, expiresAt: new Date(state.sessionExpiresAt || Date.now()).toISOString() };
+          scheduleOfflineTodoRetry();
+          updateOfflineSyncNotice().catch(() => {});
+          showNotice("Stre\u017enik trenutno ni dosegljiv. Opravilo lahko uredi\u0161 lokalno; prenos se bo ponovil samodejno.");
+          return true;
+        }
         showNotice(error.message);
         return false;
       } finally {
         state.todoLockPending = false;
       }
     }
-
     async function releaseTodoEditLockForDialog() {
       const openedLock = state.todoEditLock;
       await pauseTodoLockHeartbeat();
@@ -13719,8 +13889,15 @@
       if (event.target === event.currentTarget) event.currentTarget.close();
     });
 
-    window.addEventListener("online", () => reconnectAfterOffline().catch(() => {}));
-    window.addEventListener("offline", () => updateOfflineSyncNotice().catch(() => {}));
+    window.addEventListener("online", () => {
+      clearOfflineTodoRetry();
+      offlineTodoRetryDelayMs = 1_500;
+      reconnectAfterOffline().catch(() => scheduleOfflineTodoRetry());
+    });
+    window.addEventListener("offline", () => {
+      clearOfflineTodoRetry();
+      updateOfflineSyncNotice().catch(() => {});
+    });
     window.addEventListener("pagehide", releaseTodoEditLockOnPageHide);
 
     initializeModalBackNavigation();

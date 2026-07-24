@@ -133,4 +133,42 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
       await context.close();
     }
   });
+
+  test("queued task retries automatically after a transient server outage", async ({ browser }) => {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    const title = "PW samodejni sync";
+    let dropResponseAfterServerSave = true;
+    try {
+      await localLogin(page, "ibro");
+      await page.route("**/api/todos", async (route, request) => {
+        if (request.method() === "POST" && dropResponseAfterServerSave) {
+          dropResponseAfterServerSave = false;
+          const response = await route.fetch();
+          expect(response.ok()).toBeTruthy();
+          // The server has committed the create, but the browser loses its response.
+          await route.abort("failed");
+          return;
+        }
+        await route.continue();
+      });
+
+      await page.locator("#newTodoButton").click();
+      await page.locator("#todoFormTask").fill(title);
+      await page.locator("#todoFormClient").fill(CLIENT_ALIAS);
+      await page.locator("#saveTodoDialog").click();
+
+      await expect(page.locator("#todoDialog")).toBeHidden();
+      await expect(page.locator("#offlineSyncNotice")).toContainText("Povezava je na voljo");
+      await page.unroute("**/api/todos");
+
+      // No browser online event is dispatched here. The retry timer itself
+      // must resend the queued mutation while navigator.onLine stays true.
+      await expect(page.locator("#offlineSyncNotice")).toBeHidden({ timeout: 10_000 });
+      await expect(page.locator("#todoItems")).toContainText(title);
+      await expect.poll(() => page.locator("#todoItems .todo-item").filter({ hasText: title }).count(), { timeout: 10_000 }).toBe(1);
+    } finally {
+      await context.close();
+    }
+  });
 });
