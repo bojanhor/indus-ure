@@ -417,6 +417,68 @@
       font-size: 12px;
     }
 
+    .work-context-menu {
+      position: relative;
+    }
+
+    .work-context-menu > summary {
+      list-style: none;
+    }
+
+    .work-context-menu > summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .work-context-menu[open] .active-work-context {
+      background: #dce9e2;
+      outline: 2px solid rgba(43, 122, 77, 0.2);
+    }
+
+    .work-context-chevron {
+      width: 14px;
+      height: 14px;
+      transition: transform 0.15s ease;
+    }
+
+    .work-context-menu[open] .work-context-chevron {
+      transform: rotate(180deg);
+    }
+
+    .work-context-panel {
+      position: absolute;
+      top: calc(100% + 8px);
+      right: 0;
+      z-index: 101;
+      width: min(310px, calc(100vw - 24px));
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fff;
+      box-shadow: 0 18px 45px rgba(20, 35, 28, 0.22);
+    }
+
+    .work-context-panel label {
+      display: block;
+      margin: 0 0 5px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 900;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .work-context-panel select {
+      width: 100%;
+      min-height: 42px;
+      padding: 8px 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #f8fbfa;
+      color: var(--ink);
+      font: inherit;
+      font-weight: 750;
+    }
+
     .tools {
       display: flex;
       gap: 10px;
@@ -3717,6 +3779,14 @@
         padding: 6px 7px;
       }
       .active-work-context > span { display: none; }
+      .work-context-menu { position: static; }
+      .work-context-panel {
+        position: absolute;
+        top: calc(100% + 8px);
+        left: 8px;
+        right: 8px;
+        width: auto;
+      }
       .tools-menu > summary {
         width: 44px;
         height: 48px;
@@ -4038,7 +4108,16 @@
 
             <button class="view-btn legacy-report-button" id="reportViewBtn" type="button">Arhiv poro&#269;il</button>
           </div>
-          <button class="active-work-context" id="activeWorkContext" type="button" title="Izberi pogled"><span>Pogled:</span><strong id="activeWorkContextLabel"></strong></button>
+          <details class="work-context-menu hidden" id="workContextControl">
+            <summary class="active-work-context" id="activeWorkContext" title="Izberi pogled" aria-label="Izberi pogled">
+              <span>Pogled:</span><strong id="activeWorkContextLabel"></strong>
+              <svg class="work-context-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m7 10 5 5 5-5"></path></svg>
+            </summary>
+            <div class="work-context-panel" role="group" aria-label="Izberi pogled">
+              <label for="workContextSelect">Pogled</label>
+              <select id="workContextSelect"></select>
+            </div>
+          </details>
           <details class="tools-menu" id="toolsMenu">
             <summary class="account-btn settings-menu-button" title="Nastavitve in orodja" aria-label="Nastavitve in orodja">
               <svg class="settings-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
@@ -4053,10 +4132,7 @@
                 <span id="userName"></span>
                 <span id="userRole"></span>
               </div>
-              <div class="tools-menu-context hidden" id="workContextControl">
-                <label for="workContextSelect">Pogled</label>
-                <select id="workContextSelect"></select>
-              </div>
+
               <span class="tools-menu-label">Uporabnik</span>
               <button class="menu-action" id="accountBtn" type="button">Ra&#269;un in profil</button>
               <span class="tools-menu-label">Delo</span>
@@ -5042,6 +5118,10 @@
       $("toolsMenu")?.removeAttribute("open");
     }
 
+    function closeWorkContextMenu() {
+      $("workContextControl")?.removeAttribute("open");
+    }
+
     function keepToolsMenuInViewport() {
       const menu = $("toolsMenu");
       const panel = menu?.querySelector(".tools-menu-panel");
@@ -5739,6 +5819,7 @@
       loadTodoSortMode();
       loadCalendarCompletedFilter();
       $("workContextControl").classList.toggle("hidden", contexts.length <= 1);
+      if (contexts.length <= 1) $("workContextControl").removeAttribute("open");
     }
 
     function isAdminView() {
@@ -11811,7 +11892,10 @@
     $("toolsMenu").addEventListener("change", (event) => {
       if (event.target.closest(".tools-menu-panel select")) closeToolsMenu();
     });
-    $("toolsMenu").addEventListener("toggle", keepToolsMenuInViewport);
+    $("toolsMenu").addEventListener("toggle", () => {
+      if ($("toolsMenu").open) closeWorkContextMenu();
+      keepToolsMenuInViewport();
+    });
     window.addEventListener("resize", keepToolsMenuInViewport);
     function openAppSettings() {
       const billing = state.settings.billing || {};
@@ -11845,17 +11929,24 @@
     document.addEventListener("click", (event) => {
       const menu = $("toolsMenu");
       if (menu?.open && !menu.contains(event.target)) closeToolsMenu();
+      const context = $("workContextControl");
+      if (context?.open && !context.contains(event.target)) closeWorkContextMenu();
     });
     document.addEventListener("keydown", (event) => {
-      if (event.key === "Escape") closeToolsMenu();
+      if (event.key === "Escape") {
+        closeToolsMenu();
+        closeWorkContextMenu();
+      }
     });
-    $("activeWorkContext").addEventListener("click", () => {
-      const menu = $("toolsMenu");
-      menu.open = true;
-      keepToolsMenuInViewport();
+    $("workContextControl").addEventListener("toggle", () => {
+      if (!$("workContextControl").open) return;
+      closeToolsMenu();
       if (state.user?.role === "boss") requestAnimationFrame(() => $("workContextSelect").focus());
     });
-    $("workContextSelect").addEventListener("change", (event) => setWorkContext(event.target.value));
+    $("workContextSelect").addEventListener("change", (event) => {
+      setWorkContext(event.target.value);
+      closeWorkContextMenu();
+    });
     $("todoSortMode").value = state.todoSortMode;
     $("todoSortMode").addEventListener("change", (event) => {
       state.todoSortMode = todoSortModes.includes(event.target.value) ? event.target.value : "manual";

@@ -48,7 +48,10 @@ test("front-end naročila in foto urejevalnik ohranita dogovorjeni mobilni prika
   assert.match(html, /state\.todoSortMode === "imported" \? isImportedTodo\(todo\) : !isImportedTodo\(todo\)/);
   assert.match(html, /!isImportedTodo\(todo\) && \(includeArchived \|\| !todo\.archivedAt\)/);
   assert.match(html, /@media \(min-width: 1600px\)[\s\S]*?width: min\(100%, 1540px\)/);
-  assert.match(html, /\$\("activeWorkContext"\)\.addEventListener\("click"/);
+  assert.match(html, /<details class="work-context-menu hidden" id="workContextControl">/);
+  assert.match(html, /class="work-context-panel"/);
+  assert.doesNotMatch(html, /tools-menu-context hidden" id="workContextControl"/);
+  assert.match(html, /\$\("workContextControl"\)\.addEventListener\("toggle"/);
   assert.match(html, /todoSectionCollapseStorageKey/);
   assert.match(html, /todo-order-section-toggle/);
   assert.match(html, /#todoFormNotes,[\s\S]*?#todoFormMaterial \{[\s\S]*?overflow-y: hidden;/);
