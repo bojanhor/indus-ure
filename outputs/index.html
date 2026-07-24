@@ -5245,6 +5245,18 @@
       vacation: "Dopust"
     };
 
+    function createLocalUuid() {
+      const cryptoApi = globalThis.crypto;
+      if (typeof cryptoApi?.randomUUID === "function") return cryptoApi.randomUUID();
+      const bytes = new Uint8Array(16);
+      if (typeof cryptoApi?.getRandomValues === "function") cryptoApi.getRandomValues(bytes);
+      else for (let index = 0; index < bytes.length; index += 1) bytes[index] = Math.floor(Math.random() * 256);
+      bytes[6] = (bytes[6] & 0x0f) | 0x40;
+      bytes[8] = (bytes[8] & 0x3f) | 0x80;
+      const hex = [...bytes].map((value) => value.toString(16).padStart(2, "0"));
+      return `${hex.slice(0, 4).join("")}-${hex.slice(4, 6).join("")}-${hex.slice(6, 8).join("")}-${hex.slice(8, 10).join("")}-${hex.slice(10).join("")}`;
+    }
+
     const todoStatusDefinitions = [
       { id: "order", label: "Naro\u010di-projekt" },
       { id: "order_car", label: "Naro\u010di Avto" },
@@ -6972,7 +6984,7 @@
     async function saveTodoToServer(todo) {
       const todoRevision = beginTodoMutation();
       const creating = !todo.id || String(todo.id).startsWith("offline-");
-      const clientMutationId = creating ? String(todo.clientMutationId || crypto.randomUUID()) : "";
+      const clientMutationId = creating ? String(todo.clientMutationId || createLocalUuid()) : "";
       const requestTodo = creating ? { ...todo, clientMutationId } : todo;
       const editLockToken = !creating && requestTodo.id && state.todoEditLock?.todoId === requestTodo.id
         ? state.todoEditLock.token
@@ -6994,7 +7006,7 @@
           resumeTodoLockHeartbeat(requestTodo.id, editLockToken);
           throw error;
         }
-        const localTodo = creating ? { ...requestTodo, id: requestTodo.id || "offline-" + crypto.randomUUID(), offlinePending: true } : { ...requestTodo, offlinePending: true };
+        const localTodo = creating ? { ...requestTodo, id: requestTodo.id || "offline-" + createLocalUuid(), offlinePending: true } : { ...requestTodo, offlinePending: true };
         await queueOfflineTodo({ kind: creating ? "create" : "update", todoId: localTodo.id, todo: { ...requestTodo }, baseUpdatedAt: requestTodo.updatedAt || "" });
         if (isCurrentTodoRevision(todoRevision)) {
           const index = state.todos.findIndex((item) => item.id === requestTodo.id);
@@ -10827,7 +10839,7 @@
           if (!file.size) throw new Error("Praznega videa ni mogoče dodati.");
           if (file.size > maxBytes) throw new Error("Video je prevelik. Največja dovoljena velikost je 200 MB.");
           const draft = {
-            id: crypto.randomUUID(),
+            id: createLocalUuid(),
             name: "Video",
             comment: "",
             mimeType: todoVideoMimeType(file),
@@ -10877,7 +10889,7 @@
         return;
       }
       state.todoDialogDriveFiles.push({
-        id: crypto.randomUUID(),
+        id: createLocalUuid(),
         kind: info.kind,
         fileId: info.fileId,
         url: info.url,
@@ -12561,7 +12573,7 @@
       state.todoLockPending = true;
       try {
         if (state.offlineMode || !navigator.onLine) {
-          state.todoEditLock = { todoId, token: `offline-${crypto.randomUUID()}`, expiresAt: new Date(state.sessionExpiresAt || Date.now()).toISOString() };
+          state.todoEditLock = { todoId, token: `offline-${createLocalUuid()}`, expiresAt: new Date(state.sessionExpiresAt || Date.now()).toISOString() };
           scheduleOfflineTodoRetry();
           return true;
         }
@@ -12577,7 +12589,7 @@
       } catch (error) {
         if (isNetworkError(error)) {
           state.offlineMode = true;
-          state.todoEditLock = { todoId, token: `offline-${crypto.randomUUID()}`, expiresAt: new Date(state.sessionExpiresAt || Date.now()).toISOString() };
+          state.todoEditLock = { todoId, token: `offline-${createLocalUuid()}`, expiresAt: new Date(state.sessionExpiresAt || Date.now()).toISOString() };
           scheduleOfflineTodoRetry();
           updateOfflineSyncNotice().catch(() => {});
           showNotice("Stre\u017enik trenutno ni dosegljiv. Opravilo lahko uredi\u0161 lokalno; prenos se bo ponovil samodejno.");
@@ -12792,7 +12804,7 @@
             const context = canvas.getContext("2d");
             context.drawImage(image, 0, 0, canvas.width, canvas.height);
             resolve({
-              id: window.crypto?.randomUUID ? window.crypto.randomUUID() : `${Date.now()}-${Math.random()}`,
+              id: createLocalUuid(),
               name: file.name,
               data: canvasAsLimitedJpegDataUrl(canvas),
               createdBy: state.user?.id || "",
@@ -12876,7 +12888,7 @@
         data = data.replace(/^data:[^;]*;base64,/, "data:application/pdf;base64,");
         const thumbnailData = await createPdfThumbnailSafely(data);
         return {
-          id: window.crypto?.randomUUID ? window.crypto.randomUUID() : `${Date.now()}-${Math.random()}`,
+          id: createLocalUuid(),
           name: file.name || "priloga.pdf",
           data,
           thumbnailData,
