@@ -16,7 +16,7 @@ test("nepooblaščena Google prijava ima splošno zavrnitev in trajni zapis", as
     fs.readFile(path.join(__dirname, "..", "outputs", "server.js"), "utf8"),
     fs.readFile(path.join(__dirname, "..", "outputs", "postgres-store.js"), "utf8")
   ]);
-  assert.match(server, /async function recordDeniedGoogleLogin\(email\)/);
+  assert.match(server, /async function recordDeniedGoogleLogin\(email(?:,\s*req\s*=\s*null)?\)/);
   assert.match(server, /sendText\(res, 403, "Dostop je zavrnjen\.", "text\/plain"\)/);
   assert.match(server, /insert into indus_access_attempts/);
   assert.match(store, /create table if not exists indus_access_attempts/);

@@ -41,6 +41,9 @@ const resetUserPasswords = process.env.RESET_USER_PASSWORDS === "true";
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || "";
 const GOOGLE_REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI || "";
+// Stable only on this server; never returned to clients. A dedicated env value
+// lets an operator rotate the audit source pseudonyms independently if needed.
+const AUDIT_LOG_HMAC_KEY = String(process.env.AUDIT_LOG_HMAC_KEY || GOOGLE_CLIENT_SECRET || DATABASE_URL || crypto.randomBytes(32).toString("hex"));
 // Bump this whenever the Google Workspace consent set changes. A stale Drive-only
 // token must never be silently reused for creating Gmail drafts. It remains valid
 // for Drive uploads, though: Drive attachment uploads must not be blocked merely
@@ -64,6 +67,12 @@ const ARCHIVE_RETENTION_CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
 // retention period avoids turning the trash into a second long-term archive.
 const DELETED_TODO_RETENTION_DAYS = 30;
 const DELETED_TODO_RETENTION_MS = DELETED_TODO_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+// A small, privacy-conscious activity trail is kept alongside application
+// state. It is deliberately not a raw HTTP/request-body log: passwords,
+// OAuth/session material and attachment contents must never reach it.
+const AUDIT_LOG_RETENTION_DAYS = 30;
+const AUDIT_LOG_RETENTION_MS = AUDIT_LOG_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+const AUDIT_LOG_MAX_EVENTS = 10_000;
 const MONITOR_MAX_RSS_MB = Math.max(256, Number(process.env.MONITOR_MAX_RSS_MB || 1_800));
 const MONITOR_DISK_WARNING_PERCENT = Math.min(99, Math.max(90, Number(process.env.MONITOR_DISK_WARNING_PERCENT || 90)));
 const REPORT_PDF_MAX_TOTAL_BYTES = 50 * 1024 * 1024;
@@ -72,11 +81,14 @@ const REPORT_GMAIL_MAX_TOTAL_BYTES = 8 * 1024 * 1024;
 let pgPool = null;
 let pgStore = null;
 let pgReady = null;
+let auditLogStoreReady = null;
+let auditLogStoreCleanupAt = 0;
 let mutationQueue = Promise.resolve();
 let monitorTimer = null;
 let alertTransport = null;
 const monitorAlertCooldowns = new Map();
 const testLoginFailures = new Map();
+const auditLogCooldowns = new Map();
 let archiveRetentionCleanupLastAt = 0;
 let archiveRetentionCleanupPromise = null;
 
@@ -778,6 +790,261 @@ function normalizeGoogleState(value) {
 
   return { state, changed };
 }
+const AUDIT_LOG_PRIVATE_KEY = /(?:password|passwd|token|secret|cookie|authorization|credential|csrf|email|e-mail|dataurl|base64|^bytes$|^content$|^body$|^raw$|^binary$)/i;
+
+function cleanAuditLogText(value, max = 180) {
+  return String(value == null ? "" : value)
+    .replace(/[\u0000-\u001f\u007f]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, max);
+}
+
+function auditLogTextLooksSensitive(value) {
+  const text = String(value || "");
+  return /@|^data:[^,]+;base64,|(?:bearer\s+|eyJ[a-zA-Z0-9_-]{8,}\.)|\b(?:password|passwd|token|secret|cookie|authorization|credential|csrf)\b/i.test(text);
+}
+
+function cleanAuditActorName(value, fallback = "system") {
+  const text = cleanAuditLogText(value, 120);
+  return text && !auditLogTextLooksSensitive(text) ? text : fallback;
+}
+
+function cleanAuditTargetId(value) {
+  const text = cleanAuditLogText(value, 160);
+  return auditLogTextLooksSensitive(text) ? "[redacted]" : text;
+}
+
+function auditLogKeyIsPrivate(key) {
+  const normalized = String(key || "").replace(/[^a-z0-9]/gi, "").toLowerCase();
+  if (AUDIT_LOG_PRIVATE_KEY.test(normalized)) return true;
+  if (/(attachment|photo|file|image|video).*(data|content|bytes|base64|binary|body)/.test(normalized)) return true;
+  return /^(access|refresh|id)?token$/.test(normalized);
+}
+
+function sanitizeAuditLogValue(value, key = "", depth = 0) {
+  if (auditLogKeyIsPrivate(key)) return "[redacted]";
+  if (depth > 3) return "[truncated]";
+  if (value == null) return value;
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value === "string") {
+    const text = cleanAuditLogText(value, 360);
+    if (auditLogTextLooksSensitive(text)) return "[redacted]";
+    return text;
+  }
+  if (Array.isArray(value)) return value.slice(0, 20).map((item) => sanitizeAuditLogValue(item, key, depth + 1));
+  if (typeof value === "object") {
+    const safe = {};
+    for (const [childKey, childValue] of Object.entries(value).slice(0, 30)) {
+      safe[cleanAuditLogText(childKey, 80) || "field"] = sanitizeAuditLogValue(childValue, childKey, depth + 1);
+    }
+    return safe;
+  }
+  return cleanAuditLogText(value, 180);
+}
+
+function auditLogTimestamp(value, fallback = 0) {
+  const direct = value instanceof Date ? value.getTime() : (typeof value === "number" ? value : NaN);
+  if (Number.isFinite(direct)) return direct;
+  const timestamp = Date.parse(String(value || ""));
+  return Number.isFinite(timestamp) ? timestamp : fallback;
+}
+
+function auditLogSeverity(value) {
+  const severity = String(value || "info").toLowerCase();
+  if (["info", "warning", "error", "security"].includes(severity)) return severity;
+  return severity === "critical" ? "error" : "info";
+}
+
+function normalizedAuditLogEvent(raw, users = {}, now = Date.now()) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const timestamp = auditLogTimestamp(raw.createdAt || raw.occurredAt || raw.at, 0);
+  if (!timestamp || timestamp < now - AUDIT_LOG_RETENTION_MS || timestamp > now + 5 * 60_000) return null;
+  const actor = raw.actor && typeof raw.actor === "object" ? raw.actor : {};
+  const actorId = cleanAuditLogText(raw.actorId || actor.id || raw.by || "system", 120) || "system";
+  const actorName = cleanAuditActorName(raw.actorName || actor.name || raw.byName || users?.[actorId]?.name || actorId, actorId);
+  const action = cleanAuditLogText(raw.action || raw.title || "unknown", 160) || "unknown";
+  const targetType = cleanAuditLogText(raw.targetType || raw.context?.targetType || "", 80);
+  const targetId = cleanAuditTargetId(raw.targetId || raw.context?.targetId || "");
+  const sourceContext = raw.context !== undefined ? raw.context : (raw.details !== undefined ? raw.details : {});
+  const context = sanitizeAuditLogValue(sourceContext, "context") || {};
+  return {
+    id: /^[a-zA-Z0-9_-]{8,128}$/.test(String(raw.id || "")) ? String(raw.id) : crypto.randomUUID(),
+    createdAt: new Date(timestamp).toISOString(),
+    occurredAt: new Date(timestamp).toISOString(),
+    actorId,
+    actorName,
+    actor: { id: actorId, name: actorName },
+    action,
+    targetType,
+    targetId,
+    severity: auditLogSeverity(raw.severity),
+    context: typeof context === "object" && !Array.isArray(context) ? context : { value: context }
+  };
+}
+
+function purgeExpiredAuditLog(db, now = Date.now()) {
+  if (!db || typeof db !== "object" || !Array.isArray(db.auditLog)) return 0;
+  const current = Number(now instanceof Date ? now.getTime() : now);
+  const cutoff = (Number.isFinite(current) ? current : Date.now()) - AUDIT_LOG_RETENTION_MS;
+  const before = db.auditLog.length;
+  db.auditLog = db.auditLog.filter((event) => auditLogTimestamp(event?.createdAt || event?.occurredAt || event?.at, 0) >= cutoff);
+  return before - db.auditLog.length;
+}
+
+function normalizeAuditLog(raw, users = {}, now = Date.now()) {
+  const values = Array.isArray(raw) ? raw : [];
+  const normalized = values
+    .map((event) => normalizedAuditLogEvent(event, users, now))
+    .filter(Boolean)
+    .sort((left, right) => auditLogTimestamp(right.createdAt) - auditLogTimestamp(left.createdAt))
+    .slice(0, AUDIT_LOG_MAX_EVENTS);
+  return normalized;
+}
+
+function buildAuditLogEvent({ actor = null, action = "", targetType = "", targetId = "", details, context, severity = "info", occurredAt } = {}, users = {}) {
+  const actorId = cleanAuditLogText(actor?.id || actor?.actorId || "system", 120) || "system";
+  const actorName = cleanAuditActorName(actor?.name || actor?.actorName || users?.[actorId]?.name || actorId, actorId);
+  const createdAt = new Date(auditLogTimestamp(occurredAt, Date.now())).toISOString();
+  return normalizedAuditLogEvent({
+    id: crypto.randomUUID(),
+    createdAt,
+    actorId,
+    actorName,
+    action,
+    targetType,
+    targetId,
+    severity,
+    context: context !== undefined ? context : details
+  }, users, Date.now());
+}
+
+function recordAuditLog(db, input = {}) {
+  if (!db || typeof db !== "object") return null;
+  if (!Array.isArray(db.auditLog)) db.auditLog = [];
+  purgeExpiredAuditLog(db);
+  const event = buildAuditLogEvent(input, db.users || {});
+  if (!event) return null;
+  db.auditLog.unshift(event);
+  if (db.auditLog.length > AUDIT_LOG_MAX_EVENTS) db.auditLog.length = AUDIT_LOG_MAX_EVENTS;
+  return JSON.parse(JSON.stringify(event));
+}
+
+function auditLogRelatedUserIds(event) {
+  const related = new Set([String(event?.actorId || "")]);
+  const context = event?.context && typeof event.context === "object" ? event.context : {};
+  for (const key of ["userId", "workerId", "assigneeId", "createdBy", "updatedBy", "person"]) {
+    if (context[key]) related.add(String(context[key]));
+  }
+  for (const key of ["assigneeIds", "userIds", "workerIds"]) {
+    for (const id of Array.isArray(context[key]) ? context[key] : []) related.add(String(id));
+  }
+  return related;
+}
+
+function visibleAuditLogForUser(db, user) {
+  if (!user) return [];
+  const events = Array.isArray(db?.auditLog) ? db.auditLog : [];
+  const actorId = String(user.id || "");
+  return events
+    .filter((event) => user.role === "boss" || auditLogRelatedUserIds(event).has(actorId))
+    .sort((left, right) => auditLogTimestamp(right.createdAt) - auditLogTimestamp(left.createdAt))
+    .map((event) => JSON.parse(JSON.stringify(event)));
+}
+
+function auditRequestSource(req) {
+  const peer = String(req?.socket?.remoteAddress || "").replace(/^::ffff:/, "");
+  const isLoopback = peer === "127.0.0.1" || peer === "::1";
+  // Trust a proxy-supplied address only from the local Nginx hop. X-Real-IP is
+  // a single value, unlike a user-controlled forwarding chain.
+  const proxySource = isLoopback ? String(req?.headers?.["x-real-ip"] || "").trim().replace(/^::ffff:/, "") : "";
+  const source = cleanAuditLogText(proxySource || peer || "unknown", 80) || "unknown";
+  if (source === "unknown") return source;
+  // HMAC keeps the same source correlatable for incident response while making
+  // the database value unusable as a raw IP address or a reversible hash.
+  return `source-${crypto.createHmac("sha256", AUDIT_LOG_HMAC_KEY).update(source).digest("hex").slice(0, 16)}`;
+}
+
+function auditRoute(pathname) {
+  return String(pathname || "")
+    .replace(/\/[0-9a-f]{8}-[0-9a-f-]{27,}/gi, "/:id")
+    .replace(/\/[a-f0-9]{32,}/gi, "/:id")
+    .replace(/\/(?:[A-Za-z0-9_-]{36,})/g, "/:id")
+    .slice(0, 180);
+}
+
+function auditTargetFromPath(pathname) {
+  const parts = String(pathname || "").split("/").filter(Boolean);
+  const resources = {
+    todos: "todo",
+    entries: "entry",
+    clients: "client",
+    payrolls: "payroll",
+    "client-bills": "client_bill",
+    attachments: "attachment"
+  };
+  const index = parts.findIndex((part) => Object.hasOwn(resources, part));
+  if (index < 0) return { targetType: "", targetId: "" };
+  return {
+    targetType: resources[parts[index]],
+    targetId: cleanAuditTargetId(parts[index + 1] || "")
+  };
+}
+
+function shouldAuditApiRequest(req, url, statusCode) {
+  const pathname = String(url?.pathname || "");
+  const status = Number(statusCode || 0);
+  if (pathname === "/api/health" || pathname === "/api/test-mode") return false;
+  if (pathname === "/api/audit-log" && status < 400) return false;
+  if ([401, 403, 429].includes(status) || status >= 500) return true;
+  if (!isUnsafeRequest(req)) return false;
+  return !/^\/api\/(?:sync|sync-state|todos\/[^/]+\/lock|entries\/[^/]+\/lock)$/.test(pathname);
+}
+
+function scheduleAuditLog(input, { dedupeMs = 0 } = {}) {
+  const event = { ...input };
+  const fingerprint = `${event.action || ""}|${event.severity || ""}|${event.context?.source || ""}|${event.context?.route || ""}`;
+  if (dedupeMs > 0) {
+    const last = Number(auditLogCooldowns.get(fingerprint) || 0);
+    if (Date.now() - last < dedupeMs) return;
+    auditLogCooldowns.set(fingerprint, Date.now());
+  }
+  if (DATABASE_URL) {
+    appendAuditLogToPostgres(event).catch((error) => console.error(`Revizijskega zapisa ni bilo mogoče shraniti: ${error.message || error}`));
+    return;
+  }
+  runSerializedWork(async () => {
+    const db = await readDbAsync();
+    recordAuditLog(db, event);
+    await writeDbAsync(db);
+  }).catch((error) => console.error(`Revizijskega zapisa ni bilo mogoče shraniti: ${error.message || error}`));
+}
+
+function attachApiAuditTrail(req, res, url) {
+  if (req.indusAuditTrailAttached) return;
+  req.indusAuditTrailAttached = true;
+  res.once("finish", () => {
+    const status = Number(res.statusCode || 0);
+    if (!shouldAuditApiRequest(req, url, status)) return;
+    const target = auditTargetFromPath(url.pathname);
+    const denied = [401, 403, 429].includes(status);
+    const failed = status >= 500;
+    scheduleAuditLog({
+      actor: req.indusSessionUser || { id: denied ? "anonymous" : "system", name: denied ? "Neznan uporabnik" : "Sistem" },
+      action: denied || failed ? `security.request.${status}` : `api.${String(req.method || "GET").toLowerCase()}`,
+      targetType: target.targetType,
+      targetId: target.targetId,
+      severity: failed ? "error" : (denied ? "security" : "info"),
+      context: {
+        route: auditRoute(url.pathname),
+        method: String(req.method || "GET").toUpperCase(),
+        status,
+        source: auditRequestSource(req)
+      }
+    }, { dedupeMs: denied || failed ? 2 * 60_000 : 0 });
+  });
+}
 function normalizeDb(db = {}) {
   let changed = false;
 
@@ -859,6 +1126,11 @@ function normalizeDb(db = {}) {
     }
   }
 
+  const normalizedAuditLog = normalizeAuditLog(db.auditLog, db.users);
+  if (!Array.isArray(db.auditLog) || JSON.stringify(db.auditLog) !== JSON.stringify(normalizedAuditLog)) {
+    db.auditLog = normalizedAuditLog;
+    changed = true;
+  }
   const hasTodoCreateReceipts = db.todoCreateReceipts && typeof db.todoCreateReceipts === "object" && !Array.isArray(db.todoCreateReceipts);
   const normalizedTodoCreateReceipts = normalizeTodoCreateReceipts(db.todoCreateReceipts, db.users);
   if (!hasTodoCreateReceipts || JSON.stringify(db.todoCreateReceipts) !== JSON.stringify(normalizedTodoCreateReceipts)) {
@@ -1326,7 +1598,7 @@ function normalizeDb(db = {}) {
 function ensureDb() {
   if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
   if (!fs.existsSync(dbFile)) {
-    fs.writeFileSync(dbFile, JSON.stringify({ users: defaultUsers, sessions: {}, entries: [], todos: [], attachments: {}, debts: [], clients: [], clientBills: [] }, null, 2), "utf8");
+    fs.writeFileSync(dbFile, JSON.stringify({ users: defaultUsers, sessions: {}, entries: [], todos: [], attachments: {}, debts: [], clients: [], clientBills: [], auditLog: [] }, null, 2), "utf8");
     return;
   }
 
@@ -1359,6 +1631,83 @@ function getPgStore() {
   return pgStore;
 }
 
+async function ensureAuditLogStore() {
+  if (!DATABASE_URL) return;
+  if (auditLogStoreReady) return auditLogStoreReady;
+  auditLogStoreReady = (async () => {
+    await getPgPool().query(`
+      create table if not exists indus_audit_log (
+        id text primary key,
+        actor_id text not null default '',
+        actor_name text not null default '',
+        action text not null default '',
+        target_type text not null default '',
+        target_id text not null default '',
+        severity text not null default 'info',
+        context jsonb not null default '{}'::jsonb,
+        created_at timestamptz not null default now()
+      );
+      create index if not exists indus_audit_log_created_idx on indus_audit_log (created_at desc);
+      create index if not exists indus_audit_log_actor_idx on indus_audit_log (actor_id, created_at desc);
+    `);
+  })();
+  try {
+    await auditLogStoreReady;
+  } catch (error) {
+    auditLogStoreReady = null;
+    throw error;
+  }
+}
+
+async function purgeExpiredPersistedAuditLog({ force = false } = {}) {
+  if (!DATABASE_URL) return 0;
+  if (!force && Date.now() - auditLogStoreCleanupAt < 60 * 60_000) return 0;
+  await ensureAuditLogStore();
+  const result = await getPgPool().query("delete from indus_audit_log where created_at < now() - interval '30 days'");
+  auditLogStoreCleanupAt = Date.now();
+  return result.rowCount || 0;
+}
+async function appendAuditLogToPostgres(input) {
+  if (!DATABASE_URL) return null;
+  const event = buildAuditLogEvent(input);
+  if (!event) return null;
+  await ensureAuditLogStore();
+  await getPgPool().query(
+    `insert into indus_audit_log
+      (id, actor_id, actor_name, action, target_type, target_id, severity, context, created_at)
+     values ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::timestamptz)`,
+    [event.id, event.actorId, event.actorName, event.action, event.targetType, event.targetId, event.severity, JSON.stringify(event.context), event.createdAt]
+  );
+  await purgeExpiredPersistedAuditLog();
+  return event;
+}
+
+async function persistedAuditLogForUser(user, limit = 500) {
+  if (!DATABASE_URL || !user) return [];
+  await ensureAuditLogStore();
+  const result = await getPgPool().query(
+    `select id, actor_id, actor_name, action, target_type, target_id, severity, context, created_at
+       from indus_audit_log
+      where created_at >= now() - interval '30 days'
+      order by created_at desc, id desc
+      limit $1`,
+    [Math.max(1, Math.min(501, Number(limit) || 500))]
+  );
+  const db = {
+    auditLog: normalizeAuditLog(result.rows.map((row) => ({
+      id: row.id,
+      actorId: row.actor_id,
+      actorName: row.actor_name,
+      action: row.action,
+      targetType: row.target_type,
+      targetId: row.target_id,
+      severity: row.severity,
+      context: row.context,
+      createdAt: row.created_at
+    })))
+  };
+  return visibleAuditLogForUser(db, user);
+}
 function initialDatabaseState() {
   return {
     users: JSON.parse(JSON.stringify(defaultUsers)),
@@ -1372,6 +1721,7 @@ function initialDatabaseState() {
     payrolls: [],
     clientBills: [],
     todoCreateReceipts: {},
+    auditLog: [],
     settings: {},
     calendarToken: crypto.randomBytes(24).toString("hex"),
     syncRevision: 0
@@ -1385,6 +1735,7 @@ async function ensurePostgresDb() {
     // Normalize legacy JSON once before writing relational rows so UUID client references,
     // assignment groups and attachment metadata survive the conversion intact.
     await getPgStore().ensure(initialDatabaseState(), normalizeDb);
+    await ensureAuditLogStore();
   })();
   return pgReady;
 }
@@ -3782,7 +4133,19 @@ async function runDailyWorkerDigest({ date = "", dryRun = false } = {}) {
     await recordOperationalAlert({ code: `worker-digest-failed-${reportDate}`, severity: "warning", title: "No\u010dni povzetek ur ni v celoti pripravljen", message });
     throw new Error(message);
   }
-  return { date: reportDate, drafted, skipped: workers.length - reports.length };
+  const result = { date: reportDate, drafted, skipped: workers.length - reports.length };
+  scheduleAuditLog({
+    actor: { id: "system", name: "Sistem" },
+    action: "system.worker_digest.completed",
+    targetType: "worker_digest",
+    severity: "info",
+    context: {
+      reportDate,
+      draftedCount: drafted.length,
+      skippedWorkers: result.skipped
+    }
+  });
+  return result;
 }
 // A saved OAuth token is not proof that Google still accepts it. Check the
 // token with a read-only Drive request before showing the connection as ready.
@@ -4049,7 +4412,25 @@ async function runArchiveRetentionCleanup() {
     skipped: trashApproval.drive.skipped + archiveApproval.drive.skipped
   };
   const blocked = trashApproval.blocked + archiveApproval.blocked;
-  if (purged.todos || trashed.todos) await writeDbAsync(db);
+  const cleanupChanged = Boolean(purged.todos || trashed.todos || blocked);
+  const cleanupAudit = cleanupChanged ? {
+    actor: { id: "system", name: "Sistem" },
+    action: blocked ? "system.retention_cleanup.blocked" : "system.retention_cleanup.completed",
+    targetType: "retention_cleanup",
+    severity: blocked ? "warning" : "info",
+    context: {
+      archiveEventsRemoved: Number(purged.todos || 0),
+      trashEventsRemoved: Number(trashed.todos || 0),
+      attachmentsRemoved: Number(purged.attachments || 0) + Number(trashed.attachments || 0),
+      adHocClientsRemoved: Number(purged.adHocClients || 0) + Number(trashed.adHocClients || 0),
+      driveFilesRemoved: Number(drive.deleted || 0),
+      driveFilesSkipped: Number(drive.skipped || 0),
+      blockedGroups: Number(blocked || 0)
+    }
+  } : null;
+  if (!DATABASE_URL && cleanupAudit) recordAuditLog(db, cleanupAudit);
+  if (purged.todos || trashed.todos || (!DATABASE_URL && cleanupAudit)) await writeDbAsync(db);
+  if (DATABASE_URL && cleanupAudit) scheduleAuditLog(cleanupAudit);
   if (blocked) {
     await recordOperationalAlert({
       code: "archive-retention-drive-cleanup-failed",
@@ -4072,6 +4453,13 @@ function scheduleArchiveRetentionCleanup(force = false) {
   });
   mutationQueue = archiveRetentionCleanupPromise.catch((error) => {
     console.error(`Čiščenje arhiva ni uspelo: ${error.message || error}`);
+    scheduleAuditLog({
+      actor: { id: "system", name: "Sistem" },
+      action: "system.retention_cleanup.failed",
+      targetType: "retention_cleanup",
+      severity: "error",
+      context: { errorClass: cleanAuditLogText(error?.name || "Error", 80) }
+    }, { dedupeMs: 10 * 60_000 });
   });
   return archiveRetentionCleanupPromise.finally(() => { archiveRetentionCleanupPromise = null; });
 }
@@ -4511,9 +4899,21 @@ function deniedGoogleLoginCode(email) {
   return `denied-google-login-${crypto.createHash("sha256").update(String(email || "").toLowerCase()).digest("hex").slice(0, 20)}`;
 }
 
-async function recordDeniedGoogleLogin(email) {
+async function recordDeniedGoogleLogin(email, req = null) {
   const normalizedEmail = String(email || "").trim().toLowerCase().slice(0, 254);
   if (!normalizedEmail) return;
+  scheduleAuditLog({
+    actor: { id: "anonymous", name: "Neznan Google račun" },
+    action: "auth.google.denied",
+    targetType: "login",
+    targetId: crypto.createHash("sha256").update(normalizedEmail).digest("hex").slice(0, 16),
+    severity: "security",
+    context: {
+      provider: "google",
+      accountFingerprint: crypto.createHash("sha256").update(normalizedEmail).digest("hex").slice(0, 16),
+      source: req ? auditRequestSource(req) : "unknown"
+    }
+  }, { dedupeMs: 2 * 60_000 });
   if (DATABASE_URL) {
     try {
       await getPgPool().query(
@@ -4561,6 +4961,14 @@ async function recordOperationalAlert({ code, severity = "warning", title, messa
     }
   }
   await sendOperationalAlertEmail(notification);
+  scheduleAuditLog({
+    actor: { id: "system", name: "Sistem" },
+    action: "system.operational_alert",
+    targetType: "operational_alert",
+    targetId: cleanAuditLogText(code, 120),
+    severity: auditLogSeverity(severity),
+    context: { code: cleanAuditLogText(code, 120) }
+  }, { dedupeMs: 6 * 60 * 60 * 1000 });
   return true;
 }
 
@@ -4624,6 +5032,13 @@ async function runOperationalMonitor() {
     issues.push({ code: "memory-high", severity: "warning", title: "Poraba pomnilnika je visoka", message: `Proces INDUS URE porabi ${Math.round(rssMb)} MB RAM.` });
   }
   for (const issue of issues) await recordOperationalAlert(issue);
+  if (DATABASE_URL) {
+    try {
+      await purgeExpiredPersistedAuditLog();
+    } catch (error) {
+      console.error(`Revizijskega dnevnika ni bilo mogoče počistiti: ${error.message || error}`);
+    }
+  }
   scheduleArchiveRetentionCleanup().catch((error) => console.error(`Čiščenje arhiva ni uspelo: ${error.message || error}`));
 }
 
@@ -4635,6 +5050,7 @@ function startOperationalMonitor() {
 }
 async function handleApi(req, res) {
   const url = new URL(req.url, `http://${req.headers.host}`);
+  attachApiAuditTrail(req, res, url);
 
   try {
     if (url.pathname === "/api/test-mode" && req.method === "GET") {
@@ -4785,6 +5201,25 @@ async function handleApi(req, res) {
       return;
     }
 
+    if (url.pathname === "/api/audit-log" && req.method === "GET") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      if (user.role !== "boss") {
+        sendJson(res, 403, { error: "Revizijski dnevnik vidi samo šef." });
+        return;
+      }
+      const maxEvents = 500;
+      const availableEvents = DATABASE_URL
+        ? await persistedAuditLogForUser(user, maxEvents + 1)
+        : visibleAuditLogForUser(await readDbAsync(), user);
+      sendJson(res, 200, {
+        events: availableEvents.slice(0, maxEvents),
+        retentionDays: AUDIT_LOG_RETENTION_DAYS,
+        maxEvents,
+        truncated: availableEvents.length > maxEvents
+      });
+      return;
+    }
     if (url.pathname === "/api/notifications" && req.method === "GET") {
       const user = await requireUser(req, res);
       if (!user) return;
@@ -4914,12 +5349,19 @@ async function handleApi(req, res) {
         const db = await readDbAsync();
         const user = userByEmail(db, email);
         if (!user) {
-          await recordDeniedGoogleLogin(email);
+          await recordDeniedGoogleLogin(email, req);
           sendText(res, 403, "Dostop je zavrnjen.", "text/plain");
           return;
         }
         const sessionToken = createSession(db, user.id);
         await writeDbAsync(db);
+        scheduleAuditLog({
+          actor: user,
+          action: "auth.google.login",
+          targetType: "session",
+          severity: "info",
+          context: { provider: "google", source: auditRequestSource(req) }
+        });
         setSessionCookie(req, res, sessionToken);
         const destination = new URL(safeAppReturnTo(pendingLogin?.returnTo), absoluteBaseUrl(req));
         destination.searchParams.set("login", "ok");
@@ -4958,6 +5400,13 @@ async function handleApi(req, res) {
         driveScopeVersion: GOOGLE_DRIVE_SCOPE_VERSION
       };
       await writeDbAsync(db);
+      scheduleAuditLog({
+        actor: user,
+        action: "auth.google_workspace.connected",
+        targetType: "google_workspace",
+        severity: "security",
+        context: { provider: "google", scopes: "drive_file,gmail_compose", source: auditRequestSource(req) }
+      });
       sendText(res, 200, "Google Dokumenti, preglednice, Gmail osnutki in backup so povezani. Lahko zapreš to okno in se vrneš v INDUS URE.", "text/plain");
       return;
     }
@@ -7103,6 +7552,10 @@ module.exports = {
   ENTRY_EDIT_LOCK_TTL_MS,
   TODO_EDIT_LOCK_TTL_MS,
   DELETED_TODO_RETENTION_DAYS,
+  AUDIT_LOG_RETENTION_DAYS,
+  recordAuditLog,
+  visibleAuditLogForUser,
+  purgeExpiredAuditLog,
   GOOGLE_DRIVE_SCOPE_VERSION,
   INDUS_GOOGLE_APP_ID,
   TODO_STATUS_DEFINITIONS,

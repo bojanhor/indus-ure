@@ -680,6 +680,21 @@
     .server-status-values { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; color: var(--muted); font-size: 13px; font-weight: 750; }
     .server-status-values span { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 5px 10px; min-width: 0; padding: 9px 10px; border: 1px solid var(--line); border-radius: 8px; background: #f8fbfa; }
     .server-status-values b { color: var(--ink); }
+    .audit-log-dialog { width: min(820px, calc(100vw - 26px)); max-height: min(780px, calc(100dvh - 26px)); overflow-y: auto; overscroll-behavior: contain; }
+    .audit-log-retention { display: block; color: var(--muted); font-size: 13px; margin: -2px 0 12px; }
+    .audit-log-list { display: grid; gap: 9px; }
+    .audit-log-event { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; align-items: start; padding: 11px 12px; border: 1px solid var(--line); border-left: 4px solid #6c8594; border-radius: 9px; background: #f8faf7; }
+    .audit-log-event.severity-warning { border-left-color: #c78316; background: #fffaf0; }
+    .audit-log-event.severity-error { border-left-color: #bd3f47; background: #fff5f4; }
+    .audit-log-event.severity-security { border-left-color: #6a4c93; background: #faf7ff; }
+    .audit-log-event-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+    .audit-log-event-head strong { overflow-wrap: anywhere; }
+    .audit-log-event time { color: var(--muted); font-size: 12px; font-weight: 700; }
+    .audit-log-event p { margin: 5px 0 0; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+    .audit-log-severity { display: inline-flex; align-items: center; min-height: 25px; padding: 3px 7px; border: 1px solid currentColor; border-radius: 999px; color: #456574; font-size: 11px; font-weight: 900; letter-spacing: .02em; text-transform: uppercase; }
+    .audit-log-event.severity-warning .audit-log-severity { color: #9a6210; }
+    .audit-log-event.severity-error .audit-log-severity { color: #9f3036; }
+    .audit-log-event.severity-security .audit-log-severity { color: #5d3b89; }
     .app-issue-description {
       white-space: pre-wrap;
     }
@@ -4143,6 +4158,8 @@
       .todo-edit-icon,
       .todo-delete-icon { width: 29px; height: 29px; }
       .server-status-values { grid-template-columns: 1fr; }
+      .audit-log-event { grid-template-columns: 1fr; gap: 6px; padding: 10px; }
+      .audit-log-dialog { width: min(100vw - 18px, 820px); }
       .photo-actions {
         grid-column: 2;
       }
@@ -4368,6 +4385,7 @@
               <button class="menu-action" id="trashMenuBtn" type="button">Koš opravil</button>
               <span class="tools-menu-label admin-only">Napredno</span>
               <button class="menu-action admin-only" id="serverStatusBtn" type="button">Stanje stre&#382;nika</button>
+              <button class="menu-action admin-only" id="auditLogBtn" type="button">Dnevnik dejavnosti</button>
               <button class="menu-action admin-only" id="appSettingsBtn" type="button">Nastavitve obračuna in arhiva</button>
               <button class="menu-action admin-only" id="exportCsv" type="button">Izvoz CSV</button>
               <button class="menu-action admin-only" id="downloadBackup" type="button">Prenesi varnostno kopijo (ZIP)</button>
@@ -5098,6 +5116,18 @@
       </div>
     </form>
   </dialog>
+  <dialog id="auditLogDialog" class="audit-log-dialog">
+    <form method="dialog">
+      <div class="modal-head">
+        <div><h3>Dnevnik dejavnosti</h3><span class="todo-meta" id="auditLogSubtitle"></span></div>
+        <button class="icon-btn" id="closeAuditLog" type="button" title="Zapri" aria-label="Zapri">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="audit-log-retention" id="auditLogRetention"></p>
+        <div class="audit-log-list" id="auditLogList" aria-live="polite"></div>
+      </div>
+    </form>
+  </dialog>
   <div class="app-notice" id="appNotice" role="status" aria-live="polite" hidden>
     <span class="app-notice-message" id="appNoticeMessage"></span>
     <button class="app-notice-close" id="closeAppNotice" type="button" aria-label="Zapri obvestilo">&times;</button>
@@ -5239,6 +5269,10 @@
       todos: [],
       deletedTodos: [],
       deletedTodoRetentionDays: 30,
+      auditEvents: [],
+      auditLogRetentionDays: 30,
+      auditLogMaxEvents: 500,
+      auditLogTruncated: false,
       todoRevision: 0,
       todoMutationPending: 0,
       debts: [],
@@ -12785,6 +12819,139 @@
       await refreshNotifications();
       $("notificationsDialog").showModal();
     }
+
+    function auditSafeText(value, maxLength = 180) {
+      const text = String(value ?? "").replace(/\s+/g, " ").trim();
+      if (!text) return "";
+      if (/(?:password|passcode|token|secret|authorization|bearer|cookie|csrf|oauth|private[ _-]?key|api[ _-]?key|client[ _-]?secret)\s*[:=]/i.test(text)) return "";
+      if (/\b[A-Za-z0-9_-]{40,}\b/.test(text) || /@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/.test(text) || /\b(?:\d{1,3}\.){3}\d{1,3}\b/.test(text)) return "";
+      return text.length > maxLength ? `${text.slice(0, Math.max(1, maxLength - 1))}\u2026` : text;
+    }
+
+    function auditEventSeverity(event) {
+      const value = String(event?.severity || event?.level || event?.status || "info").toLowerCase();
+      if (/(security|auth|access|permission)/.test(value)) return "security";
+      if (/(critical|error|failed|failure|denied)/.test(value)) return "error";
+      if (/(warn|warning)/.test(value)) return "warning";
+      return "info";
+    }
+
+    function auditSeverityLabel(severity) {
+      return ({ info: "Informacija", warning: "Opozorilo", error: "Napaka", security: "Varnost" })[severity] || "Informacija";
+    }
+
+    function auditEventActor(event) {
+      const actor = event?.actor && typeof event.actor === "object" ? event.actor : {};
+      return auditSafeText(
+        event?.actorName || event?.userName || event?.performedByName || event?.displayName ||
+        actor.name || actor.displayName || actor.label || actor.id ||
+        (typeof event?.actor === "string" ? event.actor : "") ||
+        (typeof event?.user === "string" ? event.user : "") || event?.actorId || event?.userId,
+        80
+      ) || "Sistem";
+    }
+
+    function auditEventAction(event) {
+      const raw = auditSafeText(event?.action || event?.type || event?.event || event?.kind, 110);
+      const normalized = raw.toLowerCase().replace(/[\s/]+/g, ".").replace(/_+/g, ".");
+      const labels = {
+        "login": "Prijava", "auth.login": "Prijava", "logout": "Odjava", "auth.logout": "Odjava",
+        "todo.created": "Ustvarjeno opravilo", "todo.updated": "Posodobljeno opravilo", "todo.deleted": "Opravilo premaknjeno v ko\u0161", "todo.restored": "Opravilo obnovljeno",
+        "billing.confirmed": "Potrjen obra\u010dun", "billing.reverted": "Preklican obra\u010dun",
+        "backup.completed": "Varnostna kopija dokon\u010dana", "backup.failed": "Varnostna kopija ni uspela",
+        "settings.updated": "Posodobljene nastavitve", "user.updated": "Posodobljen uporabnik"
+      };
+      if (labels[normalized]) return labels[normalized];
+      return raw ? raw.replace(/[._-]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase()) : "Zabele\u017eeno dejanje";
+    }
+
+    function auditTargetTypeLabel(value) {
+      const labels = {
+        todo: "Opravilo", entry: "Vpis ur", payroll: "Obra\u010dun", billing: "Obra\u010dun",
+        client: "Stranka", user: "Uporabnik", settings: "Nastavitve", backup: "Varnostna kopija",
+        session: "Seja", attachment: "Priloga", system: "Sistem"
+      };
+      return labels[String(value || "").toLowerCase()] || "";
+    }
+
+    function auditEventContext(event) {
+      const context = event?.context && typeof event.context === "object" && !Array.isArray(event.context) ? event.context : {};
+      const candidates = [
+        event?.contextLabel, event?.summary, event?.targetLabel, event?.entityLabel, event?.resourceLabel,
+        context.label, context.summary, context.entityLabel, context.resourceLabel, context.todoTitle,
+        context.eventTitle, context.clientName, context.title, context.name,
+        typeof event?.context === "string" ? event.context : ""
+      ];
+      for (const candidate of candidates) {
+        const safe = auditSafeText(candidate, 180);
+        if (safe) return safe;
+      }
+      const parts = [];
+      const targetType = auditTargetTypeLabel(event?.targetType || context.targetType);
+      const source = auditSafeText(context.source, 70);
+      const method = auditSafeText(context.method, 12);
+      const route = auditSafeText(String(context.route || "").split("?")[0], 100);
+      const status = Number(context.status);
+      if (targetType) parts.push(targetType);
+      if (source) parts.push(source);
+      if (method && route) parts.push(`${method.toUpperCase()} ${route}`);
+      else if (method) parts.push(method.toUpperCase());
+      if (Number.isInteger(status) && status >= 100 && status <= 599) parts.push(`HTTP ${status}`);
+      return parts.join(" \u00b7 ") || "Brez dodatnih podatkov";
+    }
+
+    function auditEventTime(event) {
+      const value = event?.createdAt || event?.occurredAt || event?.timestamp || event?.time || event?.at;
+      return Number.isFinite(Date.parse(String(value || ""))) ? String(value) : "";
+    }
+
+    function auditEventTimestamp(event) {
+      const value = auditEventTime(event);
+      return value ? Date.parse(value) : 0;
+    }
+
+    function renderAuditLog() {
+      const dialog = $("auditLogDialog");
+      const list = $("auditLogList");
+      const subtitle = $("auditLogSubtitle");
+      const retention = $("auditLogRetention");
+      if (!dialog || !list || !subtitle || !retention) return;
+      if (!isAdminView()) {
+        if (dialog.open) dialog.close();
+        return;
+      }
+      const events = Array.isArray(state.auditEvents) ? state.auditEvents.slice() : [];
+      const retentionDays = Math.max(1, Number(state.auditLogRetentionDays || 30));
+      const maxEvents = Math.max(1, Number(state.auditLogMaxEvents || 500));
+      const truncated = Boolean(state.auditLogTruncated);
+      events.sort((left, right) => auditEventTimestamp(right) - auditEventTimestamp(left));
+      subtitle.textContent = events.length ? `${events.length} ${events.length === 1 ? "zapis" : "zapisov"}` : "Brez zapisov";
+      retention.textContent = `Hramba ${retentionDays} dni. Prikazanih je do ${maxEvents} najnovej\u0161ih zapisov${truncated ? "; starejši zapisi ostanejo v 30-dnevni hrambi" : ""}. Gesla, \u017eetoni, seje in druge ob\u010dutljive vrednosti niso prikazane.`;
+      if (!events.length) {
+        list.innerHTML = `<p class="todo-meta">V izbranem obdobju ni zabele\u017eenih dejavnosti.</p>`;
+        return;
+      }
+      list.innerHTML = events.map((event) => {
+        const severity = auditEventSeverity(event);
+        const time = auditEventTime(event);
+        const action = auditEventAction(event);
+        const actor = auditEventActor(event);
+        const context = auditEventContext(event);
+        return `<article class="audit-log-event severity-${escapeHtml(severity)}"><span class="audit-log-severity">${escapeHtml(auditSeverityLabel(severity))}</span><div><div class="audit-log-event-head"><strong>${escapeHtml(action)}</strong><time${time ? ` datetime="${escapeHtml(time)}"` : ""}>${escapeHtml(time ? formatDateTime(time) : "\u010cas ni na voljo")}</time></div><p>${escapeHtml(actor)} \u00b7 ${escapeHtml(context)}</p></div></article>`;
+      }).join("");
+    }
+
+    async function openAuditLog() {
+      if (!isAdminView()) throw new Error("Dnevnik dejavnosti je na voljo samo v \u0161efovskem pogledu.");
+      const data = await api("/api/audit-log", { recoverSession: false });
+      state.auditEvents = Array.isArray(data.events) ? data.events : [];
+      state.auditLogRetentionDays = Math.max(1, Number(data.retentionDays || 30));
+      state.auditLogMaxEvents = Math.max(1, Number(data.maxEvents || 500));
+      state.auditLogTruncated = Boolean(data.truncated);
+      renderAuditLog();
+      $("auditLogDialog").showModal();
+    }
+
     function renderDeletedTodos() {
       const list = $("deletedTodosList");
       const meta = $("deletedTodosMeta");
@@ -12901,6 +13068,8 @@
     $("closeNotifications").addEventListener("click", () => $("notificationsDialog").close());
     $("serverStatusBtn").addEventListener("click", () => openServerStatus().catch((error) => showNotice(error.message)));
     $("closeServerStatus").addEventListener("click", () => $("serverStatusDialog").close());
+    $("auditLogBtn").addEventListener("click", () => openAuditLog().catch((error) => showNotice(error.message)));
+    $("closeAuditLog").addEventListener("click", () => $("auditLogDialog").close());
     $("notificationsList").addEventListener("click", async (event) => {
       const button = event.target.closest(".read-notification");
       const item = event.target.closest("[data-notification-id]");
