@@ -134,6 +134,37 @@
       font-weight: 700;
     }
     .offline-sync-notice.conflict { background: #9f5a24; }
+    .offline-sync-notice-actions {
+      display: flex;
+      justify-content: flex-end;
+      margin-top: 8px;
+    }
+    .offline-sync-review {
+      color: #fff;
+      border-color: rgba(255, 255, 255, 0.72);
+      background: rgba(255, 255, 255, 0.12);
+      min-height: 32px;
+    }
+    .offline-sync-review:hover,
+    .offline-sync-review:focus-visible { background: rgba(255, 255, 255, 0.24); }
+    .offline-conflict-list { display: grid; gap: 12px; }
+    .offline-conflict-item {
+      display: grid;
+      gap: 8px;
+      padding: 13px;
+      border: 1px solid #d6ded8;
+      border-radius: 10px;
+      background: #f8faf6;
+    }
+    .offline-conflict-item h4 { margin: 0; font-size: 16px; }
+    .offline-conflict-item p { margin: 0; }
+    .offline-conflict-details {
+      margin: 0;
+      color: #536168;
+      font-size: 13px;
+      white-space: pre-wrap;
+    }
+    .offline-conflict-actions { display: flex; flex-wrap: wrap; gap: 8px; }
     .hidden,
     .view-hidden { display: none !important; }
 
@@ -4649,6 +4680,13 @@
     </form>
   </dialog>
 
+  <dialog id="offlineConflictsDialog">
+    <form method="dialog">
+      <div class="modal-head"><div><h3>Spremembe za pregled</h3><span class="todo-meta" id="offlineConflictsMeta"></span></div><button class="icon-btn" id="closeOfflineConflicts" type="button" title="Zapri" aria-label="Zapri">&times;</button></div>
+      <div class="modal-body"><p class="todo-meta">Te lokalne spremembe niso bile prenesene na stre&#382;nik. Pred zavrnitvijo lahko preveri&#353; naslov in vsebino lokalne spremembe.</p><div class="offline-conflict-list" id="offlineConflictsList"></div></div>
+    </form>
+  </dialog>
+
   <dialog id="todoDialog" tabindex="-1">
     <form method="dialog" id="todoForm">
       <div class="modal-head">
@@ -5596,6 +5634,117 @@
       return (await offlineTodoOps()).filter((item) => item.userId === state.user.id && !item.conflict);
     }
 
+    async function offlineTodoConflictsForCurrentUser() {
+      if (!state.user?.id) return [];
+      return (await offlineTodoOps())
+        .filter((item) => item.userId === state.user.id && item.conflict)
+        .sort((left, right) => Number(left.id || 0) - Number(right.id || 0));
+    }
+
+    function offlineConflictActionLabel(operation) {
+      if (operation?.kind === "delete") return "Izbris opravila";
+      if (operation?.kind === "reorder") return "Razvr\u0161\u010danje opravil";
+      if (operation?.kind === "create") return "Dodajanje opravila";
+      return "Urejanje opravila";
+    }
+
+    function offlineConflictTodoLabel(operation) {
+      const title = String(operation?.todo?.title || "").trim();
+      return title || offlineConflictActionLabel(operation);
+    }
+
+    function offlineConflictReason(operation) {
+      const code = String(operation?.lastErrorCode || "");
+      if (code === "todo_not_found") return "Opravilo je bilo medtem odstranjeno.";
+      if (code === "todo_not_editable") return "Opravilo ni ve\u010d dodeljeno tebi oziroma ga ne more\u0161 urejati.";
+      return String(operation?.lastError || "Spremembe ni bilo mogo\u010de varno prenesti.").trim();
+    }
+
+    function offlineConflictDetails(operation) {
+      const todo = operation?.todo || {};
+      return [
+        todo.client ? `Stranka: ${todo.client}` : "",
+        todo.notes ? `Opis: ${todo.notes}` : "",
+        todo.material ? `Material: ${todo.material}` : ""
+      ].filter(Boolean).join("\n\n");
+    }
+
+    async function renderOfflineConflictsDialog() {
+      const dialog = $("offlineConflictsDialog");
+      const list = $("offlineConflictsList");
+      const meta = $("offlineConflictsMeta");
+      const conflicts = await offlineTodoConflictsForCurrentUser();
+      meta.textContent = conflicts.length === 1
+        ? "1 lokalna sprememba"
+        : conflicts.length
+          ? `${conflicts.length} lokalnih sprememb`
+          : "Ni odprtih lokalnih sprememb.";
+      if (!conflicts.length) {
+        list.innerHTML = `<p class="todo-meta">Ni lokalnih sprememb za pregled.</p>`;
+        if (dialog.open) dialog.close();
+        return conflicts;
+      }
+      list.innerHTML = conflicts.map((operation) => {
+        const details = offlineConflictDetails(operation);
+        const detailsMarkup = details
+          ? `<details><summary>Poka\u017ei lokalno spremembo</summary><p class="offline-conflict-details">${escapeHtml(details)}</p></details>`
+          : "";
+        return `
+          <article class="offline-conflict-item" data-offline-conflict-id="${Number(operation.id)}">
+            <div>
+              <h4>${escapeHtml(offlineConflictTodoLabel(operation))}</h4>
+              <p class="todo-meta">${escapeHtml(offlineConflictActionLabel(operation))}</p>
+            </div>
+            <p>${escapeHtml(offlineConflictReason(operation))}</p>
+            ${detailsMarkup}
+            <div class="offline-conflict-actions">
+              <button class="secondary" type="button" data-offline-conflict-action="retry" data-offline-conflict-id="${Number(operation.id)}">Poskusi znova</button>
+              <button class="danger" type="button" data-offline-conflict-action="discard" data-offline-conflict-id="${Number(operation.id)}">Zavrzi lokalno spremembo</button>
+            </div>
+          </article>`;
+      }).join("");
+      return conflicts;
+    }
+
+    async function openOfflineConflictsDialog() {
+      const conflicts = await renderOfflineConflictsDialog();
+      const dialog = $("offlineConflictsDialog");
+      if (conflicts.length && !dialog.open) dialog.showModal();
+    }
+
+    async function retryOfflineTodoConflict(id) {
+      const operation = (await offlineTodoOps()).find((item) => item.userId === state.user?.id && Number(item.id) === Number(id));
+      if (!operation) return;
+      delete operation.conflict;
+      delete operation.failedAt;
+      delete operation.lastErrorCode;
+      delete operation.retryAt;
+      operation.attempts = 0;
+      operation.lastError = "";
+      await putOfflineTodoOp(operation);
+      await updateOfflineSyncNotice();
+      await flushOfflineTodoQueue();
+      await renderOfflineConflictsDialog();
+    }
+
+    async function discardOfflineTodoConflict(id) {
+      const operation = (await offlineTodoOps()).find((item) => item.userId === state.user?.id && Number(item.id) === Number(id));
+      if (!operation) return;
+      const label = offlineConflictTodoLabel(operation);
+      if (!await showAppConfirm(`Zavr\u017eem lokalno spremembo \u00bb${label}\u00ab? Stre\u017eni\u0161ka razli\u010dica ostane nespremenjena.`, {
+        title: "Zavrzi lokalno spremembo",
+        confirmLabel: "Zavrzi",
+        danger: true
+      })) return;
+      await removeOfflineTodoOp(operation.id);
+      if (navigator.onLine && !state.offlineMode) {
+        try { await loadTodos(); } catch (error) { if (!isNetworkError(error)) throw error; }
+      }
+      await updateOfflineSyncNotice();
+      await renderOfflineConflictsDialog();
+      showNotice("Lokalna sprememba je zavr\u017eena.");
+    }
+
     function clearOfflineTodoRetry() {
       if (!offlineTodoRetryTimer) return;
       clearTimeout(offlineTodoRetryTimer);
@@ -5755,8 +5904,19 @@
         ? `Brez povezave. Prikaz je iz ${formatDateTime((await usableOfflineSnapshot())?.savedAt || new Date().toISOString())}. `
         : "";
       if (conflicts) {
-        const reason = String(ops.find((item) => item.conflict && item.lastError)?.lastError || "").trim();
-        notice.textContent = `${localPrefix}${conflicts} sprememba${conflicts === 1 ? "" : "e"} potrebuje${conflicts === 1 ? "" : "jo"} pregled${reason ? `: ${reason}` : "."}`;
+        const reason = offlineConflictReason(ops.find((item) => item.conflict));
+        const message = `${localPrefix}${conflicts} sprememba${conflicts === 1 ? "" : "e"} potrebuje${conflicts === 1 ? "" : "jo"} pregled: ${reason}`;
+        const text = document.createElement("span");
+        text.textContent = message;
+        const actions = document.createElement("div");
+        actions.className = "offline-sync-notice-actions";
+        const review = document.createElement("button");
+        review.type = "button";
+        review.className = "secondary offline-sync-review";
+        review.textContent = "Preglej";
+        review.addEventListener("click", () => openOfflineConflictsDialog().catch((error) => showNotice(error.message)));
+        actions.append(review);
+        notice.replaceChildren(text, actions);
       } else if (ops.length) {
         const transport = state.offlineMode || !navigator.onLine
           ? "\u010caka na povezavo."
@@ -5766,12 +5926,14 @@
         notice.textContent = `${localPrefix}${ops.length} sprememba${ops.length === 1 ? "" : "e"} \u0161e ni varno prenesena. ${transport}${pendingAttachments ? " Med njimi so tudi priloge." : ""}`;
       } else if (state.offlineMode) {
         notice.textContent = `${localPrefix}Nove spremembe opravil, ur in prilog bodo poslane samodejno, ko se povezava vrne.`;
+      } else {
+        notice.textContent = "";
       }
     }
 
     async function queueOfflineTodo(operation) {
       const ops = await offlineTodoOps();
-      const existing = ops.find((item) => item.userId === state.user.id && item.todoId === operation.todoId && !item.conflict);
+      const existing = ops.find((item) => item.userId === state.user.id && item.todoId === operation.todoId);
       if (existing) {
         if (existing.kind === "create") {
           existing.todo = { ...(operation.todo || {}) };
@@ -5782,6 +5944,9 @@
         existing.hasAttachments = Boolean((existing.todo?.photos || []).some((photo) => photo.data));
         existing.attempts = 0;
         existing.lastError = "";
+        delete existing.conflict;
+        delete existing.failedAt;
+        delete existing.lastErrorCode;
         delete existing.retryAt;
         await putOfflineTodoOp(existing);
       } else {
@@ -5839,6 +6004,7 @@
             }
             op.conflict = true;
             op.lastError = String(error?.message || "Spremembe ni bilo mogo\u010de varno prenesti.");
+            op.lastErrorCode = String(error?.code || "");
             op.failedAt = new Date().toISOString();
             await putOfflineTodoOp(op);
           }
@@ -6806,12 +6972,12 @@
       const creating = !todo.id || String(todo.id).startsWith("offline-");
       const clientMutationId = creating ? String(todo.clientMutationId || crypto.randomUUID()) : "";
       const requestTodo = creating ? { ...todo, clientMutationId } : todo;
-      if (!creating && requestTodo.id && state.todoEditLock?.todoId === requestTodo.id) await pauseTodoLockHeartbeat();
-      const method = creating ? "POST" : "PUT";
-      const path = creating ? "/api/todos" : `/api/todos/${requestTodo.id}`;
       const editLockToken = !creating && requestTodo.id && state.todoEditLock?.todoId === requestTodo.id
         ? state.todoEditLock.token
         : "";
+      if (editLockToken) await pauseTodoLockHeartbeat();
+      const method = creating ? "POST" : "PUT";
+      const path = creating ? "/api/todos" : `/api/todos/${requestTodo.id}`;
       const payload = editLockToken ? { ...requestTodo, editLockToken } : requestTodo;
       try {
         const data = await api(path, { method, body: JSON.stringify({ ...payload, baseUpdatedAt: requestTodo.updatedAt || "" }) });
@@ -6822,7 +6988,10 @@
         }
         return data;
       } catch (error) {
-        if (!isNetworkError(error)) throw error;
+        if (!isNetworkError(error)) {
+          resumeTodoLockHeartbeat(requestTodo.id, editLockToken);
+          throw error;
+        }
         const localTodo = creating ? { ...requestTodo, id: requestTodo.id || "offline-" + crypto.randomUUID(), offlinePending: true } : { ...requestTodo, offlinePending: true };
         await queueOfflineTodo({ kind: creating ? "create" : "update", todoId: localTodo.id, todo: { ...requestTodo }, baseUpdatedAt: requestTodo.updatedAt || "" });
         if (isCurrentTodoRevision(todoRevision)) {
@@ -6854,7 +7023,10 @@
         }
         return data;
       } catch (error) {
-        if (!isNetworkError(error)) throw error;
+        if (!isNetworkError(error)) {
+          resumeTodoLockHeartbeat(todo.id, editLockToken);
+          throw error;
+        }
         const localTodo = { ...todo, start, end, date, hoursNeedsReview: false, offlinePending: true };
         await queueOfflineTodo({ kind: "update", todoId: localTodo.id, todo: localTodo, baseUpdatedAt: todo.updatedAt || "" });
         if (isCurrentTodoRevision(todoRevision)) {
@@ -6869,10 +7041,10 @@
     }
     async function deleteTodoFromServer(id) {
       const todoRevision = beginTodoMutation();
-      if (state.todoEditLock?.todoId === id) await pauseTodoLockHeartbeat();
       const editLockToken = state.todoEditLock?.todoId === id
         ? state.todoEditLock.token
         : "";
+      if (editLockToken) await pauseTodoLockHeartbeat();
       const previousTodos = state.todos.slice();
       const deletedEventId = String(previousTodos.find((todo) => todo.id === id)?.assignmentGroupId || id);
       state.todos = state.todos.filter((todo) => String(todo.assignmentGroupId || todo.id) !== deletedEventId);
@@ -6907,6 +7079,7 @@
           refreshClientList();
           render();
         }
+        resumeTodoLockHeartbeat(id, editLockToken);
         throw error;
       } finally {
         finishTodoMutation();
@@ -12338,6 +12511,13 @@
       if (state.todoLockRenewPromise) await state.todoLockRenewPromise;
     }
 
+    function resumeTodoLockHeartbeat(todoId, token) {
+      const current = state.todoEditLock;
+      if (!current || state.todoLockHeartbeat || state.offlineMode || !navigator.onLine) return;
+      if (current.todoId !== todoId || current.token !== token) return;
+      state.todoLockHeartbeat = setInterval(renewTodoEditLock, 20_000);
+    }
+
     function renewTodoEditLock() {
       const current = state.todoEditLock;
       if (!current || state.offlineMode || !navigator.onLine) return Promise.resolve();
@@ -12400,6 +12580,14 @@
           updateOfflineSyncNotice().catch(() => {});
           showNotice("Stre\u017enik trenutno ni dosegljiv. Opravilo lahko uredi\u0161 lokalno; prenos se bo ponovil samodejno.");
           return true;
+        }
+        if (error?.code === "todo_not_found" || error?.code === "todo_not_editable") {
+          if (state.todoEditLock?.todoId === todoId) clearTodoEditLockState();
+          try { await loadTodos(); } catch (refreshError) { if (!isNetworkError(refreshError)) throw refreshError; }
+          showNotice(error.code === "todo_not_found"
+            ? "Opravilo je bilo medtem odstranjeno."
+            : "Opravilo ni ve\u010d dodeljeno tebi oziroma ga ne more\u0161 urejati.");
+          return false;
         }
         showNotice(error.message);
         return false;
@@ -13343,6 +13531,17 @@
     $("reportClientSort").addEventListener("change", () => { state.reportClientSort = $("reportClientSort").value; renderReport(); });
 
     ["closeTodoDialog", "cancelTodoDialogFooter"].forEach((id) => $(id).addEventListener("click", () => $("todoDialog").close()));
+    $("closeOfflineConflicts").addEventListener("click", () => $("offlineConflictsDialog").close());
+    $("offlineConflictsList").addEventListener("click", (event) => {
+      const action = event.target.closest("[data-offline-conflict-action]");
+      if (!action) return;
+      const id = Number(action.dataset.offlineConflictId);
+      if (!Number.isFinite(id)) return;
+      const task = action.dataset.offlineConflictAction === "retry"
+        ? retryOfflineTodoConflict(id)
+        : discardOfflineTodoConflict(id);
+      task.catch((error) => showNotice(error.message));
+    });
 
     ["todoFormStart", "todoFormEnd"].forEach((id) => $(id).addEventListener("change", normalizeTodoFormTimes));
     $("todoFormDate").addEventListener("change", () => syncTodoFormEndDate());

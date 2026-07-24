@@ -171,4 +171,67 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
       await context.close();
     }
   });
+  test("terminal offline conflict can be reviewed and discarded", async ({ browser }) => {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    try {
+      await localLogin(page, "ibro");
+
+      // Simulate a mutation which the server has permanently rejected after a
+      // reassignment or deletion. Such operations deliberately stay in
+      // IndexedDB until the user reviews them; they must not create a banner
+      // that survives forever without a way to resolve it.
+      await page.evaluate(async () => {
+        const database = await new Promise((resolve, reject) => {
+          const request = indexedDB.open("indus-ure-offline", 3);
+          request.onerror = () => reject(request.error);
+          request.onsuccess = () => resolve(request.result);
+        });
+        try {
+          await new Promise((resolve, reject) => {
+            const transaction = database.transaction("todoOps", "readwrite");
+            transaction.objectStore("todoOps").add({
+              userId: "ibro",
+              todoId: "missing-pw-conflict",
+              kind: "update",
+              todo: {
+                id: "missing-pw-conflict",
+                title: "PW lokalna sprememba",
+                client: "PW stranka",
+                notes: "Lokalni opis za preverjanje konflikta."
+              },
+              conflict: true,
+              lastError: "Tega opravila ne moreš urejati.",
+              lastErrorCode: "todo_not_editable",
+              failedAt: new Date().toISOString()
+            });
+            transaction.onerror = () => reject(transaction.error);
+            transaction.oncomplete = () => resolve();
+          });
+        } finally {
+          database.close();
+        }
+      });
+
+      await page.reload({ waitUntil: "networkidle" });
+      await expect(page.locator("#offlineSyncNotice")).toContainText("sprememba potrebuje pregled");
+      await page.locator("#offlineSyncNotice .offline-sync-review").click();
+      await expect(page.locator("#offlineConflictsDialog")).toBeVisible();
+      await expect(page.locator("#offlineConflictsList")).toContainText("PW lokalna sprememba");
+      await expect(page.locator("#offlineConflictsList")).toContainText("Lokalni opis za preverjanje konflikta.");
+
+      await page.locator('[data-offline-conflict-action="discard"]').click();
+      await expect(page.locator("#appConfirmDialog")).toBeVisible();
+      await page.locator("#appConfirmAccept").click();
+      await expect(page.locator("#offlineConflictsDialog")).toBeHidden();
+      await expect(page.locator("#offlineSyncNotice")).toBeHidden();
+
+      // Reload validates that the discarded operation was removed from the
+      // persistent browser queue, rather than merely hidden for this page.
+      await page.reload({ waitUntil: "networkidle" });
+      await expect(page.locator("#offlineSyncNotice")).toBeHidden();
+    } finally {
+      await context.close();
+    }
+  });
 });

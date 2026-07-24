@@ -6835,8 +6835,12 @@ async function handleApi(req, res) {
       const body = await readBody(req);
       const db = await readDbAsync();
       const todo = db.todos.find((item) => item.id === id);
+      if (!todo) {
+        sendJson(res, 404, { code: "todo_not_found", error: "Opravilo ne obstaja več." });
+        return;
+      }
       if (!canManageTodo(user, todo)) {
-        sendJson(res, 403, { error: "Tega opravila ne moreš urejati." });
+        sendJson(res, 403, { code: "todo_not_editable", error: "Tega opravila ne moreš urejati." });
         return;
       }
       if (isTrashedTodo(todo)) {

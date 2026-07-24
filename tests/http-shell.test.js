@@ -212,6 +212,18 @@ test("lokalna testna instanca omogoča ločeno prijavo samo v testnem načinu", 
     const me = await request(port, "/api/me", { headers: { Cookie: cookie } });
     assert.equal(me.status, 200);
     assert.equal(JSON.parse(me.body).user.id, "bojan");
+
+    const missingTodoLock = await request(port, "/api/todos/missing-id/lock", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: cookie,
+        "X-CSRF-Token": JSON.parse(login.body).csrfToken
+      },
+      body: JSON.stringify({ lockToken: "" })
+    });
+    assert.equal(missingTodoLock.status, 404, missingTodoLock.body);
+    assert.equal(JSON.parse(missingTodoLock.body).code, "todo_not_found");
   } finally {
     child.kill("SIGTERM");
     await fs.rm(dataDir, { recursive: true, force: true });
