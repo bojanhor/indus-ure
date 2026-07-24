@@ -60,6 +60,10 @@ const ALERT_EMAIL_TO = String(process.env.ALERT_EMAIL_TO || "bojan@indus.si").tr
 const MONITOR_INTERVAL_MS = Math.max(60_000, Number(process.env.MONITOR_INTERVAL_MS || 5 * 60_000));
 const OPERATIONAL_MONITOR_ENABLED = process.env.DISABLE_OPERATIONAL_MONITOR !== "true";
 const ARCHIVE_RETENTION_CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
+// A normal delete is intentionally reversible. Keeping a short, fixed
+// retention period avoids turning the trash into a second long-term archive.
+const DELETED_TODO_RETENTION_DAYS = 30;
+const DELETED_TODO_RETENTION_MS = DELETED_TODO_RETENTION_DAYS * 24 * 60 * 60 * 1000;
 const MONITOR_MAX_RSS_MB = Math.max(256, Number(process.env.MONITOR_MAX_RSS_MB || 1_800));
 const MONITOR_DISK_WARNING_PERCENT = Math.min(99, Math.max(90, Number(process.env.MONITOR_DISK_WARNING_PERCENT || 90)));
 const REPORT_PDF_MAX_TOTAL_BYTES = 50 * 1024 * 1024;
@@ -1119,6 +1123,11 @@ function normalizeDb(db = {}) {
       next.endDate = normalizedEndDate;
       changed = true;
     }
+    const calendarOnly = Boolean(next.calendarOnly && normalizedDate);
+    if (next.calendarOnly !== calendarOnly) {
+      next.calendarOnly = calendarOnly;
+      changed = true;
+    }
     if (typeof next.order !== "number") {
       next.order = index + 1;
       changed = true;
@@ -1226,6 +1235,19 @@ function normalizeDb(db = {}) {
         next[field] = "";
         changed = true;
       }
+    }
+    const trashedAt = Date.parse(String(next.trashedAt || ""));
+    if (!Number.isFinite(trashedAt)) {
+      for (const field of ["trashedAt", "trashedBy", "trashedByName"]) {
+        if (Object.hasOwn(next, field)) {
+          delete next[field];
+          changed = true;
+        }
+      }
+    } else {
+      next.trashedAt = new Date(trashedAt).toISOString();
+      next.trashedBy = cleanUserId(next.trashedBy) || "system";
+      next.trashedByName = String(next.trashedByName || db.users?.[next.trashedBy]?.name || next.trashedBy).slice(0, 120);
     }
     const billingHourlyRate = nonnegativeNumber(next.billingHourlyRate, null, 10_000);
     if (next.billingHourlyRate !== billingHourlyRate) {
@@ -1491,8 +1513,126 @@ function todoAssignmentAssigneeIds(db, todo) {
     .filter(Boolean))];
 }
 
+function isTrashedTodo(todo) {
+  return Boolean(String(todo?.trashedAt || "").trim());
+}
+
+function trashedTodoExpiresAt(todo) {
+  const deletedAt = Date.parse(String(todo?.trashedAt || ""));
+  return Number.isFinite(deletedAt) ? new Date(deletedAt + DELETED_TODO_RETENTION_MS).toISOString() : "";
+}
+
+function trashTodoGroup(db, todo, actor, now = new Date().toISOString()) {
+  const assignmentItems = todoAssignmentItems(db, todo);
+  const ids = new Set(assignmentItems.map((item) => String(item.id || "")).filter(Boolean));
+  const name = String(actor?.name || actor?.id || "Sistem");
+  db.todos = (db.todos || []).map((item) => !ids.has(String(item.id || "")) ? item : {
+    ...item,
+    trashedAt: now,
+    trashedBy: String(actor?.id || "system"),
+    trashedByName: name,
+    updatedAt: now,
+    updatedBy: String(actor?.id || "system"),
+    updatedByName: name,
+    history: [...(item.history || []), audit(actor || { id: "system", name }, "premaknjeno v Izbrisano")]
+  });
+  return (db.todos || []).filter((item) => ids.has(String(item.id || "")));
+}
+
+function restoreTrashedTodoGroup(db, todo, actor, now = new Date().toISOString()) {
+  const assignmentItems = todoAssignmentItems(db, todo);
+  const ids = new Set(assignmentItems.map((item) => String(item.id || "")).filter(Boolean));
+  const name = String(actor?.name || actor?.id || "Sistem");
+  db.todos = (db.todos || []).map((item) => !ids.has(String(item.id || "")) ? item : (() => {
+    const restored = {
+      ...item,
+      updatedAt: now,
+      updatedBy: String(actor?.id || "system"),
+      updatedByName: name,
+      history: [...(item.history || []), audit(actor || { id: "system", name }, "obnovljeno iz Izbrisano")]
+    };
+    delete restored.trashedAt;
+    delete restored.trashedBy;
+    delete restored.trashedByName;
+    return restored;
+  })());
+  return (db.todos || []).filter((item) => ids.has(String(item.id || "")));
+}
+
+function managedDriveFilesForTodos(todos) {
+  return [...new Map((todos || []).flatMap((todo) => todo.driveFiles || [])
+    .filter((file) => Boolean(file?.managed)
+      && String(file.ownerEmail || "").trim().toLowerCase() === GOOGLE_DRIVE_OWNER_EMAIL
+      && validGoogleDriveId(file.fileId))
+    .map((file) => [String(file.fileId), file])).values()];
+}
+
+function trashedTodoRetentionCandidates(db, now = Date.now()) {
+  const currentMs = Number(now instanceof Date ? now.getTime() : now);
+  const cutoff = (Number.isFinite(currentMs) ? currentMs : Date.now()) - DELETED_TODO_RETENTION_MS;
+  const allByGroup = new Map();
+  for (const todo of db.todos || []) {
+    const groupId = String(todo.assignmentGroupId || todo.id || "");
+    if (!groupId) continue;
+    const group = allByGroup.get(groupId) || [];
+    group.push(todo);
+    allByGroup.set(groupId, group);
+  }
+  const groups = [];
+  for (const [id, todos] of allByGroup) {
+    const fullyTrashedAndExpired = todos.length > 0 && todos.every((todo) => {
+      const deletedAt = Date.parse(String(todo.trashedAt || ""));
+      return isTrashedTodo(todo) && Number.isFinite(deletedAt) && deletedAt <= cutoff;
+    });
+    if (!fullyTrashedAndExpired) continue;
+    groups.push({ id, todos, managedDriveFiles: managedDriveFilesForTodos(todos) });
+  }
+  return { cutoffAt: new Date(cutoff).toISOString(), groups };
+}
+
+function purgeExpiredTrashedTodoGroups(db, now = Date.now(), approvedGroups = null) {
+  const candidates = trashedTodoRetentionCandidates(db, now).groups;
+  // Without caller-approved groups, preserve app-managed Drive files. The
+  // scheduler deletes only files it owns and then explicitly approves a group.
+  const requestedIds = Array.isArray(approvedGroups)
+    ? new Set(approvedGroups.map((group) => String(group?.id || "")).filter(Boolean))
+    : new Set(candidates.filter((group) => !group.managedDriveFiles.length).map((group) => group.id));
+  const expiredIds = new Set(candidates.map((group) => group.id).filter((id) => requestedIds.has(id)));
+  if (!expiredIds.size) return { groups: 0, todos: 0, attachments: 0, adHocClients: 0 };
+  const beforeTodos = (db.todos || []).length;
+  const beforeAttachments = Object.keys(db.attachments || {}).length;
+  const beforeClients = (db.clients || []).length;
+  db.todos = (db.todos || []).filter((todo) => !expiredIds.has(String(todo.assignmentGroupId || todo.id || "")));
+  pruneUnusedTodoAttachments(db);
+  pruneUnusedAdHocClients(db);
+  return {
+    groups: expiredIds.size,
+    todos: beforeTodos - db.todos.length,
+    attachments: beforeAttachments - Object.keys(db.attachments || {}).length,
+    adHocClients: beforeClients - (db.clients || []).length
+  };
+}
+
+function visibleTrashedTodosForUser(db, user) {
+  const visible = (db.todos || []).filter((todo) => isTrashedTodo(todo)
+    && (user.role === "boss" || todo.syncUser === user.id || todo.createdBy === user.id));
+  const events = new Map();
+  for (const todo of visible) {
+    const key = String(todo.assignmentGroupId || todo.id || "");
+    const current = events.get(key);
+    if (!current || String(todo.trashedAt || "") > String(current.trashedAt || "")) events.set(key, todo);
+  }
+  return [...events.values()]
+    .sort((left, right) => String(right.trashedAt || "").localeCompare(String(left.trashedAt || "")))
+    .map((todo) => {
+      const hydrated = hydrateTodoAttachments(db, { ...todo, assigneeIds: todoAssignmentAssigneeIds(db, todo) });
+      const { completionRequests, ...publicTodo } = hydrated;
+      return { ...publicTodo, restoreUntil: trashedTodoExpiresAt(todo) };
+    });
+}
+
 function visibleTodosForUser(db, user) {
-  const todos = db.todos || [];
+  const todos = (db.todos || []).filter((todo) => !isTrashedTodo(todo));
   const visible = user.role === "boss"
     ? todos
     : todos.filter((todo) => todo.syncUser === user.id || todo.createdBy === user.id);
@@ -1683,7 +1823,7 @@ function canManageTodo(user, todo) {
 function sourceTodoForNewEntry(db, user, entry) {
   const sourceTodoId = String(entry.sourceTodoId || "");
   const todo = (db.todos || []).find((item) => item.id === sourceTodoId);
-  if (!todo || !canManageTodo(user, todo)) return null;
+  if (!todo || isTrashedTodo(todo) || !canManageTodo(user, todo)) return null;
   if (!todo.date || todo.date !== entry.date) return null;
   if ((db.entries || []).some((item) => item.sourceTodoId === sourceTodoId)) return null;
   return todo;
@@ -2010,7 +2150,7 @@ function buildPayrollSnapshot(db, workerId, rangeInput, previous = {}, note = un
   const lockedAdvanceIds = lockedPayrollFinancialIds(db, "advanceIds", previous.id);
   const lockedPersonalPurchaseIds = lockedPayrollFinancialIds(db, "personalPurchaseIds", previous.id);
   const lines = withDailyCommuteInPayroll(db, workerId, (db.todos || [])
-    .filter((todo) => !todo.imported && (todo.syncUser || todo.createdBy) === workerId && !todo.archivedAt && String(todo.date || "") >= range.from && String(todo.date || "") <= range.to)
+    .filter((todo) => !todo.imported && !isTrashedTodo(todo) && (todo.syncUser || todo.createdBy) === workerId && !todo.archivedAt && String(todo.date || "") >= range.from && String(todo.date || "") <= range.to)
     .filter((todo) => !lockedElsewhere.has(String(todo.id || "")))
     .map((todo) => payrollLineForTodo(db, todo, workerId))
     .filter(Boolean)
@@ -2150,7 +2290,7 @@ function clientBillCandidates(db, input = {}) {
   const billed = confirmedClientBillByEvent(db);
   const groups = new Map();
   for (const todo of db.todos || []) {
-    if (!todoRequiresClientBilling(todo)) continue;
+    if (isTrashedTodo(todo) || !todoRequiresClientBilling(todo)) continue;
     if (String(todo.clientId || "") !== String(client.clientId || "") && String(todo.client || "").trim().toLowerCase() !== String(client.name || "").trim().toLowerCase()) continue;
     if ((from && String(todo.date || "") < from) || (to && String(todo.date || "") > to)) continue;
     const eventId = todoBillingEventId(todo);
@@ -2523,7 +2663,7 @@ function workerDailyDigestSnapshot(db, workerId, date) {
   if (!worker || !isDateKey(date)) return null;
   const payroll = buildPayrollSnapshot(db, workerId, { from: date, to: date }) || { lines: [] };
   const warnings = (db.todos || [])
-    .filter((todo) => (todo.syncUser || todo.createdBy) === workerId && todo.date === date && PAYROLL_PAID_TODO_STATUSES.has(todo.status))
+    .filter((todo) => !isTrashedTodo(todo) && (todo.syncUser || todo.createdBy) === workerId && todo.date === date && PAYROLL_PAID_TODO_STATUSES.has(todo.status))
     .filter((todo) => Boolean(todo.hoursNeedsReview) || !payrollMinutesForTodo(db, todo))
     .sort((left, right) => String(left.start || "").localeCompare(String(right.start || "")) || String(left.title || "").localeCompare(String(right.title || "")))
     .map((todo) => ({ id: String(todo.id || ""), title: String(todo.title || "Brez naziva"), start: String(todo.start || ""), end: String(todo.end || "") }));
@@ -2758,6 +2898,7 @@ function reconcileTodoArchives(db, actor = null) {
   let restored = 0;
   let changed = false;
   for (const todo of db.todos || []) {
+    if (isTrashedTodo(todo)) continue;
     const payroll = payrolls.get(String(todo.id || ""));
     const needsClientBill = todoRequiresClientBilling(todo);
     const bill = needsClientBill ? bills.get(todoBillingEventId(todo)) : null;
@@ -2814,6 +2955,7 @@ function archiveRetentionCandidates(db, now = new Date()) {
   const cutoffMs = cutoff.getTime();
   const byGroup = new Map();
   for (const todo of db.todos || []) {
+    if (isTrashedTodo(todo)) continue;
     const groupId = String(todo.assignmentGroupId || todo.id || "");
     if (!groupId) continue;
     const group = byGroup.get(groupId) || [];
@@ -2827,11 +2969,7 @@ function archiveRetentionCandidates(db, now = new Date()) {
       return Number.isFinite(archivedAt) && archivedAt < cutoffMs;
     });
     if (!fullyArchived) continue;
-    const managedDriveFiles = [...new Map(todos.flatMap((todo) => todo.driveFiles || [])
-      .filter((file) => Boolean(file?.managed)
-        && String(file.ownerEmail || "").trim().toLowerCase() === GOOGLE_DRIVE_OWNER_EMAIL
-        && validGoogleDriveId(file.fileId))
-      .map((file) => [String(file.fileId), file])).values()];
+    const managedDriveFiles = managedDriveFilesForTodos(todos);
     groups.push({ id, todos, managedDriveFiles });
   }
   return { retentionMonths: months, cutoffAt: cutoff.toISOString(), groups };
@@ -2877,7 +3015,7 @@ function todoEditableSnapshot(todo) {
     thumbnailData: String(item?.thumbnailData || "")
   }));
   return JSON.stringify({
-    title: String(todo?.title || ""), date: String(todo?.date || ""), endDate: String(todo?.endDate || todo?.date || ""), start: String(todo?.start || ""), end: String(todo?.end || ""),
+    title: String(todo?.title || ""), date: String(todo?.date || ""), endDate: String(todo?.endDate || todo?.date || ""), calendarOnly: Boolean(todo?.calendarOnly && todo?.date), start: String(todo?.start || ""), end: String(todo?.end || ""),
     client: String(todo?.client || ""), clientId: String(todo?.clientId || ""), clientContactIds: cleanTodoClientContactIds(todo?.clientContactIds), clientContacts: cleanTodoClientContactSnapshots(todo?.clientContacts), notes: String(todo?.notes || ""), material: String(todo?.material || ""),
     status, urgent: Boolean(todo?.urgent), ordered: Boolean(todo?.ordered), warranty: isCompleted && Boolean(todo?.warranty),
     sourceProjectTodoId: String(todo?.sourceProjectTodoId || ""), billingHourlyRate: isTimeEntry ? nonnegativeNumber(todo?.billingHourlyRate, null, 10_000) : null,
@@ -3202,6 +3340,7 @@ function cleanTodo(input) {
     title: isMeal ? "Malica" : String(input.title || "").trim(),
     date: String(input.date || ""),
     endDate: String(input.endDate || input.date || ""),
+    calendarOnly: Boolean(input.calendarOnly && input.date),
     start: roundTimeToQuarterHour(input.start),
     end: roundTimeToQuarterHour(input.end),
     client: isMeal ? "" : String(input.client || "").trim(),
@@ -3474,7 +3613,7 @@ function foldIcsLine(line) {
 function buildCalendarIcs(db, { userId = "", combined = false } = {}) {
   const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
   const entries = (db.entries || []).filter((entry) => combined || !userId || (entry.syncUser || entry.createdBy) === userId);
-  const assignedTodos = (db.todos || []).filter((todo) => !todo.imported && (combined || !userId || (todo.syncUser || todo.createdBy) === userId));
+  const assignedTodos = (db.todos || []).filter((todo) => !todo.imported && !isTrashedTodo(todo) && (combined || !userId || (todo.syncUser || todo.createdBy) === userId));
   const todos = combined
     ? [...assignedTodos.reduce((groups, todo) => {
       const key = todo.assignmentGroupId || todo.id;
@@ -3876,37 +4015,51 @@ async function deleteRetentionManagedDriveFiles(db, files) {
   return { deleted, skipped };
 }
 
-async function runArchiveRetentionCleanup() {
-  const db = await readDbAsync();
-  const candidates = archiveRetentionCandidates(db);
-  if (!candidates.groups.length) return { ...candidates, purged: { groups: 0, todos: 0, attachments: 0, adHocClients: 0 }, drive: { deleted: 0, skipped: 0 }, blocked: 0 };
+async function approveRetentionGroupsForPurge(db, groups, label) {
   const approvedGroups = [];
-  let blocked = 0;
   const drive = { deleted: 0, skipped: 0 };
-  for (const group of candidates.groups) {
+  let blocked = 0;
+  for (const group of groups || []) {
     try {
-      const result = await deleteRetentionManagedDriveFiles(db, group.managedDriveFiles);
+      const result = await deleteRetentionManagedDriveFiles(db, group.managedDriveFiles || []);
       drive.deleted += result.deleted;
       drive.skipped += result.skipped;
       approvedGroups.push(group);
     } catch (error) {
       blocked += 1;
-      console.error(`Arhivske priloge za ${group.id} niso bile očiščene: ${error.message || error}`);
+      console.error(`${label} za ${group.id} niso bile očiščene: ${error.message || error}`);
     }
   }
-  const purged = purgeArchivedTodoGroups(db, approvedGroups);
-  if (purged.todos) await writeDbAsync(db);
+  return { approvedGroups, drive, blocked };
+}
+
+async function runArchiveRetentionCleanup() {
+  const db = await readDbAsync();
+  // Permanent deletion is deliberately conservative: an app-managed Drive file
+  // must be removed (or safely identified as already gone) before its event is
+  // removed locally. External Docs/Sheets are never part of these candidates.
+  const trashCandidates = trashedTodoRetentionCandidates(db);
+  const trashApproval = await approveRetentionGroupsForPurge(db, trashCandidates.groups, "Priloge iz koša");
+  const trashed = purgeExpiredTrashedTodoGroups(db, Date.now(), trashApproval.approvedGroups);
+  const candidates = archiveRetentionCandidates(db);
+  const archiveApproval = await approveRetentionGroupsForPurge(db, candidates.groups, "Arhivske priloge");
+  const purged = purgeArchivedTodoGroups(db, archiveApproval.approvedGroups);
+  const drive = {
+    deleted: trashApproval.drive.deleted + archiveApproval.drive.deleted,
+    skipped: trashApproval.drive.skipped + archiveApproval.drive.skipped
+  };
+  const blocked = trashApproval.blocked + archiveApproval.blocked;
+  if (purged.todos || trashed.todos) await writeDbAsync(db);
   if (blocked) {
     await recordOperationalAlert({
       code: "archive-retention-drive-cleanup-failed",
       severity: "warning",
-      title: "Čiščenje arhiva čaka na Google Drive",
-      message: `${blocked} arhiviranih dogodkov ni bilo očiščenih, ker njihovih aplikacijskih Drive prilog ni bilo mogoče varno odstraniti. Poveži Google Drive in sistem bo poskusil znova.`
+      title: "Čiščenje arhiva ali koša čaka na Google Drive",
+      message: `${blocked} dogodkov ni bilo očiščenih, ker njihovih aplikacijskih Drive prilog ni bilo mogoče varno odstraniti. Poveži Google Drive in sistem bo poskusil znova.`
     });
   }
-  return { ...candidates, purged, drive, blocked };
+  return { ...candidates, purged, trashed, trashCandidates, drive, blocked };
 }
-
 function scheduleArchiveRetentionCleanup(force = false) {
   if (archiveRetentionCleanupPromise) return archiveRetentionCleanupPromise;
   if (!force && archiveRetentionCleanupLastAt && Date.now() - archiveRetentionCleanupLastAt < ARCHIVE_RETENTION_CLEANUP_INTERVAL_MS) return Promise.resolve(null);
@@ -3914,6 +4067,7 @@ function scheduleArchiveRetentionCleanup(force = false) {
     const result = await runArchiveRetentionCleanup();
     archiveRetentionCleanupLastAt = Date.now();
     if (result.purged.todos) console.info(`Čiščenje arhiva: ${result.purged.todos} dogodkov, ${result.purged.attachments} prilog, ${result.purged.adHocClients} ad-hoc strank.`);
+    if (result.trashed?.todos) console.info(`Čiščenje koša: ${result.trashed.todos} dogodkov, ${result.trashed.attachments} prilog, ${result.trashed.adHocClients} ad-hoc strank.`);
     return result;
   });
   mutationQueue = archiveRetentionCleanupPromise.catch((error) => {
@@ -5448,6 +5602,13 @@ async function handleApi(req, res) {
       return;
     }
 
+    if (url.pathname === "/api/todos/trash" && req.method === "GET") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      const db = await readDbAsync();
+      sendJson(res, 200, { todos: visibleTrashedTodosForUser(db, user), retentionDays: DELETED_TODO_RETENTION_DAYS });
+      return;
+    }
     if (url.pathname === "/api/todos/reorder" && req.method === "POST") {
       const user = await requireUser(req, res);
       if (!user) return;
@@ -5466,6 +5627,10 @@ async function handleApi(req, res) {
       for (const todo of todos) {
         if (!todo || !canManageTodo(user, todo)) {
           sendJson(res, 403, { error: "Tega vrstnega reda ne smeš spreminjati." });
+          return;
+        }
+        if (isTrashedTodo(todo)) {
+          sendJson(res, 409, { error: "Opravilo je v Izbrisano. Najprej ga obnovi." });
           return;
         }
         if (todo.done || todo.urgent || todo.status === "meal") {
@@ -5567,7 +5732,7 @@ async function handleApi(req, res) {
       }
       if (advance.projectTodoId) {
         const project = db.todos.find((todo) => todo.id === advance.projectTodoId);
-        if (!project || !["execution", "open", "in_progress", "internal"].includes(project.status)) {
+        if (!project || isTrashedTodo(project) || !["execution", "open", "in_progress", "internal"].includes(project.status)) {
           sendJson(res, 400, { error: "Povezano opravilo ni več odprto." });
           return;
         }
@@ -5606,7 +5771,7 @@ async function handleApi(req, res) {
       if (validation) { sendJson(res, 400, { error: validation }); return; }
       if (advance.projectTodoId) {
         const project = db.todos.find((todo) => todo.id === advance.projectTodoId);
-        if (!project || !["execution", "open", "in_progress", "internal"].includes(project.status)) { sendJson(res, 400, { error: "Povezano opravilo ni več odprto." }); return; }
+        if (!project || isTrashedTodo(project) || !["execution", "open", "in_progress", "internal"].includes(project.status)) { sendJson(res, 400, { error: "Povezano opravilo ni več odprto." }); return; }
       }
       advance = storeTodoAttachments(db, advance, user);
       db.debts[index] = { ...existing, ...advance, id, type: "advance", updatedBy: user.id, updatedByName: user.name, updatedAt: new Date().toISOString() };
@@ -6225,7 +6390,10 @@ async function handleApi(req, res) {
         sendJson(res, 403, { error: "Tega opravila ne moreš urejati." });
         return;
       }
-      const result = acquireTodoAssignmentEditLock(db, todo, user, body.lockToken);
+      if (isTrashedTodo(todo)) {
+        sendJson(res, 409, { error: "Opravilo je v Izbrisano. Najprej ga obnovi." });
+        return;
+      }      const result = acquireTodoAssignmentEditLock(db, todo, user, body.lockToken);
       if (!result.ok) {
         sendJson(res, 409, { error: `Opravilo trenutno ureja ${result.lock.lockedByName || result.lock.lockedById}.`, lock: result.lock });
         return;
@@ -6262,6 +6430,10 @@ async function handleApi(req, res) {
         return;
       }
 
+      if (isTrashedTodo(todo)) {
+        sendJson(res, 404, { error: "Opravilo je v Izbrisano." });
+        return;
+      }
       if (req.method === "GET") {
         const token = String(url.searchParams.get("token") || "");
         const tokenHash = sessionTokenHash(token);
@@ -6392,7 +6564,7 @@ async function handleApi(req, res) {
       const operationByAssignmentId = new Map();
       for (const requested of requestedItems) {
         const previousTodo = (db.todos || []).find((item) => item.id === String(requested.id || ""));
-        if (!previousTodo || !canManageTodo(user, previousTodo)) {
+        if (!previousTodo || isTrashedTodo(previousTodo) || !canManageTodo(user, previousTodo)) {
           sendJson(res, 403, { error: "Eno od opravil v dnevnem pogledu ne obstaja več ali ga ne smeš spreminjati." });
           return;
         }
@@ -6480,7 +6652,7 @@ async function handleApi(req, res) {
       const editLockToken = String(body.editLockToken || "");
       const db = await readDbAsync();
       const previousTodo = db.todos.find((item) => item.id === id);
-      if (!canManageTodo(user, previousTodo)) {
+      if (!canManageTodo(user, previousTodo) || isTrashedTodo(previousTodo)) {
         sendJson(res, 403, { error: "Tega opravila ne moreš spreminjati." });
         return;
       }
@@ -6532,6 +6704,26 @@ async function handleApi(req, res) {
       sendJson(res, 200, { todos: visibleTodosForUser(db, user) });
       return;
     }
+    const todoRestoreMatch = url.pathname.match(/^\/api\/todos\/([^/]+)\/restore$/);
+    if (todoRestoreMatch && req.method === "POST") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      const id = decodeURIComponent(todoRestoreMatch[1]);
+      const db = await readDbAsync();
+      const todo = (db.todos || []).find((item) => item.id === id);
+      if (!todo || !isTrashedTodo(todo)) {
+        sendJson(res, 404, { error: "Opravila v Izbrisano ni vec ali pa je bilo ze obnovljeno." });
+        return;
+      }
+      if (!canManageTodo(user, todo)) {
+        sendJson(res, 403, { error: "Tega opravila ne mores obnoviti." });
+        return;
+      }
+      restoreTrashedTodoGroup(db, todo, user);
+      await writeDbAsync(db);
+      sendJson(res, 200, { todos: visibleTodosForUser(db, user), deletedTodos: visibleTrashedTodosForUser(db, user) });
+      return;
+    }
     const todoMatch = url.pathname.match(/^\/api\/todos\/([^/]+)$/);
     if (todoMatch && req.method === "GET") {
       const user = await requireUser(req, res);
@@ -6545,7 +6737,8 @@ async function handleApi(req, res) {
       }
       sendJson(res, 200, { todo });
       return;
-    }    if (todoMatch && req.method === "PUT") {
+    }
+    if (todoMatch && req.method === "PUT") {
       const user = await requireUser(req, res);
       if (!user) return;
       const id = decodeURIComponent(todoMatch[1]);
@@ -6576,7 +6769,10 @@ async function handleApi(req, res) {
         sendJson(res, 404, { error: "Opravilo ne obstaja." });
         return;
       }
-      if (!canManageTodo(user, db.todos[index])) {
+      if (isTrashedTodo(db.todos[index])) {
+        sendJson(res, 409, { error: "Opravilo je v Izbrisano. Najprej ga obnovi." });
+        return;
+      }      if (!canManageTodo(user, db.todos[index])) {
         sendJson(res, 403, { error: "Tega opravila ne moreš spreminjati." });
         return;
       }
@@ -6724,6 +6920,10 @@ releaseTodoAssignmentEditLock(db, previousTodo, user, editLockToken);
         sendJson(res, 403, { error: "Tega opravila ne moreš izbrisati." });
         return;
       }
+      if (isTrashedTodo(todo)) {
+        sendJson(res, 200, { todos: visibleTodosForUser(db, user), deletedTodos: visibleTrashedTodosForUser(db, user) });
+        return;
+      }
       const editLock = todoAssignmentEditLockConflict(db, todo, user, editLockToken);
       if (editLock) {
         sendJson(res, 409, { error: `Opravilo trenutno ureja ${editLock.lockedByName || editLock.lockedById}.`, lock: editLock });
@@ -6746,14 +6946,11 @@ releaseTodoAssignmentEditLock(db, previousTodo, user, editLockToken);
         sendJson(res, 403, { error: `Opravilo je že v potrjenem obračunu stranki ${clientBillLock.clientName} in ga ni več mogoče izbrisati.` });
         return;
       }
-releaseTodoAssignmentEditLock(db, todo, user, editLockToken);
-      const removedIds = new Set(assignmentItems.map((item) => item.id));
-      db.todos = db.todos.filter((item) => !removedIds.has(item.id));
-      pruneUnusedTodoAttachments(db);
-      pruneUnusedAdHocClients(db);
+      releaseTodoAssignmentEditLock(db, todo, user, editLockToken);
+      trashTodoGroup(db, todo, user);
       await writeDbAsync(db);
       releaseTodoAssignmentEditLock(db, todo, user, editLockToken);
-      sendJson(res, 200, { todos: visibleTodosForUser(db, user) });
+      sendJson(res, 200, { todos: visibleTodosForUser(db, user), deletedTodos: visibleTrashedTodosForUser(db, user) });
       return;
     }
 
@@ -6905,6 +7102,7 @@ if (require.main === module) {
 module.exports = {
   ENTRY_EDIT_LOCK_TTL_MS,
   TODO_EDIT_LOCK_TTL_MS,
+  DELETED_TODO_RETENTION_DAYS,
   GOOGLE_DRIVE_SCOPE_VERSION,
   INDUS_GOOGLE_APP_ID,
   TODO_STATUS_DEFINITIONS,
@@ -6918,6 +7116,10 @@ module.exports = {
   todoAssignmentEditLockConflict,
   ownsTodoAssignmentEditLock,
   todoAssignmentItems,
+  isTrashedTodo,
+  trashTodoGroup,
+  restoreTrashedTodoGroup,
+  purgeExpiredTrashedTodoGroups,
   releaseTodoAssignmentEditLock,
   entryEditLockConflict,
   buildCalendarIcs,
@@ -6991,4 +7193,5 @@ module.exports = {
   visibleDebtsForUser,
   visibleEntriesForUser,
   visibleTodosForUser,
+  visibleTrashedTodosForUser,
 };

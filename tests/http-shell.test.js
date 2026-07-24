@@ -231,3 +231,20 @@ test("completion request UI and authenticated link flow are present", async () =
   assert.match(html, /requestTodoCompletion/);
   assert.match(html, /params\.set\("return_to", returnTo\)/);
 });
+test("calendar-only task controls are date-bound and excluded only from task lists", async () => {
+  const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  assert.match(html, /id="todoFormCalendarOnly"/);
+  assert.match(html, /id="todoFormCalendarOnlyField"/);
+  assert.match(html, /const canShowOnlyInCalendar = Boolean\(date\);/);
+  assert.match(html, /if \(!canShowOnlyInCalendar\) calendarOnly\.checked = false;/);
+  assert.match(html, /calendarOnly: Boolean\(\$\("todoFormDate"\)\.value && \$\("todoFormCalendarOnly"\)\.checked\)/);
+  assert.match(html, /!todo\.calendarOnly && \(state\.todoSortMode === "imported" \? isImportedTodo\(todo\) : !isImportedTodo\(todo\)\)/);
+  assert.match(html, /function calendarTodos\(\{ includeArchived = false \} = \{\}\) \{[\s\S]*?!isImportedTodo\(todo\)/);
+});
+
+test("date sort is ascending and client view hides only order status chips", async () => {
+  const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  assert.match(html, /function todoDateSort\(a, b\) \{[\s\S]*?String\(a\.date\)\.localeCompare\(String\(b\.date\)\)[\s\S]*?String\(a\.start \|\| "00:00"\)\.localeCompare\(String\(b\.start \|\| "00:00"\)\)[\s\S]*?String\(a\.end \|\| "00:00"\)\.localeCompare\(String\(b\.end \|\| "00:00"\)\)/);
+  assert.match(html, /const showStatusChip = !todoOrderStatusIds\.has\(todo\.status\);/);
+  assert.match(html, /showStatusChip \? `<span class="todo-chip todo-status-chip todo-status-color \$\{todoStatusClass\(todo\.status\)\}">/);
+});

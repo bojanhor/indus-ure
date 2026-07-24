@@ -1191,6 +1191,14 @@
     .todo-order-section-toggle:focus-visible { color: var(--accent-dark); }
     .todo-order-section-chevron { width: 15px; color: var(--accent-dark); }
     .todo-order-drop-zone { min-height: 36px; }
+    .todo-order-drop-zone-end {
+      min-height: 28px;
+      margin: 0 4px 4px;
+      border-radius: 7px;
+    }
+    .todo-order-drop-zone-end.todo-drop-target {
+      background: linear-gradient(90deg, rgba(31, 111, 139, 0.12), rgba(31, 111, 139, 0.03));
+    }
 
 
     .todo-item {
@@ -1555,7 +1563,8 @@
 
     .todo-ordered-toggle[aria-pressed="false"] > span { opacity: .28; }
 
-    .modal-body label.todo-form-ordered {
+    .modal-body label.todo-form-ordered,
+    .modal-body label.todo-form-calendar-only {
       display: grid;
       grid-template-columns: 20px minmax(0, 1fr);
       column-gap: 8px;
@@ -1564,7 +1573,8 @@
       color: var(--ink);
     }
 
-    .modal-body label.todo-form-ordered input[type="checkbox"] {
+    .modal-body label.todo-form-ordered input[type="checkbox"],
+    .modal-body label.todo-form-calendar-only input[type="checkbox"] {
       grid-column: 1;
       grid-row: 1;
       width: 18px;
@@ -1575,7 +1585,9 @@
       accent-color: #217a3f;
     }
 
-    .todo-form-ordered > span { grid-column: 2; grid-row: 1; font-weight: 800; }
+    .todo-form-ordered > span,
+    .todo-form-calendar-only > span { grid-column: 2; grid-row: 1; font-weight: 800; }
+    .todo-form-calendar-only { grid-column: 1 / -1; }
     .todo-form-ordered > small { grid-column: 1 / -1; color: var(--muted); line-height: 1.35; }
 
     .todo-title {
@@ -2716,6 +2728,14 @@
     }
 
     dialog::backdrop { background: rgba(17, 24, 28, 0.45); }
+
+    #deletedTodosDialog { width: min(680px, calc(100vw - 26px)); max-height: min(760px, calc(100dvh - 26px)); overflow-y: auto; overscroll-behavior: contain; }
+    .deleted-todos-list { display: grid; gap: 10px; }
+    .deleted-todo-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: #f8faf7; }
+    .deleted-todo-card strong { display: block; overflow-wrap: anywhere; }
+    .deleted-todo-card p { margin: 5px 0 0; color: var(--muted); line-height: 1.35; }
+    .deleted-todo-card .secondary { min-height: 40px; white-space: nowrap; }
+    .deleted-todo-empty { margin: 0; color: var(--muted); }
 
     .modal-head {
       display: flex;
@@ -4000,10 +4020,13 @@
         font-size: 19px;
       }
       .calendar-shell {
-        margin-left: -16px;
-        margin-right: -16px;
+        /* .main has 8px inline padding on phones. Keep this panel exactly
+           full-bleed, rather than making it 16px wider than the document. */
+        margin-left: -8px;
+        margin-right: -8px;
         overflow-x: auto;
         overflow-y: hidden;
+        overscroll-behavior-x: contain;
         border-left: 0;
         border-right: 0;
         border-radius: 0;
@@ -4027,13 +4050,30 @@
         padding: 4px;
         gap: 3px;
       }
-      .day-head { gap: 2px; min-height: 25px; }
-      .day-number { font-size: 14px; }
+      .day-head {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 28px 28px;
+        justify-content: initial;
+        gap: 3px;
+        min-height: 30px;
+      }
+      .day-number { min-width: 0; font-size: 14px; }
       .day-edit-hint,
-      .quick-add { width: 23px; height: 23px; font-size: 15px; }
+      .quick-add {
+        width: 28px;
+        height: 28px;
+        min-width: 28px;
+        min-height: 28px;
+        font-size: 16px;
+      }
+      .day-edit-hint {
+        border: 1px solid #d2e4df;
+        background: #f1f8f5;
+      }
       .quick-add-hours { font-size: 15px; }
       .day-todo {
         min-width: 0;
+        max-width: 100%;
         min-height: 27px;
         padding: 4px 3px;
         border-left-width: 3px;
@@ -4221,6 +4261,8 @@
       .client-billing-when strong { grid-row: 1 / span 2; }
       .client-billing-open { width: 100%; }
       .client-billing-attachments { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .deleted-todo-card { grid-template-columns: minmax(0, 1fr); }
+      .deleted-todo-card .secondary { width: 100%; }
       .client-row-actions { justify-content: stretch; }
       .client-row-actions > button { flex: 1 1 0; }
       #appSettingsDialog { width: min(calc(100vw - 20px), 520px); max-height: calc(100dvh - 20px); overflow-y: auto; }
@@ -4322,6 +4364,8 @@
               <span class="tools-menu-label">Podatki in sinhronizacija</span>
               <button class="menu-action hidden" id="googleDrive" type="button">Google Dokumenti, preglednice in Gmail</button>
               <button class="menu-action admin-only" id="notificationsBtn" type="button">Sistemska opozorila <span id="notificationsCount"></span></button>
+              <span class="tools-menu-label">Izbrisano</span>
+              <button class="menu-action" id="trashMenuBtn" type="button">Koš opravil</button>
               <span class="tools-menu-label admin-only">Napredno</span>
               <button class="menu-action admin-only" id="serverStatusBtn" type="button">Stanje stre&#382;nika</button>
               <button class="menu-action admin-only" id="appSettingsBtn" type="button">Nastavitve obračuna in arhiva</button>
@@ -4580,6 +4624,13 @@
       </div>
     </form>
   </dialog>
+  <dialog id="deletedTodosDialog">
+    <form method="dialog">
+      <div class="modal-head"><div><h3>Izbrisano</h3><span class="todo-meta" id="deletedTodosMeta"></span></div><button class="icon-btn" id="closeDeletedTodos" type="button" title="Zapri" aria-label="Zapri">&times;</button></div>
+      <div class="modal-body"><div class="deleted-todos-list" id="deletedTodosList"></div></div>
+    </form>
+  </dialog>
+
   <dialog id="todoDialog" tabindex="-1">
     <form method="dialog" id="todoForm">
       <div class="modal-head">
@@ -4629,6 +4680,10 @@
               <small id="todoFormEndDateHint">Privzeto isti dan. Spremeni samo za večdnevno opravilo.</small>
             </label>
           </div>
+          <label class="todo-form-calendar-only hidden" id="todoFormCalendarOnlyField">
+            <input id="todoFormCalendarOnly" type="checkbox">
+            <span>Prika&#382;i samo v koledarju (ne prika&#382;i med opravili)</span>
+          </label>
           <label>Ura od
             <input id="todoFormStart" type="time" step="900">
           </label>
@@ -5182,6 +5237,8 @@
       view: "todos",
       entries: [],
       todos: [],
+      deletedTodos: [],
+      deletedTodoRetentionDays: 30,
       todoRevision: 0,
       todoMutationPending: 0,
       debts: [],
@@ -6783,7 +6840,8 @@
         ? state.todoEditLock.token
         : "";
       const previousTodos = state.todos.slice();
-      state.todos = state.todos.filter((todo) => todo.id !== id);
+      const deletedEventId = String(previousTodos.find((todo) => todo.id === id)?.assignmentGroupId || id);
+      state.todos = state.todos.filter((todo) => String(todo.assignmentGroupId || todo.id) !== deletedEventId);
       refreshClientList();
       render();
       try {
@@ -6793,6 +6851,8 @@
         });
         if (isCurrentTodoRevision(todoRevision)) {
           state.todos = data.todos;
+          state.deletedTodos = data.deletedTodos || state.deletedTodos;
+          if ($("deletedTodosDialog")?.open) renderDeletedTodos();
           refreshClientList();
           render();
         }
@@ -7186,14 +7246,15 @@
     }
 
     function todoDateSort(a, b) {
+      const dateDifference = String(a.date).localeCompare(String(b.date));
+      if (dateDifference) return dateDifference;
+      const startDifference = String(a.start || "00:00").localeCompare(String(b.start || "00:00"));
+      if (startDifference) return startDifference;
+      const endDifference = String(a.end || "00:00").localeCompare(String(b.end || "00:00"));
+      if (endDifference) return endDifference;
       if (Number(a.done) !== Number(b.done)) return Number(a.done) - Number(b.done);
       if (Number(a.urgent) !== Number(b.urgent)) return Number(b.urgent) - Number(a.urgent);
-      const dateDifference = String(b.date).localeCompare(String(a.date));
-      if (dateDifference) return dateDifference;
-      const startDifference = String(b.start || "00:00").localeCompare(String(a.start || "00:00"));
-      if (startDifference) return startDifference;
-      const endDifference = String(b.end || "00:00").localeCompare(String(a.end || "00:00"));
-      return endDifference || todoSort(a, b);
+      return todoSort(a, b);
     }
 
     const todoTextOrderMarker = /(^|[^\p{L}\p{N}_])naro\u010di(?=$|[^\p{L}\p{N}_])/iu;
@@ -7214,7 +7275,7 @@
     }
 
     function sortedTodosForMode(todos = contextTodos()) {
-      let list = [...todos].filter((todo) => state.todoSortMode === "imported" ? isImportedTodo(todo) : !isImportedTodo(todo));
+      let list = [...todos].filter((todo) => !todo.calendarOnly && (state.todoSortMode === "imported" ? isImportedTodo(todo) : !isImportedTodo(todo)));
       if (state.todoSortMode === "imported") return list.sort(todoDateSort);
       if (state.todoSortMode === "date") return list.filter((todo) => todo.date && !timeEntryStatusIds.has(todo.status)).sort(todoDateSort);
       if (state.todoSortMode === "order") return list.filter((todo) => todoNeedsOrdering(todo)).sort(todoOrderingSort);
@@ -9377,6 +9438,17 @@
       items.appendChild(section);
     }
 
+    function appendTodoOrderTailDropZone(items, bucket, targetId) {
+      if (!targetId || !["sorted", "unsorted", "ordering"].includes(bucket)) return;
+      const zone = document.createElement("div");
+      zone.className = "todo-order-drop-zone todo-order-drop-zone-end";
+      zone.dataset.todoDropBucket = bucket;
+      zone.dataset.todoDropPlacement = "after";
+      zone.dataset.todoDropTargetId = targetId;
+      zone.setAttribute("aria-hidden", "true");
+      items.appendChild(zone);
+    }
+
     function renderClientTodoItems(items, title) {
       title.textContent = "Opravila po strankah";
       items.classList.add("client-todo-groups");
@@ -9423,8 +9495,9 @@
             row.type = "button";
             row.className = `client-todo-task-row ${todo.done ? "done" : ""} ${todo.urgent ? "urgent" : ""}`;
             const dateText = todo.date ? todoDateTimeLabel(todo) : "Brez datuma";
+            const showStatusChip = !todoOrderStatusIds.has(todo.status);
             row.innerHTML = `
-              <span class="todo-chip todo-status-chip todo-status-color ${todoStatusClass(todo.status)}">${escapeHtml(todoStatus(todo.status).label)}</span>
+              ${showStatusChip ? `<span class="todo-chip todo-status-chip todo-status-color ${todoStatusClass(todo.status)}">${escapeHtml(todoStatus(todo.status).label)}</span>` : ""}
               <span class="client-todo-task-content">
                 <strong>${todo.urgent ? '<span class="todo-chip todo-urgent-chip">NUJNO</span> ' : ""}${escapeHtml(todo.title || "Brez naslova")}</strong>
                 <small>${escapeHtml(dateText)} · Za: ${escapeHtml(todoAssigneeNames(todo))}</small>
@@ -9460,6 +9533,7 @@
       const showManualSections = state.todoSortMode === "manual";
       let completedGroupKey = "";
       let currentManualCategory = "";
+      let manualTailTargetId = "";
       const collapsedManualSections = collapsedTodoSections();
 
       todos.forEach((todo) => {
@@ -9476,13 +9550,16 @@
         if (showManualSections) {
           manualCategory = todoManualCategory(todo);
           if (manualCategory !== currentManualCategory) {
+            appendTodoOrderTailDropZone(items, currentManualCategory, manualTailTargetId);
             appendTodoOrderSection(items, manualCategory);
             currentManualCategory = manualCategory;
+            manualTailTargetId = "";
           }
           if (manualCategory === "ordering" && collapsedManualSections.has("ordering")) return;
         }
         const item = document.createElement("div");
-        const reorderable = state.todoSortMode === "manual" && !todo.done && !todo.urgent;
+        const reorderable = state.todoSortMode === "manual" && todoCanManualReorder(todo);
+        if (showManualSections && reorderable) manualTailTargetId = todo.id;
         const hasExpandedDetails = todoHasExpandedDetails(todo);
         const detailsExpanded = state.expandedTodoIds.has(todo.id);
         const attachmentCount = todoAttachmentCount(todo);
@@ -9569,6 +9646,7 @@
         });
         items.appendChild(item);
       });
+      if (showManualSections) appendTodoOrderTailDropZone(items, currentManualCategory, manualTailTargetId);
 
     }
 
@@ -10692,6 +10770,11 @@
     function syncTodoFormDateRangeControls() {
       const date = $('todoFormDate').value;
       const endDate = $('todoFormEndDate');
+      const calendarOnly = $('todoFormCalendarOnly');
+      const calendarOnlyField = $('todoFormCalendarOnlyField');
+      const canShowOnlyInCalendar = Boolean(date);
+      calendarOnlyField.classList.toggle('hidden', !canShowOnlyInCalendar);
+      if (!canShowOnlyInCalendar) calendarOnly.checked = false;
       const isTimeEntry = timeEntryStatusIds.has($('todoFormStatus').value);
       if (isTimeEntry && date && endDate.value !== date) {
         endDate.value = date;
@@ -10855,6 +10938,7 @@
       $("todoFormWarranty").checked = Boolean(todo.warranty);
       $("todoFormWorkFromHome").checked = Boolean(todo.workFromHome);
       $("todoFormImported").checked = Boolean(todo.imported);
+      $("todoFormCalendarOnly").checked = Boolean(todo.calendarOnly && todo.date);
       updateTodoFormStatus();
       syncTodoFormClientContacts({ preserve: true });
        autosizeTodoNarrativeFields();
@@ -10939,6 +11023,7 @@
         clientContactIds: meal ? [] : [...state.todoDialogClientContactIds],
         clientKm: meal ? 0 : clientKm,
         clientVehicle: meal ? "personal" : clientVehicle,
+        calendarOnly: Boolean($("todoFormDate").value && $("todoFormCalendarOnly").checked),
         driveFiles: state.todoDialogDriveFiles,
         photos: state.todoDialogPhotos
       };
@@ -11158,7 +11243,7 @@
     }
     async function deleteTodoFromDialog() {
       const id = $("todoFormId").value;
-      if (!id || !await showAppConfirm("Izbrišem to opravilo?")) return;
+      if (!id || !await showAppConfirm("Premaknem opravilo v Izbrisano? Obnovitev je možna 30 dni.")) return;
       const returnDayDate = state.todoDialogReturnDayDate;
       state.todoDialogReturnDayDate = "";
       await deleteTodoFromServer(id);
@@ -11735,6 +11820,7 @@
 
     function clearTodoDragVisuals() {
       document.querySelectorAll(".todo-item.dragging").forEach((item) => item.classList.remove("dragging"));
+      document.querySelectorAll(".todo-order-drop-zone.todo-drop-target").forEach((zone) => zone.classList.remove("todo-drop-target"));
       document.querySelectorAll(".todo-drag-ghost, .todo-drop-indicator").forEach((element) => element.remove());
     }
 
@@ -11755,7 +11841,8 @@
       const left = Math.max(8, rect.left + 8);
       const width = Math.max(24, Math.min(window.innerWidth - left - 8, rect.width - 16));
       indicator.style.left = `${left}px`;
-      indicator.style.top = `${drag.targetPlacement === "before" ? rect.top - 2 : rect.bottom - 2}px`;
+      const isEndZone = target.classList.contains("todo-order-drop-zone-end");
+      indicator.style.top = `${isEndZone || drag.targetPlacement === "before" ? rect.top - 2 : rect.bottom - 2}px`;
       indicator.style.width = `${width}px`;
       indicator.style.display = "block";
     }
@@ -11766,23 +11853,31 @@
       const atPoint = document.elementFromPoint(clientX, clientY);
       const target = atPoint?.closest(".todo-item");
       const section = atPoint?.closest("[data-todo-drop-bucket]");
+      const source = contextTodos().find((todo) => todo.id === drag.sourceId);
       let targetElement = null;
       let targetId = "";
       let targetPlacement = "before";
-      let targetBucket = todoManualBucketForCurrentUser(contextTodos().find((todo) => todo.id === drag.sourceId));
+      let targetBucket = todoManualBucketForCurrentUser(source);
       if (target && target.dataset.todoId !== drag.sourceId && todosCanReorderTogether(drag.sourceId, target.dataset.todoId)) {
         const targetRect = target.getBoundingClientRect();
         targetPlacement = clientY < targetRect.top + targetRect.height / 2 ? "before" : "after";
         targetId = target.dataset.todoId;
         targetElement = target;
         targetBucket = todoManualBucketForCurrentUser(contextTodos().find((todo) => todo.id === targetId));
-      } else if (section && todoCanManualReorder(contextTodos().find((todo) => todo.id === drag.sourceId))) {
+      } else if (section && todoCanManualReorder(source)) {
         const bucket = String(section.dataset.todoDropBucket || "");
-        if (["sorted", "unsorted"].includes(bucket)) {
-          targetBucket = bucket;
+        const anchorId = String(section.dataset.todoDropTargetId || "");
+        const namedBucket = ["sorted", "unsorted"].includes(bucket);
+        if (namedBucket || anchorId) {
+          if (namedBucket) targetBucket = bucket;
+          targetId = anchorId;
           targetPlacement = section.dataset.todoDropPlacement === "after" ? "after" : "before";
           targetElement = section;
         }
+      }
+      if (drag.targetElement !== targetElement) {
+        drag.targetElement?.classList.remove("todo-drop-target");
+        if (targetElement?.classList.contains("todo-order-drop-zone-end")) targetElement.classList.add("todo-drop-target");
       }
       drag.targetElement = targetElement;
       drag.targetId = targetId;
@@ -12690,6 +12785,45 @@
       await refreshNotifications();
       $("notificationsDialog").showModal();
     }
+    function renderDeletedTodos() {
+      const list = $("deletedTodosList");
+      const meta = $("deletedTodosMeta");
+      const todos = Array.isArray(state.deletedTodos) ? state.deletedTodos : [];
+      const retentionDays = Number(state.deletedTodoRetentionDays || 30);
+      meta.textContent = todos.length
+        ? `${todos.length} ${todos.length === 1 ? "opravilo" : "opravil"} · obnova je možna ${retentionDays} dni po brisanju`
+        : `Obnova je možna ${retentionDays} dni po brisanju.`;
+      if (!todos.length) {
+        list.innerHTML = '<p class="deleted-todo-empty">Koš je prazen.</p>';
+        return;
+      }
+      list.innerHTML = todos.map((todo) => {
+        const deletedAt = todo.trashedAt ? formatDateTime(todo.trashedAt) : "neznano";
+        const restoreUntil = todo.restoreUntil ? ` · do ${escapeHtml(formatDateTime(todo.restoreUntil))}` : "";
+        const client = todo.client ? ` · ${escapeHtml(todo.client)}` : "";
+        const date = todo.date ? ` · ${escapeHtml(todoDateTimeLabel(todo))}` : "";
+        const deletedBy = todo.trashedByName ? ` · izbrisal ${escapeHtml(todo.trashedByName)}` : "";
+        return `<article class="deleted-todo-card" data-deleted-todo-id="${escapeHtml(todo.id)}"><div><strong>${escapeHtml(todo.title || "Brez naslova")}</strong><p>${escapeHtml(todoStatus(todo.status).label)}${client}${date}<br>Izbrisano ${escapeHtml(deletedAt)}${deletedBy}${restoreUntil}</p></div><button class="secondary restore-deleted-todo" type="button">Obnovi</button></article>`;
+      }).join("");
+    }
+
+    async function openDeletedTodos() {
+      const data = await api("/api/todos/trash");
+      state.deletedTodos = data.todos || [];
+      state.deletedTodoRetentionDays = Number(data.retentionDays || 30);
+      renderDeletedTodos();
+      $("deletedTodosDialog").showModal();
+    }
+
+    async function restoreDeletedTodo(id) {
+      const data = await api(`/api/todos/${encodeURIComponent(id)}/restore`, { method: "POST", body: JSON.stringify({}) });
+      state.todos = data.todos || state.todos;
+      state.deletedTodos = data.deletedTodos || [];
+      refreshClientList();
+      render();
+      renderDeletedTodos();
+      showNotice("Opravilo je obnovljeno iz Izbrisano.");
+    }
     function openAccountDialog() {
       $("accountName").value = state.user.name || "";
       $("accountImage").value = "";
@@ -12755,7 +12889,14 @@
       location.reload();
     });
 
-    $("accountBtn").addEventListener("click", openAccountDialog);
+    $("trashMenuBtn").addEventListener("click", () => openDeletedTodos().catch((error) => showNotice(error.message)));
+    $("closeDeletedTodos").addEventListener("click", () => $("deletedTodosDialog").close());
+    $("deletedTodosList").addEventListener("click", (event) => {
+      const button = event.target.closest(".restore-deleted-todo");
+      const card = event.target.closest("[data-deleted-todo-id]");
+      if (!button || !card) return;
+      restoreDeletedTodo(card.dataset.deletedTodoId).catch((error) => showNotice(error.message));
+    });    $("accountBtn").addEventListener("click", openAccountDialog);
     $("notificationsBtn").addEventListener("click", () => openNotifications().catch((error) => showNotice(error.message)));
     $("closeNotifications").addEventListener("click", () => $("notificationsDialog").close());
     $("serverStatusBtn").addEventListener("click", () => openServerStatus().catch((error) => showNotice(error.message)));
@@ -13271,7 +13412,7 @@
       const item = button.closest(".todo-item");
       const id = item?.dataset.todoId;
       if (!id) return;
-      if (!await showAppConfirm("Izbrišem to opravilo?")) return;
+      if (!await showAppConfirm("Premaknem opravilo v Izbrisano? Obnovitev je možna 30 dni.")) return;
       button.disabled = true;
       button.setAttribute("aria-busy", "true");
       try {
