@@ -148,6 +148,8 @@ test("PWA ne hrani API ali zasebnih prilog v service-worker predpomnilniku", () 
   const html = fs.readFileSync(htmlPath, "utf8");
   assert.match(worker, /url\.pathname\.startsWith\("\/api\/"\)/);
   assert.match(worker, /url\.pathname === "\/calendar\.ics"/);
+  assert.match(worker, /url\.pathname === "\/fakture"/);
+  assert.match(worker, /url\.pathname\.startsWith\("\/fakture\/"\)/);
   assert.match(html, /indexedDB\.open\(offlineTodoDbName, offlineDbVersion\)/);
   assert.match(html, /sessionExpiresAt/);
   assert.match(html, /navigator\.serviceWorker\.register\("\/service-worker\.js"\)/);

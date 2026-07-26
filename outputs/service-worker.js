@@ -1,6 +1,6 @@
 "use strict";
 
-const CACHE_NAME = "indus-ure-shell-v3";
+const CACHE_NAME = "indus-ure-shell-v4";
 const SHELL = ["/", "/index.html", "/manifest.webmanifest", "/assets/indus-icon.svg"];
 
 self.addEventListener("install", (event) => {
@@ -18,6 +18,8 @@ self.addEventListener("fetch", (event) => {
   if (request.method !== "GET") return;
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
+  // Fakture imajo svoj omejeni service worker in nikoli ne sodijo v URE shell.
+  if (url.pathname === "/fakture" || url.pathname.startsWith("/fakture/")) return;
   // API responses and private attachments are never cached by the service worker.
   if (url.pathname.startsWith("/api/") || url.pathname === "/calendar.ics") return;
   if (request.mode === "navigate") {
