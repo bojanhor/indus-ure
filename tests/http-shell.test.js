@@ -258,6 +258,72 @@ test("lokalna testna instanca omogoča ločeno prijavo samo v testnem načinu", 
     });
     assert.equal(missingTodoLock.status, 404, missingTodoLock.body);
     assert.equal(JSON.parse(missingTodoLock.body).code, "todo_not_found");
+    const bossTodoHeaders = {
+      "Content-Type": "application/json",
+      Cookie: cookie,
+      "X-CSRF-Token": JSON.parse(login.body).csrfToken
+    };
+    const assigned = await request(port, "/api/todos", {
+      method: "POST",
+      headers: bossTodoHeaders,
+      body: JSON.stringify({
+        date: "2026-07-27",
+        client: "Test client",
+        title: "Boss assigned task",
+        status: "open",
+        assigneeIds: ["ibro"]
+      })
+    });
+    assert.equal(assigned.status, 200, assigned.body);
+    const assignedData = JSON.parse(assigned.body);
+    assert.deepEqual(assignedData.assignedTo.map((user) => user.id), ["ibro"]);
+    const createdTodo = assignedData.todos.find((todo) => todo.title === "Boss assigned task");
+    assert.ok(createdTodo);
+    assert.equal(createdTodo.syncUser, "ibro");
+    assert.equal(createdTodo.createdBy, "bojan");
+
+    const noAssignee = await request(port, "/api/todos", {
+      method: "POST",
+      headers: bossTodoHeaders,
+      body: JSON.stringify({
+        date: "2026-07-27",
+        client: "Test client",
+        title: "Task without assignee",
+        status: "open",
+        assigneeIds: []
+      })
+    });
+    assert.equal(noAssignee.status, 400, noAssignee.body);
+    assert.match(JSON.parse(noAssignee.body).error, /vsaj enega/);
+
+    const ibroLogin = await request(port, "/api/test-login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userId: "ibro", password })
+    });
+    assert.equal(ibroLogin.status, 200, ibroLogin.body);
+    const ibroCookie = ibroLogin.headers["set-cookie"]?.[0];
+    const ibroTodoHeaders = {
+      "Content-Type": "application/json",
+      Cookie: ibroCookie,
+      "X-CSRF-Token": JSON.parse(ibroLogin.body).csrfToken
+    };
+    const crossAssigned = await request(port, "/api/todos", {
+      method: "POST",
+      headers: ibroTodoHeaders,
+      body: JSON.stringify({
+        date: "2026-07-27",
+        client: "Test client",
+        title: "Worker must not assign Bojan",
+        status: "open",
+        assigneeIds: ["bojan"]
+      })
+    });
+    assert.equal(crossAssigned.status, 403, crossAssigned.body);
+    assert.match(JSON.parse(crossAssigned.body).error, /samo sebi/);
+    const ibroTodos = await request(port, "/api/todos", { headers: { Cookie: ibroCookie } });
+    assert.equal(ibroTodos.status, 200, ibroTodos.body);
+    assert.ok(JSON.parse(ibroTodos.body).todos.some((todo) => todo.title === "Boss assigned task"));
   } finally {
     child.kill("SIGTERM");
     await fs.rm(dataDir, { recursive: true, force: true });
@@ -294,6 +360,17 @@ test("completion request UI and authenticated link flow are present", async () =
   assert.match(html, /function openWorkerDailyDigestFromLink\(\)/);
   assert.match(html, /worker-digest-worker/);
   assert.match(html, /await openWorkerDailyDigestFromLink\(\);/);
+});
+test("boss can create a task for workers directly from admin view", async () => {
+  const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  assert.match(html, /\$\("newTodoButton"\)\.classList\.remove\("hidden"\);/);
+  assert.match(html, /function startTodoForDate\(date = ""\) \{\s*openTodoDialog\(\{ date, _adminCreate: isAdminView\(\) \}\);/);
+  assert.match(html, /todo\._adminCreate\s*\? \[\]/);
+  assert.match(html, /id="todoFormAssigneeLabel"/);
+  assert.match(html, /Izberi vsaj enega izvajalca\./);
+  assert.match(html, /add\.title = isAdminView\(\) \? 'Dodaj opravilo za delavca'/);
+  assert.match(html, /function openStandaloneHoursDialog\(date = dateKey\(new Date\(\)\), \{ adminCreate = false \} = \{\}\)/);
+  assert.match(html, /openStandaloneHoursDialog\(date, \{ adminCreate: isAdminView\(\) \}\)/);
 });
 test("calendar-only task controls are date-bound and excluded only from task lists", async () => {
   const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");

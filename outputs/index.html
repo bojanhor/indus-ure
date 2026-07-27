@@ -4872,7 +4872,7 @@
           <small>Označi, ko je material za ta projekt, avto ali skladišče že naročen.</small>
         </label>
         <div id="todoFormAssigneeField">
-          <label>Delo opravil</label>
+          <label id="todoFormAssigneeLabel">Delo opravil</label>
           <div class="todo-form-assignees" id="todoFormAssignees"></div>
         </div>
         <label>Ime opravila
@@ -6838,7 +6838,8 @@
       $("userRole").textContent = admin ? "Šef - administracija" : `${worker?.name || "Delavec"} - delavec`;
       document.querySelectorAll(".admin-only").forEach((element) => element.classList.toggle("hidden", !admin));
       document.querySelectorAll(".worker-only").forEach((element) => element.classList.toggle("hidden", admin));
-      $("newTodoButton").classList.toggle("hidden", admin);
+      $("newTodoButton").classList.remove("hidden");
+      $("newTodoButton").textContent = admin ? "Dodaj opravilo za delavca" : "Dodaj opravilo";
       $("writeHoursButton").classList.toggle("hidden", admin);
       document.querySelectorAll(".admin-entry-field").forEach((element) => element.classList.toggle("hidden", !admin));
       $("googleDrive").classList.toggle("hidden", String(state.user?.email || "").toLowerCase() !== "bojan@indus.si");
@@ -7683,11 +7684,7 @@
     }
 
     function startTodoForDate(date = "") {
-      if (isAdminView()) {
-        showNotice("Za novo opravilo najprej izberi delavski pogled.");
-        return;
-      }
-      openTodoDialog({ date });
+      openTodoDialog({ date, _adminCreate: isAdminView() });
     }
 
     function todoOrderForCurrentUser(todo) {
@@ -8150,16 +8147,14 @@
         editHint.addEventListener('click', (event) => { event.stopPropagation(); openDayTimeline(key); });
         head.appendChild(editHint);
 
-        if (!isAdminView()) {
-          const add = document.createElement('button');
-          add.addEventListener('click', (event) => event.stopPropagation());
-          add.className = 'quick-add';
-          add.type = 'button';
-          add.textContent = '+';
-          add.title = `Dodaj opravilo za ${activeWorker()?.name || 'delavca'}`;
-          add.addEventListener('click', () => startTodoForDate(key));
-          head.appendChild(add);
-        }
+        const add = document.createElement('button');
+        add.addEventListener('click', (event) => event.stopPropagation());
+        add.className = 'quick-add';
+        add.type = 'button';
+        add.textContent = '+';
+        add.title = isAdminView() ? 'Dodaj opravilo za delavca' : `Dodaj opravilo za ${activeWorker()?.name || 'delavca'}`;
+        add.addEventListener('click', () => startTodoForDate(key));
+        head.appendChild(add);
         day.appendChild(head);
         appendMonthMultiDayLanes(day, key, Math.floor(i / 7), multiDayLayout);
 
@@ -8394,10 +8389,6 @@
         showNotice(state.dayTimelineSaving ? "Dnevni pogled se še shranjuje." : "Najprej shrani ali prekliči spremembe dnevne časovnice.");
         return;
       }
-      if (isAdminView()) {
-        showNotice("Za novo opravilo najprej izberi delavski pogled.");
-        return;
-      }
       const timelineRect = $("dayTimeline").getBoundingClientRect();
       const clickedMinute = (clientY - timelineRect.top) / state.dayTimelineMinuteHeight;
       const startMinute = Math.max(0, Math.min(1380, Math.floor(clickedMinute / 15) * 15));
@@ -8408,7 +8399,8 @@
       await openTodoDialog({
         date: state.dayTimelineDate,
         start: dayTimelineTime(startMinute),
-        end: dayTimelineTime(endMinute)
+        end: dayTimelineTime(endMinute),
+        _adminCreate: isAdminView()
       });
     }
     function dayWorkBlocks(todos) {
@@ -11448,6 +11440,7 @@
       const editing = Boolean(todo.id);
       state.todoHoursSourceId = String(todo._hoursSourceId || "");
       state.todoStandaloneHours = Boolean(todo._standaloneHours);
+      $("todoFormAssigneeLabel").textContent = isAdminView() ? "Dodeli delavcem" : "Delo opravil";
       state.todoMealEntry = Boolean(todo._mealEntry);
       state.todoDraftSourceProjectTodoId = String(todo.sourceProjectTodoId || "");
       const canChooseCreationMode = !editing && !state.todoHoursSourceId;
@@ -11489,7 +11482,9 @@
       syncTodoFormClientContacts({ preserve: true });
        autosizeTodoNarrativeFields();
        if (state.todoMealEntry && !editing) applyMealDefaults();
-      const draftAssignees = todo._hoursAssigneeIds?.length
+      const draftAssignees = todo._adminCreate
+        ? []
+        : todo._hoursAssigneeIds?.length
         ? todo._hoursAssigneeIds
         : (todo._duplicateAssigneeIds?.length ? todo._duplicateAssigneeIds : [activeWorkerId()]);
       const selectedAssignees = editing ? todoAssigneeIds(todo) : draftAssignees;
@@ -11535,6 +11530,10 @@
       const client = findTodoClient($("todoFormClient").value);
       const meal = $("todoFormStatus").value === "meal";
       const assigneeIds = selectedTodoFormAssignees();
+      if (!meal && !assigneeIds.length) {
+        showNotice("Izberi vsaj enega izvajalca.");
+        return;
+      }
       if (meal) assigneeIds.splice(0, assigneeIds.length, existing?.syncUser || activeWorkerId());
       const hourlyRate = parseBillingNumber($("todoFormHourlyRate").value, 10_000);
       const billingKm = parseBillingNumber($("todoFormBillingKm").value, 1_000_000);
@@ -11758,9 +11757,10 @@
         clientVehicle: "personal"
       });
     }
-    async function openStandaloneHoursDialog(date = dateKey(new Date())) {
+    async function openStandaloneHoursDialog(date = dateKey(new Date()), { adminCreate = false } = {}) {
       await openTodoDialog({
         _standaloneHours: true,
+        _adminCreate: adminCreate,
         date,
         status: "execution",
         urgent: false,
@@ -13756,7 +13756,7 @@
       const wantsHours = tab.dataset.createMode === "hours";
       if (wantsHours === state.todoStandaloneHours) return;
       $("todoDialog").close();
-      (wantsHours ? openStandaloneHoursDialog(date) : openTodoDialog({ date })).catch((error) => showNotice(error.message));
+      (wantsHours ? openStandaloneHoursDialog(date, { adminCreate: isAdminView() }) : openTodoDialog({ date, _adminCreate: isAdminView() })).catch((error) => showNotice(error.message));
     });
 
     document.querySelectorAll(".debt-stat").forEach((button) => {

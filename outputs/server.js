@@ -6996,7 +6996,23 @@ async function handleApi(req, res) {
       todo = storeTodoAttachments(db, todo, user);
       const minOrder = db.todos.reduce((min, item) => Math.min(min, Number(item.order || 0)), 0);
       const newOrder = todo.order || minOrder - 1;
-      let assigneeIds = todoAssigneesForRequest(user, body.assigneeIds || todo.syncUser, db.users);
+      const hasExplicitAssignees = Array.isArray(body.assigneeIds);
+      const requestedAssigneeIds = hasExplicitAssignees
+        ? [...new Set(body.assigneeIds
+          .map(cleanUserId)
+          .filter((assigneeId) => Boolean(db.users?.[assigneeId])))]
+        : [];
+      if (user.role !== "boss" && requestedAssigneeIds.some((assigneeId) => assigneeId !== user.id)) {
+        sendJson(res, 403, { error: "Delavec lahko opravilo dodeli samo sebi." });
+        return;
+      }
+      if (hasExplicitAssignees && !requestedAssigneeIds.length && todo.status !== "meal") {
+        sendJson(res, 400, { error: "Izberi vsaj enega izvajalca." });
+        return;
+      }
+      let assigneeIds = requestedAssigneeIds.length
+        ? requestedAssigneeIds
+        : todoAssigneesForRequest(user, todo.syncUser, db.users);
       if (todo.status === "meal") assigneeIds = [syncUserForRequest(user, todo.syncUser || assigneeIds[0] || user.id, "", db.users)];
       if (TIME_ENTRY_TODO_STATUSES.has(todo.status) && assigneeIds.length !== 1) {
         sendJson(res, 400, { error: "Vnos ur se vpisuje posebej za enega delavca." });
