@@ -4625,11 +4625,16 @@ async function sendAttachmentFile(res, attachment) {
 }
 
 function attachmentVisibleToUser(db, user, attachmentId) {
+  // A freshly uploaded attachment is deliberately not attached to a task until
+  // the form is saved. It must nevertheless be visible to its uploader so the
+  // form can render a video/photo preview and the user can verify it before
+  // saving. The pending map also drops expired records here.
+  const pendingVisible = pendingAttachmentMap(db)[attachmentId]?.userId === user.id;
   const todoVisible = (db.todos || []).some((todo) => canManageTodo(user, todo)
     && (todo.photos || []).some((photo) => photo.attachmentId === attachmentId));
   const advanceVisible = (db.debts || []).some((debt) => (user.role === "boss" || debt.person === user.id)
     && (debt.photos || []).some((photo) => photo.attachmentId === attachmentId));
-  return todoVisible || advanceVisible;
+  return pendingVisible || todoVisible || advanceVisible;
 }
 
 const MAX_BROWSER_RESTORE_BYTES = 1_500 * 1024 * 1024;
@@ -5139,6 +5144,15 @@ async function handleApi(req, res) {
         return;
       }
       const source = db.attachments?.[attachmentId];
+      const storageKey = attachmentMatch[2] ? source?.thumbnailKey : source?.storageKey;
+      const relativeStorageKey = safeRestoreRelativePath(storageKey);
+      const localFile = relativeStorageKey
+        ? path.resolve(MEDIA_DIR, relativeStorageKey)
+        : "";
+      if (localFile && localFile.startsWith(`${MEDIA_DIR}${path.sep}`) && fs.existsSync(localFile)) {
+        await sendAttachmentFile(res, { filePath: localFile, mimeType: source?.mimeType });
+        return;
+      }
       const dataUrl = attachmentMatch[2] ? source?.thumbnailData : source?.data;
       const match = String(dataUrl || "").match(/^data:([^;,]+);base64,([A-Za-z0-9+/]+={0,2})$/);
       if (!match) {

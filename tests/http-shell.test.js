@@ -228,6 +228,12 @@ test("lokalna testna instanca omogoča ločeno prijavo samo v testnem načinu", 
   }
 });
 
+test("lastnik vidi začasno video prilogo pred shranjevanjem, drugi uporabniki ne", async () => {
+  const server = await fs.readFile(path.join(__dirname, "..", "outputs", "server.js"), "utf8");
+  assert.match(server, /const pendingVisible = pendingAttachmentMap\(db\)\[attachmentId\]\?\.userId === user\.id;/);
+  assert.match(server, /return pendingVisible \|\| todoVisible \|\| advanceVisible;/);
+});
+
 test("completion request UI and authenticated link flow are present", async () => {
   const [server, html] = await Promise.all([
     fs.readFile(path.join(__dirname, "..", "outputs", "server.js"), "utf8"),
