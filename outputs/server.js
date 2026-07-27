@@ -6109,7 +6109,7 @@ async function handleApi(req, res) {
           sendJson(res, 409, { error: "Opravilo je v Izbrisano. Najprej ga obnovi." });
           return;
         }
-        if (todo.done || todo.urgent || todo.status === "meal") {
+        if (todo.done || todo.status === "meal") {
           sendJson(res, 400, { error: "Izbranega opravila ni mogoče ročno razvrščati." });
           return;
         }

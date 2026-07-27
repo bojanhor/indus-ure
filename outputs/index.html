@@ -428,25 +428,33 @@
     }
 
     .active-work-context {
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-      min-height: 34px;
-      padding: 6px 9px;
+      width: 42px;
+      min-height: 42px;
+      display: inline-grid;
+      place-items: center;
+      padding: 0;
       border: 1px solid var(--line);
       border-radius: 8px;
       background: #f3f7f4;
       color: var(--muted);
-      font-size: 11px;
-      font-weight: 800;
-      white-space: nowrap;
       cursor: pointer;
     }
 
-    .active-work-context strong {
-      color: var(--ink);
+    .active-work-context-icon {
+      width: 27px;
+      height: 27px;
+      display: grid;
+      place-items: center;
+      border-radius: 50%;
+      background: var(--accent);
+      color: #fff;
       font-size: 12px;
+      font-weight: 900;
+      line-height: 1;
     }
+
+    .active-work-context[data-context="admin"] .active-work-context-icon { background: #203035; }
+    .active-work-context-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
     .work-context-menu {
       position: relative;
@@ -510,21 +518,7 @@
       font-weight: 750;
     }
 
-    /* The work context is itself the control.  Do not hide a select inside
-       a second dropdown: on phones that adds an unnecessary tap. */
-    .work-context-select {
-      min-width: min(310px, calc(100vw - 24px));
-      min-height: 42px;
-      padding: 8px 34px 8px 10px;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: #f3f7f4;
-      color: var(--ink);
-      font: inherit;
-      font-size: 13px;
-      font-weight: 800;
-      cursor: pointer;
-    }
+    .work-context-panel .work-context-select { min-width: 0; }
     .work-context-select:hover,
     .work-context-select:focus-visible {
       border-color: var(--accent);
@@ -3151,6 +3145,7 @@
     .completion-request-recipient input { width: 18px; height: 18px; margin: 0; accent-color: var(--accent); }
     .completion-request-recipient small { margin-left: auto; color: var(--muted); overflow-wrap: anywhere; }
     .completion-request-status { margin: 0; padding: 9px 10px; border: 1px solid #d3b1b1; border-radius: 8px; background: #fff5f5; color: #8d2c2c; font-weight: 700; }
+    .completion-request-status.pending { border-color: #a8c8d8; background: #f2f9fc; color: #185a78; }
     .completion-request-status.success { border-color: #a8cfb2; background: #f1faf3; color: #1c6a35; }
     .todo-form-footer-actions {
       display: flex;
@@ -4065,19 +4060,13 @@
         position: relative;
         gap: 8px;
       }
-      .active-work-context,
-      .work-context-select {
-        min-height: 48px;
-        padding: 6px 7px;
-      }
-      .active-work-context > span { display: none; }
+      .active-work-context { width: 44px; min-height: 48px; }
       .work-context-menu { position: static; }
-      .work-context-select { width: 100%; min-width: 0; }
       .work-context-panel {
         position: absolute;
         top: calc(100% + 8px);
-        left: 8px;
-        right: 8px;
+        left: 0;
+        right: 0;
         width: auto;
       }
       .tools-menu > summary {
@@ -4430,7 +4419,16 @@
 
             <button class="view-btn legacy-report-button" id="reportViewBtn" type="button">Arhiv poro&#269;il</button>
           </div>
-          <select class="work-context-select hidden" id="workContextSelect" aria-label="Pogled" title="Izberi pogled"></select>
+          <details class="work-context-menu hidden" id="workContextControl">
+            <summary class="active-work-context" id="activeWorkContext" title="Izberi pogled" aria-label="Izberi pogled">
+              <span class="active-work-context-icon" id="activeWorkContextIcon" aria-hidden="true"></span>
+              <span class="active-work-context-label" id="activeWorkContextLabel"></span>
+            </summary>
+            <div class="work-context-panel" role="group" aria-label="Izbira pogleda">
+              <label for="workContextSelect">Pogled</label>
+              <select class="work-context-select" id="workContextSelect" aria-label="Pogled" title="Izberi pogled"></select>
+            </div>
+          </details>
           <details class="tools-menu" id="toolsMenu">
             <summary class="account-btn settings-menu-button" title="Nastavitve in orodja" aria-label="Nastavitve in orodja">
               <svg class="settings-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
@@ -4928,7 +4926,7 @@
         <p class="completion-request-status" id="completionRequestStatus" role="status" aria-live="polite" hidden></p>
         <div class="modal-actions">
           <button class="secondary" id="cancelCompletionRequestDialog" type="button">Prekliči</button>
-          <button class="primary" type="submit">Pošlji zahtevek</button>
+          <button class="primary" id="completionRequestSubmit" type="submit">Pošlji zahtevek</button>
         </div>
       </div>
     </form>
@@ -5523,6 +5521,10 @@
 
     function closeToolsMenu() {
       $("toolsMenu")?.removeAttribute("open");
+    }
+
+    function closeWorkContextMenu() {
+      $("workContextControl")?.removeAttribute("open");
     }
 
 
@@ -6458,6 +6460,7 @@
 
     function initializeWorkContext() {
       const select = $("workContextSelect");
+      const control = $("workContextControl");
       select.replaceChildren();
       const directory = [...new Map([...state.users, state.user].map((user) => [user.id, user])).values()]
         .sort((a, b) => {
@@ -6494,7 +6497,8 @@
       select.value = state.workContext;
       loadTodoSortMode();
       loadCalendarCompletedFilter();
-      select.classList.toggle("hidden", contexts.length <= 1);
+      control.classList.toggle("hidden", contexts.length <= 1);
+      if (contexts.length <= 1) closeWorkContextMenu();
     }
 
     function isAdminView() {
@@ -6607,7 +6611,13 @@
       const admin = isAdminView();
       const worker = activeWorker();
       const contextName = admin ? "Šef" : (worker?.name || "Delavec");
+      const contextControl = $("activeWorkContext");
       $("workContextSelect").title = "Aktivni pogled: " + contextName;
+      contextControl.title = "Aktivni pogled: " + contextName + ". Odpri izbiro pogleda.";
+      contextControl.setAttribute("aria-label", contextControl.title);
+      contextControl.dataset.context = admin ? "admin" : "worker";
+      $("activeWorkContextIcon").textContent = admin ? "Š" : String(contextName).trim().slice(0, 1).toUpperCase();
+      $("activeWorkContextLabel").textContent = contextName;
       document.body.classList.toggle("admin-view", admin);
       $("userRole").textContent = admin ? "Šef - administracija" : `${worker?.name || "Delavec"} - delavec`;
       document.querySelectorAll(".admin-only").forEach((element) => element.classList.toggle("hidden", !admin));
@@ -6637,6 +6647,7 @@
       // Baza strank je skupna delovna evidenca: dostopna je tudi v delavskem
       // pogledu. Samo poročila/obračun strank ostanejo šefovska funkcija.
       if (!isAdminView() && state.view === "report") state.view = "todos";
+      closeWorkContextMenu();
       applyWorkContextUi();
       setView(state.view);
       render();
@@ -7477,13 +7488,14 @@
     }
 
     function todoManualCategory(todo) {
+      if (todo?.urgent) return "urgent";
       if (todo?.status === "execution") return "completed";
       if (manualOrderingStatusIds.has(todo?.status)) return "ordering";
       return todoManualBucketForCurrentUser(todo);
     }
 
     function todoManualCategorySort(a, b) {
-      const positions = { ordering: 0, unsorted: 1, sorted: 2, completed: 3 };
+      const positions = { urgent: 0, ordering: 1, unsorted: 2, sorted: 3, completed: 4 };
       const aCategory = todoManualCategory(a);
       const bCategory = todoManualCategory(b);
       const categoryDifference = (positions[aCategory] ?? 9) - (positions[bCategory] ?? 9);
@@ -9673,6 +9685,7 @@
     function appendTodoOrderSection(items, bucket) {
       const section = document.createElement("div");
       const labels = {
+        urgent: ["Nujno", "Nujna opravila"],
         sorted: ["Razvrščeno", "Ustaljeni vrstni red"],
         unsorted: ["Nerazvrščeno", "Nova opravila"],
         ordering: ["Naroči", "Naročila in opravila za v avto"],
@@ -9707,7 +9720,7 @@
     }
 
     function appendTodoOrderTailDropZone(items, bucket, targetId) {
-      if (!targetId || !["sorted", "unsorted", "ordering"].includes(bucket)) return;
+      if (!targetId || !["urgent", "sorted", "unsorted", "ordering"].includes(bucket)) return;
       const zone = document.createElement("div");
       zone.className = "todo-order-drop-zone todo-order-drop-zone-end";
       zone.dataset.todoDropBucket = bucket;
@@ -11377,6 +11390,17 @@
       node.className = "completion-request-status" + (kind ? " " + kind : "");
     }
 
+    function setCompletionRequestSending(sending) {
+      const dialog = $("completionRequestDialog");
+      const submit = $("completionRequestSubmit");
+      dialog.querySelectorAll("select, textarea, input[name='completionRecipient'], #cancelCompletionRequestDialog").forEach((field) => {
+        field.disabled = Boolean(sending);
+      });
+      submit.disabled = Boolean(sending);
+      submit.setAttribute("aria-busy", String(Boolean(sending)));
+      submit.textContent = sending ? "Pošiljam e-pošto …" : "Pošlji zahtevek";
+    }
+
     function renderCompletionRequestRecipients(todo, preferredRecipientId = "") {
       const container = $("completionRequestRecipients");
       const allowedIds = new Set([...todoAssigneeIds(todo), String(todo.createdBy || ""), String(todo.syncUser || "")].filter(Boolean));
@@ -11401,6 +11425,9 @@
       $("completionRequestTodoSelect").innerHTML = todos.map((todo) => `<option value="${escapeHtml(todo.id)}">${escapeHtml(completionRequestTodoLabel(todo))}</option>`).join("");
       updateCompletionRequestTodo(String(todoId || $("todoFormId").value || todos[0].id));
       $("completionRequestComment").value = "";
+      $("completionRequestSubmit").hidden = false;
+      $("cancelCompletionRequestDialog").textContent = "Prekliči";
+      setCompletionRequestSending(false);
       completionRequestStatus();
       $("completionRequestDialog").showModal();
       requestAnimationFrame(() => $("completionRequestComment").focus());
@@ -11412,22 +11439,25 @@
       if (!todoId) throw new Error("Opravilo ni izbrano.");
       const recipientUserIds = [...document.querySelectorAll('input[name="completionRecipient"]:checked')].map((input) => input.value);
       if (!recipientUserIds.length) throw new Error("Izberi vsaj enega prejemnika.");
-      const submit = $("completionRequestForm button.primary");
-      submit.disabled = true;
-      completionRequestStatus("Po\u0161iljam zahtevek ...", "success");
+      const submit = $("completionRequestSubmit");
+      setCompletionRequestSending(true);
+      completionRequestStatus("Pošiljam zahtevek po e-pošti. Počakaj na potrditev …", "pending");
       try {
         const data = await api("/api/todos/" + encodeURIComponent(todoId) + "/completion-request", {
           method: "POST",
           body: JSON.stringify({ comment: $("completionRequestComment").value.trim(), recipientUserIds })
         });
         const recipients = (data.recipients || []).map((recipient) => recipient.name || recipient.email).filter(Boolean);
-        dialog.close();
+        completionRequestStatus("Zahtevek je poslan: " + (recipients.join(", ") || "prejemnikom") + ". E-pošta je uspešno predana Gmailu.", "success");
+        submit.hidden = true;
+        $("cancelCompletionRequestDialog").textContent = "Zapri";
+        $("cancelCompletionRequestDialog").disabled = false;
         showNotice("Zahtevek je uspe\u0161no poslan: " + (recipients.join(", ") || "prejemnikom") + ".");
       } catch (error) {
         completionRequestStatus(error.message || "Po\u0161iljanje zahtevka ni uspelo.", "error");
         throw error;
       } finally {
-        submit.disabled = false;
+        if (!submit.hidden) setCompletionRequestSending(false);
       }
     }
 
@@ -12108,13 +12138,14 @@
       window.open("https://mail.google.com/mail/u/0/#drafts", "_blank", "noopener");
     }
     function todoCanManualReorder(todo) {
-      return Boolean(todo && !todo.done && !todo.urgent && todo.status !== "meal");
+      return Boolean(todo && !todo.done && !timeEntryStatusIds.has(todo.status));
     }
 
     function todosCanReorderTogether(sourceId, targetId) {
       const todos = contextTodos();
       const source = todos.find((todo) => todo.id === sourceId);
       const target = todos.find((todo) => todo.id === targetId);
+      if (Boolean(source?.urgent) !== Boolean(target?.urgent)) return false;
       return todoCanManualReorder(source) && todoCanManualReorder(target);
     }
 
@@ -12173,7 +12204,8 @@
         const bucket = String(section.dataset.todoDropBucket || "");
         const anchorId = String(section.dataset.todoDropTargetId || "");
         const namedBucket = ["sorted", "unsorted"].includes(bucket);
-        if (namedBucket || anchorId) {
+        const compatibleAnchor = anchorId ? todosCanReorderTogether(drag.sourceId, anchorId) : !source?.urgent;
+        if ((namedBucket || anchorId) && compatibleAnchor) {
           if (namedBucket) targetBucket = bucket;
           targetId = anchorId;
           targetPlacement = section.dataset.todoDropPlacement === "after" ? "after" : "before";
@@ -13378,6 +13410,9 @@
       if (event.target.closest(".tools-menu-panel select")) closeToolsMenu();
     });
     $("toolsMenu").addEventListener("toggle", () => keepToolsMenuInViewport());
+    $("workContextControl").addEventListener("toggle", () => {
+      if ($("workContextControl").open) closeToolsMenu();
+    });
     window.addEventListener("resize", keepToolsMenuInViewport);
     function openAppSettings() {
       const billing = state.settings.billing || {};
@@ -13411,10 +13446,13 @@
     document.addEventListener("click", (event) => {
       const menu = $("toolsMenu");
       if (menu?.open && !menu.contains(event.target)) closeToolsMenu();
+      const context = $("workContextControl");
+      if (context?.open && !context.contains(event.target)) closeWorkContextMenu();
     });
     document.addEventListener("keydown", (event) => {
       if (event.key === "Escape") {
         closeToolsMenu();
+        closeWorkContextMenu();
       }
     });
     $("workContextSelect").addEventListener("change", (event) => {

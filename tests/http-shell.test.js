@@ -41,15 +41,18 @@ test("front-end naročila in foto urejevalnik ohranita dogovorjeni mobilni prika
   assert.match(html, /function autosizeTodoNarrativeFields\(\)/);
   assert.match(html, /function dayTimelineDragAutoScrollVelocity\(clientY\)/);
   assert.match(html, /todoTextOrderMarker/);
-  assert.match(html, /<select class="work-context-select hidden" id="workContextSelect"/);
-  assert.doesNotMatch(html, /id="activeWorkContext"/);
+  assert.match(html, /<details class="work-context-menu hidden" id="workContextControl"/);
+  assert.match(html, /id="activeWorkContext"/);
+  assert.match(html, /id="activeWorkContextIcon"/);
+  assert.match(html, /<select class="work-context-select" id="workContextSelect"/);
   assert.match(html, /id="toolsMenuNotificationsCount"/);
   assert.match(html, /todoSortModes = \["manual", "client", "date", "order", "completed", "open", "in_progress", "imported"\]/);
   assert.match(html, /function isImportedTodo\(todo\)/);
   assert.match(html, /state\.todoSortMode === "imported" \? isImportedTodo\(todo\) : !isImportedTodo\(todo\)/);
   assert.match(html, /!isImportedTodo\(todo\) && \(includeArchived \|\| !todo\.archivedAt\)/);
   assert.match(html, /@media \(min-width: 1600px\)[\s\S]*?width: min\(100%, 1540px\)/);
-  assert.doesNotMatch(html, /id="workContextControl"/);
+  assert.match(html, /function closeWorkContextMenu\(\)/);
+  assert.match(html, /closeWorkContextMenu\(\);/);
   assert.match(html, /todoSectionCollapseStorageKey/);
   assert.match(html, /todo-order-section-toggle/);
   assert.match(html, /#todoFormNotes,[\s\S]*?#todoFormMaterial \{[\s\S]*?overflow-y: hidden;/);
@@ -66,6 +69,30 @@ test("front-end naročila in foto urejevalnik ohranita dogovorjeni mobilni prika
   assert.match(html, /\.todo-title-row \.todo-client-name \{[\s\S]*?flex: 1 1 0;/);
   assert.doesNotMatch(html, /serverStatusPanel/);
 });
+test("ročni filter loči in omogoča razvrščanje nujnih opravil", async () => {
+  const [html, server] = await Promise.all([
+    fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8"),
+    fs.readFile(path.join(__dirname, "..", "outputs", "server.js"), "utf8")
+  ]);
+  assert.match(html, /function todoManualCategory\(todo\) \{\s*if \(todo\?\.urgent\) return "urgent";/);
+  assert.match(html, /const positions = \{ urgent: 0, ordering: 1, unsorted: 2, sorted: 3, completed: 4 \}/);
+  assert.match(html, /urgent: \["Nujno", "Nujna opravila"\]/);
+  assert.match(html, /const collapsible = bucket === "ordering";/);
+  assert.match(html, /function todoCanManualReorder\(todo\) \{\s*return Boolean\(todo && !todo\.done && !timeEntryStatusIds\.has\(todo\.status\)\);/);
+  assert.match(html, /Boolean\(source\?\.urgent\) !== Boolean\(target\?\.urgent\)/);
+  assert.match(server, /if \(todo\.done \|\| todo\.status === "meal"\)/);
+  assert.doesNotMatch(server, /todo\.done \|\| todo\.urgent \|\| todo\.status === "meal"/);
+});
+
+test("zahtevek za dopolnitev uporabnika jasno vodi od pošiljanja do potrditve", async () => {
+  const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  assert.match(html, /id="completionRequestSubmit"/);
+  assert.match(html, /function setCompletionRequestSending\(sending\)/);
+  assert.match(html, /Pošiljam zahtevek po e-pošti\. Počakaj na potrditev/);
+  assert.match(html, /E-pošta je uspešno predana Gmailu/);
+  assert.match(html, /completion-request-status\.pending/);
+});
+
 test("večdnevno opravilo ima ločen datum do in se prikaže skozi cel razpon", async () => {
   const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
   assert.match(html, /id="todoFormEndDate"/);
