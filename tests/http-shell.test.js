@@ -44,7 +44,13 @@ test("front-end naročila in foto urejevalnik ohranita dogovorjeni mobilni prika
   assert.match(html, /<details class="work-context-menu hidden" id="workContextControl"/);
   assert.match(html, /id="activeWorkContext"/);
   assert.match(html, /id="activeWorkContextIcon"/);
-  assert.match(html, /<select class="work-context-select" id="workContextSelect"/);
+  assert.match(html, /id="workContextOptions"/);
+  assert.match(html, /function renderWorkContextOptions\(contexts\)/);
+  assert.match(html, /work-context-option/);
+  assert.match(html, /\\u265B/);
+  assert.doesNotMatch(html, /<select class="work-context-select"/);
+  assert.match(html, /overscroll-behavior-y: none/);
+  assert.match(html, /function panMonthTodoPointerGesture\(drag, event\)/);
   assert.match(html, /id="toolsMenuNotificationsCount"/);
   assert.match(html, /todoSortModes = \["manual", "client", "date", "order", "completed", "open", "in_progress", "imported"\]/);
   assert.match(html, /function isImportedTodo\(todo\)/);
@@ -78,6 +84,9 @@ test("ročni filter loči in omogoča razvrščanje nujnih opravil", async () =>
   assert.match(html, /const positions = \{ urgent: 0, ordering: 1, unsorted: 2, sorted: 3, completed: 4 \}/);
   assert.match(html, /urgent: \["Nujno", "Nujna opravila"\]/);
   assert.match(html, /const collapsible = bucket === "ordering";/);
+  assert.match(html, /function appendTodoOrderSection\(items, bucket, itemCount = 0\)/);
+  assert.match(html, /hiddenCountSuffix/);
+  assert.match(html, /manualCategoryCounts/);
   assert.match(html, /function todoCanManualReorder\(todo\) \{\s*return Boolean\(todo && !todo\.done && !timeEntryStatusIds\.has\(todo\.status\)\);/);
   assert.match(html, /Boolean\(source\?\.urgent\) !== Boolean\(target\?\.urgent\)/);
   assert.match(server, /if \(todo\.done \|\| todo\.status === "meal"\)/);

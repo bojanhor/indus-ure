@@ -25,6 +25,8 @@ const {
   gmailDraftRaw,
   gmailCompletionRequestRaw,
   cleanTodoCompletionRequests,
+  todoCompletionRequestsForAssignment,
+  findActiveTodoCompletionRequest,
   cleanTodo,
   cancelClientBill,
   clientBillLockForTodos,
@@ -877,6 +879,45 @@ test("completion request is private to its recipient and expires", () => {
   const visible = visibleTodosForUser({ todos: [delegatedTodo], attachments: [] }, worker);
   assert.equal(visible.length, 1);
   assert.equal(Object.hasOwn(visible[0], "completionRequests"), false);
+});
+
+test("completion link stays valid through an assignment copy change", () => {
+  const now = Date.now();
+  const tokenHash = "d".repeat(64);
+  const request = {
+    id: "fixed-link",
+    tokenHash,
+    recipientUserId: "ibro",
+    recipientEmail: "ibro@example.test",
+    requestedBy: "bojan",
+    expiresAt: now + 14 * 24 * 60 * 60 * 1000
+  };
+  const beforeSave = {
+    todos: [
+      { id: "old-copy", assignmentGroupId: "shared-task", completionRequests: [request] },
+      { id: "other-copy", assignmentGroupId: "shared-task", completionRequests: [] }
+    ]
+  };
+  const preserved = todoCompletionRequestsForAssignment(beforeSave, beforeSave.todos[1], now);
+  assert.equal(preserved.length, 1);
+  assert.equal(preserved[0].tokenHash, tokenHash);
+
+  const afterSave = {
+    todos: [{ id: "new-copy", assignmentGroupId: "shared-task", completionRequests: preserved }]
+  };
+  const match = findActiveTodoCompletionRequest(afterSave, "old-copy", tokenHash, now);
+  assert.equal(match?.todo.id, "new-copy");
+  assert.equal(match?.request.id, "fixed-link");
+
+  const manyActiveRequests = cleanTodoCompletionRequests(Array.from({ length: 21 }, (_, index) => ({
+    id: `request-${index}`,
+    tokenHash: String(index % 10).repeat(64),
+    recipientUserId: "ibro",
+    recipientEmail: "ibro@example.test",
+    requestedBy: "bojan",
+    expiresAt: now + 60_000
+  })), now);
+  assert.equal(manyActiveRequests.length, 21);
 });
 
 test("completion request email has recipient, subject and encoded body", () => {

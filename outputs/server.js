@@ -3647,8 +3647,39 @@ function cleanTodoCompletionRequests(input, now = Date.now()) {
       && request.requestedBy
       && request.expiresAt > now
       && !seen.has(request.id)
-      && (seen.add(request.id) || true))
-    .slice(-20);
+      && (seen.add(request.id) || true));
+}
+
+// Zahteve za dopolnitev pripadajo logi?nemu (skupno dodeljenemu) opravilu,
+// ne posamezni kopiji za delavca. Kopije obdr?imo na vseh pripadajo?ih
+// dogodkih, da stare povezave ostanejo uporabne tudi po spremembi dodelitve.
+function todoCompletionRequestsForAssignment(db, todo, now = Date.now()) {
+  const requestsByToken = new Map();
+  for (const assignmentTodo of todoAssignmentItems(db, todo)) {
+    for (const request of cleanTodoCompletionRequests(assignmentTodo.completionRequests, now)) {
+      if (!requestsByToken.has(request.tokenHash)) requestsByToken.set(request.tokenHash, request);
+    }
+  }
+  return [...requestsByToken.values()];
+}
+
+function findActiveTodoCompletionRequest(db, requestedTodoId, tokenHash, now = Date.now()) {
+  if (!/^[a-f0-9]{64}$/.test(String(tokenHash || ""))) return null;
+  const requestedId = String(requestedTodoId || "");
+  const todos = Array.isArray(db?.todos) ? db.todos : [];
+  const candidates = [];
+  const requestedTodo = todos.find((item) => item.id === requestedId);
+  if (requestedTodo && !isTrashedTodo(requestedTodo)) candidates.push(requestedTodo);
+  for (const todo of todos) {
+    if (todo === requestedTodo || isTrashedTodo(todo)) continue;
+    candidates.push(todo);
+  }
+  for (const todo of candidates) {
+    const request = cleanTodoCompletionRequests(todo.completionRequests, now)
+      .find((item) => item.tokenHash === tokenHash);
+    if (request) return { todo, request };
+  }
+  return null;
 }
 
 function cleanClientMutationId(value) {
@@ -6904,25 +6935,17 @@ async function handleApi(req, res) {
       if (!user) return;
       const id = decodeURIComponent(todoCompletionRequestMatch[1]);
       const db = await readDbAsync();
-      const todo = (db.todos || []).find((item) => item.id === id);
-      if (!todo) {
-        sendJson(res, 404, { error: "Opravilo ne obstaja." });
-        return;
-      }
-
-      if (isTrashedTodo(todo)) {
-        sendJson(res, 404, { error: "Opravilo je v Izbrisano." });
-        return;
-      }
+      let todo = (db.todos || []).find((item) => item.id === id);
       if (req.method === "GET") {
         const token = String(url.searchParams.get("token") || "");
         const tokenHash = sessionTokenHash(token);
-        const request = cleanTodoCompletionRequests(todo.completionRequests)
-          .find((item) => item.tokenHash === tokenHash);
-        if (!request) {
+        const match = findActiveTodoCompletionRequest(db, id, tokenHash);
+        if (!match) {
           sendJson(res, 403, { error: "Povezava za dopolnitev ni veljavna ali je potekla." });
           return;
         }
+        todo = match.todo;
+        const request = match.request;
         if (!request.recipientUserIds.includes(user.id)) {
           sendJson(res, 403, { error: "Ta povezava je namenjena drugemu uporabniku." });
           return;
@@ -6941,6 +6964,15 @@ async function handleApi(req, res) {
             expiresAt: request.expiresAt
           }
         });
+        return;
+      }
+
+      if (!todo) {
+        sendJson(res, 404, { error: "Opravilo ne obstaja." });
+        return;
+      }
+      if (isTrashedTodo(todo)) {
+        sendJson(res, 404, { error: "Opravilo je v Izbrisano." });
         return;
       }
 
@@ -7014,8 +7046,8 @@ async function handleApi(req, res) {
           sendJson(res, 502, { error: "E-po\u0161te ni bilo mogo\u010de poslati. V Nastavitvah ponovno pove\u017ei Google ra\u010dun in poskusi znova." });
           return;
         }
-        todo.completionRequests = [
-          ...cleanTodoCompletionRequests(todo.completionRequests),
+        const completionRequests = [
+          ...todoCompletionRequestsForAssignment(db, todo),
           {
             id: crypto.randomUUID(),
             tokenHash: sessionTokenHash(rawToken),
@@ -7029,7 +7061,14 @@ async function handleApi(req, res) {
             createdAt: new Date().toISOString(),
             expiresAt
           }
-        ].slice(-20);
+        ];
+        for (const assignmentTodo of todoAssignmentItems(db, todo)) {
+          assignmentTodo.completionRequests = completionRequests.map((request) => ({
+            ...request,
+            recipientUserIds: [...request.recipientUserIds],
+            recipientEmails: [...request.recipientEmails]
+          }));
+        }
         todo.history = [...(todo.history || []), audit(user, "poslan zahtevek za dopolnitev: " + recipients.map((recipient) => recipient.name || recipient.id).join(", "))];
         await writeDbAsync(db);
         sendJson(res, 201, {
@@ -7296,6 +7335,13 @@ async function handleApi(req, res) {
         return;
       }
       const assignmentItems = todoAssignmentItems(db, previousTodo);
+      // Javni obrazec teh internih tokenov nikoli ne dobi. Ob navadnem
+      // shranjevanju jih zato obnovimo iz celotne skupine in jih spodaj
+      // prenesemo na morebitne na novo ustvarjene kopije za delavce.
+      todo = {
+        ...todo,
+        completionRequests: todoCompletionRequestsForAssignment(db, previousTodo)
+      };
       const payrollLock = payrollLockForTodos(db, assignmentItems);
       if (payrollLock) {
         sendJson(res, 403, { error: `Opravilo je del potrjenega obračuna za ${db.users?.[payrollLock.workerId]?.name || payrollLock.workerId} (${payrollLock.month}). Šef ga mora najprej ponovno odpreti.` });
@@ -7649,6 +7695,8 @@ module.exports = {
   gmailWorkerDigestDraftRaw,
   gmailCompletionRequestRaw,
   cleanTodoCompletionRequests,
+  todoCompletionRequestsForAssignment,
+  findActiveTodoCompletionRequest,
   cleanTodo,
   archivePayrollTodos,
   cancelClientBill,

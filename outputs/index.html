@@ -25,12 +25,19 @@
 
     * { box-sizing: border-box; }
 
+    html {
+      /* This is an installable work app: browser pull-to-refresh must not
+         steal a touch that starts inside an open application menu. */
+      overscroll-behavior-y: none;
+    }
+
     body {
       margin: 0;
       font-family: Arial, Helvetica, sans-serif;
       color: var(--ink);
       background: var(--bg);
       overflow-x: hidden;
+      overscroll-behavior-y: none;
       -webkit-text-size-adjust: 100%;
     }
 
@@ -489,6 +496,10 @@
       right: 0;
       z-index: 101;
       width: min(310px, calc(100vw - 24px));
+      max-height: min(70vh, 620px);
+      overflow-y: auto;
+      overscroll-behavior-y: contain;
+      -webkit-overflow-scrolling: touch;
       padding: 10px;
       border: 1px solid var(--line);
       border-radius: 10px;
@@ -506,25 +517,43 @@
       text-transform: uppercase;
     }
 
-    .work-context-panel select {
+    .work-context-options { display: grid; gap: 6px; }
+    .work-context-option {
+      display: flex;
+      align-items: center;
+      gap: 9px;
       width: 100%;
-      min-height: 42px;
+      min-height: 44px;
       padding: 8px 10px;
       border: 1px solid var(--line);
       border-radius: 8px;
       background: #f8fbfa;
       color: var(--ink);
+      text-align: left;
       font: inherit;
       font-weight: 750;
     }
-
-    .work-context-panel .work-context-select { min-width: 0; }
-    .work-context-select:hover,
-    .work-context-select:focus-visible {
+    .work-context-option:hover,
+    .work-context-option:focus-visible,
+    .work-context-option.active {
       border-color: var(--accent);
-      background: #edf5f1;
+      background: #e7f3ef;
       outline: 2px solid transparent;
     }
+    .work-context-option-icon {
+      flex: 0 0 25px;
+      width: 25px;
+      height: 25px;
+      display: grid;
+      place-items: center;
+      border-radius: 50%;
+      background: var(--accent);
+      color: #fff;
+      font-size: 12px;
+      font-weight: 900;
+      line-height: 1;
+    }
+    .work-context-option[data-work-context="admin"] .work-context-option-icon { background: #203035; font-size: 16px; }
 
     .tools {
       display: flex;
@@ -621,6 +650,8 @@
       width: min(320px, calc(100vw - 32px));
       max-height: min(70vh, 620px);
       overflow-y: auto;
+      overscroll-behavior-y: contain;
+      -webkit-overflow-scrolling: touch;
       display: grid;
       gap: 5px;
       padding: 10px;
@@ -2333,6 +2364,9 @@
       border-left: 4px solid #6d7fb5;
       font-size: 12px;
       min-height: 34px;
+      touch-action: none;
+      user-select: none;
+      -webkit-user-select: none;
     }
 
     .day-todo.done {
@@ -2369,6 +2403,9 @@
       white-space: nowrap;
       text-overflow: ellipsis;
       cursor: pointer;
+      touch-action: none;
+      user-select: none;
+      -webkit-user-select: none;
     }
 
     .day-multiday-event.is-span-start {
@@ -2396,8 +2433,10 @@
       text-overflow: ellipsis;
     }
 
-    .day-todo.month-drag-armed { cursor: grab; }
-    .day-todo.month-dragging { opacity: 0.42; outline: 2px dashed var(--accent); outline-offset: 2px; }
+    .day-todo.month-drag-armed,
+    .day-multiday-event.month-drag-armed { cursor: grab; }
+    .day-todo.month-dragging,
+    .day-multiday-event.month-dragging { opacity: 0.42; outline: 2px dashed var(--accent); outline-offset: 2px; }
     .day.month-drag-target { box-shadow: inset 0 0 0 3px var(--accent); background: #edf8f3; }
     .month-todo-drag-ghost {
       position: fixed;
@@ -4425,8 +4464,9 @@
               <span class="active-work-context-label" id="activeWorkContextLabel"></span>
             </summary>
             <div class="work-context-panel" role="group" aria-label="Izbira pogleda">
-              <label for="workContextSelect">Pogled</label>
-              <select class="work-context-select" id="workContextSelect" aria-label="Pogled" title="Izberi pogled"></select>
+              <label>Pogled</label>
+              <div class="work-context-options" id="workContextOptions"></div>
+              <select id="workContextSelect" hidden aria-hidden="true" tabindex="-1"></select>
             </div>
           </details>
           <details class="tools-menu" id="toolsMenu">
@@ -6495,10 +6535,35 @@
       const stored = localStorage.getItem(workContextKey) || "";
       state.workContext = state.user.role === "boss" && allowed.has(stored) ? stored : contexts[0].value;
       select.value = state.workContext;
+      renderWorkContextOptions(contexts);
       loadTodoSortMode();
       loadCalendarCompletedFilter();
       control.classList.toggle("hidden", contexts.length <= 1);
       if (contexts.length <= 1) closeWorkContextMenu();
+    }
+
+    function renderWorkContextOptions(contexts) {
+      const options = $("workContextOptions");
+      if (!options) return;
+      options.replaceChildren();
+      contexts.forEach((context) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "work-context-option";
+        button.dataset.workContext = context.value;
+        button.setAttribute("aria-pressed", String(context.value === state.workContext));
+        const icon = document.createElement("span");
+        icon.className = "work-context-option-icon";
+        icon.setAttribute("aria-hidden", "true");
+        icon.textContent = context.value === "admin"
+          ? "\u265B"
+          : String(context.label || "").replace(/^Delavski pogled - /, "").trim().slice(0, 1).toUpperCase();
+        const label = document.createElement("span");
+        label.textContent = context.value === "admin" ? "\u0160efovski pogled" : context.label;
+        button.append(icon, label);
+        button.addEventListener("click", () => setWorkContext(context.value));
+        options.appendChild(button);
+      });
     }
 
     function isAdminView() {
@@ -6618,6 +6683,13 @@
       contextControl.dataset.context = admin ? "admin" : "worker";
       $("activeWorkContextIcon").textContent = admin ? "Š" : String(contextName).trim().slice(0, 1).toUpperCase();
       $("activeWorkContextLabel").textContent = contextName;
+      const activeContextIcon = $("activeWorkContextIcon");
+      activeContextIcon.textContent = admin ? "\u265B" : String(contextName).trim().slice(0, 1).toUpperCase();
+      document.querySelectorAll(".work-context-option").forEach((button) => {
+        const active = button.dataset.workContext === state.workContext;
+        button.classList.toggle("active", active);
+        button.setAttribute("aria-pressed", String(active));
+      });
       document.body.classList.toggle("admin-view", admin);
       $("userRole").textContent = admin ? "Šef - administracija" : `${worker?.name || "Delavec"} - delavec`;
       document.querySelectorAll(".admin-only").forEach((element) => element.classList.toggle("hidden", !admin));
@@ -7706,6 +7778,7 @@
             item.appendChild(titleElement);
           }
           item.addEventListener('pointerdown', (event) => beginMonthTodoPointerDrag(event, item, todo, key));
+          item.addEventListener('lostpointercapture', cancelMonthTodoPointerDrag);
           item.addEventListener('click', (event) => {
             if (Date.now() - lastMonthTodoDragAt < 450) {
               event.preventDefault();
@@ -7739,6 +7812,17 @@
         // Izguba zajema kazalca samo prekliče trenutno vlečenje.
       }
       return drag;
+    }
+
+    function panMonthTodoPointerGesture(drag, event) {
+      const deltaX = event.clientX - drag.startX;
+      const deltaY = event.clientY - drag.startY;
+      if (!drag.panAxis) drag.panAxis = Math.abs(deltaX) > Math.abs(deltaY) ? "x" : "y";
+      if (drag.panAxis === "x" && drag.scrollHost) {
+        drag.scrollHost.scrollLeft = drag.scrollLeft - deltaX;
+      } else if (drag.panAxis === "y") {
+        window.scrollTo(drag.windowScrollX, drag.windowScrollY - deltaY);
+      }
     }
 
     function updateMonthTodoPointerDragTarget(drag, clientX, clientY) {
@@ -7783,6 +7867,7 @@
       if (!event.isPrimary || (event.pointerType === "mouse" && event.button !== 0)) return;
       clearMonthTodoPointerDrag();
       const rect = item.getBoundingClientRect();
+      const scrollHost = item.closest(".calendar-shell");
       const drag = {
         pointerId: event.pointerId,
         pointerType: event.pointerType,
@@ -7796,12 +7881,19 @@
         grabOffsetX: event.clientX - rect.left,
         grabOffsetY: event.clientY - rect.top,
         active: false,
+        panning: false,
+        panAxis: "",
         holdTimer: 0,
         targetDate: "",
         targetElement: null,
-        ghostElement: null
+        ghostElement: null,
+        scrollHost,
+        scrollLeft: scrollHost?.scrollLeft || 0,
+        windowScrollX: window.scrollX,
+        windowScrollY: window.scrollY
       };
       monthTodoPointerDrag = drag;
+      try { item.setPointerCapture?.(event.pointerId); } catch {}
       item.classList.add("month-drag-armed");
       drag.holdTimer = window.setTimeout(activateMonthTodoPointerDrag, MONTH_TODO_DRAG_HOLD_MS);
     }
@@ -7811,8 +7903,25 @@
       if (!drag || drag.pointerId !== event.pointerId) return;
       drag.clientX = event.clientX;
       drag.clientY = event.clientY;
+      const distance = Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY);
+      if (drag.panning) {
+        event.preventDefault();
+        panMonthTodoPointerGesture(drag, event);
+        return;
+      }
       if (!drag.active) {
-        if (Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) > MONTH_TODO_DRAG_CANCEL_DISTANCE) clearMonthTodoPointerDrag();
+        if (distance > MONTH_TODO_DRAG_CANCEL_DISTANCE) {
+          if (drag.pointerType === "touch") {
+            if (drag.holdTimer) clearTimeout(drag.holdTimer);
+            drag.holdTimer = 0;
+            drag.panning = true;
+            drag.item.classList.remove("month-drag-armed");
+            event.preventDefault();
+            panMonthTodoPointerGesture(drag, event);
+          } else {
+            clearMonthTodoPointerDrag();
+          }
+        }
         return;
       }
       event.preventDefault();
@@ -7823,10 +7932,12 @@
       const drag = monthTodoPointerDrag;
       if (!drag || drag.pointerId !== event.pointerId) return;
       const wasActive = drag.active;
+      const wasPanning = drag.panning;
       const targetDate = drag.targetDate;
       const todo = drag.todo;
       const originDate = drag.originDate || todo.date;
-      if (wasActive) event.preventDefault();
+      if (wasPanning) lastMonthTodoDragAt = Date.now();
+      if (wasActive || wasPanning) event.preventDefault();
       clearMonthTodoPointerDrag();
       if (!wasActive) return;
       lastMonthTodoDragAt = Date.now();
@@ -7921,6 +8032,7 @@
             const title = `${todo.urgent ? `NUJNO ${String.fromCharCode(183)} ` : ''}${todo.title || 'Brez naslova'}`;
             item.innerHTML = `<span class="day-todo-time">${time}</span><span class="day-todo-client">${escapeHtml(client)}</span><span class="day-todo-title">${escapeHtml(title)}</span>${settlementIndicators}`;
             item.addEventListener('pointerdown', (event) => beginMonthTodoPointerDrag(event, item, todo, key));
+            item.addEventListener('lostpointercapture', cancelMonthTodoPointerDrag);
             item.addEventListener('click', (event) => {
               if (Date.now() - lastMonthTodoDragAt < 450) {
                 event.preventDefault();
@@ -9682,7 +9794,7 @@
       </div>`;
     }
 
-    function appendTodoOrderSection(items, bucket) {
+    function appendTodoOrderSection(items, bucket, itemCount = 0) {
       const section = document.createElement("div");
       const labels = {
         urgent: ["Nujno", "Nujna opravila"],
@@ -9703,6 +9815,7 @@
       }
       if (collapsible) {
         const collapsed = collapsedTodoSections().has(bucket);
+        const hiddenCountSuffix = collapsed && itemCount ? ` (${itemCount} skritih)` : "";
         const button = document.createElement("button");
         button.type = "button";
         button.className = "todo-order-section-toggle";
@@ -9713,6 +9826,7 @@
           renderTodos();
         });
         section.appendChild(button);
+        if (hiddenCountSuffix) button.querySelector("small").textContent = detail + hiddenCountSuffix;
       } else {
         section.innerHTML = "<span>" + escapeHtml(label) + "</span><small>" + escapeHtml(detail) + "</small>";
       }
@@ -9816,6 +9930,13 @@
       let currentManualCategory = "";
       let manualTailTargetId = "";
       const collapsedManualSections = collapsedTodoSections();
+      const manualCategoryCounts = new Map();
+      if (showManualSections) {
+        todos.forEach((todo) => {
+          const bucket = todoManualCategory(todo);
+          manualCategoryCounts.set(bucket, (manualCategoryCounts.get(bucket) || 0) + 1);
+        });
+      }
 
       todos.forEach((todo) => {
         const groupKey = todo.clientId || normalizeText(todo.client) || "__brez_stranke__";
@@ -9832,7 +9953,7 @@
           manualCategory = todoManualCategory(todo);
           if (manualCategory !== currentManualCategory) {
             appendTodoOrderTailDropZone(items, currentManualCategory, manualTailTargetId);
-            appendTodoOrderSection(items, manualCategory);
+            appendTodoOrderSection(items, manualCategory, manualCategoryCounts.get(manualCategory) || 0);
             currentManualCategory = manualCategory;
             manualTailTargetId = "";
           }
