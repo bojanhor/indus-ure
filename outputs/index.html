@@ -5626,7 +5626,7 @@
         else state.todos.unshift(todo);
         clearTodoLink();
         renderTodos();
-        renderCalendar();
+        renderMonth();
         await openTodoDialog(todo);
         if (notice) showNotice(notice);
       } catch (error) {
