@@ -61,6 +61,37 @@ function requestJson({ token, csrfToken, method, requestPath, body = null, heade
   });
 }
 
+function requestBytes({ token, csrfToken, method, requestPath, body = null, headers = {} }) {
+  return new Promise((resolve, reject) => {
+    const request = http.request({
+      hostname: REQUEST_HOST,
+      port: REQUEST_PORT,
+      method,
+      path: requestPath,
+      headers: {
+        ...(REQUEST_SERVER_NAME ? { Host: REQUEST_SERVER_NAME } : {}),
+        Cookie: COOKIE_NAME + "=" + encodeURIComponent(token),
+        "X-CSRF-Token": csrfToken,
+        ...headers
+      },
+      timeout: 60000
+    }, (response) => {
+      const chunks = [];
+      response.on("data", (chunk) => chunks.push(chunk));
+      response.on("end", () => {
+        if (response.statusCode < 200 || response.statusCode >= 300) {
+          reject(new Error(`Video smoke preview je vrnil HTTP ${response.statusCode || 0}.`));
+          return;
+        }
+        resolve(Buffer.concat(chunks));
+      });
+    });
+    request.on("timeout", () => request.destroy(new Error("Video smoke preview je potekel.")));
+    request.on("error", reject);
+    request.end(body || undefined);
+  });
+}
+
 async function ownerFor(pool) {
   const result = await pool.query("select id, data from indus_users where lower(coalesce(data->>'email', '')) = $1 limit 1", [OWNER_EMAIL]);
   const owner = result.rows[0]?.data;
@@ -100,6 +131,13 @@ async function main() {
     if (!/^[a-f0-9]{64}$/.test(attachmentId) || photo.mimeType !== "video/mp4") {
       fail("API ni vrnil veljavne zasebne video priloge.");
     }
+    const preview = await requestBytes({
+      token,
+      csrfToken,
+      method: "GET",
+      requestPath: String(photo.url || "")
+    });
+    if (!preview.equals(SAMPLE_VIDEO)) fail("Predogled naloženega videa se ne ujema z vzorcem.");
     const stored = await pool.query("select mime_type, byte_size, storage_key from indus_attachments where id = $1", [attachmentId]);
     const record = stored.rows[0];
     if (!record || String(record.mime_type) !== "video/mp4" || Number(record.byte_size) !== SAMPLE_VIDEO.length || !String(record.storage_key || "").startsWith("objects/")) {
