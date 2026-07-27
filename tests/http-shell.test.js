@@ -288,6 +288,12 @@ test("completion request UI and authenticated link flow are present", async () =
   assert.match(html, /params\.set\("return_to", returnTo\)/);
   assert.match(html, /async function openTodoFromLink\(\) \{[\s\S]*?renderTodos\(\);[\s\S]*?renderMonth\(\);[\s\S]*?await openTodoDialog\(todo\);/);
   assert.doesNotMatch(html, /renderCalendar\(\)/);
+  assert.match(server, /\/api\/worker-daily-report/);
+  assert.match(server, /workerDigestPortalUrl/);
+  assert.match(html, /id="workerDailyDigestDialog"/);
+  assert.match(html, /function openWorkerDailyDigestFromLink\(\)/);
+  assert.match(html, /worker-digest-worker/);
+  assert.match(html, /await openWorkerDailyDigestFromLink\(\);/);
 });
 test("calendar-only task controls are date-bound and excluded only from task lists", async () => {
   const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");

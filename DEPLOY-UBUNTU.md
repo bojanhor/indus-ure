@@ -184,18 +184,22 @@ Nočni backup naredi obnovljiv paket PostgreSQL baze, prilog in kode aplikacije.
 
 Paket ne vsebuje OAuth žetona, aktivnih sej, hashov gesel, ICS povezav ali /etc/indus-ure.env. V isti Drive mapi je vedno datoteka `RESTORE-INDUS-URE.txt` s hitrim postopkom za IT obnovo. Ob obnovi se okoljske skrivnosti vnesejo iz ločenega varnega zapisa in Google Drive se ponovno poveže.
 
-## Nocni osnutki povzetkov ur
+## Nocni HTML povzetki ur
 
-Vsak dan ob 01:00 (Europe/Ljubljana) `indus-ure-worker-digest.timer` pripravi Gmail osnutek samo za delavca, ki je prejsnji dan vpisal ure ali ima oznacen vpis za preveritev ur. Osnutek se ne poslje samodejno. PDF uporablja isto obracunsko logiko kot aplikacija, prikaze ure prihoda/odhoda, razmake med vnosi in povezave, ki odprejo isto opravilo v aplikaciji.
+Vsak dan ob 01:00 (Europe/Ljubljana) `indus-ure-worker-digest.timer` poslje Bojanu en HTML e-mail za vsakega uporabnika z vlogo sef ali delavec, tudi kadar ta dan nima vpisanih ur. Vsak mail predstavlja samo enega delavca in prejsnji koledarski dan. To niso vec Gmail osnutki in PDF ni pripet.
 
-Rocno preverjanje brez izdelave Gmail osnutkov:
+V glavi maila je povezava **Odpri dnevni povzetek**, ki po prijavi odpre samo-za-branje porocilo v INDUS URE. Naslov vsakega vpisa v mailu je normalna povezava, ki po prijavi odpre prav ta vpis v obrazcu za urejanje. Dostop preveri aplikacija: sef vidi vse povzetke, delavec samo svojega.
+
+Povzetek je zgodovinski dnevni pregled: ze potrjeni ali arhivirani vnosi za ta dan ostanejo prikazani. Dostava je evidentirana po kombinaciji delavec + datum in se hrani 400 dni, zato ponovni zagon ne posilja duplikatov. PostgreSQL in JSON izvedba oba cistita stare evidence.
+
+Ob neuspehu se storitev ponovi po 15 minutah (najvec 12 poskusov v 12 urah) in aplikacija ustvari sistemsko opozorilo. Ce je Gmail dovoljenje neveljavno, ga mora Bojan v Nastavitvah ponovno povezati.
+
+Rocno preverjanje brez posiljanja e-mailov:
 
 ```bash
 sudo -u indus-ure /usr/bin/node /opt/indus-ure/current/scripts/daily-worker-digest.js --dry-run
 systemctl status indus-ure-worker-digest.timer --no-pager
 ```
-
-Ce Gmail dovoljenje ni vec veljavno, aplikacija ustvari sistemsko opozorilo za Bojana; v Nastavitvah je treba ponovno povezati Google Dokumente, preglednice in Gmail.
 ## Samodejno ciscenje starih izdaj
 
 Vsaka objava prek `scripts/deploy.ps1` po uspesnem preklopu namesti

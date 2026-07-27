@@ -3154,6 +3154,33 @@
     #todoDialog { width: min(820px, calc(100vw - 26px)); max-height: calc(100dvh - 20px); overflow-y: auto; }
     #completionRequestDialog { width: min(560px, calc(100vw - 26px)); }
     #completionRequestDialog textarea { min-height: 130px; resize: vertical; }
+    #workerDailyDigestDialog { width: min(760px, calc(100vw - 26px)); max-height: calc(100dvh - 20px); overflow-y: auto; }
+    .worker-digest-report { display: grid; gap: 12px; }
+    .worker-digest-intro { margin: 0; color: var(--muted); }
+    .worker-digest-summary {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px;
+    }
+    .worker-digest-summary > div,
+    .worker-digest-line,
+    .worker-digest-warning {
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: #f8fbfa;
+    }
+    .worker-digest-summary > div { padding: 10px; }
+    .worker-digest-summary small { display: block; color: var(--muted); font-weight: 700; }
+    .worker-digest-summary strong { display: block; margin-top: 3px; font-size: 17px; }
+    .worker-digest-lines { display: grid; gap: 8px; }
+    .worker-digest-line { padding: 11px 12px; }
+    .worker-digest-line a { color: var(--accent-dark); font-weight: 850; text-decoration: underline; overflow-wrap: anywhere; }
+    .worker-digest-line-meta { display: flex; gap: 8px 14px; flex-wrap: wrap; margin-top: 5px; color: var(--muted); font-size: 13px; }
+    .worker-digest-warning { padding: 10px 12px; border-color: #ddc16d; background: #fff9e7; color: #725708; }
+    .worker-digest-warning a { color: inherit; font-weight: 850; }
+    @media (max-width: 620px) {
+      .worker-digest-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
     .completion-request-recipients {
       display: grid;
       gap: 7px;
@@ -4971,6 +4998,18 @@
       </div>
     </form>
   </dialog>
+  <dialog id="workerDailyDigestDialog">
+    <form method="dialog">
+      <div class="modal-head">
+        <h3 id="workerDailyDigestTitle">Dnevni povzetek ur</h3>
+        <button class="icon-btn" id="closeWorkerDailyDigestDialog" type="button" title="Zapri" aria-label="Zapri">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="worker-digest-intro" id="workerDailyDigestMeta"></p>
+        <div class="worker-digest-report" id="workerDailyDigestContent" aria-live="polite"></div>
+      </div>
+    </form>
+  </dialog>
   <dialog id="billingRangeDialog">
     <form method="dialog">
       <div class="modal-head"><h3>Izberi obračunsko obdobje</h3><button class="icon-btn" id="closeBillingRangeDialog" type="button" title="Zapri">&times;</button></div>
@@ -5678,6 +5717,110 @@
     async function openCompletionRequestFromLink() {
       return openTodoFromLink();
     }
+
+    function clearWorkerDailyDigestLink() {
+      const current = new URL(location.href);
+      current.searchParams.delete("worker-digest-worker");
+      current.searchParams.delete("worker-digest-date");
+      history.replaceState(history.state, "", current.pathname + current.search + current.hash);
+    }
+
+    function workerDailyDigestTodoHref(todoId) {
+      const current = new URL(location.href);
+      current.search = "";
+      current.hash = "";
+      current.searchParams.set("todo", String(todoId || ""));
+      return current.pathname + current.search;
+    }
+
+    function workerDailyDigestMinutes(value) {
+      const match = /^(\d{2}):(\d{2})$/.exec(String(value || ""));
+      return match ? Number(match[1]) * 60 + Number(match[2]) : null;
+    }
+
+    function workerDailyDigestGapLabel(minutes) {
+      const rounded = Math.max(0, Math.round(Number(minutes) || 0));
+      if (rounded < 60) return rounded + " min";
+      const hours = Math.floor(rounded / 60);
+      const remainder = rounded % 60;
+      return remainder ? `${hours} h ${remainder} min` : `${hours} h`;
+    }
+
+    function workerDailyDigestTotals(lines = []) {
+      return lines.reduce((totals, line) => ({
+        hours: totals.hours + Number(line?.hours || 0),
+        workAmount: totals.workAmount + Number(line?.workAmount || 0),
+        km: totals.km + Number(line?.km || 0),
+        kmAmount: totals.kmAmount + Number(line?.kmAmount || 0)
+      }), { hours: 0, workAmount: 0, km: 0, kmAmount: 0 });
+    }
+
+    function renderWorkerDailyDigest(report) {
+      const snapshot = report || {};
+      const lines = [...(Array.isArray(snapshot.lines) ? snapshot.lines : [])]
+        .sort((left, right) => String(left?.start || "").localeCompare(String(right?.start || "")) || String(left?.end || "").localeCompare(String(right?.end || "")) || String(left?.title || "").localeCompare(String(right?.title || ""), "sl"));
+      const totals = workerDailyDigestTotals(lines);
+      const workerName = String(snapshot.workerName || "Delavec");
+      const date = String(snapshot.date || "");
+      $("workerDailyDigestTitle").textContent = `Dnevni povzetek ur \u00b7 ${workerName}`;
+      $("workerDailyDigestMeta").textContent = date ? formatDate(date) : "";
+      const summary = `<div class="worker-digest-summary">
+        <div><small>Vpisane ure</small><strong>${Number(totals.hours || 0).toLocaleString("sl-SI", { maximumFractionDigits: 2 })} h</strong></div>
+        <div><small>Delo</small><strong>${money(totals.workAmount)} EUR</strong></div>
+        <div><small>Kilometrina</small><strong>${Number(totals.km || 0).toLocaleString("sl-SI", { maximumFractionDigits: 1 })} km</strong></div>
+        <div><small>Skupaj</small><strong>${money(totals.workAmount + totals.kmAmount)} EUR</strong></div>
+      </div>`;
+      let previous = null;
+      const lineMarkup = lines.map((line) => {
+        const start = String(line?.start || "");
+        const end = String(line?.end || "");
+        const startMinutes = workerDailyDigestMinutes(start);
+        const previousEnd = workerDailyDigestMinutes(previous?.end);
+        const gap = previous && startMinutes !== null && previousEnd !== null && startMinutes > previousEnd
+          ? `<div class="worker-digest-warning">&#8597; Razmak med vnosi: ${escapeHtml(workerDailyDigestGapLabel(startMinutes - previousEnd))}</div>`
+          : "";
+        previous = line;
+        const heading = escapeHtml(line?.title || "Brez naziva");
+        const todoId = String(line?.todoId || "");
+        const linkedHeading = todoId ? `<a href="${escapeHtml(workerDailyDigestTodoHref(todoId))}">${heading}</a>` : `<strong>${heading}</strong>`;
+        const time = start && end ? `${escapeHtml(start)}&ndash;${escapeHtml(end)}` : "Brez ure";
+        const client = String(line?.client || "").trim();
+        const km = Number(line?.km || 0);
+        return `${gap}<article class="worker-digest-line">
+          <div>${linkedHeading}</div>
+          <div class="worker-digest-line-meta">
+            <span>${time}</span>
+            ${client ? `<span>${escapeHtml(client)}</span>` : ""}
+            <span>${Number(line?.hours || 0).toLocaleString("sl-SI", { maximumFractionDigits: 2 })} h</span>
+            <span>${money(line?.workAmount)} EUR</span>
+            ${km ? `<span>${km.toLocaleString("sl-SI", { maximumFractionDigits: 1 })} km &middot; ${money(line?.kmAmount)} EUR</span>` : ""}
+          </div>
+        </article>`;
+      }).join("");
+      const warningMarkup = (Array.isArray(snapshot.warnings) ? snapshot.warnings : []).map((warning) => {
+        const todoId = String(warning?.id || "");
+        const title = escapeHtml(warning?.title || "Brez naziva");
+        const link = todoId ? `<a href="${escapeHtml(workerDailyDigestTodoHref(todoId))}">Popravi delovne ure: ${title}</a>` : `Popravi delovne ure: ${title}`;
+        return `<div class="worker-digest-warning">&#9888; ${link}</div>`;
+      }).join("");
+      $("workerDailyDigestContent").innerHTML = summary + warningMarkup + (lineMarkup ? `<div class="worker-digest-lines">${lineMarkup}</div>` : `<div class="worker-digest-warning">Za ta dan ni vpisanih obra\u010dunskih ur.</div>`);
+    }
+
+    async function openWorkerDailyDigestFromLink() {
+      const current = new URL(location.href);
+      const workerId = String(current.searchParams.get("worker-digest-worker") || "").trim();
+      const date = String(current.searchParams.get("worker-digest-date") || "").trim();
+      if (!workerId || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !state.user || state.offlineMode) return;
+      try {
+        const data = await api(`/api/worker-daily-report?workerId=${encodeURIComponent(workerId)}&date=${encodeURIComponent(date)}`, { recoverSession: false });
+        renderWorkerDailyDigest(data?.report || data);
+        clearWorkerDailyDigestLink();
+        $("workerDailyDigestDialog").showModal();
+      } catch (error) {
+        clearWorkerDailyDigestLink();
+        showNotice(error.message || "Dnevnega povzetka ni bilo mogo\u010de odpreti.");
+      }
+    }
     function recoverExpiredSession() {
       if (sessionRecoveryPromise) return sessionRecoveryPromise;
       sessionRecoveryPromise = (async () => {
@@ -6285,6 +6428,7 @@
         showApp();
         await loadAll();
         await openTodoFromLink();
+        await openWorkerDailyDigestFromLink();
         await Promise.all([refreshNotifications(), refreshGoogleDriveConnectionStatus(), refreshServerStatus()]);
         await updateOfflineSyncNotice();
         await flushOfflineTodoQueue();
@@ -13907,6 +14051,8 @@
       } catch (error) { showNotice(error.message); }
     });
     ["closeCompletionRequestDialog", "cancelCompletionRequestDialog"].forEach((id) => $(id).addEventListener("click", () => $("completionRequestDialog").close()));
+    $("closeWorkerDailyDigestDialog").addEventListener("click", () => $("workerDailyDigestDialog").close());
+    $("workerDailyDigestDialog").addEventListener("click", (event) => { if (event.target === event.currentTarget) $("workerDailyDigestDialog").close(); });
     $("completionRequestTodoSelect").addEventListener("change", (event) => {
       try {
         updateCompletionRequestTodo(event.target.value);

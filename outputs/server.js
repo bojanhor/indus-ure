@@ -78,10 +78,12 @@ const MONITOR_DISK_WARNING_PERCENT = Math.min(99, Math.max(90, Number(process.en
 const REPORT_PDF_MAX_TOTAL_BYTES = 50 * 1024 * 1024;
 const REPORT_GMAIL_MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;
 const REPORT_GMAIL_MAX_TOTAL_BYTES = 8 * 1024 * 1024;
+const WORKER_DIGEST_RUN_RETENTION_MS = 400 * 24 * 60 * 60 * 1000;
 let pgPool = null;
 let pgStore = null;
 let pgReady = null;
 let auditLogStoreReady = null;
+let workerDigestStoreReady = null;
 let auditLogStoreCleanupAt = 0;
 let mutationQueue = Promise.resolve();
 let monitorTimer = null;
@@ -1045,6 +1047,70 @@ function attachApiAuditTrail(req, res, url) {
     }, { dedupeMs: denied || failed ? 2 * 60_000 : 0 });
   });
 }
+
+function workerDigestRunKey(workerId, date) {
+  const userId = cleanUserId(workerId);
+  const reportDate = isDateKey(date) ? String(date) : "";
+  return userId && reportDate ? `${userId}:${reportDate}` : "";
+}
+
+function normalizeWorkerDigestRuns(input, now = Date.now()) {
+  const oldest = now - WORKER_DIGEST_RUN_RETENTION_MS;
+  const seen = new Set();
+  return (Array.isArray(input) ? input : [])
+    .map((item) => {
+      const workerId = cleanUserId(item?.workerId);
+      const date = isDateKey(item?.date) ? String(item.date) : "";
+      const key = workerDigestRunKey(workerId, date);
+      const sentAt = String(item?.sentAt || "");
+      const sentAtMs = Date.parse(sentAt);
+      const recipientEmail = String(item?.recipientEmail || "").trim().toLowerCase();
+      if (!key || !Number.isFinite(sentAtMs) || sentAtMs < oldest || !validEmailAddress(recipientEmail) || seen.has(key)) return null;
+      seen.add(key);
+      return {
+        key,
+        workerId,
+        date,
+        recipientEmail,
+        messageId: String(item?.messageId || "").trim().slice(0, 300),
+        lineCount: Math.max(0, Math.min(10_000, Math.round(Number(item?.lineCount || 0)))),
+        warningCount: Math.max(0, Math.min(10_000, Math.round(Number(item?.warningCount || 0)))),
+        sentAt
+      };
+    })
+    .filter(Boolean)
+    .sort((left, right) => String(right.sentAt).localeCompare(String(left.sentAt)) || left.key.localeCompare(right.key));
+}
+
+function workerDigestRunFor(db, workerId, date) {
+  const key = workerDigestRunKey(workerId, date);
+  if (!key) return null;
+  return (db?.workerDigestRuns || []).find((item) => item?.key === key) || null;
+}
+
+function recordWorkerDigestRun(db, report, details = {}) {
+  const workerId = cleanUserId(report?.workerId);
+  const date = isDateKey(report?.date) ? String(report.date) : "";
+  const key = workerDigestRunKey(workerId, date);
+  const recipientEmail = String(details.recipientEmail || "").trim().toLowerCase();
+  if (!key || !validEmailAddress(recipientEmail)) return null;
+  const record = {
+    key,
+    workerId,
+    date,
+    recipientEmail,
+    messageId: String(details.messageId || "").trim().slice(0, 300),
+    lineCount: Math.max(0, Math.round(Number(report?.lines?.length || 0))),
+    warningCount: Math.max(0, Math.round(Number(report?.warnings?.length || 0))),
+    sentAt: String(details.sentAt || new Date().toISOString())
+  };
+  db.workerDigestRuns = normalizeWorkerDigestRuns([
+    ...(Array.isArray(db.workerDigestRuns) ? db.workerDigestRuns : []).filter((item) => item?.key !== key),
+    record
+  ]);
+  return workerDigestRunFor(db, workerId, date);
+}
+
 function normalizeDb(db = {}) {
   let changed = false;
 
@@ -1135,6 +1201,12 @@ function normalizeDb(db = {}) {
   const normalizedTodoCreateReceipts = normalizeTodoCreateReceipts(db.todoCreateReceipts, db.users);
   if (!hasTodoCreateReceipts || JSON.stringify(db.todoCreateReceipts) !== JSON.stringify(normalizedTodoCreateReceipts)) {
     db.todoCreateReceipts = normalizedTodoCreateReceipts;
+    changed = true;
+  }
+  const hasWorkerDigestRuns = Array.isArray(db.workerDigestRuns);
+  const normalizedWorkerDigestRuns = normalizeWorkerDigestRuns(db.workerDigestRuns);
+  if (!hasWorkerDigestRuns || JSON.stringify(db.workerDigestRuns) !== JSON.stringify(normalizedWorkerDigestRuns)) {
+    db.workerDigestRuns = normalizedWorkerDigestRuns;
     changed = true;
   }
 
@@ -1659,6 +1731,118 @@ async function ensureAuditLogStore() {
   }
 }
 
+async function ensureWorkerDigestRunStore() {
+  if (!DATABASE_URL) return;
+  if (workerDigestStoreReady) return workerDigestStoreReady;
+  workerDigestStoreReady = (async () => {
+    await getPgPool().query(`
+      create table if not exists indus_worker_digest_runs (
+        worker_id text not null,
+        report_date date not null,
+        status text not null default 'sending',
+        recipient_email text not null default '',
+        message_id text not null default '',
+        data jsonb not null default '{}'::jsonb,
+        created_at timestamptz not null default now(),
+        sent_at timestamptz,
+        primary key (worker_id, report_date)
+      );
+      create index if not exists indus_worker_digest_runs_sent_idx on indus_worker_digest_runs (sent_at desc);
+    `);
+  })();
+  try {
+    await workerDigestStoreReady;
+  } catch (error) {
+    workerDigestStoreReady = null;
+    throw error;
+  }
+}
+
+function workerDigestRunData(report, recipientEmail) {
+  return {
+    lineCount: Math.max(0, Math.round(Number(report?.lines?.length || 0))),
+    warningCount: Math.max(0, Math.round(Number(report?.warnings?.length || 0))),
+    recipientEmail: String(recipientEmail || "").trim().toLowerCase(),
+    portalUrl: String(report?.portalUrl || "").slice(0, 2_000)
+  };
+}
+
+async function workerDigestDeliveryStatus(db, workerId, date) {
+  if (!DATABASE_URL) return workerDigestRunFor(db, workerId, date);
+  await ensureWorkerDigestRunStore();
+  const result = await getPgPool().query(
+    `select worker_id, report_date, status, recipient_email, message_id, sent_at, data
+       from indus_worker_digest_runs where worker_id = $1 and report_date = $2::date`,
+    [cleanUserId(workerId), String(date || "")]
+  );
+  if (!result.rowCount) return null;
+  const row = result.rows[0];
+  return {
+    key: workerDigestRunKey(row.worker_id, String(row.report_date || "").slice(0, 10)),
+    workerId: String(row.worker_id || ""),
+    date: String(row.report_date || "").slice(0, 10),
+    status: String(row.status || ""),
+    recipientEmail: String(row.recipient_email || ""),
+    messageId: String(row.message_id || ""),
+    sentAt: row.sent_at ? new Date(row.sent_at).toISOString() : "",
+    ...((row.data && typeof row.data === "object") ? row.data : {})
+  };
+}
+
+async function reserveWorkerDigestDelivery(db, report, recipientEmail) {
+  const workerId = cleanUserId(report?.workerId);
+  const date = isDateKey(report?.date) ? String(report.date) : "";
+  if (!workerDigestRunKey(workerId, date)) throw new Error("Dnevni povzetek nima veljavnega delavca ali datuma.");
+  if (!DATABASE_URL) return { reserved: !workerDigestRunFor(db, workerId, date), run: workerDigestRunFor(db, workerId, date) };
+  await ensureWorkerDigestRunStore();
+  const result = await getPgPool().query(
+    `insert into indus_worker_digest_runs
+       (worker_id, report_date, status, recipient_email, data, created_at)
+     values ($1, $2::date, 'sending', $3, $4::jsonb, now())
+     on conflict (worker_id, report_date) do update
+       set status = 'sending', recipient_email = excluded.recipient_email, message_id = '', data = excluded.data, created_at = now(), sent_at = null
+       where indus_worker_digest_runs.status <> 'sent'
+         and indus_worker_digest_runs.created_at < now() - interval '2 hours'
+     returning worker_id, report_date`,
+    [workerId, date, String(recipientEmail || "").trim().toLowerCase(), JSON.stringify(workerDigestRunData(report, recipientEmail))]
+  );
+  return { reserved: Boolean(result.rowCount), run: result.rowCount ? null : await workerDigestDeliveryStatus(db, workerId, date) };
+}
+
+async function completeWorkerDigestDelivery(db, report, recipientEmail, messageId) {
+  const workerId = cleanUserId(report?.workerId);
+  const date = isDateKey(report?.date) ? String(report.date) : "";
+  if (!DATABASE_URL) return recordWorkerDigestRun(db, report, { recipientEmail, messageId });
+  await ensureWorkerDigestRunStore();
+  const result = await getPgPool().query(
+    `update indus_worker_digest_runs
+        set status = 'sent', recipient_email = $3, message_id = $4, data = $5::jsonb, sent_at = now()
+      where worker_id = $1 and report_date = $2::date and status = 'sending'
+      returning worker_id, report_date, recipient_email, message_id, sent_at`,
+    [workerId, date, String(recipientEmail || "").trim().toLowerCase(), String(messageId || "").slice(0, 300), JSON.stringify(workerDigestRunData(report, recipientEmail))]
+  );
+  if (!result.rowCount) throw new Error("Dnevnega povzetka po po\u0161iljanju ni bilo mogo\u010de evidentirati.");
+  return workerDigestDeliveryStatus(db, workerId, date);
+}
+
+async function releaseWorkerDigestDelivery(report) {
+  if (!DATABASE_URL) return;
+  const workerId = cleanUserId(report?.workerId);
+  const date = isDateKey(report?.date) ? String(report.date) : "";
+  if (!workerDigestRunKey(workerId, date)) return;
+  await ensureWorkerDigestRunStore();
+  await getPgPool().query(
+    "delete from indus_worker_digest_runs where worker_id = $1 and report_date = $2::date and status = 'sending'",
+    [workerId, date]
+  );
+}
+
+async function purgeExpiredWorkerDigestRuns(db) {
+  if (!DATABASE_URL) return Array.isArray(db?.workerDigestRuns) ? db.workerDigestRuns.length : 0;
+  await ensureWorkerDigestRunStore();
+  const result = await getPgPool().query("delete from indus_worker_digest_runs where coalesce(sent_at, created_at) < now() - interval '400 days'");
+  return result.rowCount || 0;
+}
 async function purgeExpiredPersistedAuditLog({ force = false } = {}) {
   if (!DATABASE_URL) return 0;
   if (!force && Date.now() - auditLogStoreCleanupAt < 60 * 60_000) return 0;
@@ -1721,6 +1905,7 @@ function initialDatabaseState() {
     payrolls: [],
     clientBills: [],
     todoCreateReceipts: {},
+    workerDigestRuns: [],
     auditLog: [],
     settings: {},
     calendarToken: crypto.randomBytes(24).toString("hex"),
@@ -1736,6 +1921,7 @@ async function ensurePostgresDb() {
     // assignment groups and attachment metadata survive the conversion intact.
     await getPgStore().ensure(initialDatabaseState(), normalizeDb);
     await ensureAuditLogStore();
+    await ensureWorkerDigestRunStore();
   })();
   return pgReady;
 }
@@ -2999,6 +3185,13 @@ function workerDigestTodoUrl(todoId) {
   return `${workerDigestBaseUrl()}/?todo=${encodeURIComponent(String(todoId || ""))}`;
 }
 
+function workerDigestPortalUrl(workerId, date) {
+  const id = cleanUserId(workerId);
+  const reportDate = isDateKey(date) ? String(date) : "";
+  if (!id || !reportDate) return `${workerDigestBaseUrl()}/`;
+  return `${workerDigestBaseUrl()}/?worker-digest-worker=${encodeURIComponent(id)}&worker-digest-date=${encodeURIComponent(reportDate)}`;
+}
+
 function workerDigestMinutes(value) {
   const match = /^(\d{2}):(\d{2})$/.exec(String(value || ""));
   return match ? Number(match[1]) * 60 + Number(match[2]) : null;
@@ -3015,9 +3208,16 @@ function workerDigestGapLabel(value) {
 function workerDailyDigestSnapshot(db, workerId, date) {
   const worker = db.users?.[workerId] || null;
   if (!worker || !isDateKey(date)) return null;
-  const payroll = buildPayrollSnapshot(db, workerId, { from: date, to: date }) || { lines: [] };
+  // This is a historical daily journal, not a live payroll draft: archived or
+  // already confirmed entries must stay visible in the morning digest.
+  const lines = withDailyCommuteInPayroll(db, workerId, (db.todos || [])
+    .filter((todo) => !todo.imported && !isTrashedTodo(todo) && (todo.syncUser || todo.createdBy) === workerId && todo.date === date)
+    .map((todo) => payrollLineForTodo(db, todo, workerId))
+    .filter(Boolean)
+    .sort((left, right) => String(left.date || "").localeCompare(String(right.date || "")) || String(left.start || "").localeCompare(String(right.start || "")) || String(left.title || "").localeCompare(String(right.title || ""), "sl")));
+  const totals = payrollTotals(lines);
   const warnings = (db.todos || [])
-    .filter((todo) => !isTrashedTodo(todo) && (todo.syncUser || todo.createdBy) === workerId && todo.date === date && PAYROLL_PAID_TODO_STATUSES.has(todo.status))
+    .filter((todo) => !todo.imported && !isTrashedTodo(todo) && (todo.syncUser || todo.createdBy) === workerId && todo.date === date && PAYROLL_PAID_TODO_STATUSES.has(todo.status))
     .filter((todo) => Boolean(todo.hoursNeedsReview) || !payrollMinutesForTodo(db, todo))
     .sort((left, right) => String(left.start || "").localeCompare(String(right.start || "")) || String(left.title || "").localeCompare(String(right.title || "")))
     .map((todo) => ({ id: String(todo.id || ""), title: String(todo.title || "Brez naziva"), start: String(todo.start || ""), end: String(todo.end || "") }));
@@ -3026,14 +3226,83 @@ function workerDailyDigestSnapshot(db, workerId, date) {
     workerName: String(worker.name || workerId),
     email: String(worker.email || "").trim().toLowerCase(),
     date,
-    lines: payroll.lines || [],
-    warnings
+    portalUrl: workerDigestPortalUrl(workerId, date),
+    lines,
+    warnings,
+    totals
   };
+}
+
+function canReadWorkerDailyReport(user, workerId) {
+  const id = cleanUserId(workerId);
+  return Boolean(user && id && (user.role === "boss" || cleanUserId(user.id) === id));
 }
 
 function workerDailyReportFilename(report) {
   const worker = safeReportFileName(report?.workerName || "delavec").replace(/\s+/g, "-");
   return `dnevni-povzetek-${worker || "delavec"}-${report?.date || "dan"}.pdf`;
+}
+
+function workerDigestHtmlEscape(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (character) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    "\"": "&quot;",
+    "'": "&#39;"
+  }[character]));
+}
+
+function workerDigestAmount(value, digits = 2) {
+  return Number(value || 0).toLocaleString("sl-SI", {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits
+  });
+}
+
+function workerDailyReportText(report = {}) {
+  const readableDate = reportPdfDate(report.date);
+  const lines = [...(report.lines || [])].sort((left, right) => String(left.start || "").localeCompare(String(right.start || "")) || String(left.end || "").localeCompare(String(right.end || "")) || String(left.title || "").localeCompare(String(right.title || "")));
+  const text = [
+    "Dnevni povzetek ur",
+    `Delavec: ${report.workerName || ""}`,
+    `Datum: ${readableDate}`,
+    ""
+  ];
+  if (lines.length) {
+    text.push("Vpisane ure:");
+    for (const line of lines) {
+      const time = line.start && line.end ? `${line.start}-${line.end}` : "Brez ure";
+      const client = line.client ? ` | ${line.client}` : "";
+      text.push(`- ${time} | ${line.title || "Brez naziva"}${client} | ${workerDigestAmount(line.hours || 0)} h | ${workerDigestAmount(line.hourlyRate || 0)} EUR/h`);
+    }
+  } else {
+    text.push("Za ta dan ni vpisanih obra\u010dunskih ur.");
+  }
+  if ((report.warnings || []).length) {
+    text.push("", "Potrebno je preveriti ure:");
+    for (const warning of report.warnings) text.push(`- ${warning.title || "Brez naziva"}`);
+  }
+  const totals = report.totals || payrollTotals(lines);
+  text.push("", `Skupaj: ${workerDigestAmount(totals.hours || 0)} h | ${workerDigestAmount(totals.totalAmount || 0)} EUR`);
+  if (report.portalUrl) text.push("", `Odpri dnevni povzetek v INDUS URE: ${report.portalUrl}`);
+  return text.join("\n");
+}
+
+function workerDailyReportHtml(report = {}) {
+  const readableDate = reportPdfDate(report.date);
+  const lines = [...(report.lines || [])].sort((left, right) => String(left.start || "").localeCompare(String(right.start || "")) || String(left.end || "").localeCompare(String(right.end || "")) || String(left.title || "").localeCompare(String(right.title || "")));
+  const rows = lines.map((line) => {
+    const time = line.start && line.end ? `${line.start}&ndash;${line.end}` : "Brez ure";
+    const title = workerDigestHtmlEscape(line.title || "Brez naziva");
+    const client = workerDigestHtmlEscape(line.client || "");
+    const href = workerDigestTodoUrl(line.todoId);
+    return `<tr><td style="padding:10px 8px;border-bottom:1px solid #d7e4df;white-space:nowrap">${time}</td><td style="padding:10px 8px;border-bottom:1px solid #d7e4df"><a href="${href}" style="color:#0d536b;font-weight:700;text-decoration:none">${title}</a>${client ? `<br><span style="color:#60706c">${client}</span>` : ""}</td><td style="padding:10px 8px;border-bottom:1px solid #d7e4df;text-align:right;white-space:nowrap">${workerDigestAmount(line.hours || 0)} h</td></tr>`;
+  }).join("") || '<tr><td colspan="3" style="padding:12px 8px;color:#60706c">Za ta dan ni vpisanih obra\u010dunskih ur.</td></tr>';
+  const warnings = (report.warnings || []).map((warning) => `<li style="margin:4px 0"><a href="${workerDigestTodoUrl(warning.id)}" style="color:#a12b22">${workerDigestHtmlEscape(warning.title || "Brez naziva")}</a></li>`).join("");
+  const totals = report.totals || payrollTotals(lines);
+  const portalUrl = String(report.portalUrl || workerDigestPortalUrl(report.workerId, report.date));
+  return `<!doctype html><html lang="sl"><body style="margin:0;background:#f3f7f5;color:#1e3430;font:15px Arial,sans-serif"><main style="max-width:680px;margin:0 auto;padding:24px"><section style="background:#fff;border:1px solid #d7e4df;border-radius:14px;overflow:hidden"><header style="padding:22px 24px;background:#0d536b;color:#fff"><h1 style="margin:0;font-size:22px">Dnevni povzetek ur</h1><p style="margin:7px 0 0">${workerDigestHtmlEscape(report.workerName || "Delavec")} &middot; ${workerDigestHtmlEscape(readableDate)}</p></header><div style="padding:18px 24px"><table role="presentation" style="width:100%;border-collapse:collapse"><tbody>${rows}</tbody></table>${warnings ? `<section style="margin-top:18px;padding:12px 14px;background:#fff5f3;border-left:4px solid #b3261e"><strong>Potrebno je preveriti ure</strong><ul style="margin:8px 0 0;padding-left:20px">${warnings}</ul></section>` : ""}<section style="margin-top:18px;padding:14px;background:#eaf4f1;border-radius:9px"><strong>Skupaj: ${workerDigestAmount(totals.hours || 0)} h</strong><span style="float:right">${workerDigestAmount(totals.totalAmount || 0)} EUR</span></section><p style="margin:22px 0 4px"><a href="${workerDigestHtmlEscape(portalUrl)}" style="display:inline-block;padding:11px 16px;border-radius:8px;background:#0d536b;color:#fff;font-weight:700;text-decoration:none">Odpri dnevni povzetek</a></p></div></section></main></body></html>`;
 }
 
 function buildWorkerDailyReportPdf(db, report) {
@@ -3164,6 +3433,35 @@ function gmailWorkerDigestDraftRaw({ to, workerName, date, pdf, pdfFilename }) {
     text: `Pozdravljeni,\n\nv prilogi je dnevni povzetek vpisanih ur za ${readableDate}. Povezave v PDF-ju odprejo isto opravilo v INDUS URE.\n\nLep pozdrav.`
   });
 }
+
+function gmailWorkerDigestMessageRaw({ to, workerName, date, html, text }) {
+  const recipient = String(to || "").trim().toLowerCase();
+  if (!validEmailAddress(recipient)) throw new Error("Dnevnega povzetka ni mogo\u010de poslati brez veljavnega Bojanovega e-naslova.");
+  const boundary = `indus-ure-digest-${crypto.randomBytes(18).toString("hex")}`;
+  const subject = `Dnevni povzetek ur - ${String(workerName || "delavec")} - ${reportPdfDate(date)}`;
+  const encodedSubject = `=?UTF-8?B?${Buffer.from(subject, "utf8").toString("base64")}?=`;
+  const parts = [
+    `To: ${recipient}`,
+    `Subject: ${encodedSubject}`,
+    "MIME-Version: 1.0",
+    `Content-Type: multipart/alternative; boundary=\"${boundary}\"`,
+    "",
+    `--${boundary}`,
+    "Content-Type: text/plain; charset=utf-8",
+    "Content-Transfer-Encoding: base64",
+    "",
+    mimeBase64(String(text || "")),
+    `--${boundary}`,
+    "Content-Type: text/html; charset=utf-8",
+    "Content-Transfer-Encoding: base64",
+    "",
+    mimeBase64(String(html || "")),
+    `--${boundary}--`,
+    ""
+  ];
+  return Buffer.from(parts.join("\r\n")).toString("base64url");
+}
+
 function gmailCompletionRequestRaw({ to, subject, text }) {
   const encodedSubject = `=?UTF-8?B?${Buffer.from(String(subject || ""), "utf8").toString("base64")}?=`;
   const parts = [
@@ -4134,41 +4432,88 @@ async function runDailyWorkerDigest({ date = "", dryRun = false } = {}) {
   const reportDate = isDateKey(date) ? String(date) : workerDigestPreviousDate();
   const db = await readDbAsync();
   const workers = Object.values(db.users || {})
-    .filter((user) => ["boss", "worker"].includes(user?.role) && validEmailAddress(user?.email))
+    .filter((user) => ["boss", "worker"].includes(user?.role))
     .sort((left, right) => String(left.name || left.id).localeCompare(String(right.name || right.id), "sl"));
-  const reports = workers.map((worker) => workerDailyDigestSnapshot(db, worker.id, reportDate)).filter((report) => report && (report.lines.length || report.warnings.length));
-  if (dryRun) return { date: reportDate, dryRun: true, reports: reports.map((report) => ({ workerId: report.workerId, email: report.email, lines: report.lines.length, warnings: report.warnings.length })) };
+  const reports = workers.map((worker) => workerDailyDigestSnapshot(db, worker.id, reportDate)).filter(Boolean);
+  if (dryRun) {
+    const reportStatuses = await Promise.all(reports.map(async (report) => ({
+      workerId: report.workerId,
+      workerName: report.workerName,
+      lines: report.lines.length,
+      warnings: report.warnings.length,
+      sent: String((await workerDigestDeliveryStatus(db, report.workerId, reportDate))?.status || "") === "sent"
+    })));
+    return { date: reportDate, dryRun: true, reports: reportStatuses, skipped: workers.length - reports.length };
+  }
+
+  await purgeExpiredWorkerDigestRuns(db);
+
+  if (!reports.length) {
+    const result = { date: reportDate, sent: [], alreadySent: [], skipped: workers.length };
+    scheduleAuditLog({
+      actor: { id: "system", name: "Sistem" },
+      action: "system.worker_digest.completed",
+      targetType: "worker_digest",
+      severity: "info",
+      context: { reportDate, sentCount: 0, alreadySentCount: 0, skippedWorkers: result.skipped }
+    });
+    return result;
+  }
 
   const owner = googleDriveOwner(db);
-  if (!googleReady() || !googleWorkspaceTokenAvailable(owner)) {
+  const ownerEmail = String(owner?.email || GOOGLE_DRIVE_OWNER_EMAIL || "").trim().toLowerCase();
+  if (!validEmailAddress(ownerEmail) || !googleReady() || !googleWorkspaceTokenAvailable(owner)) {
     const error = "Bojan mora v Nastavitvah ponovno povezati Google Dokumente, preglednice in Gmail.";
     await recordOperationalAlert({ code: "worker-digest-google-unavailable", severity: "warning", title: "No\u010dni povzetki ur niso pripravljeni", message: error });
     throw new Error(error);
   }
   const { google } = require("googleapis");
   const gmail = google.gmail({ version: "v1", auth: googleClient({ headers: {}, socket: {} }, owner.google.tokens) });
-  const drafted = [];
+  const sent = [];
+  const alreadySent = [];
   const errors = [];
   for (const report of reports) {
+    let reserved = false;
+    let gmailSent = false;
     try {
-      const pdf = await buildWorkerDailyReportPdf(db, report);
-      const pdfFilename = workerDailyReportFilename(report);
-      const draft = await gmail.users.drafts.create({
+      const reservation = await reserveWorkerDigestDelivery(db, report, ownerEmail);
+      reserved = Boolean(reservation.reserved);
+      if (!reserved) {
+        if (String(reservation.run?.status || "") === "sending") {
+          throw new Error("Dnevni povzetek se \u017ee po\u0161ilja; ponovni poskus bo samodejen.");
+        }
+        alreadySent.push({
+          workerId: report.workerId,
+          workerName: report.workerName,
+          sentAt: String(reservation.run?.sentAt || ""),
+          lines: report.lines.length,
+          warnings: report.warnings.length
+        });
+        continue;
+      }
+      const html = workerDailyReportHtml(report);
+      const text = workerDailyReportText(report);
+      const message = await gmail.users.messages.send({
         userId: "me",
         requestBody: {
-          message: {
-            raw: gmailWorkerDigestDraftRaw({
-              to: report.email,
-              workerName: report.workerName,
-              date: report.date,
-              pdf,
-              pdfFilename
-            })
-          }
+          raw: gmailWorkerDigestMessageRaw({ to: ownerEmail, workerName: report.workerName, date: report.date, html, text })
         }
       });
-      drafted.push({ workerId: report.workerId, email: report.email, draftId: String(draft.data?.id || ""), lines: report.lines.length, warnings: report.warnings.length });
+      gmailSent = true;
+      const messageId = String(message.data?.id || "");
+      await completeWorkerDigestDelivery(db, report, ownerEmail, messageId);
+      // JSON installs have no separate digest table, so persist the delivered
+      // marker only after Gmail accepted the message.
+      if (!DATABASE_URL) await writeDbAsync(db);
+      sent.push({ workerId: report.workerId, workerName: report.workerName, recipientEmail: ownerEmail, messageId, lines: report.lines.length, warnings: report.warnings.length });
     } catch (error) {
+      if (reserved && !gmailSent) {
+        try {
+          await releaseWorkerDigestDelivery(report);
+        } catch (releaseError) {
+          console.error(`Dnevnega povzetka ni bilo mogo\u010de sprostiti za ponovni poskus: ${releaseError.message || releaseError}`);
+        }
+      }
       errors.push(`${report.workerName}: ${error.message || error}`);
     }
   }
@@ -4177,7 +4522,7 @@ async function runDailyWorkerDigest({ date = "", dryRun = false } = {}) {
     await recordOperationalAlert({ code: `worker-digest-failed-${reportDate}`, severity: "warning", title: "No\u010dni povzetek ur ni v celoti pripravljen", message });
     throw new Error(message);
   }
-  const result = { date: reportDate, drafted, skipped: workers.length - reports.length };
+  const result = { date: reportDate, sent, alreadySent, skipped: workers.length - reports.length };
   scheduleAuditLog({
     actor: { id: "system", name: "Sistem" },
     action: "system.worker_digest.completed",
@@ -4185,7 +4530,8 @@ async function runDailyWorkerDigest({ date = "", dryRun = false } = {}) {
     severity: "info",
     context: {
       reportDate,
-      draftedCount: drafted.length,
+      sentCount: sent.length,
+      alreadySentCount: alreadySent.length,
       skippedWorkers: result.skipped
     }
   });
@@ -5530,6 +5876,35 @@ async function handleApi(req, res) {
       const db = await readDbAsync();
       const users = Object.values(db.users || {}).map(publicDirectoryUser);
       sendJson(res, 200, { users });
+      return;
+    }
+    if (url.pathname === "/api/worker-daily-report" && req.method === "GET") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      const requestedWorkerId = url.searchParams.get("workerId");
+      const workerId = requestedWorkerId === null || requestedWorkerId === ""
+        ? cleanUserId(user.id)
+        : cleanUserId(requestedWorkerId);
+      const date = String(url.searchParams.get("date") || "");
+      if (!workerId || !isDateKey(date)) {
+        sendJson(res, 400, { error: "Izberi veljavnega delavca in datum dnevnega povzetka." });
+        return;
+      }
+      if (!canReadWorkerDailyReport(user, workerId)) {
+        sendJson(res, 403, { error: "Dnevni povzetek drugega delavca vidi samo \u0161ef." });
+        return;
+      }
+      const db = await readDbAsync();
+      if (!db.users?.[workerId]) {
+        sendJson(res, 404, { error: "Delavec ne obstaja." });
+        return;
+      }
+      const report = workerDailyDigestSnapshot(db, workerId, date);
+      if (!report) {
+        sendJson(res, 404, { error: "Dnevni povzetek ni na voljo." });
+        return;
+      }
+      sendJson(res, 200, { report });
       return;
     }
     if (url.pathname === "/api/payrolls" && req.method === "GET") {
@@ -7689,10 +8064,19 @@ module.exports = {
   buildClientReportPdf,
   buildWorkerDailyReportPdf,
   workerDailyDigestSnapshot,
+  workerDigestPortalUrl,
+  workerDailyReportHtml,
+  workerDailyReportText,
   workerDailyReportFilename,
+  canReadWorkerDailyReport,
   runDailyWorkerDigest,
   gmailDraftRaw,
   gmailWorkerDigestDraftRaw,
+  gmailWorkerDigestMessageRaw,
+  workerDigestRunKey,
+  workerDigestRunFor,
+  recordWorkerDigestRun,
+  normalizeWorkerDigestRuns,
   gmailCompletionRequestRaw,
   cleanTodoCompletionRequests,
   todoCompletionRequestsForAssignment,

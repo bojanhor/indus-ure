@@ -1,5 +1,5 @@
 [Unit]
-Description=Create INDUS URE daily worker report drafts at 01:00
+Description=Send INDUS URE daily worker HTML reports at 01:00
 
 [Timer]
 OnCalendar=*-*-* 01:00:00 Europe/Ljubljana

@@ -1,8 +1,10 @@
 [Unit]
-Description=Create INDUS URE daily worker report Gmail drafts
+Description=Send INDUS URE daily worker HTML reports to owner
 After=network-online.target postgresql.service indus-ure.service
 Wants=network-online.target
 Requires=postgresql.service
+StartLimitIntervalSec=12h
+StartLimitBurst=12
 
 [Service]
 Type=oneshot
@@ -11,6 +13,8 @@ Group=indus-ure
 WorkingDirectory=/opt/indus-ure/current
 EnvironmentFile=/etc/indus-ure.env
 ExecStart=/usr/local/sbin/indus-ure-worker-digest
+Restart=on-failure
+RestartSec=15min
 UMask=0077
 NoNewPrivileges=true
 PrivateTmp=true
