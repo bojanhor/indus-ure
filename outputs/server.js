@@ -3619,21 +3619,31 @@ function cleanTodoUserOrderBuckets(input) {
 function cleanTodoCompletionRequests(input, now = Date.now()) {
   const seen = new Set();
   return (Array.isArray(input) ? input : [])
-    .map((request) => ({
-      id: String(request?.id || "").trim(),
-      tokenHash: String(request?.tokenHash || "").trim().toLowerCase(),
-      recipientUserId: cleanUserId(request?.recipientUserId),
-      recipientEmail: String(request?.recipientEmail || "").trim().toLowerCase(),
-      requestedBy: cleanUserId(request?.requestedBy),
-      requestedByName: String(request?.requestedByName || "").trim().slice(0, 120),
-      comment: String(request?.comment || "").trim().slice(0, 2_000),
-      createdAt: String(request?.createdAt || ""),
-      expiresAt: Number(request?.expiresAt || 0)
-    }))
+    .map((request) => {
+      const recipientUserIds = [...new Set((Array.isArray(request?.recipientUserIds) ? request.recipientUserIds : [request?.recipientUserId])
+        .map(cleanUserId).filter(Boolean))].slice(0, 20);
+      const recipientEmails = [...new Set((Array.isArray(request?.recipientEmails) ? request.recipientEmails : [request?.recipientEmail])
+        .map((email) => String(email || "").trim().toLowerCase()).filter(Boolean))].slice(0, 20);
+      return {
+        id: String(request?.id || "").trim(),
+        tokenHash: String(request?.tokenHash || "").trim().toLowerCase(),
+        recipientUserIds,
+        recipientEmails,
+        // Ohranimo tudi stari obliki polj, da stare povezave ostanejo veljavne.
+        recipientUserId: recipientUserIds[0] || "",
+        recipientEmail: recipientEmails[0] || "",
+        requestedBy: cleanUserId(request?.requestedBy),
+        requestedByName: String(request?.requestedByName || "").trim().slice(0, 120),
+        comment: String(request?.comment || "").trim().slice(0, 2_000),
+        createdAt: String(request?.createdAt || ""),
+        expiresAt: Number(request?.expiresAt || 0)
+      };
+    })
     .filter((request) => request.id
       && /^[a-f0-9]{64}$/.test(request.tokenHash)
-      && request.recipientUserId
-      && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(request.recipientEmail)
+      && request.recipientUserIds.length
+      && request.recipientEmails.length
+      && request.recipientEmails.every((email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
       && request.requestedBy
       && request.expiresAt > now
       && !seen.has(request.id)
@@ -6899,11 +6909,16 @@ async function handleApi(req, res) {
           sendJson(res, 403, { error: "Povezava za dopolnitev ni veljavna ali je potekla." });
           return;
         }
-        if (request.recipientUserId !== user.id || !canManageTodo(user, todo)) {
+        if (!request.recipientUserIds.includes(user.id)) {
           sendJson(res, 403, { error: "Ta povezava je namenjena drugemu uporabniku." });
           return;
         }
-        const visible = visibleTodosForUser({ ...db, todos: [todo] }, user)[0];
+        const recipientTodo = todoAssignmentItems(db, todo).find((item) => canManageTodo(user, item));
+        if (!recipientTodo) {
+          sendJson(res, 403, { error: "Za to opravilo nimas dostopa." });
+          return;
+        }
+        const visible = visibleTodosForUser({ ...db, todos: [recipientTodo] }, user)[0];
         sendJson(res, 200, {
           todo: visible,
           request: {
@@ -6920,10 +6935,27 @@ async function handleApi(req, res) {
           sendJson(res, 403, { error: "Zahtevek za dopolnitev lahko po\u0161lje samo Bojan." });
           return;
         }
-        const recipientUserId = cleanUserId(todo.createdBy || todo.syncUser);
-        const recipient = db.users?.[recipientUserId];
-        if (!recipient || !validEmailAddress(recipient.email)) {
-          sendJson(res, 409, { error: "Ustvarjalec opravila nima veljavnega e-po\u0161tnega naslova." });
+        const body = await readBody(req);
+        const assignmentRecipientIds = new Set([
+          ...todoAssignmentAssigneeIds(db, todo),
+          cleanUserId(todo.createdBy),
+          cleanUserId(todo.syncUser)
+        ].filter(Boolean));
+        const requestedRecipientIds = Array.isArray(body.recipientUserIds)
+          ? body.recipientUserIds
+          : [body.recipientUserId || todo.createdBy || todo.syncUser];
+        const recipientUserIds = [...new Set(requestedRecipientIds.map(cleanUserId).filter(Boolean))].slice(0, 20);
+        if (!recipientUserIds.length) {
+          sendJson(res, 400, { error: "Izberi vsaj enega prejemnika." });
+          return;
+        }
+        if (recipientUserIds.some((recipientUserId) => !assignmentRecipientIds.has(recipientUserId))) {
+          sendJson(res, 403, { error: "Prejemnik mora biti izvajalec tega opravila." });
+          return;
+        }
+        const recipients = recipientUserIds.map((recipientUserId) => db.users?.[recipientUserId]);
+        if (recipients.some((recipient) => !recipient || !validEmailAddress(recipient.email))) {
+          sendJson(res, 409, { error: "Izbrani prejemnik nima veljavnega e-po\u0161tnega naslova." });
           return;
         }
         const owner = googleDriveOwner(db);
@@ -6931,7 +6963,6 @@ async function handleApi(req, res) {
           sendJson(res, 409, { error: "V Nastavitvah kot Bojan najprej ponovno pove\u017ei Google Dokumente, preglednice in Gmail." });
           return;
         }
-        const body = await readBody(req);
         const comment = String(body.comment || "").trim().slice(0, 2_000);
         const rawToken = crypto.randomBytes(32).toString("base64url");
         const expiresAt = Date.now() + TODO_COMPLETION_REQUEST_TTL_MS;
@@ -6958,7 +6989,7 @@ async function handleApi(req, res) {
             userId: "me",
             requestBody: {
               raw: gmailCompletionRequestRaw({
-                to: recipient.email,
+                to: recipients.map((recipient) => recipient.email).join(", "),
                 subject: "Dopolnitev opravila: " + (todo.title || "INDUS URE"),
                 text
               })
@@ -6974,8 +7005,10 @@ async function handleApi(req, res) {
           {
             id: crypto.randomUUID(),
             tokenHash: sessionTokenHash(rawToken),
-            recipientUserId: recipient.id,
-            recipientEmail: String(recipient.email).toLowerCase(),
+            recipientUserIds: recipients.map((recipient) => recipient.id),
+            recipientEmails: recipients.map((recipient) => String(recipient.email).toLowerCase()),
+            recipientUserId: recipients[0].id,
+            recipientEmail: String(recipients[0].email).toLowerCase(),
             requestedBy: user.id,
             requestedByName: user.name || user.id,
             comment,
@@ -6983,9 +7016,13 @@ async function handleApi(req, res) {
             expiresAt
           }
         ].slice(-20);
-        todo.history = [...(todo.history || []), audit(user, "poslan zahtevek za dopolnitev: " + (recipient.name || recipient.id))];
+        todo.history = [...(todo.history || []), audit(user, "poslan zahtevek za dopolnitev: " + recipients.map((recipient) => recipient.name || recipient.id).join(", "))];
         await writeDbAsync(db);
-        sendJson(res, 201, { ok: true, email: recipient.email, expiresAt });
+        sendJson(res, 201, {
+          ok: true,
+          recipients: recipients.map((recipient) => ({ id: recipient.id, name: recipient.name || recipient.id, email: recipient.email })),
+          expiresAt
+        });
         return;
       }
 

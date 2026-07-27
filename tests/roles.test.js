@@ -850,6 +850,19 @@ test("completion request is private to its recipient and expires", () => {
   ], now);
   assert.equal(requests.length, 1);
   assert.equal(requests[0].recipientUserId, "ibro");
+  assert.deepEqual(requests[0].recipientUserIds, ["ibro"]);
+  assert.deepEqual(requests[0].recipientEmails, ["ibro@example.test"]);
+
+  const multiRecipient = cleanTodoCompletionRequests([{
+    id: "multi-request",
+    tokenHash: "c".repeat(64),
+    recipientUserIds: ["ibro", "bojan", "ibro"],
+    recipientEmails: ["ibro@example.test", "bojan@example.test", "ibro@example.test"],
+    requestedBy: "bojan",
+    expiresAt: now + 60_000
+  }], now);
+  assert.deepEqual(multiRecipient[0].recipientUserIds, ["ibro", "bojan"]);
+  assert.deepEqual(multiRecipient[0].recipientEmails, ["ibro@example.test", "bojan@example.test"]);
 
   const delegatedTodo = {
     id: "delegated",

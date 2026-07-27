@@ -510,6 +510,28 @@
       font-weight: 750;
     }
 
+    /* The work context is itself the control.  Do not hide a select inside
+       a second dropdown: on phones that adds an unnecessary tap. */
+    .work-context-select {
+      min-width: min(310px, calc(100vw - 24px));
+      min-height: 42px;
+      padding: 8px 34px 8px 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #f3f7f4;
+      color: var(--ink);
+      font: inherit;
+      font-size: 13px;
+      font-weight: 800;
+      cursor: pointer;
+    }
+    .work-context-select:hover,
+    .work-context-select:focus-visible {
+      border-color: var(--accent);
+      background: #edf5f1;
+      outline: 2px solid transparent;
+    }
+
     .tools {
       display: flex;
       gap: 10px;
@@ -3099,6 +3121,37 @@
     #todoDialog { width: min(820px, calc(100vw - 26px)); max-height: calc(100dvh - 20px); overflow-y: auto; }
     #completionRequestDialog { width: min(560px, calc(100vw - 26px)); }
     #completionRequestDialog textarea { min-height: 130px; resize: vertical; }
+    .completion-request-recipients {
+      display: grid;
+      gap: 7px;
+      margin: 0;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #f8fbfa;
+    }
+    .completion-request-recipients legend {
+      padding: 0 4px;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 800;
+    }
+    .completion-request-recipient {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      min-height: 38px;
+      padding: 7px 8px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #fff;
+      color: var(--ink);
+      cursor: pointer;
+    }
+    .completion-request-recipient input { width: 18px; height: 18px; margin: 0; accent-color: var(--accent); }
+    .completion-request-recipient small { margin-left: auto; color: var(--muted); overflow-wrap: anywhere; }
+    .completion-request-status { margin: 0; padding: 9px 10px; border: 1px solid #d3b1b1; border-radius: 8px; background: #fff5f5; color: #8d2c2c; font-weight: 700; }
+    .completion-request-status.success { border-color: #a8cfb2; background: #f1faf3; color: #1c6a35; }
     .todo-form-footer-actions {
       display: flex;
       align-items: center;
@@ -4012,12 +4065,14 @@
         position: relative;
         gap: 8px;
       }
-      .active-work-context {
+      .active-work-context,
+      .work-context-select {
         min-height: 48px;
         padding: 6px 7px;
       }
       .active-work-context > span { display: none; }
       .work-context-menu { position: static; }
+      .work-context-select { width: 100%; min-width: 0; }
       .work-context-panel {
         position: absolute;
         top: calc(100% + 8px);
@@ -4375,16 +4430,7 @@
 
             <button class="view-btn legacy-report-button" id="reportViewBtn" type="button">Arhiv poro&#269;il</button>
           </div>
-          <details class="work-context-menu hidden" id="workContextControl">
-            <summary class="active-work-context" id="activeWorkContext" title="Izberi pogled" aria-label="Izberi pogled">
-              <span>Pogled:</span><strong id="activeWorkContextLabel"></strong>
-              <svg class="work-context-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m7 10 5 5 5-5"></path></svg>
-            </summary>
-            <div class="work-context-panel" role="group" aria-label="Izberi pogled">
-              <label for="workContextSelect">Pogled</label>
-              <select id="workContextSelect"></select>
-            </div>
-          </details>
+          <select class="work-context-select hidden" id="workContextSelect" aria-label="Pogled" title="Izberi pogled"></select>
           <details class="tools-menu" id="toolsMenu">
             <summary class="account-btn settings-menu-button" title="Nastavitve in orodja" aria-label="Nastavitve in orodja">
               <svg class="settings-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
@@ -4406,6 +4452,7 @@
               <button class="menu-action view-menu-action" id="billingMenuBtn" type="button">Obra&#269;uni</button>
               <button class="menu-action view-menu-action admin-only" id="clientBillingMenuBtn" type="button">Obra&#269;un strank</button>
               <button class="menu-action view-menu-action" id="clientsMenuBtn" type="button">Stranke</button>
+              <button class="menu-action admin-only" id="requestCompletionMenuBtn" type="button">Zahtevaj dopolnitev</button>
               <span class="tools-menu-label">Podpora in razvoj</span>
               <a class="menu-action menu-link" href="https://docs.google.com/document/d/1mgQMSOCPml664Fx6uJq6W79XdE1duSKGejEOO6bpnEY/edit" target="_blank" rel="noopener noreferrer">Razvojni TODO</a>
 
@@ -4868,12 +4915,17 @@
         <button class="icon-btn" id="closeCompletionRequestDialog" type="button" title="Zapri" aria-label="Zapri">&times;</button>
       </div>
       <div class="modal-body">
-        <p class="todo-meta" id="completionRequestTodo"></p>
-        <p class="todo-meta" id="completionRequestRecipient"></p>
+        <label>Dogodek
+          <select id="completionRequestTodoSelect"></select>
+        </label>
+        <fieldset class="completion-request-recipients" id="completionRequestRecipients">
+          <legend>Prejemniki</legend>
+        </fieldset>
         <label>Vprasanje ali komentar
           <textarea id="completionRequestComment" maxlength="2000" placeholder="Napisi, kaj naj delavec dopolni"></textarea>
         </label>
         <p class="todo-meta">Povezava velja 14 dni in po prijavi odpre to opravilo.</p>
+        <p class="completion-request-status" id="completionRequestStatus" role="status" aria-live="polite" hidden></p>
         <div class="modal-actions">
           <button class="secondary" id="cancelCompletionRequestDialog" type="button">Prekliči</button>
           <button class="primary" type="submit">Pošlji zahtevek</button>
@@ -5473,9 +5525,6 @@
       $("toolsMenu")?.removeAttribute("open");
     }
 
-    function closeWorkContextMenu() {
-      $("workContextControl")?.removeAttribute("open");
-    }
 
     function keepToolsMenuInViewport() {
       const menu = $("toolsMenu");
@@ -6445,8 +6494,7 @@
       select.value = state.workContext;
       loadTodoSortMode();
       loadCalendarCompletedFilter();
-      $("workContextControl").classList.toggle("hidden", contexts.length <= 1);
-      if (contexts.length <= 1) $("workContextControl").removeAttribute("open");
+      select.classList.toggle("hidden", contexts.length <= 1);
     }
 
     function isAdminView() {
@@ -6559,8 +6607,7 @@
       const admin = isAdminView();
       const worker = activeWorker();
       const contextName = admin ? "Šef" : (worker?.name || "Delavec");
-      $("activeWorkContextLabel").textContent = contextName;
-      $("activeWorkContext").title = "Aktivni pogled: " + contextName;
+      $("workContextSelect").title = "Aktivni pogled: " + contextName;
       document.body.classList.toggle("admin-view", admin);
       $("userRole").textContent = admin ? "Šef - administracija" : `${worker?.name || "Delavec"} - delavec`;
       document.querySelectorAll(".admin-only").forEach((element) => element.classList.toggle("hidden", !admin));
@@ -11186,8 +11233,7 @@
       ["deleteTodoFromDialog", "deleteTodoFromDialogFooter"].forEach((id) => $(id).classList.toggle("hidden", !editing));
       ["duplicateTodoFromDialog", "duplicateTodoFromDialogFooter"].forEach((id) => $(id).classList.toggle("hidden", !editing || Boolean(state.todoHoursSourceId)));
       ["writeHoursFromTodo", "writeHoursFromTodoFooter"].forEach((id) => $(id).classList.toggle("hidden", !editing || Boolean(state.todoHoursSourceId) || !projectHoursSourceStatuses.has(todoStatus(todo.status).id)));
-      const creatorId = String(todo.createdBy || todo.syncUser || "");
-      $("requestTodoCompletion").classList.toggle("hidden", !editing || !isAdminView() || !creatorId);
+      $("requestTodoCompletion").classList.toggle("hidden", !editing || !isAdminView());
       renderTodoFormAudit(todo);
       renderTodoFormSourceProject(todo);
       ["todoFormPhotoInput", "todoFormCameraInput", "todoFormPdfInput", "todoFormVideoInput"].forEach((id) => { $(id).value = ""; });
@@ -11314,17 +11360,48 @@
         todoDialogSaveInFlight = false;
       }
     }
-    function openCompletionRequestDialog() {
-      const todoId = $("todoFormId").value;
-      const todo = state.todos.find((item) => item.id === todoId);
-      if (!todo) throw new Error("Opravilo ne obstaja več.");
+    function completionRequestTodos() {
+      return uniqueTodosByEventId(state.todos || [])
+        .filter((todo) => !todo.archivedAt && !isImportedTodo(todo))
+        .sort((a, b) => completionRequestTodoLabel(a).localeCompare(completionRequestTodoLabel(b), "sl"));
+    }
+
+    function completionRequestTodoLabel(todo) {
+      return [todo.date || "Brez datuma", todo.client, todo.title || "Brez naslova"].filter(Boolean).join(" \u00b7 ");
+    }
+
+    function completionRequestStatus(message = "", kind = "") {
+      const node = $("completionRequestStatus");
+      node.textContent = message;
+      node.hidden = !message;
+      node.className = "completion-request-status" + (kind ? " " + kind : "");
+    }
+
+    function renderCompletionRequestRecipients(todo, preferredRecipientId = "") {
+      const container = $("completionRequestRecipients");
+      const allowedIds = new Set([...todoAssigneeIds(todo), String(todo.createdBy || ""), String(todo.syncUser || "")].filter(Boolean));
+      const recipients = (state.users || []).filter((user) => allowedIds.has(String(user.id)) && user.email);
+      const defaultId = String(preferredRecipientId || todo.createdBy || todo.syncUser || recipients[0]?.id || "");
+      container.innerHTML = recipients.length
+        ? recipients.map((user) => `<label class="completion-request-recipient"><input type="checkbox" name="completionRecipient" value="${escapeHtml(String(user.id))}"${String(user.id) === defaultId ? " checked" : ""}> <span>${escapeHtml(user.name || user.id)}${user.email ? " (" + escapeHtml(user.email) + ")" : ""}</span></label>`).join("")
+        : '<p class="todo-meta">Za to opravilo ni prejemnika z e-po\u0161tnim naslovom.</p>';
+    }
+
+    function updateCompletionRequestTodo(todoId, preferredRecipientId = "") {
+      const todo = completionRequestTodos().find((item) => item.id === String(todoId));
+      if (!todo) throw new Error("Izbranega opravila ni ve\u010d med aktivnimi opravili.");
+      $("completionRequestTodoSelect").value = todo.id;
       $("completionRequestDialog").dataset.todoId = todo.id;
-      $("completionRequestTodo").textContent = (todo.client ? todo.client + " · " : "") + (todo.title || "Brez naslova");
-      const recipient = state.users.find((user) => user.id === String(todo.createdBy || todo.syncUser || ""));
-      $("completionRequestRecipient").textContent = recipient
-        ? 'Poslano bo: ' + (recipient.name || recipient.id) + (recipient.email ? ' (' + recipient.email + ')' : '')
-        : 'Prejemnika zahtevka ni mogo\u010de dolo\u010diti.';
+      renderCompletionRequestRecipients(todo, preferredRecipientId);
+    }
+
+    function openCompletionRequestDialog(todoId = "") {
+      const todos = completionRequestTodos();
+      if (!todos.length) throw new Error("Ni aktivnega opravila, za katerega bi lahko poslal zahtevek.");
+      $("completionRequestTodoSelect").innerHTML = todos.map((todo) => `<option value="${escapeHtml(todo.id)}">${escapeHtml(completionRequestTodoLabel(todo))}</option>`).join("");
+      updateCompletionRequestTodo(String(todoId || $("todoFormId").value || todos[0].id));
       $("completionRequestComment").value = "";
+      completionRequestStatus();
       $("completionRequestDialog").showModal();
       requestAnimationFrame(() => $("completionRequestComment").focus());
     }
@@ -11333,15 +11410,22 @@
       const dialog = $("completionRequestDialog");
       const todoId = String(dialog.dataset.todoId || "");
       if (!todoId) throw new Error("Opravilo ni izbrano.");
+      const recipientUserIds = [...document.querySelectorAll('input[name="completionRecipient"]:checked')].map((input) => input.value);
+      if (!recipientUserIds.length) throw new Error("Izberi vsaj enega prejemnika.");
       const submit = $("completionRequestForm button.primary");
       submit.disabled = true;
+      completionRequestStatus("Po\u0161iljam zahtevek ...", "success");
       try {
         const data = await api("/api/todos/" + encodeURIComponent(todoId) + "/completion-request", {
           method: "POST",
-          body: JSON.stringify({ comment: $("completionRequestComment").value.trim() })
+          body: JSON.stringify({ comment: $("completionRequestComment").value.trim(), recipientUserIds })
         });
+        const recipients = (data.recipients || []).map((recipient) => recipient.name || recipient.email).filter(Boolean);
         dialog.close();
-        showNotice("Zahtevek je poslan na " + data.email + ".");
+        showNotice("Zahtevek je uspe\u0161no poslan: " + (recipients.join(", ") || "prejemnikom") + ".");
+      } catch (error) {
+        completionRequestStatus(error.message || "Po\u0161iljanje zahtevka ni uspelo.", "error");
+        throw error;
       } finally {
         submit.disabled = false;
       }
@@ -13293,10 +13377,7 @@
     $("toolsMenu").addEventListener("change", (event) => {
       if (event.target.closest(".tools-menu-panel select")) closeToolsMenu();
     });
-    $("toolsMenu").addEventListener("toggle", () => {
-      if ($("toolsMenu").open) closeWorkContextMenu();
-      keepToolsMenuInViewport();
-    });
+    $("toolsMenu").addEventListener("toggle", () => keepToolsMenuInViewport());
     window.addEventListener("resize", keepToolsMenuInViewport);
     function openAppSettings() {
       const billing = state.settings.billing || {};
@@ -13330,23 +13411,14 @@
     document.addEventListener("click", (event) => {
       const menu = $("toolsMenu");
       if (menu?.open && !menu.contains(event.target)) closeToolsMenu();
-      const context = $("workContextControl");
-      if (context?.open && !context.contains(event.target)) closeWorkContextMenu();
     });
     document.addEventListener("keydown", (event) => {
       if (event.key === "Escape") {
         closeToolsMenu();
-        closeWorkContextMenu();
       }
-    });
-    $("workContextControl").addEventListener("toggle", () => {
-      if (!$("workContextControl").open) return;
-      closeToolsMenu();
-      if (state.user?.role === "boss") requestAnimationFrame(() => $("workContextSelect").focus());
     });
     $("workContextSelect").addEventListener("change", (event) => {
       setWorkContext(event.target.value);
-      closeWorkContextMenu();
     });
     $("todoSortMode").value = state.todoSortMode;
     $("todoSortMode").addEventListener("change", (event) => {
@@ -13667,9 +13739,23 @@
     });
     ["writeHoursFromTodo", "writeHoursFromTodoFooter"].forEach((id) => $(id).addEventListener("click", () => openHoursTodoFromCurrent().catch((error) => showNotice(error.message))));
     $("requestTodoCompletion").addEventListener("click", () => {
-      try { openCompletionRequestDialog(); } catch (error) { showNotice(error.message); }
+      try { openCompletionRequestDialog($("todoFormId").value); } catch (error) { showNotice(error.message); }
+    });
+    $("requestCompletionMenuBtn").addEventListener("click", () => {
+      try {
+        closeToolsMenu();
+        openCompletionRequestDialog();
+      } catch (error) { showNotice(error.message); }
     });
     ["closeCompletionRequestDialog", "cancelCompletionRequestDialog"].forEach((id) => $(id).addEventListener("click", () => $("completionRequestDialog").close()));
+    $("completionRequestTodoSelect").addEventListener("change", (event) => {
+      try {
+        updateCompletionRequestTodo(event.target.value);
+        completionRequestStatus();
+      } catch (error) {
+        completionRequestStatus(error.message || "Izbira opravila ni uspela.", "error");
+      }
+    });
     $("completionRequestForm").addEventListener("submit", (event) => {
       event.preventDefault();
       submitCompletionRequest().catch((error) => showNotice(error.message));
