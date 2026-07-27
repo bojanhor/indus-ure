@@ -11380,11 +11380,11 @@
     function renderCompletionRequestRecipients(todo, preferredRecipientId = "") {
       const container = $("completionRequestRecipients");
       const allowedIds = new Set([...todoAssigneeIds(todo), String(todo.createdBy || ""), String(todo.syncUser || "")].filter(Boolean));
-      const recipients = (state.users || []).filter((user) => allowedIds.has(String(user.id)) && user.email);
+      const recipients = (state.users || []).filter((user) => allowedIds.has(String(user.id)));
       const defaultId = String(preferredRecipientId || todo.createdBy || todo.syncUser || recipients[0]?.id || "");
       container.innerHTML = recipients.length
         ? recipients.map((user) => `<label class="completion-request-recipient"><input type="checkbox" name="completionRecipient" value="${escapeHtml(String(user.id))}"${String(user.id) === defaultId ? " checked" : ""}> <span>${escapeHtml(user.name || user.id)}${user.email ? " (" + escapeHtml(user.email) + ")" : ""}</span></label>`).join("")
-        : '<p class="todo-meta">Za to opravilo ni prejemnika z e-po\u0161tnim naslovom.</p>';
+        : '<p class="todo-meta">Za to opravilo ni prejemnika.</p>';
     }
 
     function updateCompletionRequestTodo(todoId, preferredRecipientId = "") {
