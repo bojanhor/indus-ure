@@ -14,6 +14,8 @@ const {
   canManageEntry,
   canManageFinancialEntry,
   canManageTodo,
+  applySharedManualTodoOrder,
+  sharedManualTodoGroups,
   preserveTimeEntrySourceProject,
   createSession,
   buildPayrollSnapshot,
@@ -146,6 +148,76 @@ test("osebni predal opravil je ločen po delavcu in varno normaliziran", () => {
   assert.deepEqual(database.todos[0].userOrderBuckets, { ibro: "unsorted", bojan: "sorted" });
 });
 
+test("ro\u010dni vrstni red se enkratno preseli iz \u0161efove prioritete na celotno opravilo", () => {
+  const database = {
+    users: { bojan: boss, ibro: worker }, entries: [], debts: [], clients: [],
+    todos: [
+      { id: "a-ibro", assignmentGroupId: "a", status: "open", syncUser: "ibro", order: 8, userOrders: { bojan: 3 }, userOrderBuckets: { bojan: "unsorted" } },
+      { id: "a-bojan", assignmentGroupId: "a", status: "open", syncUser: "bojan", order: 12, userOrders: { bojan: 3 }, userOrderBuckets: { bojan: "unsorted" } },
+      { id: "b-bojan", assignmentGroupId: "b", status: "open", syncUser: "bojan", order: 4, userOrders: { bojan: 1 }, userOrderBuckets: { bojan: "sorted" } }
+    ]
+  };
+  normalizeDb(database);
+  assert.deepEqual(
+    database.todos.filter((todo) => todo.assignmentGroupId === "a").map((todo) => [todo.sharedManualOrder, todo.sharedManualBucket]),
+    [[3, "unsorted"], [3, "unsorted"]]
+  );
+  assert.deepEqual(database.todos.find((todo) => todo.assignmentGroupId === "b")?.sharedManualOrder, 1);
+});
+
+test("delavec spremeni skupni vrstni red samo v svojih vidnih re\u017eah", () => {
+  const database = {
+    users: { bojan: boss, ibro: worker }, todoEditLocks: {}, entries: [], debts: [], clients: [],
+    todos: [
+      { id: "a-ibro", assignmentGroupId: "a", status: "open", syncUser: "ibro", sharedManualBucket: "unsorted", sharedManualOrder: 1, history: [] },
+      { id: "b-bojan", assignmentGroupId: "b", status: "open", syncUser: "bojan", sharedManualBucket: "unsorted", sharedManualOrder: 2, history: [] },
+      { id: "c-ibro", assignmentGroupId: "c", status: "open", syncUser: "ibro", sharedManualBucket: "unsorted", sharedManualOrder: 3, history: [] },
+      { id: "c-bojan", assignmentGroupId: "c", status: "open", syncUser: "bojan", sharedManualBucket: "unsorted", sharedManualOrder: 3, history: [] }
+    ]
+  };
+  const result = applySharedManualTodoOrder(database, { ...worker, name: "Ibro" }, {
+    sourceId: "c-ibro", targetId: "a-ibro", placement: "before"
+  });
+  assert.equal(result.error, undefined);
+  assert.deepEqual(sharedManualTodoGroups(database, { domain: "active" }).map((group) => group.id), ["c", "b", "a"]);
+  assert.deepEqual(
+    database.todos.filter((todo) => todo.assignmentGroupId === "c").map((todo) => [todo.sharedManualOrder, todo.sharedManualBucket]),
+    [[1, "unsorted"], [1, "unsorted"]],
+    "Vse dodelitve istega opravila morajo dobiti isti skupni rang."
+  );
+  assert.deepEqual(
+    sharedManualTodoGroups({ ...database, todos: database.todos.filter((todo) => todo.syncUser === "ibro") }, { domain: "active" }).map((group) => group.id),
+    ["c", "a"],
+    "Delavec vidi isti relativni vrstni red brez Bojanove skrite naloge."
+  );
+  assert.match(database.todos.find((todo) => todo.id === "c-ibro")?.history.at(-1)?.action || "", /skupni vrstni red/);
+});
+
+test("delavec ne more premikati opravila, ki ga je ustvaril za drugega delavca", () => {
+  const database = {
+    users: { bojan: boss, ibro: worker }, todoEditLocks: {}, entries: [], debts: [], clients: [],
+    todos: [
+      { id: "foreign", assignmentGroupId: "foreign", status: "open", syncUser: "bojan", createdBy: "ibro", sharedManualBucket: "unsorted", sharedManualOrder: 1 },
+      { id: "own", assignmentGroupId: "own", status: "open", syncUser: "ibro", sharedManualBucket: "unsorted", sharedManualOrder: 2 }
+    ]
+  };
+  const result = applySharedManualTodoOrder(database, worker, { sourceId: "foreign", targetId: "own" });
+  assert.equal(result.status, 403);
+  assert.match(result.error, /ne sme\u0161/);
+});
+
+test("ro\u010dni vrstni red ne me\u0161a nujnih, naro\u010dil in navadnih opravil", () => {
+  const database = {
+    users: { bojan: boss, ibro: worker }, todoEditLocks: {}, entries: [], debts: [], clients: [],
+    todos: [
+      { id: "normal", status: "open", syncUser: "ibro", sharedManualBucket: "unsorted", sharedManualOrder: 1 },
+      { id: "urgent", status: "open", urgent: true, syncUser: "ibro", sharedManualBucket: "sorted", sharedManualOrder: 1 },
+      { id: "order", status: "order", syncUser: "ibro", sharedManualBucket: "sorted", sharedManualOrder: 1 }
+    ]
+  };
+  const result = applySharedManualTodoOrder(database, worker, { sourceId: "normal", targetId: "urgent" });
+  assert.equal(result.status, 400);
+});
 test("vsak delavec vidi vse dodeljene osebe skupnega opravila", () => {
   const groupedDb = {
     todos: [

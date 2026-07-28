@@ -6300,7 +6300,22 @@
         for (const op of ops) {
           try {
             if (op.kind === "reorder") {
-              await api("/api/todos/reorder", { method: "POST", body: JSON.stringify({ todoIds: op.todoIds || [], orderUserId: op.orderUserId || state.user?.id || "", bucketById: op.bucketById || {} }) });
+              // Older offline records contain an entire personal ordering.  It
+              // cannot be replayed safely after switching to one shared order.
+              if (!op.sourceId) {
+                await removeOfflineTodoOp(op.id);
+                continue;
+              }
+              await api("/api/todos/reorder", {
+                method: "POST",
+                body: JSON.stringify({
+                  sourceId: op.sourceId,
+                  targetId: op.targetId || "",
+                  placement: op.placement === "after" ? "after" : "before",
+                  targetBucket: op.targetBucket || "",
+                  editLockTokens: op.editLockTokens || {}
+                })
+              });
             } else if (op.kind === "create") {
               await api("/api/todos", { method: "POST", body: JSON.stringify(op.todo) });
             } else {
@@ -7782,16 +7797,14 @@
     }
 
     function todoOrderForCurrentUser(todo) {
-      const userId = activeWorkerId() || state.user?.id || "";
-      const personalOrder = Number(todo?.userOrders?.[userId]);
-      return Number.isFinite(personalOrder) ? personalOrder : Number(todo?.order || 0);
+      const sharedOrder = Number(todo?.sharedManualOrder);
+      return Number.isFinite(sharedOrder) ? sharedOrder : Number(todo?.order || 0);
     }
 
     const manualOrderingStatusIds = new Set([...todoOrderStatusIds, "add_to_car"]);
 
     function todoManualBucketForCurrentUser(todo) {
-      const userId = activeWorkerId() || state.user?.id || "";
-      return todo?.userOrderBuckets?.[userId] === "unsorted" ? "unsorted" : "sorted";
+      return todo?.sharedManualBucket === "unsorted" ? "unsorted" : "sorted";
     }
 
     function todoManualCategory(todo) {
@@ -12548,16 +12561,22 @@
       showNotice(`Gmail osnutek za ${result.email} je pripravljen. Sporočilo ni bilo poslano.`);
       window.open("https://mail.google.com/mail/u/0/#drafts", "_blank", "noopener");
     }
+    function todoManualOrderDomain(todo) {
+      if (!todo || todo.done || timeEntryStatusIds.has(todo.status)) return "";
+      if (todo.urgent) return "urgent";
+      if (manualOrderingStatusIds.has(todo.status)) return "ordering";
+      return "active";
+    }
+
     function todoCanManualReorder(todo) {
-      return Boolean(todo && !todo.done && !timeEntryStatusIds.has(todo.status));
+      return Boolean(todoManualOrderDomain(todo));
     }
 
     function todosCanReorderTogether(sourceId, targetId) {
       const todos = contextTodos();
       const source = todos.find((todo) => todo.id === sourceId);
       const target = todos.find((todo) => todo.id === targetId);
-      if (Boolean(source?.urgent) !== Boolean(target?.urgent)) return false;
-      return todoCanManualReorder(source) && todoCanManualReorder(target);
+      return Boolean(todoManualOrderDomain(source) && todoManualOrderDomain(source) === todoManualOrderDomain(target));
     }
 
     const TODO_TOUCH_DRAG_HOLD_MS = 180;
@@ -12755,56 +12774,40 @@
 
     async function reorderTodos(sourceId, targetId = "", targetPlacement = "before", requestedBucket = "") {
       if (!sourceId) return;
-      const candidates = contextTodos().filter(todoCanManualReorder).sort(todoManualBucketSort);
-      const source = candidates.find((todo) => todo.id === sourceId);
-      const target = candidates.find((todo) => todo.id === targetId);
-      if (!source) return;
-      const bucketsById = new Map(candidates.map((todo) => [todo.id, todoManualBucketForCurrentUser(todo)]));
-      const destinationBucket = ["sorted", "unsorted"].includes(requestedBucket)
+      const todos = contextTodos();
+      const source = todos.find((todo) => todo.id === sourceId);
+      const target = todos.find((todo) => todo.id === targetId);
+      if (!source || (target && !todosCanReorderTogether(sourceId, targetId))) return;
+      const targetBucket = ["sorted", "unsorted"].includes(requestedBucket)
         ? requestedBucket
-        : (target ? bucketsById.get(target.id) : bucketsById.get(source.id));
-      const ordered = candidates.slice();
-      const from = ordered.findIndex((todo) => todo.id === sourceId);
-      const [moved] = ordered.splice(from, 1);
-      bucketsById.set(sourceId, destinationBucket);
-      let insertAt = 0;
-      if (target && target.id !== sourceId) {
-        const targetIndex = ordered.findIndex((todo) => todo.id === target.id);
-        insertAt = Math.max(0, targetIndex + (targetPlacement === "after" ? 1 : 0));
-      } else {
-        const matching = ordered.map((todo, index) => ({ todo, index })).filter((item) => bucketsById.get(item.todo.id) === destinationBucket);
-        if (matching.length) insertAt = targetPlacement === "after" ? matching.at(-1).index + 1 : matching[0].index;
-      }
-      ordered.splice(insertAt, 0, moved);
-      const persisted = ["sorted", "unsorted"].flatMap((bucket) => ordered.filter((todo) => bucketsById.get(todo.id) === bucket));
-      const ordersById = new Map(persisted.map((todo, index) => [todo.id, index + 1]));
-      const bucketById = Object.fromEntries(persisted.map((todo) => [todo.id, bucketsById.get(todo.id)]));
-      const previousTodos = state.todos.slice();
+        : todoManualBucketForCurrentUser(target || source);
       const todoRevision = beginTodoMutation();
-      const orderingUserId = activeWorkerId() || state.user?.id || "";
-      state.todos = state.todos.map((todo) => ordersById.has(todo.id)
-        ? { ...todo, userOrders: { ...(todo.userOrders || {}), [orderingUserId]: ordersById.get(todo.id) }, userOrderBuckets: { ...(todo.userOrderBuckets || {}), [orderingUserId]: bucketById[todo.id] } }
-        : todo);
-      refreshClientList(); render();
       try {
         const editLockTokens = state.todoEditLock ? { [state.todoEditLock.todoId]: state.todoEditLock.token } : {};
         const data = await api("/api/todos/reorder", {
           method: "POST",
-          body: JSON.stringify({ todoIds: persisted.map((todo) => todo.id), orderUserId: orderingUserId, bucketById, editLockTokens })
+          body: JSON.stringify({
+            sourceId,
+            targetId: target?.id || "",
+            placement: targetPlacement === "after" ? "after" : "before",
+            targetBucket,
+            editLockTokens
+          })
         });
-        if (isCurrentTodoRevision(todoRevision)) { state.todos = data.todos; refreshClientList(); render(); }
+        if (isCurrentTodoRevision(todoRevision)) {
+          state.todos = data.todos;
+          refreshClientList();
+          render();
+        }
       } catch (error) {
         if (isNetworkError(error)) {
-          const pendingIds = new Set(ordersById.keys());
-          state.todos = state.todos.map((todo) => pendingIds.has(todo.id) ? { ...todo, offlinePending: true } : todo);
-          await queueOfflineTodo({ kind: "reorder", todoId: `reorder:${activeWorkerId()}`, todoIds: persisted.map((todo) => todo.id), orderUserId: orderingUserId, bucketById });
-          await updateOfflineSyncNotice(); return;
+          throw new Error("Za skupni ročni vrstni red je potrebna povezava s strežnikom.");
         }
-        if (isCurrentTodoRevision(todoRevision)) { state.todos = previousTodos; refreshClientList(); render(); }
         throw error;
-      } finally { finishTodoMutation(); }
+      } finally {
+        finishTodoMutation();
+      }
     }
-
     function normalizeText(value) {
       return String(value || "")
         .toLowerCase()

@@ -1651,6 +1651,54 @@ function normalizeDb(db = {}) {
     return next;
   });
 
+  // Manual priority used to be stored separately for every user.  Keep those
+  // legacy values for rollback, but establish one authoritative rank and
+  // bucket per logical task so the boss and all assigned workers see the same
+  // relative priority.
+  const bossOrderUserId = Object.values(db.users || {}).find((user) => user?.role === "boss")?.id || "";
+  const todoGroupsForSharedOrder = new Map();
+  for (const todo of db.todos) {
+    const groupId = String(todo.assignmentGroupId || todo.id || "");
+    if (!groupId) continue;
+    const group = todoGroupsForSharedOrder.get(groupId) || [];
+    group.push(todo);
+    todoGroupsForSharedOrder.set(groupId, group);
+  }
+  for (const group of todoGroupsForSharedOrder.values()) {
+    group.sort((left, right) => String(left.id || "").localeCompare(String(right.id || "")));
+    const finite = (values) => values.map(Number).filter(Number.isFinite);
+    const existingSharedOrders = finite(group.map((todo) => todo.sharedManualOrder));
+    const bossLegacyOrders = bossOrderUserId
+      ? finite(group.map((todo) => todo.userOrders?.[bossOrderUserId]))
+      : [];
+    const fallbackOrders = finite(group.map((todo) => todo.order));
+    const sharedOrder = existingSharedOrders.length
+      ? Math.min(...existingSharedOrders)
+      : bossLegacyOrders.length
+        ? Math.min(...bossLegacyOrders)
+        : fallbackOrders.length
+          ? Math.min(...fallbackOrders)
+          : 0;
+    const explicitBucket = group.map((todo) => todo.sharedManualBucket).find((bucket) => ["sorted", "unsorted"].includes(bucket));
+    const bossLegacyBucket = bossOrderUserId
+      ? group.map((todo) => todo.userOrderBuckets?.[bossOrderUserId]).find((bucket) => ["sorted", "unsorted"].includes(bucket))
+      : "";
+    const anyLegacyUnsorted = group.some((todo) => Object.values(todo.userOrderBuckets || {}).includes("unsorted"));
+    const groupDomain = todoManualOrderDomain(group[0]);
+    const sharedBucket = groupDomain === "active"
+      ? (explicitBucket || bossLegacyBucket || (anyLegacyUnsorted ? "unsorted" : "sorted"))
+      : "sorted";
+    for (const todo of group) {
+      if (todo.sharedManualOrder !== sharedOrder) {
+        todo.sharedManualOrder = sharedOrder;
+        changed = true;
+      }
+      if (todo.sharedManualBucket !== sharedBucket) {
+        todo.sharedManualBucket = sharedBucket;
+        changed = true;
+      }
+    }
+  }
   if (pruneUnusedTodoAttachments(db)) changed = true;
 
   db.debts = db.debts.map((debt) => {
@@ -2064,6 +2112,159 @@ function todoAssignmentAssigneeIds(db, todo) {
     .filter(Boolean))];
 }
 
+function todoSharedManualOrder(todo) {
+  const value = Number(todo?.sharedManualOrder);
+  return Number.isFinite(value) ? value : Number(todo?.order || 0);
+}
+
+function todoSharedManualBucket(todo) {
+  return todo?.sharedManualBucket === "unsorted" ? "unsorted" : "sorted";
+}
+
+function todoManualOrderDomain(todo) {
+  if (!todo || todo.done || TIME_ENTRY_TODO_STATUSES.has(todo.status)) return "";
+  if (todo.urgent) return "urgent";
+  if (ORDER_TODO_STATUSES.has(todo.status) || todo.status === "add_to_car") return "ordering";
+  return "active";
+}
+
+function sharedManualTodoGroups(db, { domain = "" } = {}) {
+  const groups = new Map();
+  for (const todo of db.todos || []) {
+    if (isTrashedTodo(todo)) continue;
+    const groupId = String(todo.assignmentGroupId || todo.id || "");
+    if (!groupId) continue;
+    const current = groups.get(groupId) || { id: groupId, todos: [] };
+    current.todos.push(todo);
+    groups.set(groupId, current);
+  }
+  const records = [...groups.values()].map((group) => {
+    group.todos.sort((left, right) => String(left.id || "").localeCompare(String(right.id || "")));
+    group.todo = group.todos[0];
+    group.domain = todoManualOrderDomain(group.todo);
+    group.bucket = todoSharedManualBucket(group.todo);
+    group.order = todoSharedManualOrder(group.todo);
+    return group;
+  }).filter((group) => !domain || group.domain === domain);
+  records.sort((left, right) => {
+    const bucket = Number(left.bucket === "sorted") - Number(right.bucket === "sorted");
+    if (bucket) return bucket;
+    const order = left.order - right.order;
+    return order || left.id.localeCompare(right.id);
+  });
+  return records;
+}
+
+function userCanReorderSharedTodoGroup(user, group) {
+  return user?.role === "boss" || group?.todos?.some((todo) => cleanUserId(todo.syncUser || todo.createdBy) === user?.id);
+}
+
+function sharedManualOrderBefore(db, { domain = "active", bucket = "unsorted" } = {}) {
+  const values = sharedManualTodoGroups(db, { domain })
+    .filter((group) => group.bucket === bucket)
+    .map((group) => group.order)
+    .filter(Number.isFinite);
+  return (values.length ? Math.min(...values) : 0) - 1;
+}
+
+function applySharedManualTodoOrder(db, user, input = {}) {
+  const sourceId = String(input.sourceId || "").trim();
+  const targetId = String(input.targetId || "").trim();
+  const placement = input.placement === "after" ? "after" : "before";
+  const requestedBucket = input.targetBucket === "unsorted" ? "unsorted" : input.targetBucket === "sorted" ? "sorted" : "";
+  const locks = input.editLockTokens && typeof input.editLockTokens === "object" ? input.editLockTokens : {};
+  const allGroups = sharedManualTodoGroups(db);
+  const byTodoId = new Map((db.todos || []).map((todo) => [String(todo.id || ""), todo]));
+  const groupsById = new Map(allGroups.map((group) => [group.id, group]));
+  const sourceTodo = byTodoId.get(sourceId);
+  const source = sourceTodo ? groupsById.get(String(sourceTodo.assignmentGroupId || sourceTodo.id || "")) : null;
+  if (!source || !source.domain) return { error: "Izbranega opravila ni mogoče ročno razvrščati." };
+  if (!userCanReorderSharedTodoGroup(user, source)) return { status: 403, error: "Tega vrstnega reda ne smeš spreminjati." };
+  for (const todo of source.todos) {
+    const lock = todoAssignmentEditLockConflict(db, todo, user, String(locks[todo.id] || ""));
+    if (lock) return { status: 409, error: `Opravilo trenutno ureja ${lock.lockedByName || lock.lockedById}.`, lock };
+  }
+
+  const targetTodo = targetId ? byTodoId.get(targetId) : null;
+  const target = targetTodo ? groupsById.get(String(targetTodo.assignmentGroupId || targetTodo.id || "")) : null;
+  if (targetId && (!target || target.id === source.id || target.domain !== source.domain)) {
+    return { status: 400, error: "Opravili nista v isti skupini ročnega vrstnega reda." };
+  }
+  if (target && !userCanReorderSharedTodoGroup(user, target)) return { status: 403, error: "Tega vrstnega reda ne smeš spreminjati." };
+  if (target) {
+    for (const todo of target.todos) {
+      const lock = todoAssignmentEditLockConflict(db, todo, user, String(locks[todo.id] || ""));
+      if (lock) return { status: 409, error: `Opravilo trenutno ureja ${lock.lockedByName || lock.lockedById}.`, lock };
+    }
+  }
+
+  const domainGroups = allGroups.filter((group) => group.domain === source.domain);
+  const sourceBucket = source.bucket;
+  const destinationBucket = source.domain === "active"
+    ? (target ? target.bucket : (requestedBucket || sourceBucket))
+    : "sorted";
+  const buckets = source.domain === "active" ? ["unsorted", "sorted"] : ["sorted"];
+  const groupsByBucket = new Map(buckets.map((bucket) => [bucket, domainGroups.filter((group) => group.bucket === bucket)]));
+  const canSee = (group) => userCanReorderSharedTodoGroup(user, group);
+  const resultByBucket = new Map();
+
+  if (sourceBucket === destinationBucket) {
+    const base = [...(groupsByBucket.get(sourceBucket) || [])];
+    const visible = base.filter(canSee);
+    const sourceIndex = visible.findIndex((group) => group.id === source.id);
+    if (sourceIndex < 0) return { status: 403, error: "Tega vrstnega reda ne smeš spreminjati." };
+    const desired = visible.slice();
+    desired.splice(sourceIndex, 1);
+    let insertAt = target ? desired.findIndex((group) => group.id === target.id) : (placement === "after" ? desired.length : 0);
+    if (insertAt < 0) return { status: 400, error: "Ciljno opravilo ni v tvojem pogledu." };
+    if (target && placement === "after") insertAt += 1;
+    desired.splice(insertAt, 0, source);
+    let visibleIndex = 0;
+    resultByBucket.set(sourceBucket, base.map((group) => canSee(group) ? desired[visibleIndex++] : group));
+  } else {
+    const sourceBase = [...(groupsByBucket.get(sourceBucket) || [])].filter((group) => group.id !== source.id);
+    resultByBucket.set(sourceBucket, sourceBase);
+    const destinationBase = [...(groupsByBucket.get(destinationBucket) || [])];
+    const visible = destinationBase.filter(canSee);
+    let insertAt = target ? visible.findIndex((group) => group.id === target.id) : (placement === "after" ? visible.length : 0);
+    if (insertAt < 0) return { status: 400, error: "Ciljno opravilo ni v tvojem pogledu." };
+    if (target && placement === "after") insertAt += 1;
+    const desired = visible.slice();
+    desired.splice(insertAt, 0, source);
+    const desiredExisting = desired.filter((group) => group.id !== source.id);
+    let visibleIndex = 0;
+    const merged = destinationBase.map((group) => canSee(group) ? desiredExisting[visibleIndex++] : group);
+    const before = desired[insertAt + 1];
+    const after = desired[insertAt - 1];
+    const baseIndex = before
+      ? merged.findIndex((group) => group.id === before.id)
+      : after
+        ? merged.findIndex((group) => group.id === after.id) + 1
+        : (placement === "after" ? merged.length : 0);
+    merged.splice(Math.max(0, baseIndex), 0, source);
+    resultByBucket.set(destinationBucket, merged);
+  }
+  for (const bucket of buckets) if (!resultByBucket.has(bucket)) resultByBucket.set(bucket, groupsByBucket.get(bucket) || []);
+
+  const now = new Date().toISOString();
+  for (const bucket of buckets) {
+    const records = resultByBucket.get(bucket) || [];
+    records.forEach((group, index) => {
+      for (const todo of group.todos) {
+        todo.sharedManualBucket = bucket;
+        todo.sharedManualOrder = index + 1;
+      }
+    });
+  }
+  const sourceHistory = [...(source.todo.history || []), audit(user, "spremenjen skupni vrstni red")];
+  for (const todo of source.todos) {
+    todo.sharedManualOrderUpdatedAt = now;
+    todo.sharedManualOrderUpdatedBy = user.id;
+    todo.sharedManualOrderUpdatedByName = user.name;
+    todo.history = sourceHistory;
+  }
+  return { changed: true, sourceGroupId: source.id };
+}
 function isTrashedTodo(todo) {
   return Boolean(String(todo?.trashedAt || "").trim());
 }
@@ -6589,52 +6790,16 @@ async function handleApi(req, res) {
       const user = await requireUser(req, res);
       if (!user) return;
       const body = await readBody(req);
-      const todoIds = [...new Set((Array.isArray(body.todoIds) ? body.todoIds : [])
-        .map((id) => String(id || "").trim())
-        .filter(Boolean))];
-      if (todoIds.length < 1 || todoIds.length > 500) {
-        sendJson(res, 400, { error: "Za razvrščanje posreduj vsaj dve opravili." });
+      if (!String(body.sourceId || "").trim()) {
+        sendJson(res, 409, { error: "Ročni vrstni red se je posodobil. Osveži stran in ponovi premik." });
         return;
       }
       const db = await readDbAsync();
-      const byId = new Map((db.todos || []).map((todo) => [todo.id, todo]));
-      const todos = todoIds.map((id) => byId.get(id));
-      const editLockTokens = body.editLockTokens && typeof body.editLockTokens === "object" ? body.editLockTokens : {};
-      for (const todo of todos) {
-        if (!todo || !canManageTodo(user, todo)) {
-          sendJson(res, 403, { error: "Tega vrstnega reda ne smeš spreminjati." });
-          return;
-        }
-        if (isTrashedTodo(todo)) {
-          sendJson(res, 409, { error: "Opravilo je v Izbrisano. Najprej ga obnovi." });
-          return;
-        }
-        if (todo.done || todo.status === "meal") {
-          sendJson(res, 400, { error: "Izbranega opravila ni mogoče ročno razvrščati." });
-          return;
-        }
-        const editLock = todoAssignmentEditLockConflict(db, todo, user, String(editLockTokens[todo.id] || ""));
-        if (editLock) {
-          sendJson(res, 409, { error: `Opravilo trenutno ureja ${editLock.lockedByName || editLock.lockedById}.`, lock: editLock });
-          return;
-        }
+      const result = applySharedManualTodoOrder(db, user, body);
+      if (result.error) {
+        sendJson(res, result.status || 400, { error: result.error, ...(result.lock ? { lock: result.lock } : {}) });
+        return;
       }
-      const requestedOrderUserId = cleanUserId(body.orderUserId);
-      const orderUserId = user.role === "boss" && db.users?.[requestedOrderUserId] ? requestedOrderUserId : user.id;
-      const requestedBuckets = body.bucketById && typeof body.bucketById === "object" ? body.bucketById : {};
-      const now = new Date().toISOString();
-      todos.forEach((todo, index) => {
-        const requestedBucket = String(requestedBuckets[todo.id] || "");
-        const bucket = ["sorted", "unsorted"].includes(requestedBucket)
-          ? requestedBucket
-          : (todo.userOrderBuckets?.[orderUserId] === "unsorted" ? "unsorted" : "sorted");
-        todo.userOrders = { ...(todo.userOrders || {}), [orderUserId]: index + 1 };
-        todo.userOrderBuckets = { ...(todo.userOrderBuckets || {}), [orderUserId]: bucket };
-        todo.updatedBy = user.id;
-        todo.updatedByName = user.name;
-        todo.updatedAt = now;
-        todo.history = [...(todo.history || []), audit(user, "spremenjen vrstni red")];
-      });
       await writeDbAsync(db);
       sendJson(res, 200, { todos: visibleTodosForUser(db, user) });
       return;
@@ -7096,6 +7261,12 @@ async function handleApi(req, res) {
       todo = storeTodoAttachments(db, todo, user);
       const minOrder = db.todos.reduce((min, item) => Math.min(min, Number(item.order || 0)), 0);
       const newOrder = todo.order || minOrder - 1;
+      const sharedManualDomain = todoManualOrderDomain(todo);
+      const sharedManualBucket = sharedManualDomain === "active" ? "unsorted" : "sorted";
+      const sharedManualOrder = sharedManualOrderBefore(db, {
+        domain: sharedManualDomain || "active",
+        bucket: sharedManualBucket
+      });
       const hasExplicitAssignees = Array.isArray(body.assigneeIds);
       const requestedAssigneeIds = hasExplicitAssignees
         ? [...new Set(body.assigneeIds
@@ -7132,6 +7303,8 @@ async function handleApi(req, res) {
           driveFiles: stampTodoDriveFiles(todo, user),
           syncUser: assigneeId,
           userOrderBuckets: { ...(todo.userOrderBuckets || {}), [assigneeId]: "unsorted" },
+          sharedManualBucket,
+          sharedManualOrder,
           order: newOrder + index,
           createdBy: user.id,
           createdByName: user.name,
@@ -7909,6 +8082,19 @@ async function handleApi(req, res) {
         return;
       }
       todo = storeTodoAttachments(db, todo, user);
+      const previousManualDomain = todoManualOrderDomain(previousTodo);
+      const nextManualDomain = todoManualOrderDomain(todo);
+      const manualDomainChanged = Boolean(nextManualDomain && previousManualDomain && nextManualDomain !== previousManualDomain);
+      const sharedManualBucket = manualDomainChanged
+        ? (nextManualDomain === "active" ? "unsorted" : "sorted")
+        : todoSharedManualBucket(previousTodo);
+      todo = {
+        ...todo,
+        sharedManualBucket,
+        sharedManualOrder: manualDomainChanged
+          ? sharedManualOrderBefore(db, { domain: nextManualDomain, bucket: sharedManualBucket })
+          : todoSharedManualOrder(previousTodo)
+      };
       const editLock = todoAssignmentEditLockConflict(db, previousTodo, user, editLockToken);
       if (editLock) {
         sendJson(res, 409, { error: `Opravilo trenutno ureja ${editLock.lockedByName || editLock.lockedById}.`, lock: editLock });
@@ -8307,6 +8493,13 @@ module.exports = {
   canManageEntry,
   canManageFinancialEntry,
   canManageTodo,
+  todoSharedManualOrder,
+  todoSharedManualBucket,
+  todoManualOrderDomain,
+  sharedManualTodoGroups,
+  userCanReorderSharedTodoGroup,
+  sharedManualOrderBefore,
+  applySharedManualTodoOrder,
   preserveTimeEntrySourceProject,
   sourceTodoForNewEntry,
   defaultHourlyRateForUser,

@@ -94,10 +94,11 @@ test("ročni filter loči in omogoča razvrščanje nujnih opravil", async () =>
   assert.match(html, /function appendTodoOrderSection\(items, bucket, itemCount = 0\)/);
   assert.match(html, /hiddenCountSuffix/);
   assert.match(html, /manualCategoryCounts/);
-  assert.match(html, /function todoCanManualReorder\(todo\) \{\s*return Boolean\(todo && !todo\.done && !timeEntryStatusIds\.has\(todo\.status\)\);/);
-  assert.match(html, /Boolean\(source\?\.urgent\) !== Boolean\(target\?\.urgent\)/);
-  assert.match(server, /if \(todo\.done \|\| todo\.status === "meal"\)/);
-  assert.doesNotMatch(server, /todo\.done \|\| todo\.urgent \|\| todo\.status === "meal"/);
+  assert.match(html, /function todoManualOrderDomain\(todo\) \{/);
+  assert.match(html, /return Boolean\(todoManualOrderDomain\(todo\)\);/);
+  assert.match(html, /todoManualOrderDomain\(source\) === todoManualOrderDomain\(target\)/);
+  assert.match(server, /function applySharedManualTodoOrder\(db, user, input = \{\}\)/);
+  assert.match(server, /sharedManualBucket/);
 });
 
 test("zahtevek za dopolnitev uporabnika jasno vodi od pošiljanja do potrditve", async () => {
