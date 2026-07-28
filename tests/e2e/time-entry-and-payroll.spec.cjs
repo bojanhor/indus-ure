@@ -25,6 +25,51 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
     await app?.stop();
   });
 
+  test("task editor keeps one attachment chooser and sticky actions on phone and desktop", async ({ browser }) => {
+    for (const viewport of [
+      { name: "phone", width: 390, height: 844 },
+      { name: "desktop", width: 1280, height: 900 }
+    ]) {
+      const context = await browser.newContext({ viewport });
+      const page = await context.newPage();
+      try {
+        await localLogin(page, "ibro");
+        await page.locator("#newTodoButton").click();
+        await expect(page.locator("#todoDialog")).toBeVisible();
+        await expect(page.locator("#todoFormAttachmentInput")).toBeAttached();
+        await expect(page.locator("#todoFormAttachmentMenu > summary")).toContainText("Dodaj prilogo");
+        await page.locator("#todoFormAttachmentMenu > summary").click();
+        await expect(page.locator("#todoFormCameraInput")).toBeAttached();
+        await expect(page.locator("#todoFormVideoInput")).toBeAttached();
+        await page.locator("#todoFormAttachmentMenu > summary").click();
+
+        // A long description makes the form scroll on both widths.  The
+        // header must stay reachable so Save and Cancel are never stranded
+        // below the fold.
+        await page.locator("#todoFormNotes").fill("Podroben opis. ".repeat(650));
+        const scrollState = await page.locator("#todoDialog").evaluate((dialog) => {
+          const before = { scrollHeight: dialog.scrollHeight, clientHeight: dialog.clientHeight };
+          dialog.scrollTop = Math.max(0, dialog.scrollHeight - dialog.clientHeight);
+          return before;
+        });
+        expect(scrollState.scrollHeight).toBeGreaterThan(scrollState.clientHeight);
+        await page.waitForTimeout(50);
+        const geometry = await page.locator("#todoDialog").evaluate((dialog) => {
+          const header = dialog.querySelector(".modal-head");
+          const save = dialog.querySelector("#saveTodoDialog");
+          const box = dialog.getBoundingClientRect();
+          const headerBox = header.getBoundingClientRect();
+          const saveBox = save.getBoundingClientRect();
+          return { dialogTop: box.top, headerTop: headerBox.top, saveTop: saveBox.top };
+        });
+        expect(geometry.headerTop).toBeLessThanOrEqual(geometry.dialogTop + 6);
+        expect(geometry.saveTop).toBeLessThanOrEqual(geometry.dialogTop + 72);
+      } finally {
+        await context.close();
+      }
+    }
+  });
+
   test("worker enters hours through the real form", async ({ browser }) => {
     const context = await browser.newContext();
     const page = await context.newPage();
@@ -62,6 +107,53 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
       await expect(page.locator("#todoDialog")).toBeHidden();
       await expect(page.locator("#todoItems")).toContainText(ENTRY_TITLE);
       await expect(page.locator("#todoItems")).toContainText(CLIENT_ALIAS);
+    } finally {
+      await context.close();
+    }
+  });
+
+  test("e-mail task link opens its editor before the full task snapshot", async ({ browser }) => {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    const title = "PW hitra e-poštna povezava";
+    try {
+      await localLogin(page, "ibro");
+      await page.locator("#newTodoButton").click();
+      await page.locator("#todoFormTask").fill(title);
+      await page.locator("#todoFormClient").fill(CLIENT_ALIAS);
+      await page.locator("#saveTodoDialog").click();
+      await expect(page.locator("#todoDialog")).toBeHidden();
+
+      const todoId = await page.evaluate(async (taskTitle) => {
+        const response = await fetch("/api/todos");
+        const data = await response.json();
+        return data.todos.find((todo) => todo.title === taskTitle)?.id || "";
+      }, title);
+      expect(todoId).toBeTruthy();
+
+      let releaseFullSnapshot = () => {};
+      let markFullSnapshotStarted = () => {};
+      const fullSnapshotStarted = new Promise((resolve) => { markFullSnapshotStarted = resolve; });
+      const allowFullSnapshot = new Promise((resolve) => { releaseFullSnapshot = resolve; });
+      await page.route("**/api/todos", async (route, request) => {
+        const requestUrl = new URL(request.url());
+        if (request.method() === "GET" && requestUrl.pathname === "/api/todos") {
+          markFullSnapshotStarted();
+          await allowFullSnapshot;
+        }
+        await route.continue();
+      });
+      await page.goto(`${app.baseUrl}?todo=${encodeURIComponent(todoId)}`, { waitUntil: "domcontentloaded" });
+      await expect(page.locator("#todoDialog")).toBeVisible();
+      await expect(page.locator("#todoFormTask")).toHaveValue(title);
+      await fullSnapshotStarted;
+      const resumedSnapshot = page.waitForResponse((response) => {
+        const requestUrl = new URL(response.url());
+        return response.request().method() === "GET" && requestUrl.pathname === "/api/todos" && response.ok();
+      });
+      releaseFullSnapshot();
+      await resumedSnapshot;
+      await page.unroute("**/api/todos");
     } finally {
       await context.close();
     }

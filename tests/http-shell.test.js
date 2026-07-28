@@ -38,6 +38,13 @@ test("front-end naročila in foto urejevalnik ohranita dogovorjeni mobilni prika
   assert.match(html, /lostpointercapture/);
   assert.doesNotMatch(html, /photoEditorCropActions|photoEditorApplyCrop|photoEditorCancelCrop/);
   assert.match(html, /todoFormFooterActions/);
+  assert.match(html, /id="todoFormAttachmentMenu"/);
+  assert.match(html, /id="todoFormAttachmentInput"/);
+  assert.match(html, /id="todoFormCameraInput"[^>]*capture="environment"/);
+  assert.match(html, /id="todoFormVideoInput"[^>]*accept="video\/\*"/);
+  assert.match(html, /id="showTodoDriveLink"/);
+  assert.match(html, /\.modal-head \{[\s\S]*?position: sticky;/);
+  assert.match(html, /todo-form-activity-history/);
   assert.match(html, /function autosizeTodoNarrativeFields\(\)/);
   assert.match(html, /function dayTimelineDragAutoScrollVelocity\(clientY\)/);
   assert.match(html, /todoTextOrderMarker/);
@@ -246,6 +253,10 @@ test("lokalna testna instanca omogoča ločeno prijavo samo v testnem načinu", 
     const me = await request(port, "/api/me", { headers: { Cookie: cookie } });
     assert.equal(me.status, 200);
     assert.equal(JSON.parse(me.body).user.id, "bojan");
+    const users = await request(port, "/api/users", { headers: { Cookie: cookie } });
+    assert.equal(users.status, 200);
+    assert.ok(JSON.parse(users.body).users.some((user) => user.id === "bojan"));
+    assert.ok(JSON.parse(users.body).users.some((user) => user.id === "ibro"));
 
     const missingTodoLock = await request(port, "/api/todos/missing-id/lock", {
       method: "POST",
@@ -282,6 +293,21 @@ test("lokalna testna instanca omogoča ločeno prijavo samo v testnem načinu", 
     assert.equal(createdTodo.syncUser, "ibro");
     assert.equal(createdTodo.createdBy, "bojan");
 
+    const focused = await request(port, `/api/todos/${encodeURIComponent(createdTodo.id)}`, { headers: { Cookie: cookie } });
+    assert.equal(focused.status, 200, focused.body);
+    const focusedData = JSON.parse(focused.body);
+    assert.deepEqual(Object.keys(focusedData), ["todo"]);
+    assert.equal(focusedData.todo.id, createdTodo.id);
+    assert.equal(focusedData.todo.title, "Boss assigned task");
+
+    const focusedLock = await request(port, `/api/todos/${encodeURIComponent(createdTodo.id)}/lock`, {
+      method: "POST",
+      headers: bossTodoHeaders,
+      body: JSON.stringify({})
+    });
+    assert.equal(focusedLock.status, 200, focusedLock.body);
+    assert.match(JSON.parse(focusedLock.body).lockToken || "", /^[a-f0-9]+$/);
+
     const noAssignee = await request(port, "/api/todos", {
       method: "POST",
       headers: bossTodoHeaders,
@@ -314,13 +340,46 @@ test("lokalna testna instanca omogoča ločeno prijavo samo v testnem načinu", 
       body: JSON.stringify({
         date: "2026-07-27",
         client: "Test client",
-        title: "Worker must not assign Bojan",
+        title: "Worker assigned task to Bojan",
         status: "open",
         assigneeIds: ["bojan"]
       })
     });
-    assert.equal(crossAssigned.status, 403, crossAssigned.body);
-    assert.match(JSON.parse(crossAssigned.body).error, /samo sebi/);
+    assert.equal(crossAssigned.status, 200, crossAssigned.body);
+    const crossAssignedData = JSON.parse(crossAssigned.body);
+    assert.deepEqual(crossAssignedData.assignedTo.map((user) => user.id), ["bojan"]);
+    const workerCreatedForeignTask = crossAssignedData.todos.find((todo) => todo.title === "Worker assigned task to Bojan");
+    assert.ok(workerCreatedForeignTask);
+    const foreignHours = await request(port, "/api/todos", {
+      method: "POST",
+      headers: ibroTodoHeaders,
+      body: JSON.stringify({
+        date: "2026-07-27",
+        start: "08:00",
+        end: "09:00",
+        client: "Test client",
+        title: "Worker must not enter Bojan hours",
+        status: "execution",
+        assigneeIds: ["bojan"]
+      })
+    });
+    assert.equal(foreignHours.status, 403, foreignHours.body);
+    const foreignHoursUpdate = await request(port, `/api/todos/${encodeURIComponent(workerCreatedForeignTask.id)}`, {
+      method: "PUT",
+      headers: ibroTodoHeaders,
+      body: JSON.stringify({
+        ...workerCreatedForeignTask,
+        date: "2026-07-27",
+        start: "08:00",
+        end: "09:00",
+        status: "execution",
+        assigneeIds: ["bojan"],
+        baseUpdatedAt: workerCreatedForeignTask.updatedAt
+      })
+    });
+    assert.equal(foreignHoursUpdate.status, 403, foreignHoursUpdate.body);
+    assert.equal(JSON.parse(foreignHoursUpdate.body).error, JSON.parse(foreignHours.body).error);
+    assert.match(JSON.parse(foreignHours.body).error, /ure vpiše samo sebi/);
     const ibroTodos = await request(port, "/api/todos", { headers: { Cookie: ibroCookie } });
     assert.equal(ibroTodos.status, 200, ibroTodos.body);
     assert.ok(JSON.parse(ibroTodos.body).todos.some((todo) => todo.title === "Boss assigned task"));
@@ -352,7 +411,7 @@ test("completion request UI and authenticated link flow are present", async () =
   assert.match(html, /function openCompletionRequestFromLink\(\)/);
   assert.match(html, /requestTodoCompletion/);
   assert.match(html, /params\.set\("return_to", returnTo\)/);
-  assert.match(html, /async function openTodoFromLink\(\) \{[\s\S]*?renderTodos\(\);[\s\S]*?renderMonth\(\);[\s\S]*?await openTodoDialog\(todo\);/);
+  assert.match(html, /async function openTodoFromLink\(\{ render = true \} = \{\}\) \{[\s\S]*?if \(render\) \{[\s\S]*?renderTodos\(\);[\s\S]*?renderMonth\(\);[\s\S]*?\}[\s\S]*?await openTodoDialog\(todo\);/);
   assert.doesNotMatch(html, /renderCalendar\(\)/);
   assert.match(server, /\/api\/worker-daily-report/);
   assert.match(server, /workerDigestPortalUrl/);
@@ -361,6 +420,38 @@ test("completion request UI and authenticated link flow are present", async () =
   assert.match(html, /worker-digest-worker/);
   assert.match(html, /await openWorkerDailyDigestFromLink\(\);/);
 });
+test("e-poštna povezava odpre ciljno opravilo pred celotnim nalaganjem", async () => {
+  const [server, html, store] = await Promise.all([
+    fs.readFile(path.join(__dirname, "..", "outputs", "server.js"), "utf8"),
+    fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8"),
+    fs.readFile(path.join(__dirname, "..", "outputs", "postgres-store.js"), "utf8")
+  ]);
+  assert.match(server, /function visibleTodoForUser\(db, user, id\) \{/);
+  assert.match(server, /const todo = visibleTodoForUser\(db, user, id\);/);
+  assert.match(server, /async function requireUserForFocusedTodo\(req, res\) \{/);
+  assert.match(server, /const focused = await getPgStore\(\)\.focusedTodo\(id\);/);
+  assert.match(server, /completionRequestGroup\(id, tokenHash\)/);
+  assert.match(server, /function acquireTodoEditLockGroup\(todoId, assignmentIds, user, lockToken = "", now = Date\.now\(\)\) \{/);
+  assert.match(store, /async focusedTodo\(id\) \{/);
+  assert.match(store, /async completionRequestGroup\(requestedAssignmentId, tokenHash\) \{/);
+  assert.match(html, /function hasTodoLink\(\) \{/);
+  assert.match(html, /async function openTodoFromLink\(\{ render = true \} = \{\}\)/);
+  assert.match(html, /if \(hasTodoLink\(\)\) \{[\s\S]*?await openTodoFromLink\(\{ render: false \}\);[\s\S]*?await loadAll\(\);/);
+  assert.match(html, /if \(render\) \{\s*renderTodos\(\);\s*renderMonth\(\);\s*\}/);
+});
+test("zagonska identiteta in imenik v PostgreSQL ostaneta ozka", async () => {
+  const [server, store] = await Promise.all([
+    fs.readFile(path.join(__dirname, "..", "outputs", "server.js"), "utf8"),
+    fs.readFile(path.join(__dirname, "..", "outputs", "postgres-store.js"), "utf8")
+  ]);
+  assert.match(server, /async function requireUserForLightweightSession\(req, res\) \{/);
+  assert.match(server, /if \(url\.pathname === "\/api\/me"\) \{[\s\S]*?await requireUserForLightweightSession\(req, res\)/);
+  assert.match(server, /if \(url\.pathname === "\/api\/users" && req\.method === "GET"\) \{[\s\S]*?await requireUserForLightweightSession\(req, res\);[\s\S]*?getPgStore\(\)\.publicUserDirectory\(\)/);
+  assert.match(store, /async sessionWithRevision\(tokenHash\) \{[\s\S]*?jsonb_build_object\(/);
+  assert.match(store, /async publicUserDirectory\(\) \{/);
+  assert.doesNotMatch(store, /async publicUserDirectory\(\) \{[\s\S]{0,900}this\.load\(\)/);
+});
+
 test("boss can create a task for workers directly from admin view", async () => {
   const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
   assert.match(html, /\$\("newTodoButton"\)\.classList\.remove\("hidden"\);/);
@@ -372,15 +463,30 @@ test("boss can create a task for workers directly from admin view", async () => 
   assert.match(html, /function openStandaloneHoursDialog\(date = dateKey\(new Date\(\)\), \{ adminCreate = false \} = \{\}\)/);
   assert.match(html, /openStandaloneHoursDialog\(date, \{ adminCreate: isAdminView\(\) \}\)/);
 });
-test("calendar-only task controls are date-bound and excluded only from task lists", async () => {
+test("calendar-only task controls are date-bound, unavailable for time entries, and excluded only from task lists", async () => {
   const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
   assert.match(html, /id="todoFormCalendarOnly"/);
   assert.match(html, /id="todoFormCalendarOnlyField"/);
-  assert.match(html, /const canShowOnlyInCalendar = Boolean\(date\);/);
+  assert.match(html, /const isTimeEntry = timeEntryStatusIds\.has\(\$\('todoFormStatus'\)\.value\);\s*const canShowOnlyInCalendar = Boolean\(date && !isTimeEntry\);/);
   assert.match(html, /if \(!canShowOnlyInCalendar\) calendarOnly\.checked = false;/);
-  assert.match(html, /calendarOnly: Boolean\(\$\("todoFormDate"\)\.value && \$\("todoFormCalendarOnly"\)\.checked\)/);
+  assert.match(html, /calendarOnly: Boolean\(!timeEntryStatusIds\.has\(selectedStatus\) && \$\("todoFormDate"\)\.value && \$\("todoFormCalendarOnly"\)\.checked\)/);
   assert.match(html, /!todo\.calendarOnly && \(state\.todoSortMode === "imported" \? isImportedTodo\(todo\) : !isImportedTodo\(todo\)\)/);
   assert.match(html, /function calendarTodos\(\{ includeArchived = false \} = \{\}\) \{[\s\S]*?!isImportedTodo\(todo\)/);
+});
+
+test("izvorno opravilo se prikaže samo pri res povezanem vpisu ur", async () => {
+  const [html, server] = await Promise.all([
+    fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8"),
+    fs.readFile(path.join(__dirname, "..", "outputs", "server.js"), "utf8")
+  ]);
+  assert.match(html, /function sourceProjectDetailsForTodo\(todo = \{\}\)/);
+  assert.match(html, /linkedToProject: Boolean\(isTimeEntry && sourceId && \(source \|\| sourceTitle\)\)/);
+  assert.match(html, /sourceLookupPending: Boolean\(isTimeEntry && sourceId && !source && !state\.todoSnapshotLoaded\)/);
+  assert.match(html, /box\.classList\.toggle\("hidden", !linkedToProject \|\| sourceLookupPending\);/);
+  assert.match(html, /function refreshOpenTodoSourceProject\(\) \{/);
+  assert.match(html, /sourceProjectTitle: source\.title \|\| ""/);
+  assert.match(server, /const sourceProjectTodoId = status === "execution"/);
+  assert.match(server, /sourceProjectTitle,/);
 });
 
 test("date sort is ascending and client view hides only order status chips", async () => {

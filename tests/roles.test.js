@@ -14,6 +14,7 @@ const {
   canManageEntry,
   canManageFinancialEntry,
   canManageTodo,
+  preserveTimeEntrySourceProject,
   createSession,
   buildPayrollSnapshot,
   buildClientBillSnapshot,
@@ -194,6 +195,39 @@ test("delavec ne more upravljati tujih vnosov ali opravil", () => {
   assert.deepEqual(todoAssigneesForRequest(worker, ["bojan"], users), ["bojan"]);
   assert.deepEqual(todoAssigneesForRequest(worker, [], users), ["ibro"]);
   assert.deepEqual(todoAssigneesForRequest(worker, ["ne-obstaja"], users), ["ibro"]);
+});
+
+test("izvor projekta vnosa ur je preverjen ob nastanku in ohrani zgodovinski naslov", () => {
+  const sourceDb = {
+    todos: [
+      { id: "project", status: "open", syncUser: "ibro", title: "Montaža omare" },
+      { id: "foreign", status: "open", syncUser: "bojan", title: "Tuje opravilo" },
+      { id: "old-entry", status: "execution", syncUser: "ibro", title: "Stari vpis" }
+    ]
+  };
+  const linked = preserveTimeEntrySourceProject(sourceDb, worker, {
+    status: "execution",
+    sourceProjectTodoId: "project",
+    sourceProjectTitle: "Ponarejen naslov"
+  });
+  assert.equal(linked.error, "");
+  assert.equal(linked.todo.sourceProjectTodoId, "project");
+  assert.equal(linked.todo.sourceProjectTitle, "Montaža omare");
+  assert.match(preserveTimeEntrySourceProject(sourceDb, worker, {
+    status: "execution", sourceProjectTodoId: "foreign"
+  }).error, /ni na voljo/);
+  assert.match(preserveTimeEntrySourceProject(sourceDb, worker, {
+    status: "execution", sourceProjectTodoId: "old-entry"
+  }).error, /ni na voljo/);
+
+  const historical = preserveTimeEntrySourceProject({ todos: [] }, worker, {
+    status: "execution", sourceProjectTodoId: "spremenjen"
+  }, {
+    status: "execution", sourceProjectTodoId: "project", sourceProjectTitle: "Montaža omare"
+  });
+  assert.equal(historical.error, "");
+  assert.equal(historical.todo.sourceProjectTodoId, "project");
+  assert.equal(historical.todo.sourceProjectTitle, "Montaža omare");
 });
 
 test("lastnik opravila ga lahko preda veljavnemu delavcu", () => {

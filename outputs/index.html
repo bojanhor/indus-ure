@@ -2845,9 +2845,24 @@
       gap: 12px;
       padding: 18px 20px;
       border-bottom: 1px solid var(--line);
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      background: var(--panel);
+      box-shadow: 0 1px 0 var(--line);
     }
 
-    .modal-head h3 { margin: 0; font-size: 20px; }
+    /* The photo editor already keeps its header in a fixed grid row. */
+    #photoEditorDialog .modal-head { position: static; }
+
+    .modal-head h3 {
+      margin: 0;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 20px;
+    }
 
     .modal-head-actions { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
 
@@ -3137,6 +3152,23 @@
       line-height: 1.45;
     }
 
+    .todo-form-activity-history summary {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      color: var(--ink);
+      font-weight: 800;
+      cursor: pointer;
+      list-style: none;
+    }
+    .todo-form-activity-history summary::-webkit-details-marker { display: none; }
+    .todo-form-activity-history summary::after { content: "⌄"; flex: 0 0 auto; color: var(--muted); font-size: 18px; line-height: 1; }
+    .todo-form-activity-history[open] summary::after { transform: rotate(180deg); }
+    .todo-form-activity-summary { color: var(--muted); font-size: 12px; font-weight: 700; text-align: right; }
+    .todo-form-activity-content { display: grid; gap: 8px; margin-top: 11px; }
+    .todo-form-activity-events { display: grid; gap: 4px; padding-top: 8px; border-top: 1px solid var(--line); }
+
     .profile-preview {
       display: flex;
       align-items: center;
@@ -3222,7 +3254,6 @@
       padding-top: 14px;
       border-top: 1px solid var(--line);
     }
-    .todo-form-footer-actions .footer-danger { margin-right: auto; }
     .todo-form-footer-actions button { min-height: 42px; }
 
     #todoDialog .modal-head-actions { gap: 6px; }
@@ -3575,6 +3606,14 @@
       background: #f7faf7;
     }
 
+    .todo-form-attachments-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
     .todo-form-attachment-actions {
       display: flex;
       flex-wrap: wrap;
@@ -3582,6 +3621,43 @@
     }
 
     .todo-form-attachment-actions .add-photo { flex: 1 1 150px; }
+
+    .todo-attachment-add {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      min-height: 38px;
+      white-space: nowrap;
+    }
+
+    .todo-attachment-menu { position: relative; }
+    .todo-attachment-menu > summary { list-style: none; cursor: pointer; }
+    .todo-attachment-menu > summary::-webkit-details-marker { display: none; }
+    .todo-attachment-menu[open] > summary { background: #d4e3dc; }
+    .todo-attachment-menu-options {
+      position: absolute;
+      z-index: 8;
+      top: calc(100% + 6px);
+      right: 0;
+      display: grid;
+      gap: 6px;
+      min-width: min(260px, calc(100vw - 64px));
+      padding: 8px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--panel);
+      box-shadow: 0 12px 24px rgba(25, 45, 38, 0.16);
+    }
+    .todo-attachment-menu-options > label,
+    .todo-attachment-menu-options > button {
+      display: flex;
+      align-items: center;
+      width: 100%;
+      min-height: 38px;
+      text-align: left;
+      justify-content: flex-start;
+    }
 
     .todo-form-photo-row {
       display: grid;
@@ -4929,45 +5005,39 @@
           <small>Delavcu se vpis normalno obračuna, stranki pa je prikazan brez obračunanih ur in kilometrine.</small>
         </label>
         <div class="todo-form-attachments" id="todoFormAttachments">
-          <strong>Priloge</strong>
+          <div class="todo-form-attachments-head">
+            <strong>Priloge</strong>
+            <details class="todo-attachment-menu" id="todoFormAttachmentMenu">
+              <summary class="secondary todo-attachment-add"><span aria-hidden="true">&#128206;</span><span>Dodaj prilogo</span></summary>
+              <div class="todo-attachment-menu-options" role="group" aria-label="Vrsta priloge">
+                <label class="secondary">Fotografiraj
+                  <input class="hidden-file" id="todoFormCameraInput" type="file" accept="image/*" capture="environment">
+                </label>
+                <label class="secondary">Slika ali PDF
+                  <input class="hidden-file" id="todoFormAttachmentInput" type="file" accept="image/*,application/pdf,.pdf" multiple>
+                </label>
+                <label class="secondary">Video (do 200 MB)
+                  <input class="hidden-file" id="todoFormVideoInput" type="file" accept="video/*" multiple>
+                </label>
+                <button class="secondary" id="showTodoDriveLink" type="button">Povezava Docs/Sheets</button>
+              </div>
+            </details>
+          </div>
           <div id="todoFormPhotoList"></div>
           <div class="todo-drive-files" id="todoFormDriveFileList"></div>
 
-          <div class="todo-drive-link-input">
+          <div class="todo-drive-link-input hidden" id="todoFormDriveLinkPanel">
             <input id="todoFormDriveLink" type="url" placeholder="Prilepi zunanjo povezavo do Google Dokumenta ali Preglednice" inputmode="url">
             <button class="secondary" id="addTodoDriveLink" type="button">Dodaj povezavo</button>
           </div>
-          <div class="todo-form-attachment-actions">
-            <label class="secondary add-photo">Galerija slik
-              <input class="hidden-file" id="todoFormPhotoInput" type="file" accept="image/*" multiple>
-              <span class="sr-only">Izberi slike iz galerije ali slikovnih datotek</span>
-            </label>
-            <label class="secondary add-photo">Fotografiraj
-              <input class="hidden-file" id="todoFormCameraInput" type="file" accept="image/*" capture="environment">
-              <span class="sr-only">Odpri kamero telefona</span>
-            </label>
-            <label class="secondary add-photo">PDF / datoteka
-              <input class="hidden-file" id="todoFormPdfInput" type="file" accept="application/pdf,.pdf" multiple>
-              <span class="sr-only">Izberi PDF v upravljalniku datotek</span>
-            </label>
-            <label class="secondary add-photo" id="todoFormVideoLabel">Video (do 200 MB)
-              <input class="hidden-file" id="todoFormVideoInput" type="file" accept="video/*" multiple>
-              <span class="sr-only">Izberi video; shrani se zasebno v INDUS URE</span>
-            </label>
-            <div class="todo-upload-status" id="todoFormVideoStatus" role="status" aria-live="polite" hidden><progress id="todoFormVideoProgress" max="100" value="0"></progress><span></span></div>
-          </div>
+          <div class="todo-upload-status" id="todoFormVideoStatus" role="status" aria-live="polite" hidden><progress id="todoFormVideoProgress" max="100" value="0"></progress><span></span></div>
         </div>
         <div class="audit-box hidden" id="todoFormAudit"></div>
         <div class="audit-box hidden" id="todoFormSourceProject">
           <span>Izvorno opravilo: </span><button class="secondary" id="openTodoSourceProject" type="button">Odpri in uredi</button>
         </div>
-        <div class="todo-form-footer-actions" id="todoFormFooterActions" aria-label="Dejanja opravila">
-          <button class="danger footer-danger hidden" id="deleteTodoFromDialogFooter" type="button">Izbriši</button>
-          <button class="secondary hidden" id="duplicateTodoFromDialogFooter" type="button">Podvoji</button>
-          <button class="secondary hidden" id="writeHoursFromTodoFooter" type="button">Vpis ur</button>
+        <div class="todo-form-footer-actions hidden" id="todoFormFooterActions" aria-label="Dejanja opravila">
           <button class="secondary hidden" id="requestTodoCompletion" type="button">Zahtevaj dopolnitev</button>
-          <button class="secondary" id="cancelTodoDialogFooter" type="button">Prekliči</button>
-          <button class="primary" id="saveTodoDialogFooter" type="submit">Shrani</button>
         </div>
 
       </div>
@@ -5446,6 +5516,7 @@
       view: "todos",
       entries: [],
       todos: [],
+      todoSnapshotLoaded: false,
       deletedTodos: [],
       deletedTodoRetentionDays: 30,
       auditEvents: [],
@@ -5466,6 +5537,7 @@
       todoMealEntry: false,
       todoHoursSourceOriginal: null,
       todoDraftSourceProjectTodoId: "",
+      todoDraftSourceProjectTitle: "",
       todoHoursSavedSourceId: "",
       todoHoursCompletionSourceId: "",
       todoDialogReturnDayDate: "",
@@ -5683,7 +5755,11 @@
       history.replaceState(history.state, "", current.pathname + current.search + current.hash);
     }
 
-    async function openTodoFromLink() {
+    function hasTodoLink() {
+      return Boolean(new URL(location.href).searchParams.get("todo"));
+    }
+
+    async function openTodoFromLink({ render = true } = {}) {
       const current = new URL(location.href);
       const todoId = String(current.searchParams.get("todo") || "");
       const token = String(current.searchParams.get("completion") || "");
@@ -5703,10 +5779,13 @@
         const index = state.todos.findIndex((item) => item.id === todo.id);
         if (index >= 0) state.todos[index] = todo;
         else state.todos.unshift(todo);
-        clearTodoLink();
-        renderTodos();
-        renderMonth();
-        await openTodoDialog(todo);
+        refreshClientList();
+        if (render) {
+          renderTodos();
+          renderMonth();
+        }
+        const opened = await openTodoDialog(todo);
+        if (opened) clearTodoLink();
         if (notice) showNotice(notice);
       } catch (error) {
         showNotice(error.message || "Opravila ni bilo mogo\u010de odpreti.");
@@ -6110,6 +6189,7 @@
       state.users = snapshot.users || [snapshot.user];
       state.entries = snapshot.entries || [];
       state.todos = snapshot.todos || [];
+      state.todoSnapshotLoaded = true;
       state.debts = snapshot.debts || [];
       state.advances = snapshot.advances || [];
       state.personalPurchases = snapshot.personalPurchases || [];
@@ -6426,8 +6506,16 @@
         state.users = [...new Map([...availableUsers, state.user].map((user) => [user.id, user])).values()];
         initializeWorkContext();
         showApp();
-        await loadAll();
-        await openTodoFromLink();
+        // Direct links from e-mail must not wait for the potentially much
+        // larger task list.  The focused endpoint gives the dialog just the
+        // selected task; the normal snapshot then catches up behind it.
+        if (hasTodoLink()) {
+          await openTodoFromLink({ render: false });
+          await loadAll();
+        } else {
+          await loadAll();
+          await openTodoFromLink();
+        }
         await openWorkerDailyDigestFromLink();
         await Promise.all([refreshNotifications(), refreshGoogleDriveConnectionStatus(), refreshServerStatus()]);
         await updateOfflineSyncNotice();
@@ -6898,7 +6986,9 @@
       const data = await api("/api/todos");
       if (!canApplyTodoSnapshot(todoRevision, todoSnapshotWasStable)) return;
       state.todos = data.todos;
+      state.todoSnapshotLoaded = true;
       refreshClientList();
+      refreshOpenTodoSourceProject();
       render();
       saveOfflineSnapshotSoon();
     }
@@ -6925,7 +7015,10 @@
         serverStatusRequest
       ]);
       state.entries = entries.entries || [];
-      if (canApplyTodoSnapshot(todoRevision, todoSnapshotWasStable)) state.todos = todos.todos || [];
+      if (canApplyTodoSnapshot(todoRevision, todoSnapshotWasStable)) {
+        state.todos = todos.todos || [];
+        state.todoSnapshotLoaded = true;
+      }
       state.debts = debts.debts || [];
       state.advances = advances.advances || [];
       state.personalPurchases = personalPurchases.purchases || [];
@@ -6938,6 +7031,7 @@
       if (serverStatus?.status) state.serverStatus = serverStatus.status;
       state.offlineMode = false;
       refreshClientList();
+      refreshOpenTodoSourceProject();
       render();
       saveOfflineSnapshotSoon();
     }
@@ -11073,6 +11167,10 @@
       })[extension] || "application/octet-stream";
     }
 
+    function isTodoVideoFile(file) {
+      return todoVideoMimeType(file).startsWith("video/");
+    }
+
     function setTodoVideoUploadStatus(message, stateName = "", percent = null) {
       const status = $("todoFormVideoStatus");
       const progress = $("todoFormVideoProgress");
@@ -11144,14 +11242,12 @@
       });
     }
 
-    async function uploadTodoVideoFiles(event) {
-      const input = event.currentTarget;
-      const files = [...(input.files || [])];
-      if (!files.length) return;
+    async function uploadTodoVideoFiles(files) {
+      const selectedFiles = [...(files || [])];
+      if (!selectedFiles.length) return;
       const maxBytes = 200 * 1024 * 1024;
-      input.disabled = true;
       try {
-        for (const [index, file] of files.entries()) {
+        for (const [index, file] of selectedFiles.entries()) {
           if (state.todoDialogPhotos.length >= 8) throw new Error("Največ je 8 prilog na opravilo.");
           if (!file.size) throw new Error("Praznega videa ni mogoče dodati.");
           if (file.size > maxBytes) throw new Error("Video je prevelik. Največja dovoljena velikost je 200 MB.");
@@ -11166,11 +11262,11 @@
           };
           state.todoDialogPhotos.push(draft);
           renderTodoFormPhotos();
-          setTodoVideoUploadStatus(`Nalagam video ${index + 1}/${files.length}: 0 %`, "uploading", 0);
+          setTodoVideoUploadStatus(`Nalagam video ${index + 1}/${selectedFiles.length}: 0 %`, "uploading", 0);
           try {
             const data = await uploadTodoVideoFile(file, (percent) => {
               updateTodoVideoUploadDraft(draft, percent);
-              setTodoVideoUploadStatus(`Nalagam video ${index + 1}/${files.length}: ${percent} %`, "uploading", percent);
+              setTodoVideoUploadStatus(`Nalagam video ${index + 1}/${selectedFiles.length}: ${percent} %`, "uploading", percent);
             });
             const draftIndex = state.todoDialogPhotos.findIndex((item) => item.id === draft.id);
             if (draftIndex >= 0 && !state.todoDialogPhotos.some((item, itemIndex) => itemIndex !== draftIndex && item.attachmentId === data.photo.attachmentId)) {
@@ -11188,9 +11284,6 @@
       } catch (error) {
         setTodoVideoUploadStatus("Video ni bil dodan: " + String(error?.message || "Neznana napaka."), "error");
         throw error;
-      } finally {
-        input.disabled = false;
-        input.value = "";
       }
     }
 
@@ -11215,6 +11308,7 @@
         ownerEmail: ""
       });
       input.value = "";
+      $("todoFormDriveLinkPanel").classList.add("hidden");
       renderTodoFormDriveFiles();
     }
 
@@ -11282,27 +11376,63 @@
         audit.textContent = "";
         return;
       }
-      const history = (todo.history || [])
+      const historyItems = (todo.history || [])
         .slice(-5)
         .map((item) => `${escapeHtml(item.action)}: ${escapeHtml(item.byName || item.by)} (${formatDateTime(item.at)})`)
         .join("<br>");
       audit.classList.remove("hidden");
       audit.innerHTML = `
-        Dodal: <strong>${escapeHtml(todo.createdByName || "-")}</strong> (${formatDateTime(todo.createdAt)})<br>
-        Zadnja sprememba: <strong>${escapeHtml(todo.updatedByName || todo.createdByName || "-")}</strong> (${formatDateTime(todo.updatedAt || todo.createdAt)})
-        ${history ? `<br><br>${history}` : ""}
+        <details class="todo-form-activity-history">
+          <summary>
+            <span>Dejavnost uporabnikov</span>
+            <span class="todo-form-activity-summary">${historyItems ? "Prikaži" : "Osnovni podatki"}</span>
+          </summary>
+          <div class="todo-form-activity-content">
+            <div>Dodal: <strong>${escapeHtml(todo.createdByName || "-")}</strong> (${formatDateTime(todo.createdAt)})</div>
+            <div>Zadnja sprememba: <strong>${escapeHtml(todo.updatedByName || todo.createdByName || "-")}</strong> (${formatDateTime(todo.updatedAt || todo.createdAt)})</div>
+            ${historyItems ? `<div class="todo-form-activity-events">${historyItems}</div>` : ""}
+          </div>
+        </details>
       `;
+    }
+
+    function sourceProjectDetailsForTodo(todo = {}) {
+      const sourceId = String(todo.sourceProjectTodoId || "").trim();
+      const isTimeEntry = timeEntryStatusIds.has(todoStatus(todo.status).id);
+      const candidate = sourceId ? state.todos.find((item) => item.id === sourceId) : null;
+      const source = candidate && !timeEntryStatusIds.has(todoStatus(candidate.status).id) ? candidate : null;
+      const sourceTitle = String(todo.sourceProjectTitle || "").trim();
+      return {
+        sourceId,
+        source,
+        sourceTitle,
+        // A direct e-mail link opens before the full task snapshot arrives.
+        // Until then an absent source is merely unknown, not deleted.
+        sourceLookupPending: Boolean(isTimeEntry && sourceId && !source && !state.todoSnapshotLoaded),
+        linkedToProject: Boolean(isTimeEntry && sourceId && (source || sourceTitle))
+      };
+    }
+
+    function refreshOpenTodoSourceProject() {
+      const dialog = $("todoDialog");
+      const id = $("todoFormId")?.value || "";
+      if (!dialog?.open || !id) return;
+      const todo = state.todos.find((item) => item.id === id);
+      if (todo) renderTodoFormSourceProject(todo);
     }
 
     function renderTodoFormSourceProject(todo) {
       const box = $("todoFormSourceProject");
       const button = $("openTodoSourceProject");
-      const sourceId = String(todo.sourceProjectTodoId || "");
-      const source = sourceId ? state.todos.find((item) => item.id === sourceId) : null;
-      box.classList.toggle("hidden", !sourceId);
-      button.dataset.sourceTodoId = sourceId;
+      const label = box.querySelector("span");
+      const { source, sourceTitle, sourceLookupPending, linkedToProject } = sourceProjectDetailsForTodo(todo);
+      box.classList.toggle("hidden", !linkedToProject || sourceLookupPending);
+      button.dataset.sourceTodoId = source?.id || "";
       button.disabled = !source;
-      button.textContent = source ? `Odpri in uredi: ${source.title || "opravilo"}` : "Izvorno opravilo ni več na voljo";
+      label.textContent = source ? "Izvorno opravilo: " : "";
+      button.textContent = source
+        ? `Odpri in uredi: ${source.title || "opravilo"}`
+        : `Izvorno opravilo \"${sourceTitle}\" ni ve\u010d na voljo`;
     }
 
     function syncTodoFormDateRangeControls() {
@@ -11310,10 +11440,10 @@
       const endDate = $('todoFormEndDate');
       const calendarOnly = $('todoFormCalendarOnly');
       const calendarOnlyField = $('todoFormCalendarOnlyField');
-      const canShowOnlyInCalendar = Boolean(date);
+      const isTimeEntry = timeEntryStatusIds.has($('todoFormStatus').value);
+      const canShowOnlyInCalendar = Boolean(date && !isTimeEntry);
       calendarOnlyField.classList.toggle('hidden', !canShowOnlyInCalendar);
       if (!canShowOnlyInCalendar) calendarOnly.checked = false;
-      const isTimeEntry = timeEntryStatusIds.has($('todoFormStatus').value);
       if (isTimeEntry && date && endDate.value !== date) {
         endDate.value = date;
         endDate.dataset.auto = 'true';
@@ -11443,6 +11573,7 @@
       $("todoFormAssigneeLabel").textContent = isAdminView() ? "Dodeli delavcem" : "Delo opravil";
       state.todoMealEntry = Boolean(todo._mealEntry);
       state.todoDraftSourceProjectTodoId = String(todo.sourceProjectTodoId || "");
+      state.todoDraftSourceProjectTitle = String(todo.sourceProjectTitle || sourceProjectDetailsForTodo(todo).source?.title || "").trim().slice(0, 300);
       const canChooseCreationMode = !editing && !state.todoHoursSourceId;
       const creationTabs = $("todoCreationTabs");
       creationTabs.classList.toggle("hidden", !canChooseCreationMode);
@@ -11477,7 +11608,7 @@
       $("todoFormWarranty").checked = Boolean(todo.warranty);
       $("todoFormWorkFromHome").checked = Boolean(todo.workFromHome);
       $("todoFormImported").checked = Boolean(todo.imported);
-      $("todoFormCalendarOnly").checked = Boolean(todo.calendarOnly && todo.date);
+      $("todoFormCalendarOnly").checked = Boolean(!timeEntryStatusIds.has(todoStatus(todo.status || "open").id) && todo.calendarOnly && todo.date);
       updateTodoFormStatus();
       syncTodoFormClientContacts({ preserve: true });
        autosizeTodoNarrativeFields();
@@ -11503,20 +11634,27 @@
       $("todoFormBillingKm").value = Number(todo.billingKm || 0);
       $("todoFormClientKm").value = Number(todo.clientKm || 0);
       $("todoFormClientVehicle").value = editing ? (todo.clientVehicle === "van" ? "van" : "personal") : (todo.clientVehicle === "van" ? "van" : preferredClientVehicle());
-      ["deleteTodoFromDialog", "deleteTodoFromDialogFooter"].forEach((id) => $(id).classList.toggle("hidden", !editing));
-      ["duplicateTodoFromDialog", "duplicateTodoFromDialogFooter"].forEach((id) => $(id).classList.toggle("hidden", !editing || Boolean(state.todoHoursSourceId)));
-      ["writeHoursFromTodo", "writeHoursFromTodoFooter"].forEach((id) => $(id).classList.toggle("hidden", !editing || Boolean(state.todoHoursSourceId) || !projectHoursSourceStatuses.has(todoStatus(todo.status).id)));
-      $("requestTodoCompletion").classList.toggle("hidden", !editing || !isAdminView());
+      $("deleteTodoFromDialog").classList.toggle("hidden", !editing);
+      $("duplicateTodoFromDialog").classList.toggle("hidden", !editing || Boolean(state.todoHoursSourceId));
+      $("writeHoursFromTodo").classList.toggle("hidden", !editing || Boolean(state.todoHoursSourceId) || !projectHoursSourceStatuses.has(todoStatus(todo.status).id));
+      const showCompletionRequest = editing && isAdminView();
+      $("requestTodoCompletion").classList.toggle("hidden", !showCompletionRequest);
+      $("todoFormFooterActions").classList.toggle("hidden", !showCompletionRequest);
       renderTodoFormAudit(todo);
       renderTodoFormSourceProject(todo);
-      ["todoFormPhotoInput", "todoFormCameraInput", "todoFormPdfInput", "todoFormVideoInput"].forEach((id) => { $(id).value = ""; });
+      $("todoFormAttachmentInput").value = "";
+      $("todoFormCameraInput").value = "";
+      $("todoFormVideoInput").value = "";
+      $("todoFormAttachmentMenu").open = false;
       setTodoVideoUploadStatus("");
       $("todoFormDriveLink").value = "";
-      if (editing && !(await acquireTodoEditLockForDialog(todo.id))) return;
+      $("todoFormDriveLinkPanel").classList.add("hidden");
+      if (editing && !(await acquireTodoEditLockForDialog(todo.id))) return false;
       $("todoDialog").showModal();
       autosizeTodoNarrativeFieldsAfterLayout();
       requestAnimationFrame(() => $("todoDialog").focus({ preventScroll: true }));
       fillMissingPdfThumbnailsForDialog(state.todoDialogPhotos).catch((error) => console.warn(error));
+      return true;
     }
 
     async function saveTodoFromDialog() {
@@ -11539,6 +11677,11 @@
       const billingKm = parseBillingNumber($("todoFormBillingKm").value, 1_000_000);
       const clientKm = parseBillingNumber($("todoFormClientKm").value, 1_000_000);
       const clientVehicle = $("todoFormClientVehicle").value === "van" ? "van" : "personal";
+      const selectedStatus = $("todoFormStatus").value;
+      const sourceProjectTodoId = String(existing?.sourceProjectTodoId || state.todoHoursSourceId || state.todoDraftSourceProjectTodoId || "");
+      const sourceProjectTitle = sourceProjectTodoId
+        ? String(existing?.sourceProjectTitle || state.todoDraftSourceProjectTitle || "").trim().slice(0, 300)
+        : "";
       const todo = {
         ...(existing || {}),
         id: id || undefined,
@@ -11551,23 +11694,24 @@
         title: meal ? "Malica" : $("todoFormTask").value.trim(),
         notes: meal ? "" : $("todoFormNotes").value.trim(),
         material: meal ? "" : $("todoFormMaterial").value.trim(),
-        status: $("todoFormStatus").value,
+        status: selectedStatus,
         order: existing?.order || nextTodoOrder(),
         assigneeIds,
         syncUser: existing?.syncUser || assigneeIds[0] || activeWorkerId(),
-        urgent: timeEntryStatusIds.has($("todoFormStatus").value) ? false : $("todoFormUrgent").checked,
+        urgent: timeEntryStatusIds.has(selectedStatus) ? false : $("todoFormUrgent").checked,
         imported: Boolean(existing?.imported),
         ordered: todoOrderStatusIds.has($("todoFormStatus").value) && $("todoFormOrdered").checked,
         warranty: $("todoFormStatus").value === "execution" && Boolean($("todoFormWarranty").checked),
-        sourceProjectTodoId: existing?.sourceProjectTodoId || state.todoHoursSourceId || state.todoDraftSourceProjectTodoId || "",
-        done: $("todoFormStatus").value === "execution",
+        sourceProjectTodoId,
+        sourceProjectTitle,
+        done: selectedStatus === "execution",
         billingHourlyRate: hourlyRate,
         billingKm,
         workFromHome: Boolean($("todoFormWorkFromHome").checked),
         clientContactIds: meal ? [] : [...state.todoDialogClientContactIds],
         clientKm: meal ? 0 : clientKm,
         clientVehicle: meal ? "personal" : clientVehicle,
-        calendarOnly: Boolean($("todoFormDate").value && $("todoFormCalendarOnly").checked),
+        calendarOnly: Boolean(!timeEntryStatusIds.has(selectedStatus) && $("todoFormDate").value && $("todoFormCalendarOnly").checked),
         driveFiles: state.todoDialogDriveFiles,
         photos: state.todoDialogPhotos
       };
@@ -11749,6 +11893,7 @@
         urgent: false,
         syncUser: activeWorkerId() || source.syncUser || state.user?.id || "",
         _hoursAssigneeIds: [activeWorkerId() || source.syncUser || state.user?.id || ""],
+        sourceProjectTitle: source.title || "",
         photos: (source.photos || []).map((photo) => ({ ...photo })),
         driveFiles: (source.driveFiles || []).map((file) => ({ ...file })),
         billingHourlyRate: source.billingHourlyRate ?? null,
@@ -11796,6 +11941,7 @@
         status: source.status,
         urgent: source.status === "execution" ? false : Boolean(source.urgent),
         sourceProjectTodoId: source.sourceProjectTodoId || "",
+        sourceProjectTitle: source.sourceProjectTitle || "",
         billingHourlyRate: source.billingHourlyRate ?? null,
         billingKm: 0,
         clientKm: 0,
@@ -13919,7 +14065,7 @@
     $("reportTo").addEventListener("change", renderReport);
     $("reportClientSort").addEventListener("change", () => { state.reportClientSort = $("reportClientSort").value; renderReport(); });
 
-    ["closeTodoDialog", "cancelTodoDialogFooter"].forEach((id) => $(id).addEventListener("click", () => $("todoDialog").close()));
+    $("closeTodoDialog").addEventListener("click", () => $("todoDialog").close());
     $("closeOfflineConflicts").addEventListener("click", () => $("offlineConflictsDialog").close());
     $("offlineConflictsList").addEventListener("click", (event) => {
       const action = event.target.closest("[data-offline-conflict-action]");
@@ -14026,8 +14172,8 @@
       event.preventDefault();
       submitTodoDialog();
     });
-    ["deleteTodoFromDialog", "deleteTodoFromDialogFooter"].forEach((id) => $(id).addEventListener("click", () => deleteTodoFromDialog().catch((error) => showNotice(error.message))));
-    ["duplicateTodoFromDialog", "duplicateTodoFromDialogFooter"].forEach((id) => $(id).addEventListener("click", () => duplicateTodoFromCurrent().catch((error) => showNotice(error.message))));
+    $("deleteTodoFromDialog").addEventListener("click", () => deleteTodoFromDialog().catch((error) => showNotice(error.message)));
+    $("duplicateTodoFromDialog").addEventListener("click", () => duplicateTodoFromCurrent().catch((error) => showNotice(error.message)));
     $("openTodoSourceProject").addEventListener("click", async (event) => {
       const sourceId = event.currentTarget.dataset.sourceTodoId || "";
       const source = state.todos.find((todo) => todo.id === sourceId);
@@ -14040,7 +14186,7 @@
       await new Promise((resolve) => setTimeout(resolve, 0));
       await openTodoDialog(source);
     });
-    ["writeHoursFromTodo", "writeHoursFromTodoFooter"].forEach((id) => $(id).addEventListener("click", () => openHoursTodoFromCurrent().catch((error) => showNotice(error.message))));
+    $("writeHoursFromTodo").addEventListener("click", () => openHoursTodoFromCurrent().catch((error) => showNotice(error.message)));
     $("requestTodoCompletion").addEventListener("click", () => {
       try { openCompletionRequestDialog($("todoFormId").value); } catch (error) { showNotice(error.message); }
     });
@@ -14071,6 +14217,11 @@
     document.querySelectorAll("[data-create-drive]").forEach((button) => {
       button.addEventListener("click", () => createTodoGoogleDriveFile(button.dataset.createDrive).catch((error) => showNotice(error.message)));
     });
+    $("showTodoDriveLink").addEventListener("click", () => {
+      $("todoFormAttachmentMenu").open = false;
+      $("todoFormDriveLinkPanel").classList.remove("hidden");
+      requestAnimationFrame(() => $("todoFormDriveLink").focus());
+    });
     $("addTodoDriveLink").addEventListener("click", addTodoDriveLink);
     $("todoFormDriveLink").addEventListener("keydown", (event) => {
       if (event.key !== "Enter" || event.ctrlKey || event.metaKey) return;
@@ -14100,22 +14251,25 @@
       try {
         const remaining = Math.max(0, 8 - state.todoDialogPhotos.length);
         const files = [...event.target.files].slice(0, remaining);
-        for (const file of files) {
+        const videoFiles = files.filter(isTodoVideoFile);
+        const standardFiles = files.filter((file) => !isTodoVideoFile(file));
+        for (const file of standardFiles) {
           const attachment = await todoAttachmentFromFile(file);
           if (todoAttachmentsDataLength(state.todoDialogPhotos) + attachment.data.length > 4_800_000) throw new Error("Priloge so skupaj prevelike. Odstrani katero od njih.");
           state.todoDialogPhotos.push(attachment);
         }
         renderTodoFormPhotos();
+        if (videoFiles.length) await uploadTodoVideoFiles(videoFiles);
       } catch (error) {
         showNotice(error.message);
       } finally {
         event.target.value = "";
+        $("todoFormAttachmentMenu").open = false;
       }
     }
-    ["todoFormPhotoInput", "todoFormCameraInput", "todoFormPdfInput"].forEach((id) => {
+    ["todoFormAttachmentInput", "todoFormCameraInput", "todoFormVideoInput"].forEach((id) => {
       $(id).addEventListener("change", handleTodoAttachmentsFromInput);
     });
-    $("todoFormVideoInput").addEventListener("change", (event) => uploadTodoVideoFiles(event).catch((error) => showNotice(error.message)));
     $("todoFormPhotoList").addEventListener("click", (event) => {
       const edit = event.target.closest(".edit-todo-form-photo");
       if (edit) {

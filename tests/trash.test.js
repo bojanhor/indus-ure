@@ -4,6 +4,7 @@ const test = require("node:test");
 const {
   DELETED_TODO_RETENTION_DAYS,
   cleanTodo,
+  normalizeDb,
   isTrashedTodo,
   purgeExpiredTrashedTodoGroups,
   restoreTrashedTodoGroup,
@@ -59,9 +60,25 @@ test("koš po 30 dneh trajno odstrani celo skupino in samo osirotele podatke", (
   assert.equal(db.clients.length, 0);
 });
 
-test("samo datirano opravilo lahko ostane samo v koledarju", () => {
+test("samo datirano navadno opravilo lahko ostane samo v koledarju", () => {
   assert.equal(cleanTodo({ title: "Dated", date: "2026-07-01", calendarOnly: true }).calendarOnly, true);
   assert.equal(cleanTodo({ title: "Undated", calendarOnly: true }).calendarOnly, false);
+  assert.equal(cleanTodo({ title: "Hours", date: "2026-07-01", status: "execution", calendarOnly: true }).calendarOnly, false);
+  assert.equal(cleanTodo({ title: "Drive", date: "2026-07-01", status: "drive", calendarOnly: true }).calendarOnly, false);
+  const legacy = normalizeDb({
+    users: { bojan: { ...actor }, ibro: { ...worker } },
+    todos: [{ id: "legacy-hours", title: "Hours", status: "execution", date: "2026-07-01", calendarOnly: true, syncUser: "ibro" }]
+  }).db.todos[0];
+  assert.equal(legacy.calendarOnly, false);
+});
+
+test("izvorni projekt ostane samo pri zaključenem vpisu ur", () => {
+  const linked = cleanTodo({ status: "execution", sourceProjectTodoId: "project-1", sourceProjectTitle: "Montaža" });
+  assert.equal(linked.sourceProjectTodoId, "project-1");
+  assert.equal(linked.sourceProjectTitle, "Montaža");
+  const regularTask = cleanTodo({ status: "open", sourceProjectTodoId: "project-1", sourceProjectTitle: "Montaža" });
+  assert.equal(regularTask.sourceProjectTodoId, "");
+  assert.equal(regularTask.sourceProjectTitle, "");
 });
 test("delno izbrisana skupina se nikoli ne počisti", () => {
   const db = testDb();

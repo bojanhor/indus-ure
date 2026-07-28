@@ -314,7 +314,19 @@ class PostgresStore {
 
   async sessionWithRevision(tokenHash) {
     const result = await this.pool.query(
-      `select s.data as session, u.data as user, coalesce(m.data, '{}'::jsonb) as application
+      // Deliberately project only the identity fields used by the lightweight
+      // bootstrap routes. A user row can also contain OAuth credentials, so
+      // carrying the whole JSON document through an ordinary /api/me request
+      // is unnecessary (and makes it too easy to use it accidentally).
+      `select s.data as session,
+              jsonb_build_object(
+                'id', u.id,
+                'email', coalesce(u.data ->> 'email', ''),
+                'name', coalesce(u.data ->> 'name', ''),
+                'role', coalesce(u.data ->> 'role', ''),
+                'avatar', coalesce(u.data ->> 'avatar', '')
+              ) as user,
+              coalesce(m.data ->> 'syncRevision', '0') as revision
        from indus_sessions s
        join indus_users u on u.id = s.user_id
        left join indus_meta m on m.key = 'application'
@@ -327,7 +339,127 @@ class PostgresStore {
     return {
       session: row.session,
       user: row.user,
-      revision: Math.max(0, Number(row.application?.syncRevision || 0))
+      revision: Math.max(0, Number(row.revision || 0))
+    };
+  }
+
+  // The initial page only needs a small public worker directory to populate
+  // assignment controls. Do not use load() here: that would also fetch every
+  // task, attachment, entry and billing row before an e-mail deep link opens.
+  async publicUserDirectory() {
+    const result = await this.pool.query(
+      `select id,
+              coalesce(data ->> 'name', '') as name,
+              data ->> 'role' as role,
+              coalesce(data #>> '{billing,exportTitle}', '') as export_title
+       from indus_users
+       order by lower(coalesce(data ->> 'name', '')), id`
+    );
+    return result.rows.map((row) => {
+      const user = {
+        id: String(row.id || ''),
+        name: String(row.name || ''),
+        exportTitle: String(row.export_title || '')
+      };
+      if (row.role) user.role = String(row.role);
+      return user;
+    });
+  }
+
+  // A link from e-mail opens one assignment, not the whole task list.  Keep
+  // this query deliberately narrow so it stays quick even when the calendar
+  // history and attachment table have grown large.
+  async focusedTodo(id) {
+    const todoId = String(id || "");
+    if (!todoId) return null;
+    const target = await this.pool.query(
+      `select a.id as assignment_id, a.task_id, a.worker_id, a.data as assignment_data, t.data as task_data
+       from indus_task_assignments a
+       join indus_tasks t on t.id = a.task_id
+       where a.id = $1`,
+      [todoId]
+    );
+    if (!target.rowCount) return null;
+    const row = target.rows[0];
+    const assignments = await this.pool.query(
+      "select id, worker_id, data from indus_task_assignments where task_id = $1",
+      [row.task_id]
+    );
+    const todo = joinTodo(row.task_data || {}, {
+      ...(row.assignment_data || {}),
+      id: row.assignment_id,
+      taskId: row.task_id,
+      syncUser: row.assignment_data?.syncUser || row.worker_id || ""
+    });
+    const attachmentIds = [...new Set((todo.photos || [])
+      .map((photo) => String(photo?.attachmentId || "").trim())
+      .filter((attachmentId) => /^[a-f0-9]{64}$/i.test(attachmentId)))];
+    const attachmentRows = attachmentIds.length
+      ? await this.pool.query(
+        "select id, mime_type, byte_size, storage_key, thumbnail_key, data from indus_attachments where id = any($1::text[])",
+        [attachmentIds]
+      )
+      : { rows: [] };
+    const attachments = {};
+    for (const attachment of attachmentRows.rows) {
+      attachments[attachment.id] = {
+        ...(attachment.data || {}),
+        id: attachment.id,
+        mimeType: attachment.mime_type,
+        byteSize: Number(attachment.byte_size || 0),
+        storageKey: attachment.storage_key,
+        thumbnailKey: attachment.thumbnail_key
+      };
+    }
+    const assigneeIds = [...new Set(assignments.rows
+      .map((assignment) => String(assignment.data?.syncUser || assignment.worker_id || "").trim())
+      .filter(Boolean))];
+    const assignmentIds = assignments.rows.map((assignment) => String(assignment.id || "")).filter(Boolean);
+    return { todo, assigneeIds, assignmentIds, attachments };
+  }
+
+  // Completion-request links are sent by e-mail and must work even if their
+  // original assignment was subsequently replaced.  Find the logical task by
+  // the opaque token hash, then let the HTTP layer select the recipient's
+  // current assignment.  This is intentionally a narrow lookup: loading the
+  // full application state here would make the link feel broken on a large
+  // calendar history.
+  async completionRequestGroup(requestedAssignmentId, tokenHash) {
+    const assignmentId = String(requestedAssignmentId || "");
+    const hash = String(tokenHash || "").toLowerCase();
+    if (!assignmentId || !/^[a-f0-9]{64}$/.test(hash)) return null;
+    const tokenMatch = (parameter) => `exists (
+      select 1
+      from jsonb_array_elements(coalesce(a.data -> 'completionRequests', '[]'::jsonb)) as request(value)
+      where lower(coalesce(request.value ->> 'tokenHash', '')) = $${parameter}
+    )`;
+    // Most links still point at their original assignment; avoid even a
+    // group-wide lookup in that common case.  The fallback retains the older
+    // promise that a link survives a later assignment-copy change.
+    const direct = await this.pool.query(
+      `select a.task_id from indus_task_assignments a where a.id = $1 and ${tokenMatch(2)}`,
+      [assignmentId, hash]
+    );
+    const relocated = direct.rowCount ? null : await this.pool.query(
+      `select a.task_id from indus_task_assignments a where ${tokenMatch(1)} limit 1`,
+      [hash]
+    );
+    const taskId = direct.rows[0]?.task_id || relocated?.rows[0]?.task_id;
+    if (!taskId) return null;
+    const assignments = await this.pool.query(
+      "select id, worker_id, data from indus_task_assignments where task_id = $1",
+      [taskId]
+    );
+    return {
+      taskId: String(taskId || ""),
+      assignments: assignments.rows.map((row) => ({
+        id: String(row.id || ""),
+        workerId: String(row.worker_id || ""),
+        data: row.data || {}
+      })),
+      completionRequests: assignments.rows.flatMap((row) => Array.isArray(row.data?.completionRequests)
+        ? row.data.completionRequests
+        : [])
     };
   }
 

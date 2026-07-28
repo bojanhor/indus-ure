@@ -1467,7 +1467,7 @@ function normalizeDb(db = {}) {
       next.endDate = normalizedEndDate;
       changed = true;
     }
-    const calendarOnly = Boolean(next.calendarOnly && normalizedDate);
+    const calendarOnly = Boolean(!TIME_ENTRY_TODO_STATUSES.has(next.status) && next.calendarOnly && normalizedDate);
     if (next.calendarOnly !== calendarOnly) {
       next.calendarOnly = calendarOnly;
       changed = true;
@@ -1518,6 +1518,10 @@ function normalizeDb(db = {}) {
       next.done = completed;
       changed = true;
     }
+    if (TIME_ENTRY_TODO_STATUSES.has(next.status) && next.calendarOnly) {
+      next.calendarOnly = false;
+      changed = true;
+    }
     const ordered = ORDER_TODO_STATUSES.has(next.status) && Boolean(next.ordered);
     if (next.ordered !== ordered) {
       next.ordered = ordered;
@@ -1533,8 +1537,18 @@ function normalizeDb(db = {}) {
       next.syncUser = next.createdBy || "ibro";
       changed = true;
     }
-    if (typeof next.sourceProjectTodoId !== "string") {
-      next.sourceProjectTodoId = "";
+    const sourceProjectTodoId = next.status === "execution"
+      ? String(next.sourceProjectTodoId || "").trim().slice(0, 100)
+      : "";
+    if (next.sourceProjectTodoId !== sourceProjectTodoId) {
+      next.sourceProjectTodoId = sourceProjectTodoId;
+      changed = true;
+    }
+    const sourceProjectTitle = sourceProjectTodoId
+      ? String(next.sourceProjectTitle || "").trim().slice(0, 300)
+      : "";
+    if (next.sourceProjectTitle !== sourceProjectTitle) {
+      next.sourceProjectTitle = sourceProjectTitle;
       changed = true;
     }
     if (next.clientId || next.client) {
@@ -2183,6 +2197,21 @@ function visibleTodosForUser(db, user) {
   });
 }
 
+// The normal list endpoint intentionally prepares every visible task.  Links
+// in e-mail, however, open exactly one task.  Keeping that lookup focused
+// avoids hydrating every attachment and assignment before the editor appears.
+function visibleTodoForUser(db, user, id) {
+  const todoId = String(id || "");
+  const todo = (db.todos || []).find((item) => String(item?.id || "") === todoId);
+  if (!todo || isTrashedTodo(todo) || !canManageTodo(user, todo)) return null;
+  const hydrated = hydrateTodoAttachments(db, {
+    ...todo,
+    assigneeIds: todoAssignmentAssigneeIds(db, todo)
+  });
+  const { completionRequests, ...publicTodo } = hydrated;
+  return publicTodo;
+}
+
 function hydrateDebtAttachments(db, debt) {
   return hydrateTodoAttachments(db, { ...debt, photos: debt.photos || [] });
 }
@@ -2328,23 +2357,34 @@ function todoAssignmentEditLockConflict(db, todo, user, lockToken = "", now = Da
   return null;
 }
 
-function acquireTodoAssignmentEditLock(db, todo, user, lockToken = "", now = Date.now()) {
-  const items = todoAssignmentItems(db, todo);
-  const conflict = todoAssignmentEditLockConflict(db, todo, user, lockToken, now);
-  if (conflict) return { ok: false, lock: conflict };
-  const existing = items.map((item) => activeTodoEditLock(item.id, now)).find(Boolean);
+function acquireTodoEditLockGroup(todoId, assignmentIds, user, lockToken = "", now = Date.now()) {
+  const ids = [...new Set((assignmentIds || []).map((id) => String(id || "")).filter(Boolean))];
+  const targetId = String(todoId || "");
+  if (targetId && !ids.includes(targetId)) ids.push(targetId);
+  for (const id of ids) {
+    const conflict = todoEditLockConflict(id, user, lockToken, now);
+    if (conflict) return { ok: false, lock: conflict };
+  }
+  const existing = ids.map((id) => activeTodoEditLock(id, now)).find(Boolean);
   const token = existing?.token || crypto.randomBytes(18).toString("hex");
-  for (const item of items) {
-    todoEditLocks.set(String(item.id), {
-      todoId: String(item.id),
+  for (const id of ids) {
+    todoEditLocks.set(id, {
+      todoId: id,
       userId: user.id,
       userName: user.name || user.id,
       token,
       expiresAt: now + TODO_EDIT_LOCK_TTL_MS
     });
   }
-  const lock = activeTodoEditLock(todo.id, now);
+  const lock = activeTodoEditLock(targetId, now);
   return { ok: true, token, lock: publicTodoEditLock(lock) };
+}
+
+function acquireTodoAssignmentEditLock(db, todo, user, lockToken = "", now = Date.now()) {
+  const items = todoAssignmentItems(db, todo);
+  const conflict = todoAssignmentEditLockConflict(db, todo, user, lockToken, now);
+  if (conflict) return { ok: false, lock: conflict };
+  return acquireTodoEditLockGroup(todo.id, items.map((item) => item.id), user, lockToken, now);
 }
 
 function releaseTodoAssignmentEditLock(db, todo, user, lockToken = "", now = Date.now()) {
@@ -2356,6 +2396,42 @@ function canManageTodo(user, todo) {
   if (!todo) return false;
   if (user.role === "boss") return true;
   return todo.syncUser === user.id || todo.createdBy === user.id;
+}
+
+// A source project is not user-entered decoration: it is the durable link
+// between a completed hour entry and the task from which it was created.
+// New links are accepted only from a task the user can actually open. Later
+// edits retain the stored snapshot, even if that original task was deleted.
+function preserveTimeEntrySourceProject(db, user, todo, previous = null) {
+  if (todo.status !== "execution") {
+    return { todo: { ...todo, sourceProjectTodoId: "", sourceProjectTitle: "" }, error: "" };
+  }
+  const priorId = previous?.status === "execution" ? String(previous.sourceProjectTodoId || "").trim() : "";
+  if (previous) {
+    if (!priorId && todo.sourceProjectTodoId) {
+      return { todo, error: "Izvornega opravila za obstoječ vpis ur ni mogoče naknadno nastaviti." };
+    }
+    const source = priorId ? (db.todos || []).find((item) => item.id === priorId) : null;
+    return {
+      todo: {
+        ...todo,
+        sourceProjectTodoId: priorId,
+        sourceProjectTitle: priorId ? String(previous.sourceProjectTitle || source?.title || "").trim().slice(0, 300) : ""
+      },
+      error: ""
+    };
+  }
+  const sourceId = String(todo.sourceProjectTodoId || "").trim();
+  if (!sourceId) return { todo, error: "" };
+  const source = (db.todos || []).find((item) => item.id === sourceId);
+  if (!source || isTrashedTodo(source) || !canManageTodo(user, source)
+      || TIME_ENTRY_TODO_STATUSES.has(source.status) || !["open", "in_progress"].includes(source.status)) {
+    return { todo, error: "Izvorno opravilo ni na voljo za vpis ur." };
+  }
+  return {
+    todo: { ...todo, sourceProjectTodoId: source.id, sourceProjectTitle: String(source.title || "").trim().slice(0, 300) },
+    error: ""
+  };
 }
 function sourceTodoForNewEntry(db, user, entry) {
   const sourceTodoId = String(entry.sourceTodoId || "");
@@ -3667,10 +3743,10 @@ function todoEditableSnapshot(todo) {
     thumbnailData: String(item?.thumbnailData || "")
   }));
   return JSON.stringify({
-    title: String(todo?.title || ""), date: String(todo?.date || ""), endDate: String(todo?.endDate || todo?.date || ""), calendarOnly: Boolean(todo?.calendarOnly && todo?.date), start: String(todo?.start || ""), end: String(todo?.end || ""),
+    title: String(todo?.title || ""), date: String(todo?.date || ""), endDate: String(todo?.endDate || todo?.date || ""), calendarOnly: Boolean(!isTimeEntry && todo?.calendarOnly && todo?.date), start: String(todo?.start || ""), end: String(todo?.end || ""),
     client: String(todo?.client || ""), clientId: String(todo?.clientId || ""), clientContactIds: cleanTodoClientContactIds(todo?.clientContactIds), clientContacts: cleanTodoClientContactSnapshots(todo?.clientContacts), notes: String(todo?.notes || ""), material: String(todo?.material || ""),
     status, urgent: Boolean(todo?.urgent), ordered: Boolean(todo?.ordered), warranty: isCompleted && Boolean(todo?.warranty),
-    sourceProjectTodoId: String(todo?.sourceProjectTodoId || ""), billingHourlyRate: isTimeEntry ? nonnegativeNumber(todo?.billingHourlyRate, null, 10_000) : null,
+    sourceProjectTodoId: String(todo?.sourceProjectTodoId || ""), sourceProjectTitle: String(todo?.sourceProjectTitle || ""), billingHourlyRate: isTimeEntry ? nonnegativeNumber(todo?.billingHourlyRate, null, 10_000) : null,
     billingKm: isTimeEntry ? nonnegativeNumber(todo?.billingKm, null, 1_000_000) : null, workFromHome: isTimeEntry && Boolean(todo?.workFromHome), clientKm: isCompleted ? nonnegativeNumber(todo?.clientKm, null, 1_000_000) : null,
     clientVehicle: isCompleted ? todoVehicle(todo?.clientVehicle) : "", driveFiles: files(todo?.driveFiles), photos: files(todo?.photos)
   });
@@ -3826,9 +3902,10 @@ async function requireUser(req, res) {
   return user;
 }
 
-// The browser asks this endpoint frequently. In PostgreSQL this reads only the
-// session, user and revision row rather than loading every task and attachment.
-async function requireUserForSyncState(req, res) {
+// Identity/bootstrap endpoints and focused e-mail links must not load the
+// complete PostgreSQL state. The normal requireUser path intentionally still
+// does that for mutations which need an authoritative full-state snapshot.
+async function requireUserForLightweightSession(req, res) {
   if (!DATABASE_URL) return requireUser(req, res);
   await ensurePostgresDb();
   const token = sessionTokenFromRequest(req);
@@ -3839,11 +3916,22 @@ async function requireUserForSyncState(req, res) {
   }
   req.indusSession = record.session;
   req.indusDb = { syncRevision: record.revision };
+  req.indusSessionToken = token;
+  req.indusSessionUser = record.user;
   if (!validCsrf(req, record.session)) {
     sendJson(res, 403, { error: "Varnostna potrditev seje manjka. Osvezi stran in poskusi znova." });
     return null;
   }
   return record.user;
+}
+
+// Kept as named wrappers so the route intent stays obvious at call sites.
+async function requireUserForSyncState(req, res) {
+  return requireUserForLightweightSession(req, res);
+}
+
+async function requireUserForFocusedTodo(req, res) {
+  return requireUserForLightweightSession(req, res);
 }
 
 function audit(user, action) {
@@ -4028,12 +4116,14 @@ function cleanTodo(input) {
   const status = input.status === "billing" ? "execution" : TODO_STATUSES.has(input.status) ? input.status : "open";
   const isMeal = status === "meal";
   const isTimeEntry = TIME_ENTRY_TODO_STATUSES.has(status);
+  const sourceProjectTodoId = status === "execution" ? String(input.sourceProjectTodoId || "").trim().slice(0, 100) : "";
+  const sourceProjectTitle = sourceProjectTodoId ? String(input.sourceProjectTitle || "").trim().slice(0, 300) : "";
   const photos = Array.isArray(input.photos) ? input.photos : [];
   return {
     title: isMeal ? "Malica" : String(input.title || "").trim(),
     date: String(input.date || ""),
     endDate: String(input.endDate || input.date || ""),
-    calendarOnly: Boolean(input.calendarOnly && input.date),
+    calendarOnly: Boolean(!isTimeEntry && input.calendarOnly && input.date),
     start: roundTimeToQuarterHour(input.start),
     end: roundTimeToQuarterHour(input.end),
     client: isMeal ? "" : String(input.client || "").trim(),
@@ -4054,7 +4144,8 @@ function cleanTodo(input) {
     ordered: ORDER_TODO_STATUSES.has(status) && Boolean(input.ordered),
     warranty: input.status === "execution" && Boolean(input.warranty),
     syncUser: cleanUserId(input.syncUser),
-    sourceProjectTodoId: String(input.sourceProjectTodoId || "").trim().slice(0, 100),
+    sourceProjectTodoId,
+    sourceProjectTitle,
     done: input.status === "execution",
     hoursNeedsReview: isTimeEntry && Boolean(input.hoursNeedsReview),
     workFromHome: isTimeEntry && Boolean(input.workFromHome),
@@ -5845,7 +5936,9 @@ async function handleApi(req, res) {
     }
 
     if (url.pathname === "/api/me") {
-      const user = await requireUser(req, res);
+      // This is the first authenticated request on every page load. In
+      // PostgreSQL keep it narrow so an e-mail todo link can open immediately.
+      const user = await requireUserForLightweightSession(req, res);
       if (!user) return;
       sendJson(res, 200, {
         user: publicUser(user),
@@ -5871,10 +5964,11 @@ async function handleApi(req, res) {
     }
 
     if (url.pathname === "/api/users" && req.method === "GET") {
-      const user = await requireUser(req, res);
+      const user = await requireUserForLightweightSession(req, res);
       if (!user) return;
-      const db = await readDbAsync();
-      const users = Object.values(db.users || {}).map(publicDirectoryUser);
+      const users = DATABASE_URL
+        ? await getPgStore().publicUserDirectory()
+        : Object.values((req.indusDb || await readDbAsync()).users || {}).map(publicDirectoryUser);
       sendJson(res, 200, { users });
       return;
     }
@@ -6980,6 +7074,12 @@ async function handleApi(req, res) {
         sendJson(res, 400, { error: validation });
         return;
       }
+      const sourceProject = preserveTimeEntrySourceProject(db, user, todo);
+      if (sourceProject.error) {
+        sendJson(res, 400, { error: sourceProject.error });
+        return;
+      }
+      todo = sourceProject.todo;
       const now = new Date().toISOString();
       todo = attachResolvedClient(db, todo, { createAdHoc: true, user });
       const contactSelection = applyTodoClientContactSelection(db, todo, { strict: true });
@@ -7002,8 +7102,8 @@ async function handleApi(req, res) {
           .map(cleanUserId)
           .filter((assigneeId) => Boolean(db.users?.[assigneeId])))]
         : [];
-      if (user.role !== "boss" && requestedAssigneeIds.some((assigneeId) => assigneeId !== user.id)) {
-        sendJson(res, 403, { error: "Delavec lahko opravilo dodeli samo sebi." });
+      if (user.role !== "boss" && TIME_ENTRY_TODO_STATUSES.has(todo.status) && requestedAssigneeIds.some((assigneeId) => assigneeId !== user.id)) {
+        sendJson(res, 403, { error: "Delavec lahko ure vpiše samo sebi." });
         return;
       }
       if (hasExplicitAssignees && !requestedAssigneeIds.length && todo.status !== "meal") {
@@ -7278,11 +7378,34 @@ async function handleApi(req, res) {
 
     const todoLockMatch = url.pathname.match(/^\/api\/todos\/([^/]+)\/lock$/);
     if (todoLockMatch && req.method === "POST") {
-      const user = await requireUser(req, res);
-      if (!user) return;
       const id = decodeURIComponent(todoLockMatch[1]);
+      const user = await requireUserForFocusedTodo(req, res);
+      if (!user) return;
       const body = await readBody(req);
-      const db = await readDbAsync();
+      if (DATABASE_URL) {
+        const focused = await getPgStore().focusedTodo(id);
+        const todo = focused?.todo;
+        if (!todo) {
+          sendJson(res, 404, { code: "todo_not_found", error: "Opravilo ne obstaja več." });
+          return;
+        }
+        if (!canManageTodo(user, todo)) {
+          sendJson(res, 403, { code: "todo_not_editable", error: "Tega opravila ne moreš urejati." });
+          return;
+        }
+        if (isTrashedTodo(todo)) {
+          sendJson(res, 409, { error: "Opravilo je v Izbrisano. Najprej ga obnovi." });
+          return;
+        }
+        const result = acquireTodoEditLockGroup(id, focused.assignmentIds, user, body.lockToken);
+        if (!result.ok) {
+          sendJson(res, 409, { error: `Opravilo trenutno ureja ${result.lock.lockedByName || result.lock.lockedById}.`, lock: result.lock });
+          return;
+        }
+        sendJson(res, 200, { lockToken: result.token, lock: result.lock });
+        return;
+      }
+      const db = req.indusDb || await readDbAsync();
       const todo = db.todos.find((item) => item.id === id);
       if (!todo) {
         sendJson(res, 404, { code: "todo_not_found", error: "Opravilo ne obstaja več." });
@@ -7322,9 +7445,59 @@ async function handleApi(req, res) {
 
     const todoCompletionRequestMatch = url.pathname.match(/^\/api\/todos\/([^/]+)\/completion-request$/);
     if (todoCompletionRequestMatch) {
+      const id = decodeURIComponent(todoCompletionRequestMatch[1]);
+      // E-mail links must not hydrate every task, attachment and payroll row
+      // before opening one editor.  The token lookup is deliberately scoped to
+      // its logical assignment group and also survives a later assignment copy.
+      if (req.method === "GET" && DATABASE_URL) {
+        const user = await requireUserForFocusedTodo(req, res);
+        if (!user) return;
+        const tokenHash = sessionTokenHash(String(url.searchParams.get("token") || ""));
+        const requestGroup = await getPgStore().completionRequestGroup(id, tokenHash);
+        const request = cleanTodoCompletionRequests(requestGroup?.completionRequests)
+          .find((item) => item.tokenHash === tokenHash);
+        if (!request) {
+          sendJson(res, 403, { error: "Povezava za dopolnitev ni veljavna ali je potekla." });
+          return;
+        }
+        if (!request.recipientUserIds.includes(user.id)) {
+          sendJson(res, 403, { error: "Ta povezava je namenjena drugemu uporabniku." });
+          return;
+        }
+        const recipientAssignment = (requestGroup?.assignments || []).find((assignment) => {
+          const candidate = assignment?.data || {};
+          return user.role === "boss"
+            || String(candidate.syncUser || "") === user.id
+            || String(candidate.createdBy || "") === user.id
+            || String(assignment.workerId || "") === user.id;
+        });
+        if (!recipientAssignment) {
+          sendJson(res, 403, { error: "Za to opravilo nimas dostopa." });
+          return;
+        }
+        const focused = await getPgStore().focusedTodo(recipientAssignment.id);
+        const source = focused?.todo;
+        if (!source || isTrashedTodo(source) || !canManageTodo(user, source)) {
+          sendJson(res, 403, { error: "Za to opravilo nimas dostopa." });
+          return;
+        }
+        const hydrated = hydrateTodoAttachments({ attachments: focused.attachments }, {
+          ...source,
+          assigneeIds: focused.assigneeIds
+        });
+        const { completionRequests, ...todo } = hydrated;
+        sendJson(res, 200, {
+          todo,
+          request: {
+            requestedByName: request.requestedByName || request.requestedBy,
+            comment: request.comment,
+            expiresAt: request.expiresAt
+          }
+        });
+        return;
+      }
       const user = await requireUser(req, res);
       if (!user) return;
-      const id = decodeURIComponent(todoCompletionRequestMatch[1]);
       const db = await readDbAsync();
       let todo = (db.todos || []).find((item) => item.id === id);
       if (req.method === "GET") {
@@ -7663,11 +7836,26 @@ async function handleApi(req, res) {
     }
     const todoMatch = url.pathname.match(/^\/api\/todos\/([^/]+)$/);
     if (todoMatch && req.method === "GET") {
-      const user = await requireUser(req, res);
-      if (!user) return;
       const id = decodeURIComponent(todoMatch[1]);
-      const db = await readDbAsync();
-      const todo = visibleTodosForUser(db, user).find((item) => item.id === id);
+      const user = await requireUserForFocusedTodo(req, res);
+      if (!user) return;
+      if (DATABASE_URL) {
+        const focused = await getPgStore().focusedTodo(id);
+        const source = focused?.todo;
+        if (!source || isTrashedTodo(source) || !canManageTodo(user, source)) {
+          sendJson(res, 404, { error: "Opravilo ne obstaja ali ni na voljo." });
+          return;
+        }
+        const hydrated = hydrateTodoAttachments({ attachments: focused.attachments }, {
+          ...source,
+          assigneeIds: focused.assigneeIds
+        });
+        const { completionRequests, ...todo } = hydrated;
+        sendJson(res, 200, { todo });
+        return;
+      }
+      const db = req.indusDb || await readDbAsync();
+      const todo = visibleTodoForUser(db, user, id);
       if (!todo) {
         sendJson(res, 404, { error: "Opravilo ne obstaja ali ni na voljo." });
         return;
@@ -7688,6 +7876,26 @@ async function handleApi(req, res) {
         return;
       }
       const db = await readDbAsync();
+      const index = db.todos.findIndex((item) => item.id === id);
+      if (index < 0) {
+        sendJson(res, 404, { error: "Opravilo ne obstaja." });
+        return;
+      }
+      const previousTodo = db.todos[index];
+      if (isTrashedTodo(previousTodo)) {
+        sendJson(res, 409, { error: "Opravilo je v Izbrisano. Najprej ga obnovi." });
+        return;
+      }
+      if (!canManageTodo(user, previousTodo)) {
+        sendJson(res, 403, { error: "Tega opravila ne moreš spreminjati." });
+        return;
+      }
+      const sourceProject = preserveTimeEntrySourceProject(db, user, todo, previousTodo);
+      if (sourceProject.error) {
+        sendJson(res, 400, { error: sourceProject.error });
+        return;
+      }
+      todo = sourceProject.todo;
       todo = attachResolvedClient(db, todo, { createAdHoc: true, user });
       const contactSelection = applyTodoClientContactSelection(db, todo, { strict: true });
       if (contactSelection.error) {
@@ -7701,19 +7909,6 @@ async function handleApi(req, res) {
         return;
       }
       todo = storeTodoAttachments(db, todo, user);
-      const index = db.todos.findIndex((item) => item.id === id);
-      if (index < 0) {
-        sendJson(res, 404, { error: "Opravilo ne obstaja." });
-        return;
-      }
-      if (isTrashedTodo(db.todos[index])) {
-        sendJson(res, 409, { error: "Opravilo je v Izbrisano. Najprej ga obnovi." });
-        return;
-      }      if (!canManageTodo(user, db.todos[index])) {
-        sendJson(res, 403, { error: "Tega opravila ne moreš spreminjati." });
-        return;
-      }
-      const previousTodo = db.todos[index];
       const editLock = todoAssignmentEditLockConflict(db, previousTodo, user, editLockToken);
       if (editLock) {
         sendJson(res, 409, { error: `Opravilo trenutno ureja ${editLock.lockedByName || editLock.lockedById}.`, lock: editLock });
@@ -7759,6 +7954,10 @@ async function handleApi(req, res) {
         if (!assigneeIds.includes(nextAssignee)) assigneeIds.push(nextAssignee);
       }
 
+      if (user.role !== "boss" && TIME_ENTRY_TODO_STATUSES.has(todo.status) && assigneeIds.some((assigneeId) => assigneeId !== user.id)) {
+        sendJson(res, 403, { error: "Delavec lahko ure vpiše samo sebi." });
+        return;
+      }
       if (todo.status === "meal") assigneeIds = [syncUserForRequest(user, todo.syncUser || assigneeIds[0] || previousTodo.syncUser || user.id, previousTodo.syncUser, db.users)];
       if (TIME_ENTRY_TODO_STATUSES.has(todo.status) && assigneeIds.length !== 1) {
         sendJson(res, 400, { error: "Vnos ur se vpisuje posebej za enega delavca." });
@@ -8108,6 +8307,7 @@ module.exports = {
   canManageEntry,
   canManageFinancialEntry,
   canManageTodo,
+  preserveTimeEntrySourceProject,
   sourceTodoForNewEntry,
   defaultHourlyRateForUser,
   importedTodoWasEdited,
@@ -8152,5 +8352,6 @@ module.exports = {
   visibleDebtsForUser,
   visibleEntriesForUser,
   visibleTodosForUser,
+  visibleTodoForUser,
   visibleTrashedTodosForUser,
 };
