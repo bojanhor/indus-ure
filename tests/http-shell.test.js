@@ -88,7 +88,8 @@ test("ročni filter loči in omogoča razvrščanje nujnih opravil", async () =>
     fs.readFile(path.join(__dirname, "..", "outputs", "server.js"), "utf8")
   ]);
   assert.match(html, /function todoManualCategory\(todo\) \{\s*if \(todo\?\.urgent\) return "urgent";/);
-  assert.match(html, /const positions = \{ urgent: 0, ordering: 1, unsorted: 2, sorted: 3, completed: 4 \}/);
+  assert.match(html, /const positions = \{ urgent: 0, ordering: 1, unsorted: 2, sorted: 3 \}/);
+  assert.match(html, /if \(state\.todoSortMode === "manual"\) \{\s*return list\.filter\(\(todo\) => !todo\.done && !timeEntryStatusIds\.has\(todo\.status\)\)\.sort\(todoManualCategorySort\);/);
   assert.match(html, /urgent: \["Nujno", "Nujna opravila"\]/);
   assert.match(html, /const collapsible = bucket === "ordering";/);
   assert.match(html, /function appendTodoOrderSection\(items, bucket, itemCount = 0\)/);
@@ -460,7 +461,13 @@ test("boss can create a task for workers directly from admin view", async () => 
   assert.match(html, /todo\._adminCreate\s*\? \[\]/);
   assert.match(html, /id="todoFormAssigneeLabel"/);
   assert.match(html, /Izberi vsaj enega izvajalca\./);
-  assert.match(html, /add\.title = isAdminView\(\) \? 'Dodaj opravilo za delavca'/);
+  assert.match(html, /function setTodoDialogSaving\(saving\)/);
+  assert.match(html, /save\.classList\.toggle\("is-saving", Boolean\(saving\)\)/);
+  assert.match(html, /todoDialogSaveInFlight\) event\.preventDefault\(\)/);
+  assert.match(html, /\$\("todoDialog"\)\.addEventListener\("click", \(event\) => \{\s*if \(event\.target !== event\.currentTarget\) return;\s*event\.preventDefault\(\);\s*\}\);/);
+  assert.match(html, /\$\("newTodoButton"\)\.textContent = "Dodaj opravilo";/);
+  assert.match(html, /add\.title = isAdminView\(\) \? 'Dodaj opravilo'/);
+  assert.doesNotMatch(html, /Dodaj opravilo za delavca/);
   assert.match(html, /function openStandaloneHoursDialog\(date = dateKey\(new Date\(\)\), \{ adminCreate = false \} = \{\}\)/);
   assert.match(html, /openStandaloneHoursDialog\(date, \{ adminCreate: isAdminView\(\) \}\)/);
 });

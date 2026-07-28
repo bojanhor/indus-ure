@@ -3272,6 +3272,32 @@
 
     #todoDialog .todo-modal-action.primary { background: var(--accent); color: #fff; }
     #todoDialog .todo-modal-action.danger { background: #fff1f1; color: #9f3636; border: 1px solid #e3bcbc; }
+    #todoDialog button:not(:disabled):active { transform: scale(.94); filter: brightness(.96); }
+    #todoDialog .todo-modal-action.is-saving {
+      position: relative;
+      color: transparent;
+      cursor: progress;
+    }
+    #todoDialog .todo-modal-action.is-saving::after {
+      content: "";
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 15px;
+      height: 15px;
+      border: 2px solid rgba(255,255,255,.9);
+      border-right-color: transparent;
+      border-radius: 50%;
+      animation: todo-action-spin .72s linear infinite;
+    }
+    #todoDialog form.is-saving .modal-body { cursor: progress; }
+    @keyframes todo-action-spin {
+      from { transform: translate(-50%, -50%) rotate(0deg); }
+      to { transform: translate(-50%, -50%) rotate(360deg); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      #todoDialog .todo-modal-action.is-saving::after { animation: none; transform: translate(-50%, -50%); }
+    }
 
     #attachmentPreviewDialog {
       width: min(1100px, calc(100vw - 20px));
@@ -4879,6 +4905,7 @@
     <form method="dialog" id="todoForm">
       <div class="modal-head">
         <h3 id="todoFormTitle">Opravilo</h3>
+        <span class="sr-only" id="todoFormActionStatus" role="status" aria-live="polite"></span>
         <div class="modal-head-actions" aria-label="Dejanja opravila">
           <button class="todo-modal-action danger hidden" id="deleteTodoFromDialog" type="button" title="Izbriši opravilo" aria-label="Izbriši opravilo">&#128465;</button>
           <button class="todo-modal-action secondary hidden" id="duplicateTodoFromDialog" type="button" title="Podvoji opravilo" aria-label="Podvoji opravilo">&#10697;</button>
@@ -6942,7 +6969,7 @@
       document.querySelectorAll(".admin-only").forEach((element) => element.classList.toggle("hidden", !admin));
       document.querySelectorAll(".worker-only").forEach((element) => element.classList.toggle("hidden", admin));
       $("newTodoButton").classList.remove("hidden");
-      $("newTodoButton").textContent = admin ? "Dodaj opravilo za delavca" : "Dodaj opravilo";
+      $("newTodoButton").textContent = "Dodaj opravilo";
       $("writeHoursButton").classList.toggle("hidden", admin);
       document.querySelectorAll(".admin-entry-field").forEach((element) => element.classList.toggle("hidden", !admin));
       $("googleDrive").classList.toggle("hidden", String(state.user?.email || "").toLowerCase() !== "bojan@indus.si");
@@ -7809,13 +7836,12 @@
 
     function todoManualCategory(todo) {
       if (todo?.urgent) return "urgent";
-      if (todo?.status === "execution") return "completed";
       if (manualOrderingStatusIds.has(todo?.status)) return "ordering";
       return todoManualBucketForCurrentUser(todo);
     }
 
     function todoManualCategorySort(a, b) {
-      const positions = { urgent: 0, ordering: 1, unsorted: 2, sorted: 3, completed: 4 };
+      const positions = { urgent: 0, ordering: 1, unsorted: 2, sorted: 3 };
       const aCategory = todoManualCategory(a);
       const bCategory = todoManualCategory(b);
       const categoryDifference = (positions[aCategory] ?? 9) - (positions[bCategory] ?? 9);
@@ -7883,9 +7909,7 @@
       if (state.todoSortMode === "in_progress") return list.filter((todo) => todo.status === "in_progress").sort(todoManualBucketSort);
       if (state.todoSortMode === "client") return list.filter((todo) => !timeEntryStatusIds.has(todo.status) || todo.status === "execution").sort(todoSort);
       if (state.todoSortMode === "manual") {
-        const active = list.filter((todo) => !timeEntryStatusIds.has(todo.status)).sort(todoManualCategorySort);
-        const completed = list.filter((todo) => todo.status === "execution").sort(todoDateSort);
-        return [...active, ...completed];
+        return list.filter((todo) => !todo.done && !timeEntryStatusIds.has(todo.status)).sort(todoManualCategorySort);
       }
       if (state.todoSortMode === "completed") {
         const unique = new Map();
@@ -8259,7 +8283,7 @@
         add.className = 'quick-add';
         add.type = 'button';
         add.textContent = '+';
-        add.title = isAdminView() ? 'Dodaj opravilo za delavca' : `Dodaj opravilo za ${activeWorker()?.name || 'delavca'}`;
+        add.title = isAdminView() ? 'Dodaj opravilo' : `Dodaj opravilo za ${activeWorker()?.name || 'delavca'}`;
         add.addEventListener('click', () => startTodoForDate(key));
         head.appendChild(add);
         day.appendChild(head);
@@ -10044,7 +10068,6 @@
         sorted: ["Razvrščeno", "Ustaljeni vrstni red"],
         unsorted: ["Nerazvrščeno", "Nova opravila"],
         ordering: ["Naroči", "Naročila in opravila za v avto"],
-        completed: ["Zaključeno", "Zaključena opravila po datumu"]
       };
       const pair = labels[bucket] || labels.sorted;
       const label = pair[0];
@@ -11580,6 +11603,7 @@
     }
 
     async function openTodoDialog(todo = {}) {
+      setTodoDialogSaving(false);
       const editing = Boolean(todo.id);
       state.todoHoursSourceId = String(todo._hoursSourceId || "");
       state.todoStandaloneHours = Boolean(todo._standaloneHours);
@@ -11783,15 +11807,40 @@
     }
 
     let todoDialogSaveInFlight = false;
+    function setTodoDialogSaving(saving) {
+      const form = $("todoForm");
+      const save = $("saveTodoDialog");
+      const status = $("todoFormActionStatus");
+      form.classList.toggle("is-saving", Boolean(saving));
+      form.setAttribute("aria-busy", String(Boolean(saving)));
+      form.querySelectorAll("input, textarea, select, button").forEach((control) => {
+        if (saving) {
+          if (!control.disabled) {
+            control.dataset.todoDialogWasEnabled = "true";
+            control.disabled = true;
+          }
+        } else if (control.dataset.todoDialogWasEnabled === "true") {
+          control.disabled = false;
+          delete control.dataset.todoDialogWasEnabled;
+        }
+      });
+      save.classList.toggle("is-saving", Boolean(saving));
+      save.setAttribute("aria-busy", String(Boolean(saving)));
+      save.title = saving ? "Shranjujem opravilo" : "Shrani";
+      save.setAttribute("aria-label", saving ? "Shranjujem opravilo" : "Shrani");
+      status.textContent = saving ? "Shranjujem opravilo." : "";
+    }
     async function submitTodoDialog() {
       if (todoDialogSaveInFlight) return;
       todoDialogSaveInFlight = true;
+      setTodoDialogSaving(true);
       try {
         await saveTodoFromDialog();
       } catch (error) {
         showNotice(error.message);
       } finally {
         todoDialogSaveInFlight = false;
+        setTodoDialogSaving(false);
       }
     }
     function completionRequestTodos() {
@@ -14173,7 +14222,9 @@
     $("todoDialog").addEventListener("click", (event) => {
       if (event.target !== event.currentTarget) return;
       event.preventDefault();
-      submitTodoDialog();
+    });
+    $("todoDialog").addEventListener("cancel", (event) => {
+      if (todoDialogSaveInFlight) event.preventDefault();
     });
     $("deleteTodoFromDialog").addEventListener("click", () => deleteTodoFromDialog().catch((error) => showNotice(error.message)));
     $("duplicateTodoFromDialog").addEventListener("click", () => duplicateTodoFromCurrent().catch((error) => showNotice(error.message)));

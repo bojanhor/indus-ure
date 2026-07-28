@@ -70,6 +70,43 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
     }
   });
 
+  test("saving an event gives immediate feedback and blocks duplicate interaction", async ({ browser }) => {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    let releasePost = null;
+    const allowPost = new Promise((resolve) => { releasePost = resolve; });
+    let postCount = 0;
+    try {
+      await localLogin(page, "ibro");
+      await page.route("**/api/todos", async (route, request) => {
+        if (request.method() === "POST") {
+          postCount += 1;
+          await allowPost;
+        }
+        await route.continue();
+      });
+      await page.locator("#newTodoButton").click();
+      await page.locator("#todoFormTask").fill("PW vidno shranjevanje");
+      await page.locator("#todoFormClient").fill(CLIENT_ALIAS);
+      const dialog = page.locator("#todoDialog");
+      const save = page.locator("#saveTodoDialog");
+      await save.click();
+      await expect(save).toBeDisabled();
+      await expect(save).toHaveAttribute("aria-busy", "true");
+      await expect(page.locator("#closeTodoDialog")).toBeDisabled();
+      await page.keyboard.press("Escape");
+      await expect(dialog).toBeVisible();
+      await dialog.evaluate((node) => node.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+      await expect.poll(() => postCount).toBe(1);
+      releasePost();
+      await expect(dialog).toBeHidden();
+      expect(postCount).toBe(1);
+      await page.unroute("**/api/todos");
+    } finally {
+      releasePost?.();
+      await context.close();
+    }
+  });
   test("worker enters hours through the real form", async ({ browser }) => {
     const context = await browser.newContext();
     const page = await context.newPage();
@@ -105,6 +142,8 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
       await page.locator("#saveTodoDialog").click();
 
       await expect(page.locator("#todoDialog")).toBeHidden();
+      await expect(page.locator("#todoItems")).not.toContainText(ENTRY_TITLE);
+      await page.locator("#todoSortMode").selectOption("completed");
       await expect(page.locator("#todoItems")).toContainText(ENTRY_TITLE);
       await expect(page.locator("#todoItems")).toContainText(CLIENT_ALIAS);
     } finally {
