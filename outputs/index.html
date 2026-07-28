@@ -905,6 +905,9 @@
     .billing-rate-control input { width: 88px; }
     .billing-worker-control select { min-width: 220px; }
     .billing-month-step { min-width: 40px; min-height: 40px; padding: 0; }
+    .billing-quick-ranges { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+    .billing-quick-ranges > span { color: var(--muted); font-size: 12px; font-weight: 800; }
+    .billing-quick-ranges button { min-height: 34px; padding: 5px 9px; white-space: nowrap; }
     .billing-range-picker { min-height: 40px; white-space: nowrap; }
     .billing-range-calendar { display: grid; gap: 10px; }
     .billing-range-calendar-head { display: grid; grid-template-columns: 40px minmax(0, 1fr) 40px; align-items: center; gap: 8px; text-align: center; }
@@ -2595,6 +2598,8 @@
 
     #dayTimelineDialog > form {
       height: 100%;
+      min-width: 0;
+      max-width: 100%;
       display: grid;
       grid-template-rows: auto auto auto minmax(0, 1fr);
     }
@@ -2624,7 +2629,7 @@
 
     .day-all-day.hidden { display: none; }
     .day-all-day-label { padding-top: 7px; color: var(--muted); font-size: 11px; font-weight: 800; }
-    .day-all-day-items { display: flex; flex-wrap: wrap; gap: 6px; }
+    .day-all-day-items { display: flex; min-width: 0; flex-wrap: wrap; gap: 6px; }
     .day-all-day-item {
       min-height: 34px;
       max-width: 100%;
@@ -2635,11 +2640,16 @@
       border-left: 4px solid var(--todo-border, var(--todo-bg));
       text-align: left;
       font-weight: 750;
+      cursor: grab;
+      touch-action: manipulation;
     }
+    .day-all-day-item.is-drag-ready { outline: 2px dashed var(--accent); outline-offset: 2px; cursor: grabbing; }
 
     .day-timeline-scroll {
       position: relative;
       min-height: 0;
+      min-width: 0;
+      max-width: 100%;
       overflow: auto;
       overscroll-behavior: contain;
       touch-action: none;
@@ -2650,7 +2660,8 @@
     .day-timeline-scroll.is-panning { cursor: grabbing; }
     .day-timeline {
       position: relative;
-      min-width: 310px;
+      min-width: min(310px, 100%);
+      max-width: 100%;
       margin-left: 0;
       background: #fff;
     }
@@ -2676,7 +2687,7 @@
       pointer-events: none;
     }
 
-    .day-timeline-events { position: absolute; inset: 0 8px 0 66px; }
+    .day-timeline-events { position: absolute; min-width: 0; max-width: 100%; inset: 0 8px 0 66px; }
     .day-timeline-events { right: 74px; }
     .day-work-blocks { position: absolute; top: 0; right: 6px; bottom: 0; width: 62px; border-left: 1px solid var(--line); }
     .day-work-block {
@@ -2708,6 +2719,9 @@
     .day-timeline-event {
       position: absolute;
       min-height: 18px;
+      min-width: 0;
+      max-width: 100%;
+      box-sizing: border-box;
       padding: 6px 8px;
       overflow: hidden;
       border: 1px solid var(--todo-border, var(--todo-bg));
@@ -2723,12 +2737,21 @@
     }
 
     .day-timeline-event.is-moving { opacity: 0.88; cursor: grabbing; z-index: 8; }
+    .day-timeline-event.is-drop-preview {
+      pointer-events: none;
+      z-index: 9;
+      border: 2px dashed var(--accent);
+      border-left-width: 5px;
+      color: var(--accent-dark);
+      background: rgba(195, 229, 217, 0.88);
+      box-shadow: 0 6px 16px rgba(23, 114, 145, 0.2);
+    }
     .day-timeline-event.is-day-moving { outline: 3px solid rgba(23, 114, 145, 0.9); outline-offset: 2px; box-shadow: 0 8px 18px rgba(23, 114, 145, 0.28); }
-    .day-timeline-event.is-day-moving::after { content: attr(data-day-target); position: absolute; right: 6px; top: 5px; padding: 2px 5px; border-radius: 999px; background: rgba(17, 38, 46, 0.78); color: #fff; font-size: 10px; font-weight: 900; }
+    .day-timeline-event.is-day-moving::after { content: attr(data-day-target); position: absolute; right: 6px; top: 5px; max-width: calc(100% - 12px); overflow: hidden; padding: 2px 5px; border-radius: 999px; color: #fff; background: rgba(17, 38, 46, 0.78); font-size: 10px; font-weight: 900; text-overflow: ellipsis; white-space: nowrap; }
     .day-timeline-event.is-drag-ready { outline: 2px dashed var(--accent); outline-offset: 2px; }
     .day-hours-warning { display: inline-grid; place-items: center; width: 18px; height: 18px; margin-left: 5px; border-radius: 50%; background: #c93131; color: #fff; font-weight: 900; line-height: 1; }
     .day-timeline-event-title { display: block; font-size: 13px; line-height: 1.2; overflow-wrap: anywhere; }
-    .day-timeline-event-meta { display: block; margin-top: 2px; font-size: 11px; line-height: 1.15; opacity: 0.86; }
+    .day-timeline-event-meta { display: block; min-width: 0; margin-top: 2px; font-size: 11px; line-height: 1.15; overflow-wrap: anywhere; word-break: break-word; opacity: 0.86; }
     .day-resize-handle {
       position: absolute;
       width: 54px;
@@ -3888,6 +3911,20 @@
     }
 
     .client-billing-title-row h3 { margin: 0; font-size: 16px; overflow-wrap: anywhere; }
+    .client-billing-title-trigger {
+      display: inline;
+      margin: 0;
+      padding: 0;
+      border: 0;
+      color: inherit;
+      background: transparent;
+      font: inherit;
+      font-weight: inherit;
+      text-align: left;
+      cursor: pointer;
+    }
+    .client-billing-title-trigger:hover,
+    .client-billing-title-trigger:focus-visible { color: #075a4b; text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 3px; }
 
     .client-billing-select {
       display: inline-flex;
@@ -3954,6 +3991,15 @@
       font-size: 13px;
       font-weight: 750;
     }
+    .client-billing-charges-trigger {
+      width: 100%;
+      border: 0;
+      text-align: left;
+      font-family: inherit;
+      cursor: pointer;
+    }
+    .client-billing-charges-trigger:hover,
+    .client-billing-charges-trigger:focus-visible { background: #dcece6; outline: 2px solid #197e68; outline-offset: 2px; }
 
     .client-billing-attachments {
       display: grid;
@@ -4449,6 +4495,9 @@
       .billing-period label, .billing-period input { width: 100%; min-width: 0; }
       .billing-period input { min-height: 36px; padding: 5px 3px; font-size: clamp(12px, 3.4vw, 15px); letter-spacing: 0; }
       .billing-period .billing-month-step { min-width: 30px; min-height: 36px; padding: 0; font-size: 22px; }
+      .billing-quick-ranges { width: 100%; }
+      .billing-quick-ranges > span { width: 100%; }
+      .billing-quick-ranges button { flex: 1 1 calc(50% - 4px); }
       .billing-summary-row { grid-template-columns: minmax(0, 1fr) minmax(0, auto) minmax(92px, auto); gap: 7px; padding: 9px 10px; }
       .billing-summary-formula { font-size: 12px; }
       .billing-summary-value { min-width: 92px; font-size: 15px; }
@@ -4685,7 +4734,15 @@
             </label>
             <input id="billingMonth" type="hidden">
             <button class="secondary billing-month-step" id="billingNextMonth" type="button" aria-label="Naslednje obdobje">&rsaquo;</button>
-          </div>        </div>
+          </div>
+          <div class="billing-quick-ranges" aria-label="Hitri izbor obračunskega obdobja">
+            <span>Hitro</span>
+            <button class="secondary" type="button" data-billing-range-preset="current-month">Ta mesec</button>
+            <button class="secondary" type="button" data-billing-range-preset="previous-month">Pretekli mesec</button>
+            <button class="secondary" type="button" data-billing-range-preset="today">Danes</button>
+            <button class="secondary" type="button" data-billing-range-preset="yesterday">Včeraj</button>
+          </div>
+        </div>
         <div class="billing-stale-draft hidden" id="billingStaleDraftNotice" role="status"></div>
         <div class="billing-summary" id="billingSummary"></div>
         <div class="billing-payments" id="billingPayments"></div>
@@ -5451,6 +5508,8 @@
     const googleEmailKey = "indus-ure-google-email";
     const automaticLoginAttemptKey = "indus-ure-auto-login-at";
     const automaticLoginRetryDelayMs = 60_000;
+    const sessionRecoveryUiStateKey = "indus-ure-session-return";
+    const sessionRecoveryUiStateTtlMs = 15 * 60_000;
     const loggedInHistoryStateKey = "indusUreLoggedIn";
     const modalHistoryStateKey = "indusUreModal";
     const workContextKey = "indus-ure-work-context";
@@ -5580,6 +5639,7 @@
       dayTimelinePointers: new Map(),
       dayTimelineGesture: null,
       dayTimelineInteraction: null,
+      dayTimelineAllDayInteraction: null,
       dayTimelineSuppressClick: false,
       todoDialogPhotos: [],
       todoDialogDriveFiles: [],
@@ -5604,6 +5664,8 @@
       // Each worker keeps an in-memory auto/custom period independently.
       // Auto follows the newest eligible day; a deliberate choice stays put.
       billingRangeSelections: {},
+      backgroundSessionLoginRequired: false,
+      backgroundSessionNoticeShown: false,
       user: null,
       localTestMode: false,
       users: [],
@@ -5721,6 +5783,7 @@
     }
 
     let sessionRecoveryPromise = null;
+    let backgroundSessionRecoveryPromise = null;
 
     async function loadLocalTestMode() {
       const panel = $("localTestLoginPanel");
@@ -5927,9 +5990,74 @@
         showNotice(error.message || "Dnevnega povzetka ni bilo mogo\u010de odpreti.");
       }
     }
+    function rememberSessionRecoveryUiState() {
+      if (!state.user || state.offlineMode) return;
+      const validViews = new Set(["todos", "calendar", "billing", "clients", "report"]);
+      const billingFrom = $("billingFrom")?.value || "";
+      const billingTo = $("billingTo")?.value || "";
+      const snapshot = {
+        savedAt: Date.now(),
+        userId: String(state.user.id || ""),
+        view: validViews.has(state.view) ? state.view : "todos",
+        workContext: String(state.workContext || ""),
+        month: dateKey(state.current),
+        selectedClient: String(state.selectedClient || ""),
+        reportClient: String(state.reportClient || ""),
+        reportClientId: String(state.reportClientId || ""),
+        reportClientSort: String(state.reportClientSort || "recent"),
+        billingWorkerId: String(billingWorkerId() || ""),
+        billingFrom,
+        billingTo
+      };
+      try {
+        sessionStorage.setItem(sessionRecoveryUiStateKey, JSON.stringify(snapshot));
+      } catch {
+        // Browser storage can be unavailable in a restrictive/private tab.
+      }
+    }
+
+    function restoreSessionRecoveryUiState() {
+      let snapshot = null;
+      try {
+        snapshot = JSON.parse(sessionStorage.getItem(sessionRecoveryUiStateKey) || "null");
+        sessionStorage.removeItem(sessionRecoveryUiStateKey);
+      } catch {
+        return false;
+      }
+      if (!snapshot || !state.user || String(snapshot.userId || "") !== String(state.user.id || "")) return false;
+      if (!Number.isFinite(Number(snapshot.savedAt)) || Date.now() - Number(snapshot.savedAt) > sessionRecoveryUiStateTtlMs) return false;
+
+      const allowedContexts = new Set([
+        ...(state.user.role === "boss" ? ["admin"] : []),
+        ...state.users.map((user) => `worker:${user.id}`)
+      ]);
+      if (allowedContexts.has(String(snapshot.workContext || ""))) {
+        localStorage.setItem(workContextKey, snapshot.workContext);
+        initializeWorkContext();
+      }
+
+      if (isDateKey(snapshot.month)) state.current = parseDate(snapshot.month);
+      const allowedViews = new Set(["todos", "calendar", "billing", "clients", "report"]);
+      state.view = allowedViews.has(snapshot.view) ? snapshot.view : "todos";
+      if (!isAdminView() && state.view === "report") state.view = "todos";
+      state.selectedClient = String(snapshot.selectedClient || "");
+      state.reportClient = String(snapshot.reportClient || "");
+      state.reportClientId = String(snapshot.reportClientId || "");
+      state.reportClientSort = ["recent", "hours_desc", "oldest", "count_desc", "name_asc", "name_desc"].includes(snapshot.reportClientSort)
+        ? snapshot.reportClientSort
+        : "recent";
+      const workerIds = new Set(state.users.map((user) => String(user.id)));
+      if (workerIds.has(String(snapshot.billingWorkerId || ""))) state.billingWorkerId = String(snapshot.billingWorkerId);
+      if (isDateKey(snapshot.billingFrom) && isDateKey(snapshot.billingTo) && snapshot.billingFrom <= snapshot.billingTo) {
+        saveBillingRangeSelection(billingWorkerId(), { from: snapshot.billingFrom, to: snapshot.billingTo });
+      }
+      return true;
+    }
+
     function recoverExpiredSession() {
       if (sessionRecoveryPromise) return sessionRecoveryPromise;
       sessionRecoveryPromise = (async () => {
+        rememberSessionRecoveryUiState();
         state.token = "";
         state.csrfToken = "";
         const lastAttempt = Number(sessionStorage.getItem(automaticLoginAttemptKey) || 0);
@@ -5945,6 +6073,30 @@
         sessionRecoveryPromise = null;
       });
       return sessionRecoveryPromise;
+    }
+
+    function recoverBackgroundSession() {
+      if (backgroundSessionRecoveryPromise) return backgroundSessionRecoveryPromise;
+      backgroundSessionRecoveryPromise = (async () => {
+        try {
+          await refreshSessionSecurityContext();
+          return true;
+        } catch (error) {
+          if (error?.status === 401) {
+            state.backgroundSessionLoginRequired = true;
+            if (!state.backgroundSessionNoticeShown) {
+              state.backgroundSessionNoticeShown = true;
+              showNotice("Povezava s sejo je potekla. Trenutni pogled ostane odprt; ob naslednji spremembi se prijavi znova.");
+            }
+          }
+          return false;
+        }
+      })();
+      backgroundSessionRecoveryPromise.then(
+        () => { backgroundSessionRecoveryPromise = null; },
+        () => { backgroundSessionRecoveryPromise = null; }
+      );
+      return backgroundSessionRecoveryPromise;
     }
 
     const offlineTodoDbName = "indus-ure-offline";
@@ -6408,6 +6560,8 @@
       state.sessionExpiresAt = Number(me.sessionExpiresAt || 0);
       state.syncRevision = Number(me.syncRevision || state.syncRevision || 0);
       state.lastServerSyncAt = new Date().toISOString();
+      state.backgroundSessionLoginRequired = false;
+      state.backgroundSessionNoticeShown = false;
       if (me.user) state.user = me.user;
       return me;
     }
@@ -6547,7 +6701,9 @@
         const availableUsers = (await api("/api/users")).users;
         state.users = [...new Map([...availableUsers, state.user].map((user) => [user.id, user])).values()];
         initializeWorkContext();
+        const restoredSessionUi = restoreSessionRecoveryUiState();
         showApp();
+        if (restoredSessionUi) showNotice("Obnovljen je prejšnji pogled.");
         // Direct links from e-mail must not wait for the potentially much
         // larger task list.  The focused endpoint gives the dialog just the
         // selected task; the normal snapshot then catches up behind it.
@@ -7097,7 +7253,7 @@
         return;
       }
       if (response.status === 401) {
-        await recoverExpiredSession();
+        await recoverBackgroundSession();
         return;
       }
       if (!response.ok) return;
@@ -7110,7 +7266,7 @@
     }
 
     async function autoRefreshSharedData() {
-      if (!state.token || !state.user || document.visibilityState !== "visible" || state.sharedDataRefreshing || uiIsBeingEdited()) return;
+      if (!state.token || !state.user || state.backgroundSessionLoginRequired || document.visibilityState !== "visible" || state.sharedDataRefreshing || uiIsBeingEdited()) return;
       state.sharedDataRefreshing = true;
       try {
         if (state.offlineMode) {
@@ -8534,6 +8690,160 @@
         _adminCreate: isAdminView()
       });
     }
+
+    function clearDayAllDayDropPreview(interaction = state.dayTimelineAllDayInteraction) {
+      interaction?.preview?.remove();
+      if (interaction) interaction.preview = null;
+    }
+
+    function dayAllDayDropTarget(clientY) {
+      const scroll = $("dayTimelineScroll");
+      const timeline = $("dayTimeline");
+      if (!scroll || !timeline) return null;
+      const bounds = scroll.getBoundingClientRect();
+      if (clientY < bounds.top || clientY > bounds.bottom) return null;
+      const timelineRect = timeline.getBoundingClientRect();
+      const minute = Math.max(0, Math.min(1380, Math.floor(((clientY - timelineRect.top) / state.dayTimelineMinuteHeight) / 15) * 15));
+      return { startMinute: minute, endMinute: minute + 60 };
+    }
+
+    function refreshDayAllDayDropPreview(interaction) {
+      const target = dayAllDayDropTarget(interaction.currentY);
+      interaction.target = target;
+      if (!target) {
+        clearDayAllDayDropPreview(interaction);
+        return;
+      }
+      const layer = $("dayTimelineEvents");
+      if (!layer) return;
+      let preview = interaction.preview;
+      if (!preview || !preview.isConnected) {
+        preview = document.createElement("div");
+        preview.className = "day-timeline-event is-drop-preview";
+        preview.setAttribute("aria-hidden", "true");
+        const title = document.createElement("strong");
+        title.className = "day-timeline-event-title";
+        const meta = document.createElement("span");
+        meta.className = "day-timeline-event-meta";
+        preview.append(title, meta);
+        layer.appendChild(preview);
+        interaction.preview = preview;
+      }
+      preview.style.top = Math.round(target.startMinute * state.dayTimelineMinuteHeight) + "px";
+      preview.style.height = Math.max(18, Math.round((target.endMinute - target.startMinute) * state.dayTimelineMinuteHeight)) + "px";
+      preview.style.left = "2px";
+      preview.style.width = "calc(100% - 4px)";
+      preview.querySelector(".day-timeline-event-title").textContent = `Spusti: ${dayTimelineTime(target.startMinute)}–${dayTimelineTime(target.endMinute)}`;
+      preview.querySelector(".day-timeline-event-meta").textContent = interaction.todo.title || "Opravilo";
+    }
+
+    function dayAllDayDragAutoScrollVelocity(clientY) {
+      const scroll = $("dayTimelineScroll");
+      if (!scroll) return 0;
+      const bounds = scroll.getBoundingClientRect();
+      const edge = Math.max(72, Math.min(150, bounds.height * 0.18));
+      if (clientY < bounds.top - edge || clientY > bounds.bottom + edge) return 0;
+      return dayTimelineDragAutoScrollVelocity(clientY);
+    }
+
+    function tickDayAllDayDragAutoScroll(timestamp) {
+      const interaction = state.dayTimelineAllDayInteraction;
+      if (!interaction || !interaction.moved) return;
+      const scroll = $("dayTimelineScroll");
+      const elapsed = Math.min(48, Math.max(0, timestamp - (interaction.autoScrollAt || timestamp)));
+      interaction.autoScrollAt = timestamp;
+      const velocity = dayAllDayDragAutoScrollVelocity(interaction.currentY);
+      if (scroll && velocity) {
+        const previousTop = scroll.scrollTop;
+        scroll.scrollTop = Math.max(0, Math.min(scroll.scrollHeight - scroll.clientHeight, previousTop + velocity * elapsed / 1000));
+        if (scroll.scrollTop !== previousTop) refreshDayAllDayDropPreview(interaction);
+      }
+      interaction.autoScrollFrame = requestAnimationFrame(tickDayAllDayDragAutoScroll);
+    }
+
+    function beginDayAllDayPointerDrag(event, todo) {
+      if (state.dayTimelineSaving || todoIsMultiDayCalendarSpan(todo)) return;
+      if (event.pointerType === "mouse" && event.button !== 0) return;
+      const element = event.currentTarget;
+      const touchHoldRequired = event.pointerType === "touch";
+      const interaction = {
+        pointerId: event.pointerId,
+        pointerType: event.pointerType,
+        todo,
+        element,
+        startX: event.clientX,
+        startY: event.clientY,
+        currentX: event.clientX,
+        currentY: event.clientY,
+        touchReady: !touchHoldRequired,
+        touchHoldRequired,
+        holdTimer: null,
+        moved: false,
+        target: null,
+        preview: null,
+        autoScrollFrame: 0,
+        autoScrollAt: performance.now()
+      };
+      state.dayTimelineAllDayInteraction = interaction;
+      if (!touchHoldRequired) {
+        event.preventDefault();
+        event.stopPropagation();
+        try { element.setPointerCapture?.(event.pointerId); } catch { /* Firefox may reject capture. */ }
+        element.classList.add("is-drag-ready");
+        return;
+      }
+      interaction.holdTimer = setTimeout(() => {
+        if (state.dayTimelineAllDayInteraction !== interaction) return;
+        interaction.touchReady = true;
+        try { element.setPointerCapture?.(interaction.pointerId); } catch { /* Firefox may reject capture. */ }
+        element.classList.add("is-drag-ready");
+        navigator.vibrate?.(10);
+      }, 400);
+    }
+
+    function updateDayAllDayPointerDrag(event) {
+      const interaction = state.dayTimelineAllDayInteraction;
+      if (!interaction || interaction.pointerId !== event.pointerId) return;
+      interaction.currentX = event.clientX;
+      interaction.currentY = event.clientY;
+      if (!interaction.touchReady) {
+        if (Math.hypot(event.clientX - interaction.startX, event.clientY - interaction.startY) > 9) {
+          clearTimeout(interaction.holdTimer);
+          state.dayTimelineAllDayInteraction = null;
+        }
+        return;
+      }
+      if (!interaction.moved && Math.max(Math.abs(event.clientX - interaction.startX), Math.abs(event.clientY - interaction.startY)) < 4) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (!interaction.moved) {
+        interaction.moved = true;
+        interaction.autoScrollAt = performance.now();
+        interaction.autoScrollFrame = requestAnimationFrame(tickDayAllDayDragAutoScroll);
+      }
+      refreshDayAllDayDropPreview(interaction);
+    }
+
+    function finishDayAllDayPointerDrag(event, cancelled = false) {
+      const interaction = state.dayTimelineAllDayInteraction;
+      if (!interaction || interaction.pointerId !== event.pointerId) return;
+      state.dayTimelineAllDayInteraction = null;
+      clearTimeout(interaction.holdTimer);
+      if (interaction.autoScrollFrame) cancelAnimationFrame(interaction.autoScrollFrame);
+      interaction.element.classList.remove("is-drag-ready");
+      const target = interaction.target;
+      clearDayAllDayDropPreview(interaction);
+      if (interaction.moved) {
+        state.dayTimelineSuppressClick = true;
+        setTimeout(() => { state.dayTimelineSuppressClick = false; }, 250);
+      }
+      if (cancelled || !interaction.moved || !target) return;
+      event.preventDefault();
+      event.stopPropagation();
+      saveDayTimelineDraft(interaction.todo, dayTimelineTime(target.startMinute), dayTimelineTime(target.endMinute), state.dayTimelineDate);
+      renderDayTimeline();
+    }
+
     function dayWorkBlocks(todos) {
       const intervals = todos
         .map((todo) => {
@@ -8580,7 +8890,23 @@
         button.className = "day-all-day-item todo-status-color " + todoStatusClass(todo.status);
         const client = todoClientCalendarName(todo);
         button.textContent = todo.title + (client ? " - " + client : "");
-        button.addEventListener("click", () => openTodoFromDayTimeline(todo).catch((error) => showNotice(error.message)));
+        const movableToTimeline = !todoIsMultiDayCalendarSpan(todo);
+        if (movableToTimeline) {
+          button.title = "Povleci v časovnico za enourni termin";
+          const pointerOptions = { passive: false };
+          button.addEventListener("pointerdown", (event) => beginDayAllDayPointerDrag(event, todo), pointerOptions);
+          button.addEventListener("pointermove", updateDayAllDayPointerDrag, pointerOptions);
+          button.addEventListener("pointerup", (event) => finishDayAllDayPointerDrag(event), pointerOptions);
+          button.addEventListener("pointercancel", (event) => finishDayAllDayPointerDrag(event, true), pointerOptions);
+          button.addEventListener("lostpointercapture", (event) => finishDayAllDayPointerDrag(event, true));
+        }
+        button.addEventListener("click", (event) => {
+          if (state.dayTimelineSuppressClick) {
+            event.preventDefault();
+            return;
+          }
+          openTodoFromDayTimeline(todo).catch((error) => showNotice(error.message));
+        });
         allDayItems.appendChild(button);
       });
 
@@ -8743,6 +9069,8 @@
       state.dayTimelineDate = date;
       state.dayTimelineIncludeArchived = Boolean(includeArchived);
       state.dayTimelineInteraction = null;
+      clearDayAllDayDropPreview();
+      state.dayTimelineAllDayInteraction = null;
       state.dayTimelinePointers.clear();
       state.dayTimelineGesture = null;
       renderDayTimeline();
@@ -8864,15 +9192,18 @@
       const deltaX = interaction.currentX - interaction.startX;
       const deltaY = (interaction.currentY - interaction.startY) + interaction.scrollDeltaY;
       const isMove = interaction.mode === "move";
-      const dayThreshold = interaction.pointerType === "touch" ? 96 : 72;
-      const wantsDayMove = isMove && Math.abs(deltaX) >= dayThreshold && Math.abs(deltaX) > Math.abs(deltaY) * 1.35;
+      const dayThreshold = interaction.pointerType === "touch" ? 112 : 88;
+      const dayReleaseThreshold = interaction.pointerType === "touch" ? 70 : 52;
+      const horizontalDominant = Math.abs(deltaX) > Math.abs(deltaY) * 1.35;
+      const horizontalDistance = Math.abs(deltaX);
+      const wantsDayMove = isMove && horizontalDominant && horizontalDistance >= (interaction.dayOffset ? dayReleaseThreshold : dayThreshold);
       interaction.dayOffset = wantsDayMove ? (deltaX > 0 ? 1 : -1) : 0;
       if (interaction.dayOffset) {
         const target = parseDate(interaction.originalDate);
         target.setDate(target.getDate() + interaction.dayOffset);
         interaction.targetDate = dateKey(target);
         interaction.element.classList.add("is-day-moving");
-        interaction.element.dataset.dayTarget = interaction.dayOffset > 0 ? "\u2192 naslednji dan" : "\u2190 pre\u0161nji dan";
+        interaction.element.dataset.dayTarget = `Spusti: ${formatDate(interaction.targetDate)}`;
         interaction.element.style.transform = `translateX(${Math.max(-80, Math.min(80, deltaX))}px)`;
       } else {
         interaction.targetDate = interaction.originalDate;
@@ -8880,7 +9211,12 @@
         delete interaction.element.dataset.dayTarget;
         interaction.element.style.transform = "";
       }
-      if (interaction.mode === "resize-start") {
+      if (interaction.dayOffset) {
+        // Once a cross-day move is deliberately armed, vertical hand wobble
+        // must not unexpectedly alter the entered hours.
+        interaction.startMinute = interaction.originalStart;
+        interaction.endMinute = interaction.originalEnd;
+      } else if (interaction.mode === "resize-start") {
         interaction.startMinute = Math.max(0, Math.min(interaction.originalEnd - 15, interaction.originalStart + delta));
         interaction.endMinute = interaction.originalEnd;
       } else if (interaction.mode === "resize-end") {
@@ -8969,6 +9305,12 @@
         dayTimelineTime(interaction.endMinute),
         interaction.targetDate
       );
+      // Do not leave the user looking at an empty source day after a deliberate
+      // cross-day drop.  The draft remains unsaved until the visible Save
+      // button is pressed, but its destination is immediately clear.
+      if (interaction.targetDate && interaction.targetDate !== interaction.originalDate) {
+        state.dayTimelineDate = interaction.targetDate;
+      }
       renderDayTimeline();
     }
 
@@ -9078,16 +9420,15 @@
       const [year, month] = String(draft.month || dateKey(new Date()).slice(0, 7)).split("-").map(Number);
       const target = new Date(year, month - 1 + direction, 1);
       const targetMonth = `${target.getFullYear()}-${String(target.getMonth() + 1).padStart(2, "0")}`;
-      const latest = latestBillingPeriod(billingWorkerId());
-      if (direction > 0 && (!latest || targetMonth > latest.to.slice(0, 7))) return;
+      const maxDate = billingMaximumSelectableDate();
+      if (direction > 0 && targetMonth > maxDate.slice(0, 7)) return;
       draft.month = targetMonth;
       renderBillingRangePicker();
     }
 
     function selectBillingRangeDate(key) {
       const draft = state.billingRangeDraft;
-      const latest = latestBillingPeriod(billingWorkerId());
-      const maxDate = latest?.to || billingTodayKey();
+      const maxDate = billingMaximumSelectableDate();
       if (!draft || key > maxDate) return;
       if (!draft.from || draft.to) {
         draft.from = key;
@@ -9104,14 +9445,13 @@
     function renderBillingRangePicker() {
       const draft = state.billingRangeDraft;
       if (!draft) return;
-      const latest = latestBillingPeriod(billingWorkerId());
-      const maxDate = latest?.to || billingTodayKey();
+      const maxDate = billingMaximumSelectableDate();
       const [year, month] = String(draft.month).split("-").map(Number);
       const first = new Date(year, month - 1, 1);
       const daysInMonth = new Date(year, month, 0).getDate();
       const leading = (first.getDay() + 6) % 7;
       $("billingRangeMonthTitle").textContent = `${monthNames[month - 1]} ${year}`;
-      $("billingRangeNext").disabled = !latest || draft.month >= maxDate.slice(0, 7);
+      $("billingRangeNext").disabled = draft.month >= maxDate.slice(0, 7);
       $("billingRangeNext").title = $("billingRangeNext").disabled ? "Novejše obračunsko obdobje še ni na voljo." : "Naslednji mesec";
       const cells = Array.from({ length: leading }, () => `<span class="billing-range-empty" aria-hidden="true"></span>`);
       for (let day = 1; day <= daysInMonth; day += 1) {
@@ -9130,8 +9470,7 @@
 
     function applyBillingRangePicker() {
       const draft = state.billingRangeDraft;
-      const latest = latestBillingPeriod(billingWorkerId());
-      const maxDate = latest?.to || billingTodayKey();
+      const maxDate = billingMaximumSelectableDate();
       if (!draft?.from || draft.from > maxDate) return;
       $("billingFrom").value = draft.from;
       $("billingTo").value = (draft.to || draft.from) > maxDate ? maxDate : (draft.to || draft.from);
@@ -9148,6 +9487,23 @@
       const date = parseDate(key);
       date.setDate(date.getDate() + 1);
       return dateKey(date);
+    }
+
+    function billingDateBefore(key) {
+      const date = parseDate(key);
+      date.setDate(date.getDate() - 1);
+      return dateKey(date);
+    }
+
+    function billingMonthStart(key) {
+      return /^\d{4}-\d{2}-\d{2}$/.test(String(key || "")) ? `${String(key).slice(0, 7)}-01` : "";
+    }
+
+    // A range is allowed to end today. Confirmation remains separately guarded
+    // by payrollPeriodEnded, but browsing today's entered hours must never be
+    // blocked by an older completed period.
+    function billingMaximumSelectableDate(now = new Date()) {
+      return billingTodayKey(now);
     }
 
     function billingMonthEnd(key) {
@@ -9170,6 +9526,67 @@
         to: String(range?.to || "")
       };
     }
+
+    function billingAvailableEntryDates(workerId, now = new Date()) {
+      const maxDate = billingMaximumSelectableDate(now);
+      return [...new Set(billingLiveLines(workerId, { from: "1900-01-01", to: maxDate })
+        .map((line) => String(line.date || ""))
+        .filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date) && date <= maxDate))]
+        .sort((left, right) => left.localeCompare(right));
+    }
+
+    function billingFallbackEntryDate(workerId, targetDate, now = new Date()) {
+      const dates = billingAvailableEntryDates(workerId, now);
+      const onOrBefore = dates.filter((date) => date <= targetDate);
+      return onOrBefore.at(-1) || dates[0] || "";
+    }
+
+    function applyBillingRangeSelection(workerId, range) {
+      if (!workerId || !range?.from || !range?.to) return null;
+      $("billingFrom").value = range.from;
+      $("billingTo").value = range.to;
+      saveBillingRangeSelection(workerId, range);
+      renderBillingView();
+      return { from: $("billingFrom").value, to: $("billingTo").value };
+    }
+
+    function applyBillingQuickRange(preset, now = new Date()) {
+      const workerId = billingWorkerId();
+      const today = billingMaximumSelectableDate(now);
+      const currentMonthStart = billingMonthStart(today);
+      const latest = latestBillingPeriod(workerId, now);
+      let range = null;
+      let notice = "";
+
+      if (preset === "current-month") {
+        range = {
+          from: [currentMonthStart, latest?.from || currentMonthStart].sort().at(-1),
+          to: today
+        };
+      } else if (preset === "previous-month") {
+        const previousMonthEnd = billingDateBefore(currentMonthStart);
+        range = { from: billingMonthStart(previousMonthEnd), to: previousMonthEnd };
+      } else if (preset === "today" || preset === "yesterday") {
+        const requestedDate = preset === "today" ? today : billingDateBefore(today);
+        let selectedDate = requestedDate;
+        const availableDates = billingAvailableEntryDates(workerId, now);
+        if (!availableDates.includes(requestedDate)) {
+          const fallbackDate = billingFallbackEntryDate(workerId, requestedDate, now);
+          if (fallbackDate) {
+            selectedDate = fallbackDate;
+            notice = `Za ${preset === "today" ? "danes" : "včeraj"} ni vpisanih ur. Prikazan je ${formatDate(fallbackDate)}, kjer so vpisane ure.`;
+          } else {
+            notice = `Za ${preset === "today" ? "danes" : "včeraj"} ni vpisanih ur.`;
+          }
+        }
+        range = { from: selectedDate, to: selectedDate };
+      }
+
+      if (!range) return;
+      applyBillingRangeSelection(workerId, range);
+      if (notice) showNotice(notice);
+    }
+
     function latestCompletedPayroll(workerId) {
       return state.payrolls
         .filter((payroll) => payroll.workerId === workerId
@@ -9212,14 +9629,15 @@
         .filter((payroll) => payroll.from >= String(range.to || ""))
         .sort((left, right) => String(left.from).localeCompare(String(right.from)) || String(left.to).localeCompare(String(right.to)))[0] || null;
     }
-    // The newest period may include today. Each following period intentionally
-    // reuses the previous final day; locked IDs keep all amounts unique.
+    // The newest open period begins immediately after the last confirmed one.
+    // The API still accepts a shared boundary for old data, while a new range
+    // avoids showing a false overlap and may always be browsed through today.
     function latestBillingPeriod(workerId, now = new Date()) {
       const today = billingTodayKey(now);
       const previous = latestCompletedPayroll(workerId);
-      const from = previous ? previous.to : today.slice(0, 7) + "-01";
+      const from = previous ? billingDateAfter(previous.to) : today.slice(0, 7) + "-01";
       if (from > today) return null;
-      return { from, to: [billingMonthEnd(from), today].sort()[0] };
+      return { from, to: today };
     }
     function updateBillingRangeControls(range = null) {
       const workerId = billingWorkerId();
@@ -9227,7 +9645,7 @@
       const earliest = earliestBillingPayroll(workerId);
       const current = range || { from: $("billingFrom").value, to: $("billingTo").value };
       const selectedPayroll = billingPayrollsForWorker(workerId).find((payroll) => payroll.from === current?.from && payroll.to === current?.to);
-      const normalMaxDate = latest?.to || billingTodayKey();
+      const normalMaxDate = billingMaximumSelectableDate();
       const maxDate = selectedPayroll?.to > normalMaxDate ? selectedPayroll.to : normalMaxDate;
       $("billingFrom").min = earliest?.from || "";
       $("billingTo").min = earliest?.from || "";
@@ -9275,7 +9693,8 @@
       if (!/^\d{4}-\d{2}-\d{2}$/.test(fromInput.value)) fromInput.value = fallback.from;
       if (!/^\d{4}-\d{2}-\d{2}$/.test(toInput.value) || toInput.value < fromInput.value) toInput.value = fallback.to;
       const selectedPayroll = billingPayrollsForWorker(workerId).find((payroll) => payroll.from === fromInput.value && payroll.to === toInput.value);
-      if (latest && !selectedPayroll && (fromInput.value > latest.to || toInput.value > latest.to)) {
+      const maxDate = billingMaximumSelectableDate();
+      if (!selectedPayroll && (fromInput.value > maxDate || toInput.value > maxDate)) {
         fromInput.value = fallback.from;
         toInput.value = fallback.to;
       }
@@ -12377,12 +12796,11 @@
       return `<article class="client-billing-row">
         <div class="client-billing-when"><strong>${todo.date ? formatDate(todo.date) : "Brez datuma"}</strong><span>${escapeHtml(time)}</span></div>
         <div class="client-billing-main">
-          <div class="client-billing-title-row"><h3>${escapeHtml(todo.title || "Brez naziva")}</h3>${billSelection}</div>
+          <div class="client-billing-title-row"><h3><button class="client-billing-title-trigger open-report-todo" type="button" data-todo-id="${escapeHtml(todo.id)}" aria-label="Odpri vpis: ${escapeHtml(todo.title || "Brez naziva")}">${escapeHtml(todo.title || "Brez naziva")}</button></h3>${billSelection}</div>
           <div class="client-billing-meta"><span>Izvajalec: ${escapeHtml(todoAssigneeNames(todo))}</span>${clientBill ? `<span>Obračun stranki potrjen ${escapeHtml(formatDateTime(clientBill.confirmedAt))}</span>` : ""}</div>
-          <div class="client-billing-charges">${charges}</div>
+          <button class="client-billing-charges client-billing-charges-trigger open-report-todo" type="button" data-todo-id="${escapeHtml(todo.id)}" aria-label="Odpri vpis: ${escapeHtml(todo.title || "Brez naziva")}">${charges}</button>
           ${details}
         </div>
-        <button class="secondary client-billing-open open-report-todo" type="button" data-todo-id="${escapeHtml(todo.id)}">Odpri vpis</button>
       </article>`;
     }
 
@@ -14025,6 +14443,7 @@
       saveBillingRangeSelection(billingWorkerId(), { from: $("billingFrom").value, to: $("billingTo").value });
       renderBillingView();
     }));
+    document.querySelectorAll("[data-billing-range-preset]").forEach((button) => button.addEventListener("click", () => applyBillingQuickRange(button.dataset.billingRangePreset)));
     $("billingRangePrev").addEventListener("click", () => shiftBillingRangePickerMonth(-1));
     $("billingRangeNext").addEventListener("click", () => shiftBillingRangePickerMonth(1));
     $("closeBillingRangeDialog").addEventListener("click", () => $("billingRangeDialog").close());
@@ -14427,9 +14846,10 @@
       }
       const todoButton = event.target.closest(".open-report-todo");
       if (todoButton) {
+        event.preventDefault();
         const todo = state.todos.find((item) => item.id === todoButton.dataset.todoId);
         if (!todo) return;
-        openTodoDialog(todo);
+        openTodoDialog(todo).catch((error) => showNotice(error.message));
       }
     });
     $("clientDetailList").addEventListener("change", (event) => {

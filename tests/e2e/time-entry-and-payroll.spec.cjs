@@ -229,6 +229,57 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
       await context.close();
     }
   });
+
+  test("payroll quick ranges keep today selectable and fall back to entered hours", async ({ browser }) => {
+    const workerContext = await browser.newContext();
+    const workerPage = await workerContext.newPage();
+    let today = "";
+    try {
+      await localLogin(workerPage, "ibro");
+      today = await workerPage.evaluate(() => {
+        const value = new Date();
+        return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
+      });
+      await workerPage.locator("#writeHoursButton").click();
+      await workerPage.locator("#todoFormTask").fill("PW hitri obračunski datum");
+      await workerPage.locator("#todoFormClient").fill(CLIENT_ALIAS);
+      await workerPage.locator("#todoFormDate").fill(today);
+      await workerPage.locator("#todoFormStart").fill("09:00");
+      await workerPage.locator("#todoFormEnd").fill("10:00");
+      await workerPage.locator("#saveTodoDialog").click();
+      await expect(workerPage.locator("#appConfirmDialog")).toBeVisible();
+      await workerPage.locator("#appConfirmAccept").click();
+      await expect(workerPage.locator("#todoDialog")).toBeHidden();
+    } finally {
+      await workerContext.close();
+    }
+
+    const bossContext = await browser.newContext();
+    const page = await bossContext.newPage();
+    try {
+      await localLogin(page, "bojan");
+      await page.locator("#toolsMenu > summary").click();
+      await page.locator("#billingMenuBtn").click();
+      await page.locator("#billingWorker").selectOption("ibro");
+
+      await page.locator('[data-billing-range-preset="today"]').click();
+      await expect(page.locator("#billingFrom")).toHaveValue(today);
+      await expect(page.locator("#billingTo")).toHaveValue(today);
+      await expect(page.locator("#billingTo")).toHaveAttribute("max", today);
+
+      await page.locator('[data-billing-range-preset="yesterday"]').click();
+      await expect(page.locator("#billingFrom")).toHaveValue(today);
+      await expect(page.locator("#billingTo")).toHaveValue(today);
+      await expect(page.locator("#appNotice")).toContainText("Za včeraj ni vpisanih ur.");
+
+      await page.locator('[data-billing-range-preset="current-month"]').click();
+      await expect(page.locator("#billingFrom")).toHaveValue(`${today.slice(0, 7)}-01`);
+      await expect(page.locator("#billingTo")).toHaveValue(today);
+    } finally {
+      await bossContext.close();
+    }
+  });
+
   test("multi-day task is a continuous monthly span without an untimed label", async ({ browser }) => {
     const context = await browser.newContext();
     const page = await context.newPage();
@@ -260,6 +311,157 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
       await expect(startSpan).toHaveText(title);
       await expect(continuation).toHaveText("");
       expect(await page.locator(".day-multiday-event").evaluateAll((items) => items.every((item) => !item.textContent.includes("Brez ure")))).toBeTruthy();
+    } finally {
+      await context.close();
+    }
+  });
+
+  test("background session checks renew safely and never throw the user to login", async ({ browser }) => {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    try {
+      await localLogin(page, "ibro");
+      const originalUrl = page.url();
+      await page.route("**/api/sync-state", (route) => route.fulfill({
+        status: 401,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "expired" })
+      }));
+
+      // A stale background probe must first use /api/me to refresh its
+      // security context. The user remains in the currently open view.
+      await page.evaluate(() => checkServerChanges());
+      await expect(page.locator("#app")).toBeVisible();
+      expect(page.url()).toBe(originalUrl);
+      expect(await page.evaluate(() => sessionStorage.getItem("indus-ure-auto-login-at"))).toBeNull();
+
+      await page.route("**/api/me", (route) => route.fulfill({
+        status: 401,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "expired" })
+      }));
+      await page.evaluate(() => checkServerChanges());
+      await expect(page.locator("#app")).toBeVisible();
+      await expect(page.locator("#appNotice")).toContainText("Trenutni pogled ostane odprt");
+      expect(page.url()).toBe(originalUrl);
+    } finally {
+      await context.close();
+    }
+  });
+
+  test("session return state restores the last calendar view and month after login", async ({ browser }) => {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    try {
+      await localLogin(page, "ibro");
+      await page.evaluate(() => {
+        state.current = new Date(2025, 5, 1);
+        setView("calendar");
+        rememberSessionRecoveryUiState();
+      });
+      await page.reload({ waitUntil: "networkidle" });
+      await expect(page.locator("#app")).toBeVisible();
+      await expect(page.locator("#calendarViewBtn")).toHaveClass(/active/);
+      expect(await page.evaluate(() => `${state.current.getFullYear()}-${String(state.current.getMonth() + 1).padStart(2, "0")}`)).toBe("2025-06");
+      expect(await page.evaluate(() => sessionStorage.getItem("indus-ure-session-return"))).toBeNull();
+    } finally {
+      await context.close();
+    }
+  });
+
+  test("all-day task can be dropped into the day timeline as a quarter-hour time slot", async ({ browser }) => {
+    const context = await browser.newContext({ viewport: { width: 980, height: 860 } });
+    const page = await context.newPage();
+    const title = "PW celodnevno v časovnico";
+    try {
+      await localLogin(page, "ibro");
+      const date = await page.evaluate(() => {
+        const value = new Date();
+        return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
+      });
+      await page.locator("#newTodoButton").click();
+      await page.locator("#todoFormTask").fill(title);
+      await page.locator("#todoFormDate").fill(date);
+      await page.locator("#saveTodoDialog").click();
+      await expect(page.locator("#todoDialog")).toBeHidden();
+
+      await page.locator("#calendarViewBtn").click();
+      await page.locator(`.day[data-date="${date}"] .day-head`).click();
+      await expect(page.locator("#dayTimelineDialog")).toBeVisible();
+      const source = page.locator(".day-all-day-item", { hasText: title });
+      await expect(source).toBeVisible();
+      const [sourceBox, scrollBox, timelineBox] = await Promise.all([
+        source.boundingBox(),
+        page.locator("#dayTimelineScroll").boundingBox(),
+        page.locator("#dayTimeline").boundingBox()
+      ]);
+      expect(sourceBox).toBeTruthy();
+      expect(scrollBox).toBeTruthy();
+      expect(timelineBox).toBeTruthy();
+      const targetX = timelineBox.x + timelineBox.width * 0.55;
+      const targetY = scrollBox.y + Math.min(scrollBox.height - 44, 150);
+      await page.mouse.move(sourceBox.x + sourceBox.width / 2, sourceBox.y + sourceBox.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(targetX, targetY, { steps: 8 });
+      await expect(page.locator(".day-timeline-event.is-drop-preview")).toBeVisible();
+      await page.mouse.up();
+      await expect(page.locator("#saveDayTimeline")).toBeEnabled();
+      const timed = page.locator(".day-timeline-event", { hasText: title });
+      await expect(timed).toBeVisible();
+      const times = await timed.evaluate((node) => ({ start: node.dataset.start, end: node.dataset.end }));
+      expect(times.start).toMatch(/^\d{2}:(00|15|30|45)$/);
+      expect(times.end).toMatch(/^\d{2}:(00|15|30|45)$/);
+      await page.locator("#saveDayTimeline").click();
+      await expect(page.locator("#saveDayTimeline")).toBeDisabled();
+    } finally {
+      await context.close();
+    }
+  });
+
+  test("daily timeline moves a timed event to the adjacent day only after a deliberate horizontal drag", async ({ browser }) => {
+    const context = await browser.newContext({ viewport: { width: 980, height: 860 } });
+    const page = await context.newPage();
+    const title = "PW dnevni premik med dnevi";
+    try {
+      await localLogin(page, "ibro");
+      const dates = await page.evaluate(() => {
+        const current = new Date();
+        const next = new Date(current);
+        next.setDate(next.getDate() + 1);
+        const key = (value) => `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
+        return { current: key(current), next: key(next) };
+      });
+      await page.locator("#newTodoButton").click();
+      await page.locator("#todoFormTask").fill(title);
+      await page.locator("#todoFormDate").fill(dates.current);
+      await page.locator("#todoFormStart").fill("09:00");
+      await page.locator("#todoFormEnd").fill("11:00");
+      await page.locator("#saveTodoDialog").click();
+      await expect(page.locator("#todoDialog")).toBeHidden();
+
+      await page.locator("#calendarViewBtn").click();
+      await page.locator(`.day[data-date="${dates.current}"] .day-head`).click();
+      const event = page.locator(".day-timeline-event", { hasText: title });
+      await expect(event).toBeVisible();
+      const box = await event.boundingBox();
+      expect(box).toBeTruthy();
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(box.x + box.width / 2 + 128, box.y + box.height / 2, { steps: 8 });
+      await page.mouse.up();
+      expect(await page.evaluate(() => state.dayTimelineDate)).toBe(dates.next);
+      await expect(page.locator("#saveDayTimeline")).toBeEnabled();
+      const moved = page.locator(".day-timeline-event", { hasText: title });
+      await expect(moved).toHaveAttribute("data-start", "09:00");
+      await expect(moved).toHaveAttribute("data-end", "11:00");
+      await page.locator("#saveDayTimeline").click();
+      await expect(page.locator("#saveDayTimeline")).toBeDisabled();
+      const savedDate = await page.evaluate(async (taskTitle) => {
+        const response = await fetch("/api/todos");
+        const data = await response.json();
+        return data.todos.find((todo) => todo.title === taskTitle)?.date || "";
+      }, title);
+      expect(savedDate).toBe(dates.next);
     } finally {
       await context.close();
     }

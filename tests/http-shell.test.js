@@ -126,14 +126,56 @@ test("obračunsko obdobje samodejno sledi novemu dnevu, ročna izbira pa ostane 
   assert.match(html, /billingRangeSelections: \{\}/);
   assert.match(html, /function billingRangeSelectionForWorker\(workerId\)/);
   assert.match(html, /function billingTodayKey\(now = new Date\(\)\)/);
-  assert.doesNotMatch(html, /billingYesterdayKey/);
+  assert.match(html, /function billingDateBefore\(key\)/);
+  assert.match(html, /function billingMaximumSelectableDate\(now = new Date\(\)\)/);
+  assert.match(html, /data-billing-range-preset="current-month"/);
+  assert.match(html, /data-billing-range-preset="previous-month"/);
+  assert.match(html, /data-billing-range-preset="today"/);
+  assert.match(html, /data-billing-range-preset="yesterday"/);
+  assert.match(html, /function billingAvailableEntryDates\(workerId, now = new Date\(\)\)/);
+  assert.match(html, /function billingFallbackEntryDate\(workerId, targetDate, now = new Date\(\)\)/);
+  assert.match(html, /function applyBillingQuickRange\(preset, now = new Date\(\)\)/);
+  assert.match(html, /document\.querySelectorAll\("\[data-billing-range-preset\]"\)/);
   assert.match(html, /openCoversNewestRange/);
   assert.match(html, /function staleOpenBillingPayroll\(workerId\)/);
   assert.match(html, /billingStaleDraftNotice/);
   assert.match(html, /function lockedBillingFinancialIds\(workerId, field\)/);
-  assert.match(html, /const from = previous \? previous\.to/);
+  assert.match(html, /const from = previous \? billingDateAfter\(previous\.to\)/);
   assert.match(html, /saveBillingRangeSelection\(billingWorkerId\(\), \{ from: \$\("billingFrom"\)\.value, to: \$\("billingTo"\)\.value \}\);/);
   assert.match(html, /saveBillingRangeSelection\(state\.billingWorkerId, \{ from: button\.dataset\.from, to: button\.dataset\.to \}\);/);
+});
+test("obnovitev seje ohrani pogled, preverjanje v ozadju pa ne preusmeri uporabnika", async () => {
+  const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  assert.match(html, /const sessionRecoveryUiStateKey = "indus-ure-session-return"/);
+  assert.match(html, /function rememberSessionRecoveryUiState\(\)/);
+  assert.match(html, /function restoreSessionRecoveryUiState\(\)/);
+  assert.match(html, /rememberSessionRecoveryUiState\(\);[\s\S]*?location\.replace\(data\.url\)/);
+  assert.match(html, /function recoverBackgroundSession\(\)/);
+  assert.match(html, /await refreshSessionSecurityContext\(\);/);
+  assert.match(html, /state\.backgroundSessionLoginRequired = true/);
+  assert.match(html, /if \(response\.status === 401\) \{\s*await recoverBackgroundSession\(\);/);
+  assert.match(html, /state\.backgroundSessionLoginRequired \|\| document\.visibilityState/);
+  assert.match(html, /const restoredSessionUi = restoreSessionRecoveryUiState\(\);/);
+});
+test("poročilo stranke odpre isti vpis s klikom na naslov ali zeleni povzetek", async () => {
+  const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  assert.match(html, /client-billing-title-trigger/);
+  assert.match(html, /client-billing-charges-trigger/);
+  assert.match(html, /open-report-todo/);
+  assert.match(html, /closest\("\.open-report-todo"\)[\s\S]*?openTodoDialog\(todo\)/);
+  assert.doesNotMatch(html, />Odpri vpis</);
+});
+test("dnevni pregled varno vleče enodnevno opravilo brez ure v 15-minutno časovnico", async () => {
+  const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  assert.match(html, /function beginDayAllDayPointerDrag\(event, todo\)/);
+  assert.match(html, /touchHoldRequired = event\.pointerType === "touch"/);
+  assert.match(html, /setTimeout\(\(\) => \{[\s\S]*?\}, 400\)/);
+  assert.match(html, /function dayAllDayDropTarget\(clientY\)/);
+  assert.match(html, /Math\.floor\([^\n]*\/ 15\) \* 15/);
+  assert.match(html, /Spusti: \$\{dayTimelineTime\(target\.startMinute\)\}/);
+  assert.match(html, /saveDayTimelineDraft\(interaction\.todo, dayTimelineTime\(target\.startMinute\), dayTimelineTime\(target\.endMinute\), state\.dayTimelineDate\)/);
+  assert.match(html, /const movableToTimeline = !todoIsMultiDayCalendarSpan\(todo\)/);
+  assert.match(html, /\.day-timeline-event\.is-drop-preview/);
 });
 test("večdnevno opravilo dobi povezani mesečni trak in varne kontrole vnosa", async () => {
   const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
