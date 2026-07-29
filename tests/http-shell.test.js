@@ -546,6 +546,20 @@ test("izvorno opravilo se prikaže samo pri res povezanem vpisu ur", async () =>
   assert.match(server, /sourceProjectTitle,/);
 });
 
+test("blocked form saves keep an accessible error inside the active form", async () => {
+  const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  assert.match(html, /\.form-validation-error \{[\s\S]*?position: sticky;/);
+  assert.match(html, /function showFormValidationError\(formOrField, message, field = null\)/);
+  assert.match(html, /node\.setAttribute\("role", "alert"\)/);
+  assert.match(html, /const details = target\?\.closest\("details"\);[\s\S]*?details\.open = true;/);
+  assert.match(html, /focusTarget\.scrollIntoView\?\.\(\{ block: "center"/);
+  assert.match(html, /document\.addEventListener\("invalid", \(event\) => \{[\s\S]*?showFormValidationError\(form, validationMessageForField\(field\), field\)/);
+  assert.match(html, /function invalidTodoForm\(message, fieldOrId = ""\)/);
+  assert.match(html, /showFormValidationError\(\$\("paymentForm"\), "Vpiši znesek za izplačilo\./);
+  assert.match(html, /showFormValidationError\(\$\("advanceForm"\), "Vpiši komentar za ta vnos\./);
+  assert.match(html, /showFormValidationError\(\$\("quickClientForm"\), "Vpiši vsaj vzdevek stranke\./);
+});
+
 test("date sort is ascending and client view hides only order status chips", async () => {
   const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
   assert.match(html, /function todoDateSort\(a, b\) \{[\s\S]*?String\(a\.date\)\.localeCompare\(String\(b\.date\)\)[\s\S]*?String\(a\.start \|\| "00:00"\)\.localeCompare\(String\(b\.start \|\| "00:00"\)\)[\s\S]*?String\(a\.end \|\| "00:00"\)\.localeCompare\(String\(b\.end \|\| "00:00"\)\)/);

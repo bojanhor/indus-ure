@@ -2971,6 +2971,36 @@
       gap: 14px;
     }
 
+    /* Errors which block a save must remain inside the form, not only in the
+       global toast below a mobile dialog.  The message is inserted by
+       showFormValidationError() at the top of the active form body. */
+    .form-validation-error {
+      position: sticky;
+      top: 0;
+      z-index: 12;
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      margin: -3px 0 2px;
+      padding: 10px 12px;
+      border: 1px solid #c94d4d;
+      border-left: 4px solid #b3261e;
+      border-radius: 8px;
+      background: #fff4f3;
+      color: #8c1e1e;
+      box-shadow: 0 3px 12px rgba(93, 24, 24, 0.12);
+      font-weight: 800;
+      line-height: 1.35;
+    }
+
+    .form-validation-error[hidden] { display: none; }
+    .modal-body input.is-invalid,
+    .modal-body select.is-invalid,
+    .modal-body textarea.is-invalid {
+      border-color: #b3261e;
+      box-shadow: 0 0 0 3px rgba(179, 38, 30, 0.16);
+    }
+
     .project-completion-context {
       display: grid;
       gap: 4px;
@@ -6940,6 +6970,116 @@
       appNoticeTimer = window.setTimeout(closeAppNotice, 8_000);
     }
 
+    function validationFormFor(formOrField) {
+      if (!formOrField) return null;
+      if (formOrField instanceof HTMLFormElement) return formOrField;
+      return formOrField.closest?.("form") || null;
+    }
+
+    function validationFieldLabel(field) {
+      if (!field) return "to polje";
+      const explicit = field.id ? document.querySelector(`label[for="${CSS.escape(field.id)}"]`) : null;
+      const label = explicit || field.closest("label");
+      const text = String(label?.innerText || field.getAttribute("aria-label") || field.placeholder || "to polje")
+        .replace(/\s+/g, " ")
+        .trim();
+      return text || "to polje";
+    }
+
+    function validationMessageForField(field) {
+      const label = validationFieldLabel(field);
+      const validity = field?.validity;
+      if (validity?.valueMissing) return `Izpolni polje: ${label}.`;
+      if (validity?.typeMismatch) return `Vpiši veljavno vrednost za: ${label}.`;
+      if (validity?.rangeUnderflow || validity?.rangeOverflow) return `Vrednost za ${label} ni v dovoljenem obsegu.`;
+      if (validity?.stepMismatch) return `Vrednost za ${label} nastavi na dovoljen korak.`;
+      if (validity?.patternMismatch) return `Vrednost za ${label} ni v pravilni obliki.`;
+      return field?.validationMessage || `Preveri polje: ${label}.`;
+    }
+
+    function formValidationErrorNode(form) {
+      if (!form) return null;
+      let node = form.querySelector(".form-validation-error");
+      if (node) return node;
+      node = document.createElement("div");
+      node.className = "form-validation-error";
+      node.id = `${form.id || form.closest("dialog")?.id || "form"}-validation-error`;
+      node.hidden = true;
+      node.tabIndex = -1;
+      node.setAttribute("role", "alert");
+      node.setAttribute("aria-live", "assertive");
+      (form.querySelector(".modal-body") || form).prepend(node);
+      return node;
+    }
+
+    function clearFormValidationError(formOrField, field = null) {
+      const form = validationFormFor(formOrField);
+      if (!form) return;
+      const target = field || (formOrField instanceof HTMLElement ? formOrField : null);
+      // Editing an unrelated field must not make the reason for a blocked
+      // save disappear.  Clear the alert only once its marked field changes.
+      const clearsActiveError = !target || target.classList.contains("is-invalid");
+      if (target) {
+        target.classList.remove("is-invalid");
+        target.removeAttribute("aria-invalid");
+      } else {
+        form.querySelectorAll(".is-invalid").forEach((control) => {
+          control.classList.remove("is-invalid");
+          control.removeAttribute("aria-invalid");
+        });
+      }
+      const node = form.querySelector(".form-validation-error");
+      if (node && clearsActiveError) {
+        node.hidden = true;
+        node.textContent = "";
+      }
+    }
+
+    function showFormValidationError(formOrField, message, field = null) {
+      const form = validationFormFor(formOrField);
+      if (!form) {
+        showNotice(message);
+        return false;
+      }
+      const target = field || (formOrField instanceof HTMLElement && !formOrField.matches("form") ? formOrField : null);
+      const node = formValidationErrorNode(form);
+      if (!node) {
+        showNotice(message);
+        return false;
+      }
+      const details = target?.closest("details");
+      if (details) details.open = true;
+      clearFormValidationError(form);
+      node.textContent = String(message || "Preveri označeno polje.");
+      node.hidden = false;
+      if (target) {
+        target.classList.add("is-invalid");
+        target.setAttribute("aria-invalid", "true");
+        const descriptions = new Set(String(target.getAttribute("aria-describedby") || "").split(/\s+/).filter(Boolean));
+        descriptions.add(node.id);
+        target.setAttribute("aria-describedby", [...descriptions].join(" "));
+      }
+      requestAnimationFrame(() => {
+        const focusTarget = target && !target.disabled ? target : node;
+        focusTarget.scrollIntoView?.({ block: "center", inline: "nearest", behavior: "smooth" });
+        focusTarget.focus?.({ preventScroll: true });
+      });
+      return false;
+    }
+
+    // Native HTML constraints otherwise show a browser bubble that can be
+    // hidden below an open mobile modal. Route every invalid control through
+    // the same visible, accessible error treatment.
+    document.addEventListener("invalid", (event) => {
+      const field = event.target;
+      const form = validationFormFor(field);
+      if (!form) return;
+      event.preventDefault();
+      showFormValidationError(form, validationMessageForField(field), field);
+    }, true);
+    document.addEventListener("input", (event) => clearFormValidationError(event.target.form, event.target));
+    document.addEventListener("change", (event) => clearFormValidationError(event.target.form, event.target));
+
     function showAppConfirm(message, options = {}) {
       const dialog = $("appConfirmDialog");
       $("appConfirmTitle").textContent = options.title || "Potrditev";
@@ -7513,7 +7653,11 @@
     async function savePaymentFromDialog() {
       const payroll = payrollForBilling(billingWorkerId(), billingRange());
       if (!payroll) return;
-      const data = await api(`/api/payrolls/${encodeURIComponent(payroll.id)}/payments`, { method: "POST", body: JSON.stringify({ amount: Number($("paymentAmount").value || 0), note: $("paymentNote").value.trim() }) });
+      const amount = Number(String($("paymentAmount").value || "").replace(",", "."));
+      const remaining = Number(payroll.remainingAmount ?? (Number(payroll.payoutAmount || payroll.totalAmount || 0) - Number(payroll.paidAmount || 0)));
+      if (!Number.isFinite(amount) || amount <= 0) return showFormValidationError($("paymentForm"), "Vpiši znesek za izplačilo.", $("paymentAmount"));
+      if (amount > remaining + 0.005) return showFormValidationError($("paymentForm"), `Znesek ne sme presegati preostanka (${money(remaining)} EUR).`, $("paymentAmount"));
+      const data = await api(`/api/payrolls/${encodeURIComponent(payroll.id)}/payments`, { method: "POST", body: JSON.stringify({ amount, note: $("paymentNote").value.trim() }) });
       state.payrolls = data.payrolls || state.payrolls;
       $("paymentDialog").close();
       await loadAll();
@@ -7583,10 +7727,18 @@
 
     async function saveAdvanceFromDialog() {
       const purchase = state.financialEntryMode === "purchase";
+      const amount = Number(String($("advanceAmount").value || "").replace(",", "."));
+      const date = $("advanceDate").value;
+      const reason = $("advanceReason").value.trim();
+      const workerId = $("advanceWorker").value;
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return showFormValidationError($("advanceForm"), "Izberi datum vnosa.", $("advanceDate"));
+      if (!workerId) return showFormValidationError($("advanceForm"), "Izberi delavca.", $("advanceWorker"));
+      if (!Number.isFinite(amount) || amount <= 0) return showFormValidationError($("advanceForm"), "Vpiši znesek, večji od 0 EUR.", $("advanceAmount"));
+      if (!reason) return showFormValidationError($("advanceForm"), "Vpiši komentar za ta vnos.", $("advanceReason"));
       const root = purchase ? "/api/personal-purchases" : "/api/advances";
       const endpoint = state.financialEntryId ? `${root}/${encodeURIComponent(state.financialEntryId)}` : root;
       const method = state.financialEntryId ? "PUT" : "POST";
-      const data = await api(endpoint, { method, body: JSON.stringify({ person: $("advanceWorker").value, date: $("advanceDate").value, amount: Number($("advanceAmount").value || 0), reason: $("advanceReason").value.trim(), projectTodoId: purchase ? "" : $("advanceProject").value, photos: state.advancePhotos }) });
+      const data = await api(endpoint, { method, body: JSON.stringify({ person: workerId, date, amount, reason, projectTodoId: purchase ? "" : $("advanceProject").value, photos: state.advancePhotos }) });
       if (purchase) state.personalPurchases = data.purchases || state.personalPurchases;
       else state.advances = data.advances || state.advances;
       $("advanceDialog").close(); await loadAll(); renderBillingView();
@@ -7978,42 +8130,38 @@
       renderTodoFormClientContacts();
     }
 
+    function invalidTodoForm(message, fieldOrId = "") {
+      const field = typeof fieldOrId === "string" ? $(fieldOrId) : fieldOrId;
+      return showFormValidationError($("todoForm"), message, field);
+    }
+
     function validateTodo(todo) {
       if ((!todo.id || Array.isArray(todo.assigneeIds)) && (!Array.isArray(todo.assigneeIds) || todo.assigneeIds.length === 0)) {
-        showNotice("Izberi vsaj enega delavca.");
-        return false;
+        return invalidTodoForm("Izberi vsaj enega delavca.", $("todoFormAssignees").querySelector("input") || $("todoFormAssigneeLabel"));
       }
       if (!todo.title) {
-        showNotice("Vpiši ime opravila.");
-        return false;
+        return invalidTodoForm("Vpiši ime opravila.", "todoFormTask");
       }
       if (todo.endDate && !todo.date) {
-        showNotice("Za datum do vnesi tudi datum od.");
-        return false;
+        return invalidTodoForm("Za datum do vnesi tudi datum od.", "todoFormDate");
       }
       if (todo.date && todo.endDate && todo.endDate < todo.date) {
-        showNotice("Datum do ne more biti pred datumom od.");
-        return false;
+        return invalidTodoForm("Datum do ne more biti pred datumom od.", "todoFormEndDate");
       }
       if (Boolean(todo.start) !== Boolean(todo.end)) {
-        showNotice("Vnesi obe uri: od in do.");
-        return false;
+        return invalidTodoForm("Vnesi obe uri: od in do.", todo.start ? "todoFormEnd" : "todoFormStart");
       }
       if ((todo.start || todo.end) && !todo.date) {
-        showNotice("Za opravilo z uro vnesi tudi datum.");
-        return false;
+        return invalidTodoForm("Za opravilo z uro vnesi tudi datum.", "todoFormDate");
       }
       if (todo.start && todo.end && todo.endDate && todo.endDate !== todo.date) {
-        showNotice("Opravilo z uro je lahko samo za en dan. Za večdnevno opravilo pusti uri prazni.");
-        return false;
+        return invalidTodoForm("Opravilo z uro je lahko samo za en dan. Za večdnevno opravilo pusti uri prazni.", "todoFormEndDate");
       }
       if (["execution", "meal"].includes(todo.status) && (!todo.date || !todo.start || !todo.end)) {
-        showNotice(todo.status === "meal" ? "Za malico vnesi datum ter uro od in do." : "Za zaključeno opravilo vnesi datum ter uro od in do.");
-        return false;
+        return invalidTodoForm(todo.status === "meal" ? "Za malico vnesi datum ter uro od in do." : "Za zaključeno opravilo vnesi datum ter uro od in do.", !todo.date ? "todoFormDate" : (!todo.start ? "todoFormStart" : "todoFormEnd"));
       }
       if (todo.start && todo.end <= todo.start) {
-        showNotice("Ura do mora biti kasneje kot ura od.");
-        return false;
+        return invalidTodoForm("Ura do mora biti kasneje kot ura od.", "todoFormEnd");
       }
       return true;
     }
@@ -10323,9 +10471,7 @@
     async function saveQuickClientFromDialog() {
       const name = $("quickClientName").value.trim();
       if (!name) {
-        showNotice("Vpiši vsaj vzdevek stranke.");
-        $("quickClientName").focus();
-        return;
+        return showFormValidationError($("quickClientForm"), "Vpiši vsaj vzdevek stranke.", $("quickClientName"));
       }
       const data = await saveClientToServer({
         clientId: "",
@@ -10453,11 +10599,13 @@
     }
 
     function validateClientEditContacts() {
+      const rows = [...$("clientEditContacts").querySelectorAll(".client-edit-contact-row")];
       const contacts = clientEditContactDrafts();
       const incomplete = contacts.find((contact) => contact.name && !contact.phone);
-      if (incomplete) throw new Error("Pri kontaktni osebi manjka telefonska številka.");
+      if (incomplete) return showFormValidationError($("clientEditForm"), "Pri kontaktni osebi manjka telefonska številka.", rows.find((row) => String(row.dataset.contactId || "") === incomplete.id)?.querySelector(".client-edit-contact-phone"));
       if (contacts.length > 1 && contacts.some((contact) => !contact.name)) {
-        throw new Error("Pri več telefonskih številkah vpiši ime vsake kontaktne osebe.");
+        const unnamed = contacts.find((contact) => !contact.name);
+        return showFormValidationError($("clientEditForm"), "Pri več telefonskih številkah vpiši ime vsake kontaktne osebe.", rows.find((row) => String(row.dataset.contactId || "") === unnamed?.id)?.querySelector(".client-edit-contact-name"));
       }
       return contacts;
     }
@@ -10499,11 +10647,12 @@
       const name = $("clientEditName").value.trim();
       const search = $("clientEditSearch").value.trim() || name;
       const taxId = normalizeTaxId($("clientEditTax").value);
-      if (!name) throw new Error("Vpiši naziv stranke.");
+      if (!name) return showFormValidationError($("clientEditForm"), "Vpiši naziv stranke.", $("clientEditName"));
       if (taxId && !/^(?=.{8,20}$)(?=.*\d)[A-Z0-9]+$/.test(taxId)) {
-        throw new Error("Vpiši veljavno davčno številko.");
+        return showFormValidationError($("clientEditForm"), "Vpiši veljavno davčno številko.", $("clientEditTax"));
       }
       const contacts = validateClientEditContacts();
+      if (!contacts) return false;
       await saveClientToServer({
         ...existing,
         clientId,
@@ -12210,7 +12359,7 @@
 
     async function saveTodoFromDialog() {
       if (state.todoDialogPhotos.some((photo) => photo.uploading)) {
-        throw new Error("Počakaj, da se nalaganje videa konča, nato shrani opravilo.");
+        return showFormValidationError($("todoForm"), "Počakaj, da se nalaganje videa konča, nato shrani opravilo.", $("todoFormAttachments"));
       }
       normalizeTodoFormTimes();
       syncTodoFormEndDate();
@@ -12220,8 +12369,7 @@
       const meal = $("todoFormStatus").value === "meal";
       const assigneeIds = selectedTodoFormAssignees();
       if (!meal && !assigneeIds.length) {
-        showNotice("Izberi vsaj enega izvajalca.");
-        return;
+        return invalidTodoForm("Izberi vsaj enega izvajalca.", $("todoFormAssignees").querySelector("input") || $("todoFormAssigneeLabel"));
       }
       if (meal) assigneeIds.splice(0, assigneeIds.length, existing?.syncUser || activeWorkerId());
       const hourlyRate = parseBillingNumber($("todoFormHourlyRate").value, 10_000);
@@ -12273,8 +12421,7 @@
       const isHoursEntry = Boolean(state.todoHoursSourceId || state.todoStandaloneHours || timeEntryStatusIds.has(todo.status));
       if (isHoursEntry && (!todo.start || !todo.end)) {
         if (!todo.date) {
-          showNotice("Za vpis delovnih ur izberi datum.");
-          return;
+          return invalidTodoForm("Za vpis delovnih ur izberi datum.", "todoFormDate");
         }
         showNotice("Za vpis ur nastavi uro od in do. Dodan je prvi prost enourni termin, ki ga lahko takoj popraviš v dnevnem pogledu.");
         const slot = firstFreeDayTimelineSlot(todo.date);
@@ -12346,12 +12493,18 @@
     }
     async function submitTodoDialog() {
       if (todoDialogSaveInFlight) return;
+      const form = $("todoForm");
+      const invalidField = [...form.elements].find((control) => control.willValidate && !control.validity.valid);
+      if (invalidField) {
+        showFormValidationError(form, validationMessageForField(invalidField), invalidField);
+        return;
+      }
       todoDialogSaveInFlight = true;
       setTodoDialogSaving(true);
       try {
         await saveTodoFromDialog();
       } catch (error) {
-        showNotice(error.message);
+        showFormValidationError(form, error.message || "Opravila ni bilo mogoče shraniti.");
       } finally {
         todoDialogSaveInFlight = false;
         setTodoDialogSaving(false);
@@ -12420,9 +12573,9 @@
     async function submitCompletionRequest() {
       const dialog = $("completionRequestDialog");
       const todoId = String(dialog.dataset.todoId || "");
-      if (!todoId) throw new Error("Opravilo ni izbrano.");
+      if (!todoId) return showFormValidationError($("completionRequestForm"), "Izberi opravilo.", $("completionRequestTodoSelect"));
       const recipientUserIds = [...document.querySelectorAll('input[name="completionRecipient"]:checked')].map((input) => input.value);
-      if (!recipientUserIds.length) throw new Error("Izberi vsaj enega prejemnika.");
+      if (!recipientUserIds.length) return showFormValidationError($("completionRequestForm"), "Izberi vsaj enega prejemnika.", $("completionRequestRecipients").querySelector("input") || $("completionRequestRecipients"));
       const submit = $("completionRequestSubmit");
       setCompletionRequestSending(true);
       completionRequestStatus("Pošiljam zahtevek po e-pošti. Počakaj na potrditev …", "pending");
@@ -14406,8 +14559,10 @@
       const workerOwnVehicleKmRate = parseBillingNumber($("settingsWorkerOwnVehicleKmRate").value, 1_000);
       const archiveRetentionMonths = parseBillingNumber($("settingsArchiveRetentionMonths").value, 120);
       if (mealPaid === null || !Number.isInteger(mealPaid) || workerOwnVehicleKmRate === null || archiveRetentionMonths === null || !Number.isInteger(archiveRetentionMonths) || archiveRetentionMonths < 1 || archiveRetentionMonths > 120) {
-        showNotice("Vnesi veljavne nastavitve malice, kilometrine in časa hrambe arhiva.");
-        return;
+        const invalid = mealPaid === null || !Number.isInteger(mealPaid)
+          ? $("settingsMealPaidMinutes")
+          : (workerOwnVehicleKmRate === null ? $("settingsWorkerOwnVehicleKmRate") : $("settingsArchiveRetentionMonths"));
+        return showFormValidationError($("appSettingsDialog").querySelector("form"), "Vnesi veljavne nastavitve malice, kilometrine in časa hrambe arhiva.", invalid);
       }
       await saveBillingSettings({
         ...(state.settings.billing || {}),
@@ -14420,7 +14575,7 @@
     }
     $("appSettingsBtn").addEventListener("click", openAppSettings);
     ["closeAppSettings", "cancelAppSettings"].forEach((id) => $(id).addEventListener("click", () => $("appSettingsDialog").close()));
-    $("saveAppSettings").addEventListener("click", () => saveAppSettings().catch((error) => showNotice(error.message)));
+    $("saveAppSettings").addEventListener("click", () => saveAppSettings().catch((error) => showFormValidationError($("appSettingsDialog").querySelector("form"), error.message || "Nastavitev ni bilo mogoče shraniti.")));
     document.addEventListener("click", (event) => {
       const menu = $("toolsMenu");
       if (menu?.open && !menu.contains(event.target)) closeToolsMenu();
@@ -14555,7 +14710,7 @@
     $("billingAddPurchase").addEventListener("click", () => openAdvanceDialog("purchase"));
     $("closePaymentDialog").addEventListener("click", () => $("paymentDialog").close());
     $("cancelPaymentDialog").addEventListener("click", () => $("paymentDialog").close());
-    $("paymentForm").addEventListener("submit", (event) => { event.preventDefault(); savePaymentFromDialog().catch((error) => showNotice(error.message)); });
+    $("paymentForm").addEventListener("submit", (event) => { event.preventDefault(); savePaymentFromDialog().catch((error) => showFormValidationError($("paymentForm"), error.message || "Izplačila ni bilo mogoče shraniti.", $("paymentAmount"))); });
     ["billingPrevMonth", "billingNextMonth"].forEach((id) => $(id).addEventListener("click", () => {
       const range = billingRange();
       const workerId = billingWorkerId();
@@ -14599,7 +14754,7 @@
     $("closeAdvanceDialog").addEventListener("click", () => $("advanceDialog").close());
     $("cancelAdvanceDialog").addEventListener("click", () => $("advanceDialog").close());
     $("advanceProjectSearch").addEventListener("input", renderAdvanceProjects);
-    $("advanceForm").addEventListener("submit", (event) => { event.preventDefault(); saveAdvanceFromDialog().catch((error) => showNotice(error.message)); });
+    $("advanceForm").addEventListener("submit", (event) => { event.preventDefault(); saveAdvanceFromDialog().catch((error) => showFormValidationError($("advanceForm"), error.message || "Vnosa ni bilo mogoče shraniti.")); });
     async function handleAdvanceAttachments(event) {
       try {
         const files = [...event.target.files].slice(0, Math.max(0, 8 - state.advancePhotos.length));
@@ -14779,7 +14934,7 @@
     });
     $("completionRequestForm").addEventListener("submit", (event) => {
       event.preventDefault();
-      submitCompletionRequest().catch((error) => showNotice(error.message));
+      submitCompletionRequest().catch((error) => showFormValidationError($("completionRequestForm"), error.message || "Zahtevka ni bilo mogoče poslati."));
     });
     $("completionRequestDialog").addEventListener("click", (event) => {
       if (event.target === event.currentTarget) $("completionRequestDialog").close();
@@ -14882,7 +15037,7 @@
     $("addClientBtn").addEventListener("click", () => addClientFromForm().catch((error) => showNotice(error.message)));
     $("closeAppNotice").addEventListener("click", closeAppNotice);
     $("quickAddClientBtn").addEventListener("click", openQuickClientDialog);
-    $("quickClientForm").addEventListener("submit", (event) => { event.preventDefault(); saveQuickClientFromDialog().catch((error) => showNotice(error.message)); });
+    $("quickClientForm").addEventListener("submit", (event) => { event.preventDefault(); saveQuickClientFromDialog().catch((error) => showFormValidationError($("quickClientForm"), error.message || "Stranke ni bilo mogoče dodati.", $("quickClientName"))); });
     $("closeQuickClientDialog").addEventListener("click", () => $("quickClientDialog").close());
     $("cancelQuickClientDialog").addEventListener("click", () => $("quickClientDialog").close());
 
@@ -14994,7 +15149,7 @@
       event.preventDefault();
       const button = $("saveClientEdit");
       button.disabled = true;
-      saveClientFromDialog().catch((error) => showNotice(error.message)).finally(() => { button.disabled = false; });
+      saveClientFromDialog().catch((error) => showFormValidationError($("clientEditForm"), error.message || "Stranke ni bilo mogoče shraniti.")).finally(() => { button.disabled = false; });
     });
     $("clientEditDialog").addEventListener("click", (event) => {
       if (event.target === event.currentTarget) event.currentTarget.close();
