@@ -418,6 +418,104 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
     }
   });
 
+  test("all-day drop stays editable and daily controls fit a phone viewport", async ({ browser }) => {
+    const context = await browser.newContext({
+      viewport: { width: 390, height: 844 },
+      isMobile: true,
+      hasTouch: true
+    });
+    const page = await context.newPage();
+    const title = "PW long all day task that must still fit the daily timeline controls on a narrow phone";
+    try {
+      await localLogin(page, "ibro");
+      const date = await page.evaluate(() => {
+        const value = new Date();
+        return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
+      });
+      await page.locator("#newTodoButton").click();
+      await page.locator("#todoFormTask").fill(title);
+      await page.locator("#todoFormDate").fill(date);
+      await page.locator("#saveTodoDialog").click();
+      await expect(page.locator("#todoDialog")).toBeHidden();
+
+      await page.locator("#calendarViewBtn").click();
+      await page.locator(`.day[data-date="${date}"] .day-head`).click();
+      await expect(page.locator("#dayTimelineDialog")).toBeVisible();
+      await expect(page.locator("#dayTimelineTitle")).toHaveText(/^(Pon|Tor|Sre|\u010cet|Pet|Sob|Ned), \d{1,2}\. (jan|feb|mar|apr|maj|jun|jul|avg|sep|okt|nov|dec) \d{4}$/);
+
+      const initialGeometry = await page.evaluate(() => {
+        const dialog = document.querySelector("#dayTimelineDialog");
+        const save = document.querySelector("#saveDayTimeline");
+        const close = document.querySelector("#closeDayTimeline");
+        const box = (node) => {
+          const rect = node.getBoundingClientRect();
+          return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom };
+        };
+        return {
+          dialog: box(dialog),
+          save: box(save),
+          close: box(close),
+          dialogScrollWidth: dialog.scrollWidth,
+          dialogClientWidth: dialog.clientWidth,
+          documentScrollWidth: document.documentElement.scrollWidth,
+          viewportWidth: window.innerWidth
+        };
+      });
+      for (const control of [initialGeometry.save, initialGeometry.close]) {
+        expect(control.left).toBeGreaterThanOrEqual(initialGeometry.dialog.left - 1);
+        expect(control.right).toBeLessThanOrEqual(initialGeometry.dialog.right + 1);
+        expect(control.top).toBeGreaterThanOrEqual(initialGeometry.dialog.top - 1);
+        expect(control.bottom).toBeLessThanOrEqual(initialGeometry.dialog.bottom + 1);
+      }
+      expect(initialGeometry.dialogScrollWidth).toBeLessThanOrEqual(initialGeometry.dialogClientWidth + 1);
+      expect(initialGeometry.documentScrollWidth).toBeLessThanOrEqual(initialGeometry.viewportWidth + 1);
+
+      const source = page.locator(".day-all-day-item", { hasText: title });
+      await expect(source).toBeVisible();
+      const [sourceBox, scrollBox, timelineBox] = await Promise.all([
+        source.boundingBox(),
+        page.locator("#dayTimelineScroll").boundingBox(),
+        page.locator("#dayTimeline").boundingBox()
+      ]);
+      expect(sourceBox).toBeTruthy();
+      expect(scrollBox).toBeTruthy();
+      expect(timelineBox).toBeTruthy();
+      const targetX = timelineBox.x + timelineBox.width * 0.52;
+      const targetY = scrollBox.y + Math.min(scrollBox.height - 40, Math.max(44, 150));
+      await page.mouse.move(sourceBox.x + sourceBox.width / 2, sourceBox.y + sourceBox.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(targetX, targetY, { steps: 8 });
+      await expect(page.locator(".day-timeline-event.is-drop-preview")).toBeVisible();
+      await page.mouse.up();
+
+      const timed = page.locator(".day-timeline-event", { hasText: title });
+      await expect(timed).toBeVisible();
+      await expect(page.locator("#saveDayTimeline")).toBeEnabled();
+      const times = await timed.evaluate((node) => ({ start: node.dataset.start, end: node.dataset.end }));
+      expect(times.start).toMatch(/^\d{2}:(00|15|30|45)$/);
+      expect(times.end).toMatch(/^\d{2}:(00|15|30|45)$/);
+
+      // The single fresh draft is saved before opening the editor. This is the
+      // practical follow-up to a drop and avoids leaving a user at a dead card.
+      await timed.click();
+      await expect(page.locator("#todoDialog")).toBeVisible();
+      await expect(page.locator("#todoFormStart")).toHaveValue(times.start);
+      await expect(page.locator("#todoFormEnd")).toHaveValue(times.end);
+      await page.locator("#closeTodoDialog").click();
+      await expect(page.locator("#dayTimelineDialog")).toBeVisible();
+      await expect(page.locator("#saveDayTimeline")).toBeDisabled();
+
+      const persisted = await page.evaluate(async (taskTitle) => {
+        const response = await fetch("/api/todos");
+        const data = await response.json();
+        return data.todos.find((todo) => todo.title === taskTitle) || null;
+      }, title);
+      expect(persisted).toMatchObject({ date, start: times.start, end: times.end });
+    } finally {
+      await context.close();
+    }
+  });
+
   test("daily timeline moves a timed event to the adjacent day only after a deliberate horizontal drag", async ({ browser }) => {
     const context = await browser.newContext({ viewport: { width: 980, height: 860 } });
     const page = await context.newPage();

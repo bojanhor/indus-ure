@@ -2598,10 +2598,16 @@
 
     #dayTimelineDialog > form {
       height: 100%;
+      min-height: 0;
       min-width: 0;
       max-width: 100%;
       display: grid;
       grid-template-rows: auto auto auto minmax(0, 1fr);
+    }
+
+    #dayTimelineDialog .modal-head {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
     }
 
     .day-timeline-toolbar {
@@ -2623,6 +2629,10 @@
       gap: 8px;
       align-items: start;
       padding: 8px 14px;
+      min-height: 0;
+      max-height: min(24svh, 180px);
+      overflow: auto;
+      overscroll-behavior: contain;
       border-bottom: 1px solid var(--line);
       background: #fff;
     }
@@ -2913,9 +2923,22 @@
       background: #e0ebe5;
     }
 
-    .day-timeline-title-nav { display: flex; align-items: center; min-width: 0; gap: 8px; }
-    .day-timeline-title-nav h3 { min-width: 0; }
+    .day-timeline-title-nav { display: flex; align-items: center; min-width: 0; flex: 1 1 0; gap: 8px; }
+    .day-timeline-title-nav h3 { min-width: 0; flex: 1 1 auto; }
     .day-timeline-date-nav { flex: 0 0 auto; font-size: 26px; line-height: 1; }
+    #dayTimelineDialog .day-timeline-control {
+      width: 42px;
+      min-width: 42px;
+      height: 42px;
+      min-height: 42px;
+      display: inline-grid;
+      place-items: center;
+      padding: 0;
+      border-radius: 8px;
+      line-height: 1;
+    }
+    #dayTimelineDialog #saveDayTimeline { border-color: var(--accent); font-size: 21px; }
+    #dayTimelineDialog .modal-head-actions { gap: 6px; }
 
     .todo-creation-tabs {
       display: grid;
@@ -4915,21 +4938,21 @@
     <form method="dialog">
       <div class="modal-head">
         <div class="day-timeline-title-nav">
-          <button class="icon-btn day-timeline-date-nav" id="prevDayTimeline" type="button" title="Prejšnji dan" aria-label="Prejšnji dan">&lsaquo;</button>
+          <button class="icon-btn day-timeline-date-nav day-timeline-control" id="prevDayTimeline" type="button" title="Prej&#353;nji dan" aria-label="Prej&#353;nji dan">&lsaquo;</button>
           <h3 id="dayTimelineTitle">Dnevni pregled</h3>
-          <button class="icon-btn day-timeline-date-nav" id="nextDayTimeline" type="button" title="Naslednji dan" aria-label="Naslednji dan">&rsaquo;</button>
+          <button class="icon-btn day-timeline-date-nav day-timeline-control" id="nextDayTimeline" type="button" title="Naslednji dan" aria-label="Naslednji dan">&rsaquo;</button>
         </div>
         <div class="modal-head-actions">
-          <button class="primary" id="saveDayTimeline" type="button" disabled>Shrani</button>
-          <button class="icon-btn" id="closeDayTimeline" type="submit" title="Prekliči spremembe" aria-label="Prekliči spremembe in zapri dnevni pregled">&times;</button>
+          <button class="primary day-timeline-control" id="saveDayTimeline" type="button" title="Shrani spremembe dnevnega pogleda" aria-label="Shrani spremembe dnevnega pogleda" disabled>&#10003;</button>
+          <button class="icon-btn day-timeline-control" id="closeDayTimeline" type="submit" title="Prekli&#269;i spremembe" aria-label="Prekli&#269;i spremembe in zapri dnevni pregled">&times;</button>
         </div>
       </div>
       <div class="day-timeline-toolbar">
-        <div class="gesture-zoom-controls" aria-label="Povečava dnevne časovnice">
-          <button class="secondary zoom-step" id="dayTimelineZoomOut" type="button" aria-label="Pomanjšaj časovnico">&minus;</button>
+        <div class="gesture-zoom-controls" aria-label="Pove&#269;ava dnevne &#269;asovnice">
+          <button class="secondary zoom-step day-timeline-control" id="dayTimelineZoomOut" type="button" title="Pomanj&#353;aj &#269;asovnico" aria-label="Pomanj&#353;aj &#269;asovnico">&minus;</button>
           <span class="zoom-value" id="dayTimelineZoomValue">100 %</span>
-          <button class="secondary zoom-step" id="dayTimelineZoomIn" type="button" aria-label="Povečaj časovnico">&plus;</button>
-          <button class="secondary" id="dayTimelineFit" type="button">24 h</button>
+          <button class="secondary zoom-step day-timeline-control" id="dayTimelineZoomIn" type="button" title="Pove&#269;aj &#269;asovnico" aria-label="Pove&#269;aj &#269;asovnico">&plus;</button>
+          <button class="secondary day-timeline-control" id="dayTimelineFit" type="button" title="Prika&#382;i vseh 24 ur" aria-label="Prika&#382;i vseh 24 ur">&#8597;</button>
         </div>
         <span class="day-timeline-hint">Zgoraj/dol spremeni uro · vodoravno povleci dogodek čez rob za drug dan</span>
       </div>
@@ -5596,6 +5619,13 @@
       "januar", "februar", "marec", "april", "maj", "junij",
       "julij", "avgust", "september", "oktober", "november", "december"
     ];
+
+    const dayTimelineWeekdayShortNames = ["Ned", "Pon", "Tor", "Sre", "\u010cet", "Pet", "Sob"];
+    const dayTimelineMonthShortNames = ["jan", "feb", "mar", "apr", "maj", "jun", "jul", "avg", "sep", "okt", "nov", "dec"];
+
+    function compactDayTimelineTitle(date) {
+      return `${dayTimelineWeekdayShortNames[date.getDay()]}, ${date.getDate()}. ${dayTimelineMonthShortNames[date.getMonth()]} ${date.getFullYear()}`;
+    }
 
     const state = {
       current: new Date(),
@@ -8615,7 +8645,7 @@
       if (changed) resolveDayTimelineHoursWarning(todo);
     }
 
-    async function saveDayTimelineDrafts() {
+    async function saveDayTimelineDrafts({ announce = true } = {}) {
       if (!state.dayTimelineDrafts.size || state.dayTimelineSaving) return;
       const button = $("saveDayTimeline");
       const closeButton = $("closeDayTimeline");
@@ -8649,7 +8679,7 @@
         refreshClientList();
         render();
         if ($("dayTimelineDialog").open && state.dayTimelineDate === day) renderDayTimeline();
-        showNotice("Spremembe dnevnega pogleda so shranjene.");
+        if (announce) showNotice("Spremembe dnevnega pogleda so shranjene.");
       } finally {
         state.dayTimelineSaving = false;
         if ($("dayTimelineDialog").open) {
@@ -8661,16 +8691,26 @@
 
     async function openTodoFromDayTimeline(todo) {
       if (!todo) return;
-      if (state.dayTimelineSaving || state.dayTimelineDrafts.size) {
-        showNotice(state.dayTimelineSaving ? "Dnevni pogled se še shranjuje." : "Najprej shrani ali prekliči spremembe dnevne časovnice.");
+      if (state.dayTimelineSaving) {
+        showNotice("Dnevni pogled se \u0161e shranjuje.");
         return;
+      }
+      if (state.dayTimelineDrafts.size) {
+        // A just-dropped all-day task has exactly one safe, local draft. Save
+        // that one before editing it so the form never opens with stale hours.
+        // Do not silently commit unrelated timeline changes.
+        if (state.dayTimelineDrafts.size !== 1 || !state.dayTimelineDrafts.has(todo.id)) {
+          showNotice("Najprej shrani ali prekli\u010di spremembe dnevne \u010dasovnice.");
+          return;
+        }
+        await saveDayTimelineDrafts({ announce: false });
+        todo = state.todos.find((item) => item.id === todo.id) || todo;
       }
       state.todoDialogReturnDayDate = state.dayTimelineDate;
       $("dayTimelineDialog").close();
       await new Promise((resolve) => setTimeout(resolve, 0));
       await openTodoDialog(todo);
     }
-
     async function openNewTodoFromDayTimeline(clientY) {
       if (state.dayTimelineSaving || state.dayTimelineDrafts.size) {
         showNotice(state.dayTimelineSaving ? "Dnevni pogled se še shranjuje." : "Najprej shrani ali prekliči spremembe dnevne časovnice.");
@@ -8867,12 +8907,16 @@
     function renderDayTimeline() {
       if (!state.dayTimelineDate) return;
       const selectedDate = parseDate(state.dayTimelineDate);
-      $("dayTimelineTitle").textContent = selectedDate.toLocaleDateString("sl-SI", {
+      const fullDayTitle = selectedDate.toLocaleDateString("sl-SI", {
         weekday: "long",
         day: "numeric",
         month: "long",
         year: "numeric"
       });
+      const dayTimelineTitle = $("dayTimelineTitle");
+      dayTimelineTitle.textContent = compactDayTimelineTitle(selectedDate);
+      dayTimelineTitle.title = fullDayTitle;
+      dayTimelineTitle.setAttribute("aria-label", fullDayTitle);
       $("dayTimelineZoomValue").textContent = Math.round(state.dayTimelineMinuteHeight * 100) + " %";
       $("saveDayTimeline").disabled = state.dayTimelineSaving || state.dayTimelineDrafts.size === 0;
 
@@ -9295,7 +9339,10 @@
       if (cancelled) { renderDayTimeline(); return; }
       const todo = state.todos.find((item) => item.id === interaction.todoId);
       if (!interaction.moved) {
-        if (interaction.mode === "move" && todo && (!interaction.touchHoldRequired || !interaction.touchReady)) await openTodoFromDayTimeline(todo);
+        // A tap is an edit action even when it lands on a resize grip. On
+        // narrow cards the large, touch-friendly grips otherwise cover the
+        // complete card and make the event appear impossible to open.
+        if (todo && (!interaction.touchHoldRequired || !interaction.touchReady)) await openTodoFromDayTimeline(todo);
         return;
       }
       if (!todo) { renderDayTimeline(); return; }
