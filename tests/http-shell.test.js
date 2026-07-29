@@ -515,9 +515,16 @@ test("boss can create a task for workers directly from admin view", async () => 
 });
 test("calendar-only task controls are date-bound, unavailable for time entries, and excluded only from task lists", async () => {
   const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  const materialIndex = html.indexOf('id="todoFormMaterialField"');
+  const dateTimeIndex = html.indexOf('id="todoFormDateTimeSection"');
+  const attachmentsIndex = html.indexOf('id="todoFormAttachments"');
+  assert.ok(materialIndex >= 0 && dateTimeIndex > materialIndex && attachmentsIndex > dateTimeIndex);
+  assert.match(html, /<details class="todo-form-date-time" id="todoFormDateTimeSection">/);
+  assert.match(html, /placeholder="Vpi&#353;i predvideni material"/);
+  assert.match(html, /\$\("todoFormDateTimeSection"\)\.open = Boolean\(editing \|\| state\.todoHoursSourceId/);
   assert.match(html, /id="todoFormCalendarOnly"/);
   assert.match(html, /id="todoFormCalendarOnlyField"/);
-  assert.match(html, /const isTimeEntry = timeEntryStatusIds\.has\(\$\('todoFormStatus'\)\.value\);\s*const canShowOnlyInCalendar = Boolean\(date && !isTimeEntry\);/);
+  assert.match(html, /const isTimeEntry = timeEntryStatusIds\.has\(\$\('todoFormStatus'\)\.value\);[\s\S]*?const canShowOnlyInCalendar = Boolean\(date && !isTimeEntry\);/);
   assert.match(html, /if \(!canShowOnlyInCalendar\) calendarOnly\.checked = false;/);
   assert.match(html, /calendarOnly: Boolean\(!timeEntryStatusIds\.has\(selectedStatus\) && \$\("todoFormDate"\)\.value && \$\("todoFormCalendarOnly"\)\.checked\)/);
   assert.match(html, /!todo\.calendarOnly && \(state\.todoSortMode === "imported" \? isImportedTodo\(todo\) : !isImportedTodo\(todo\)\)/);
@@ -544,4 +551,20 @@ test("date sort is ascending and client view hides only order status chips", asy
   assert.match(html, /function todoDateSort\(a, b\) \{[\s\S]*?String\(a\.date\)\.localeCompare\(String\(b\.date\)\)[\s\S]*?String\(a\.start \|\| "00:00"\)\.localeCompare\(String\(b\.start \|\| "00:00"\)\)[\s\S]*?String\(a\.end \|\| "00:00"\)\.localeCompare\(String\(b\.end \|\| "00:00"\)\)/);
   assert.match(html, /const showStatusChip = !todoOrderStatusIds\.has\(todo\.status\);/);
   assert.match(html, /showStatusChip \? `<span class="todo-chip todo-status-chip todo-status-color \$\{todoStatusClass\(todo\.status\)\}">/);
+});
+
+test("logistična statusa sta ločena, Vrni nima več stare oznake in ročni filter nima odvečnega opisa", async () => {
+  const [html, server] = await Promise.all([
+    fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8"),
+    fs.readFile(path.join(__dirname, "..", "outputs", "server.js"), "utf8")
+  ]);
+  assert.ok(html.includes('{ id: "return_and_bill", label: "Vrne naj" }'));
+  assert.ok(html.includes('{ id: "bill", label: "Pora\\u010dunaj" }'));
+  assert.ok(html.includes('{ id: "return", label: "Vrni" }'));
+  assert.match(html, /\.todo-status-bill \{ --todo-bg: #d96b25;/);
+  assert.match(html, /"return_and_bill", "bill", "return"/);
+  assert.doesNotMatch(html, /Ustaljeni vrstni red/);
+  assert.match(server, /return_and_bill: \{ label: "Vrne naj", googleColorId: "4" \}/);
+  assert.match(server, /bill: \{ label: "Poračunaj", googleColorId: "6" \}/);
+  assert.match(server, /return: \{ label: "Vrni", googleColorId: "3" \}/);
 });

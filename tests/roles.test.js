@@ -136,6 +136,23 @@ test("naročila uporabljajo ločeno potrditev namesto statusa naročeno", () => 
   normalizeDb(database);
   assert.deepEqual(database.todos.map((todo) => [todo.status, todo.ordered]), [["order", true], ["add_to_car", false]]);
 });
+test("legacy vračila ostanejo veljavna, poračun pa je samostojen status", () => {
+  assert.equal(TODO_STATUS_DEFINITIONS.return_and_bill.label, "Vrne naj");
+  assert.equal(TODO_STATUS_DEFINITIONS.bill.label, "Poračunaj");
+  assert.equal(TODO_STATUS_DEFINITIONS.bill.googleColorId, "6");
+  assert.equal(TODO_STATUS_DEFINITIONS.return.label, "Vrni");
+
+  const database = {
+    users: {}, entries: [], debts: [], clients: [],
+    todos: [
+      { id: "legacy-return", title: "Staro vračilo", status: "return", syncUser: "ibro" },
+      { id: "legacy-return-and-bill", title: "Stari poračun", status: "return_and_bill", syncUser: "ibro" },
+      { id: "new-bill", title: "Novi poračun", status: "bill", syncUser: "ibro" }
+    ]
+  };
+  normalizeDb(database);
+  assert.deepEqual(database.todos.map((todo) => todo.status), ["return", "return_and_bill", "bill"]);
+});
 test("osebni predal opravil je ločen po delavcu in varno normaliziran", () => {
   const database = {
     users: {}, entries: [], debts: [], clients: [],
@@ -335,7 +352,7 @@ test("delavski vnos ne more nastaviti obračuna ali računa", () => {
 
   assert.equal(existing.invoicePaid, false);
 });
-test("delavec v zaključenem vnosu ur lahko navede kilometrino za stranko", () => {
+test("delavec lahko navede kilometrino za stranko in označi garancijski projekt", () => {
   const billingDb = {
     users: {
       bojan: { id: "bojan", role: "boss", billing: { hourlyRate: 25 } },
@@ -408,7 +425,9 @@ test("delavec v zaključenem vnosu ur lahko navede kilometrino za stranko", () =
   });
   assert.equal(ordinaryTask.clientKm, 18);
   assert.equal(ordinaryTask.clientVehicle, "van");
-  assert.equal(ordinaryTask.warranty, false);
+  // Garancija can be marked already on the ordinary project. It only affects
+  // client billing once that project is later written as an execution entry.
+  assert.equal(ordinaryTask.warranty, true);
 });
 
 test("nov koledarski vnos mora izvirati iz lastnega opravila z istim datumom", () => {

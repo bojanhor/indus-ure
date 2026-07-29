@@ -36,6 +36,7 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
         await localLogin(page, "ibro");
         await page.locator("#newTodoButton").click();
         await expect(page.locator("#todoDialog")).toBeVisible();
+        await expect(page.locator("#todoFormDateTimeSection")).not.toHaveAttribute("open", "");
         await expect(page.locator("#todoFormAttachmentInput")).toBeAttached();
         await expect(page.locator("#todoFormAttachmentMenu > summary")).toContainText("Dodaj prilogo");
         await page.locator("#todoFormAttachmentMenu > summary").click();
@@ -297,6 +298,7 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
       const title = "PW večdnevno opravilo";
       await page.locator("#newTodoButton").click();
       await page.locator("#todoFormTask").fill(title);
+      await page.locator("#todoFormDateTimeSection > summary").click();
       await page.locator("#todoFormDate").fill(span.start);
       await page.locator("#todoFormEndDate").fill(span.end);
       await page.locator("#todoFormEndDate").blur();
@@ -381,6 +383,7 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
       });
       await page.locator("#newTodoButton").click();
       await page.locator("#todoFormTask").fill(title);
+      await page.locator("#todoFormDateTimeSection > summary").click();
       await page.locator("#todoFormDate").fill(date);
       await page.locator("#saveTodoDialog").click();
       await expect(page.locator("#todoDialog")).toBeHidden();
@@ -434,6 +437,7 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
       });
       await page.locator("#newTodoButton").click();
       await page.locator("#todoFormTask").fill(title);
+      await page.locator("#todoFormDateTimeSection > summary").click();
       await page.locator("#todoFormDate").fill(date);
       await page.locator("#saveTodoDialog").click();
       await expect(page.locator("#todoDialog")).toBeHidden();
@@ -531,6 +535,7 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
       });
       await page.locator("#newTodoButton").click();
       await page.locator("#todoFormTask").fill(title);
+      await page.locator("#todoFormDateTimeSection > summary").click();
       await page.locator("#todoFormDate").fill(dates.current);
       await page.locator("#todoFormStart").fill("09:00");
       await page.locator("#todoFormEnd").fill("11:00");

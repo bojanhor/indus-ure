@@ -102,8 +102,14 @@ const TODO_STATUS_DEFINITIONS = Object.freeze({
   order_car: { label: "Naroči Avto", googleColorId: "11" },
   order_warehouse: { label: "Naroči Sklad.", googleColorId: "11" },
   add_to_car: { label: "Dodaj v avto", googleColorId: "4" },
-  return_and_bill: { label: "Vrne naj/Poračunaj", googleColorId: "6" },
-  return: { label: "!!Vrni", googleColorId: "3" },
+  // Keep the legacy ID intact: existing tasks become the distinct "Vrne naj"
+  // state without a data migration.
+  return_and_bill: { label: "Vrne naj", googleColorId: "4" },
+  // A separate, darker orange settlement status. Keeping it in the server
+  // registry makes validation and the read-only ICS calendar consistent.
+  bill: { label: "Poračunaj", googleColorId: "6" },
+  // Do not rename the old ID; only remove its legacy visual prefix.
+  return: { label: "Vrni", googleColorId: "3" },
   meal: { label: "Malica", googleColorId: "5" },
   internal: { label: "Razno/Interno", googleColorId: "5" },
   drive: { label: "Vožnja", googleColorId: "7" },
@@ -3946,7 +3952,7 @@ function todoEditableSnapshot(todo) {
   return JSON.stringify({
     title: String(todo?.title || ""), date: String(todo?.date || ""), endDate: String(todo?.endDate || todo?.date || ""), calendarOnly: Boolean(!isTimeEntry && todo?.calendarOnly && todo?.date), start: String(todo?.start || ""), end: String(todo?.end || ""),
     client: String(todo?.client || ""), clientId: String(todo?.clientId || ""), clientContactIds: cleanTodoClientContactIds(todo?.clientContactIds), clientContacts: cleanTodoClientContactSnapshots(todo?.clientContacts), notes: String(todo?.notes || ""), material: String(todo?.material || ""),
-    status, urgent: Boolean(todo?.urgent), ordered: Boolean(todo?.ordered), warranty: isCompleted && Boolean(todo?.warranty),
+    status, urgent: Boolean(todo?.urgent), ordered: Boolean(todo?.ordered), warranty: status !== "meal" && Boolean(todo?.warranty),
     sourceProjectTodoId: String(todo?.sourceProjectTodoId || ""), sourceProjectTitle: String(todo?.sourceProjectTitle || ""), billingHourlyRate: isTimeEntry ? nonnegativeNumber(todo?.billingHourlyRate, null, 10_000) : null,
     billingKm: isTimeEntry ? nonnegativeNumber(todo?.billingKm, null, 1_000_000) : null, workFromHome: isTimeEntry && Boolean(todo?.workFromHome), clientKm: isCompleted ? nonnegativeNumber(todo?.clientKm, null, 1_000_000) : null,
     clientVehicle: isCompleted ? todoVehicle(todo?.clientVehicle) : "", driveFiles: files(todo?.driveFiles), photos: files(todo?.photos)
@@ -3958,7 +3964,6 @@ function importedTodoWasEdited(previous, next, { assignmentsChanged = false } = 
 }
 function todoForUserRole(user, db, previous, todo) {
   const previousRate = nonnegativeNumber(previous?.billingHourlyRate, null, 10_000);
-  const previousWarranty = Boolean(previous?.warranty);
   const previousKm = nonnegativeNumber(previous?.billingKm, 0, 1_000_000);
   const previousClientKm = nonnegativeNumber(previous?.clientKm, 0, 1_000_000);
   const previousClientVehicle = todoVehicle(previous?.clientVehicle);
@@ -3975,7 +3980,7 @@ function todoForUserRole(user, db, previous, todo) {
       billingHourlyRate: isPaidTime ? previousRate ?? defaultRate : previousRate,
       billingKm: isMeal ? 0 : isPaidTime ? nonnegativeNumber(todo.billingKm, previousKm, 1_000_000) : previousKm,
       workFromHome: isPaidTime && Boolean(todo.workFromHome),
-      warranty: isMeal ? false : isCompleted ? Boolean(todo.warranty) : previousWarranty,
+      warranty: isMeal ? false : Boolean(todo.warranty),
       imported: preserveImported,
       clientKm: isMeal ? 0 : canSetClientMileage ? nonnegativeNumber(todo.clientKm, previousClientKm, 1_000_000) : previousClientKm,
       clientVehicle: isMeal ? "personal" : canSetClientMileage ? requestedClientVehicle : previousClientVehicle,
@@ -3987,7 +3992,7 @@ function todoForUserRole(user, db, previous, todo) {
     billingHourlyRate: isPaidTime ? nonnegativeNumber(todo.billingHourlyRate, previousRate ?? defaultRate, 10_000) : previousRate,
     billingKm: isMeal ? 0 : isPaidTime ? nonnegativeNumber(todo.billingKm, previousKm, 1_000_000) : previousKm,
     workFromHome: isPaidTime && Boolean(todo.workFromHome),
-    warranty: isMeal ? false : isCompleted ? Boolean(todo.warranty) : previousWarranty,
+    warranty: isMeal ? false : Boolean(todo.warranty),
     imported: !isPaidTime && preserveImported,
     clientKm: isMeal ? 0 : canSetClientMileage ? nonnegativeNumber(todo.clientKm, previousClientKm, 1_000_000) : previousClientKm,
     clientVehicle: isMeal ? "personal" : requestedClientVehicle,
@@ -4343,7 +4348,7 @@ function cleanTodo(input) {
     urgent: isMeal || isTimeEntry || input.status === "billing" ? false : Boolean(input.urgent),
     imported: !isTimeEntry && Boolean(input.imported),
     ordered: ORDER_TODO_STATUSES.has(status) && Boolean(input.ordered),
-    warranty: input.status === "execution" && Boolean(input.warranty),
+    warranty: !isMeal && Boolean(input.warranty),
     syncUser: cleanUserId(input.syncUser),
     sourceProjectTodoId,
     sourceProjectTitle,

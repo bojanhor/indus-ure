@@ -1486,7 +1486,9 @@
     .todo-status-order_car,
     .todo-status-order_warehouse { --todo-bg: #dc2127; --todo-fg: #fff; }
     .todo-status-add_to_car { --todo-bg: #ff887c; --todo-fg: #202124; --todo-border: #d95f54; }
+    /* "Vrne naj" is the lighter logistics marker; settlement is darker. */
     .todo-status-return_and_bill { --todo-bg: #ffb878; --todo-fg: #202124; --todo-border: #d8883f; }
+    .todo-status-bill { --todo-bg: #d96b25; --todo-fg: #fff; --todo-border: #a84612; }
     .todo-status-return { --todo-bg: #dbadff; --todo-fg: #202124; --todo-border: #8e5bb7; }
     .todo-status-meal,
     .todo-status-internal { --todo-bg: #fbd75b; --todo-fg: #202124; --todo-border: #d6ad2f; }
@@ -3102,11 +3104,43 @@
     }
 
     .todo-date-range-field {
-      grid-column: 1 / -1;
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 12px;
     }
+
+    .todo-form-date-time {
+      display: grid;
+      gap: 10px;
+      padding: 11px 12px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #f8faf8;
+    }
+
+    .todo-form-date-time > summary {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      color: var(--ink);
+      font-weight: 800;
+      cursor: pointer;
+      list-style: none;
+    }
+
+    .todo-form-date-time > summary::-webkit-details-marker { display: none; }
+    .todo-form-date-time > summary::after {
+      content: "⌄";
+      flex: 0 0 auto;
+      color: var(--muted);
+      font-size: 18px;
+      line-height: 1;
+      transition: transform .16s ease;
+    }
+    .todo-form-date-time[open] > summary::after { transform: rotate(180deg); }
+    .todo-form-date-time-fields { display: grid; gap: 12px; }
+    .todo-form-date-time-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 
     .todo-client-input-row {
       display: flex;
@@ -4484,6 +4518,7 @@
       }
       .modal-grid,
       .todo-date-range-field,
+      .todo-form-date-time-grid,
       .boss-panel,
       .month-debt-grid,
       .todo-layout,
@@ -5019,29 +5054,6 @@
             <div class="todo-client-contact-picker hidden" id="todoFormClientContactPicker"></div>
             <div class="todo-client-contact-selected" id="todoFormClientContactSelected"></div>
           </section>
-          <div class="todo-date-range-field">
-            <label>Datum od
-              <span class="date-input-with-clear">
-                <input id="todoFormDate" type="date">
-                <button class="date-clear-button" id="clearTodoFormDate" type="button" title="Odstrani datum" aria-label="Odstrani datum">&times;</button>
-              </span>
-            </label>
-            <label>Datum do
-              <input id="todoFormEndDate" type="date" aria-describedby="todoFormEndDateHint">
-              <small id="todoFormEndDateHint">Privzeto isti dan. Spremeni samo za večdnevno opravilo.</small>
-            </label>
-          </div>
-          <label class="todo-form-calendar-only hidden" id="todoFormCalendarOnlyField">
-            <input id="todoFormCalendarOnly" type="checkbox">
-            <span>Prika&#382;i samo v koledarju (ne prika&#382;i med opravili)</span>
-          </label>
-          <label>Ura od
-            <input id="todoFormStart" type="time" step="900">
-          </label>
-          <label>Ura do
-            <input id="todoFormEnd" type="time" step="900">
-          </label>
-
         </div>
         <div class="todo-status-direct-field" id="todoFormStatusField">
           <span class="todo-status-direct-label">Status</span>
@@ -5066,7 +5078,7 @@
           <textarea id="todoFormNotes" placeholder="Opi&#353;i, kaj se bo delalo"></textarea>
         </label>
         <label id="todoFormMaterialField"><span>Material</span>
-          <textarea id="todoFormMaterial" placeholder="Vpi&#353;i porabljen material"></textarea>
+          <textarea id="todoFormMaterial" placeholder="Vpi&#353;i predvideni material"></textarea>
         </label>
         <label class="todo-form-urgent" id="todoFormUrgentField">
           <input id="todoFormUrgent" type="checkbox">
@@ -5111,6 +5123,35 @@
           <span>Garancija</span>
           <small>Delavcu se vpis normalno obračuna, stranki pa je prikazan brez obračunanih ur in kilometrine.</small>
         </label>
+        <details class="todo-form-date-time" id="todoFormDateTimeSection">
+          <summary>Datum in ura</summary>
+          <div class="todo-form-date-time-fields">
+            <div class="todo-date-range-field">
+              <label>Datum od
+                <span class="date-input-with-clear">
+                  <input id="todoFormDate" type="date">
+                  <button class="date-clear-button" id="clearTodoFormDate" type="button" title="Odstrani datum" aria-label="Odstrani datum">&times;</button>
+                </span>
+              </label>
+              <label>Datum do
+                <input id="todoFormEndDate" type="date" aria-describedby="todoFormEndDateHint">
+                <small id="todoFormEndDateHint">Privzeto isti dan. Spremeni samo za večdnevno opravilo.</small>
+              </label>
+            </div>
+            <label class="todo-form-calendar-only hidden" id="todoFormCalendarOnlyField">
+              <input id="todoFormCalendarOnly" type="checkbox">
+              <span>Prika&#382;i samo v koledarju (ne prika&#382;i med opravili)</span>
+            </label>
+            <div class="todo-form-date-time-grid">
+              <label>Ura od
+                <input id="todoFormStart" type="time" step="900">
+              </label>
+              <label>Ura do
+                <input id="todoFormEnd" type="time" step="900">
+              </label>
+            </div>
+          </div>
+        </details>
         <div class="todo-form-attachments" id="todoFormAttachments">
           <div class="todo-form-attachments-head">
             <strong>Priloge</strong>
@@ -5570,11 +5611,14 @@
       { id: "order_car", label: "Naro\u010di Avto" },
       { id: "order_warehouse", label: "Naro\u010di Sklad." },
       { id: "add_to_car", label: "Dodaj v avto" },
-      { id: "return_and_bill", label: "Vrne naj/Pora\u010dunaj" },
+      // The legacy value stays stable so existing data transparently becomes
+      // the now distinct "Vrne naj" state.
+      { id: "return_and_bill", label: "Vrne naj" },
+      { id: "bill", label: "Pora\u010dunaj" },
       { id: "in_progress", label: "V teku" },
       { id: "execution", label: "Zaklju\u010deno" },
       { id: "open", label: "\u010caka" },
-      { id: "return", label: "!!Vrni" },
+      { id: "return", label: "Vrni" },
       { id: "meal", label: "Malica" },
       { id: "internal", label: "Razno/Interno" },
       { id: "drive", label: "Vožnja" },
@@ -5582,7 +5626,7 @@
     ];
     const todoStatusById = Object.fromEntries(todoStatusDefinitions.map((status) => [status.id, status]));
     const todoOrderStatusIds = new Set(["order", "order_car", "order_warehouse"]);
-    const todoLogisticsStatusIds = new Set(["order", "order_car", "order_warehouse", "add_to_car", "return_and_bill", "return"]);
+    const todoLogisticsStatusIds = new Set(["order", "order_car", "order_warehouse", "add_to_car", "return_and_bill", "bill", "return"]);
     function todoStatus(status) {
       return todoStatusById[status] || todoStatusById.open;
     }
@@ -10531,7 +10575,7 @@
       const section = document.createElement("div");
       const labels = {
         urgent: ["Nujno", "Nujna opravila"],
-        sorted: ["Razvrščeno", "Ustaljeni vrstni red"],
+        sorted: ["Razvrščeno", ""],
         unsorted: ["Nerazvrščeno", "Nova opravila"],
         ordering: ["Naroči", "Naročila in opravila za v avto"],
       };
@@ -10560,7 +10604,7 @@
         section.appendChild(button);
         if (hiddenCountSuffix) button.querySelector("small").textContent = detail + hiddenCountSuffix;
       } else {
-        section.innerHTML = "<span>" + escapeHtml(label) + "</span><small>" + escapeHtml(detail) + "</small>";
+        section.innerHTML = "<span>" + escapeHtml(label) + "</span>" + (detail ? "<small>" + escapeHtml(detail) + "</small>" : "");
       }
       items.appendChild(section);
     }
@@ -11943,6 +11987,8 @@
       const calendarOnly = $('todoFormCalendarOnly');
       const calendarOnlyField = $('todoFormCalendarOnlyField');
       const isTimeEntry = timeEntryStatusIds.has($('todoFormStatus').value);
+      const dateTimeSection = $('todoFormDateTimeSection');
+      if (isTimeEntry) dateTimeSection.open = true;
       const canShowOnlyInCalendar = Boolean(date && !isTimeEntry);
       calendarOnlyField.classList.toggle('hidden', !canShowOnlyInCalendar);
       if (!canShowOnlyInCalendar) calendarOnly.checked = false;
@@ -12033,7 +12079,8 @@
       $("todoFormHourlyRateField").classList.toggle("hidden", !showHourlyRate);
       $("todoFormWorkFromHomeField").classList.toggle("hidden", !showWorkerMileage);
       if (!showWorkerMileage) $("todoFormWorkFromHome").checked = false;
-      $("todoFormWarrantyField").classList.toggle("hidden", !showWorkerMileage);
+      $("todoFormWarrantyField").classList.toggle("hidden", meal);
+      if (meal) $("todoFormWarranty").checked = false;
       $("todoFormImportedField").classList.add("hidden");
       $("todoFormUrgentField").classList.toggle("hidden", timeEntry);
       if (timeEntry) $("todoFormUrgent").checked = false;
@@ -12112,6 +12159,7 @@
       $("todoFormWorkFromHome").checked = Boolean(todo.workFromHome);
       $("todoFormImported").checked = Boolean(todo.imported);
       $("todoFormCalendarOnly").checked = Boolean(!timeEntryStatusIds.has(todoStatus(todo.status || "open").id) && todo.calendarOnly && todo.date);
+      $("todoFormDateTimeSection").open = Boolean(editing || state.todoHoursSourceId || state.todoStandaloneHours || state.todoMealEntry || timeEntryStatusIds.has($('todoFormStatus').value));
       updateTodoFormStatus();
       syncTodoFormClientContacts({ preserve: true });
        autosizeTodoNarrativeFields();
@@ -12204,7 +12252,7 @@
         urgent: timeEntryStatusIds.has(selectedStatus) ? false : $("todoFormUrgent").checked,
         imported: Boolean(existing?.imported),
         ordered: todoOrderStatusIds.has($("todoFormStatus").value) && $("todoFormOrdered").checked,
-        warranty: $("todoFormStatus").value === "execution" && Boolean($("todoFormWarranty").checked),
+        warranty: !meal && Boolean($("todoFormWarranty").checked),
         sourceProjectTodoId,
         sourceProjectTitle,
         done: selectedStatus === "execution",
@@ -12419,6 +12467,7 @@
         end: "",
         status: "execution",
         urgent: false,
+        warranty: Boolean(source.warranty),
         syncUser: activeWorkerId() || source.syncUser || state.user?.id || "",
         _hoursAssigneeIds: [activeWorkerId() || source.syncUser || state.user?.id || ""],
         sourceProjectTitle: source.title || "",
@@ -12468,6 +12517,7 @@
         end: source.end,
         status: source.status,
         urgent: source.status === "execution" ? false : Boolean(source.urgent),
+        warranty: Boolean(source.warranty),
         sourceProjectTodoId: source.sourceProjectTodoId || "",
         sourceProjectTitle: source.sourceProjectTitle || "",
         billingHourlyRate: source.billingHourlyRate ?? null,
