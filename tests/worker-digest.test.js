@@ -6,7 +6,11 @@ const {
   canReadWorkerDailyReport,
   gmailWorkerDigestDraftRaw,
   gmailWorkerDigestMessageRaw,
+  gmailLateTimeEntryReportRaw,
+  lateTimeEntryReportText,
   normalizeWorkerDigestRuns,
+  normalizeLateTimeEntryReports,
+  queueLateTimeEntryReport,
   recordWorkerDigestRun,
   workerDailyDigestSnapshot,
   workerDailyReportHtml,
@@ -113,4 +117,57 @@ test("dnevni report lahko bere sef ali delavec sam", () => {
   assert.equal(canReadWorkerDailyReport({ id: "ibro", role: "worker" }, "ibro"), true);
   assert.equal(canReadWorkerDailyReport({ id: "ibro", role: "worker" }, "bojan"), false);
   assert.equal(canReadWorkerDailyReport(null, "ibro"), false);
+});
+
+test("pozni vpis ur se trajno zabeleĹľi s stanjem prej in potem", () => {
+  const db = JSON.parse(JSON.stringify(database));
+  db.lateTimeEntryReports = [];
+  const before = { ...db.todos[0], date: "2026-07-20", end: "09:00", notes: "Prvotni opis", photos: [{ name: "dokaz.jpg", data: "data:image/jpeg;base64,secret" }] };
+  const after = { ...before, end: "10:15", notes: "Popravljen opis", billingKm: 12 };
+  const report = queueLateTimeEntryReport(db, {
+    before,
+    after,
+    user: db.users.ibro,
+    kind: "spremenjen pozni vpis ur",
+    now: new Date("2026-07-31T00:10:00+02:00")
+  });
+
+  assert.ok(report);
+  assert.equal(db.lateTimeEntryReports.length, 1);
+  assert.equal(report.status, "queued");
+  assert.equal(report.before.end, "09:00");
+  assert.equal(report.after.end, "10:15");
+  assert.deepEqual(report.before.attachments, ["dokaz.jpg"]);
+  assert.doesNotMatch(JSON.stringify(report), /data:image/);
+  const text = lateTimeEntryReportText(report);
+  assert.match(text, /PREJ/);
+  assert.match(text, /POTEM/);
+  assert.match(text, /09:00/);
+  assert.match(text, /10:15/);
+
+  const raw = Buffer.from(gmailLateTimeEntryReportRaw({ to: "bojan@example.test", report }), "base64url").toString("utf8");
+  assert.match(raw, /To: bojan@example\.test/);
+  assert.match(raw, /Message-ID: <indus-ure-late-/);
+  assert.ok(raw.includes(Buffer.from(text, "utf8").toString("base64").slice(0, 32)));
+});
+
+test("pozni vpis obdrĹľi samo stare vnose in ponovi prekinjeno poĹˇiljanje", () => {
+  const report = {
+    id: "late-one",
+    status: "sending",
+    kind: "spremenjeno",
+    actorId: "ibro",
+    actorName: "Ibro",
+    createdAt: "2026-07-20T00:00:00.000Z",
+    sendingAt: "2026-07-20T00:01:00.000Z",
+    before: { id: "first", syncUser: "ibro", status: "execution", date: "2026-07-19", start: "08:00", end: "09:00", title: "Servis" },
+    after: { id: "first", syncUser: "ibro", status: "execution", date: "2026-07-19", start: "08:00", end: "10:00", title: "Servis" }
+  };
+  const normalized = normalizeLateTimeEntryReports([report], database.users, Date.parse("2026-07-20T01:00:00.000Z"));
+  assert.equal(normalized.length, 1);
+  assert.equal(normalized[0].status, "queued");
+  assert.match(normalized[0].lastError, /prekinjeno/);
+
+  const expired = normalizeLateTimeEntryReports([report], database.users, Date.parse("2027-09-01T00:00:00.000Z"));
+  assert.equal(expired.length, 0);
 });

@@ -1436,11 +1436,12 @@
     .todo-status-summary {
       display: inline-flex;
       align-items: center;
-      min-height: 28px;
+      min-height: 32px;
       max-width: min(62vw, 260px);
-      padding: 4px 8px;
+      padding: 5px 10px;
       border-radius: 7px;
-      font-size: 13px;
+      font-size: 15px;
+      font-weight: 900;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
@@ -1472,16 +1473,7 @@
       box-shadow: 0 0 0 2px #fff inset;
     }
 
-    .todo-form-urgent {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      width: fit-content;
-      color: #b3261e;
-      font-weight: 900;
-    }
-
-    .modal-body label.todo-form-warranty {
+    .modal-body label.todo-form-option {
       display: grid;
       grid-template-columns: 20px minmax(0, 1fr);
       column-gap: 8px;
@@ -1490,7 +1482,7 @@
       color: var(--ink);
     }
 
-    .modal-body label.todo-form-warranty input[type="checkbox"] {
+    .modal-body label.todo-form-option input[type="checkbox"] {
       grid-column: 1;
       grid-row: 1;
       width: 18px;
@@ -1501,17 +1493,42 @@
       accent-color: var(--accent-dark);
     }
 
-    .todo-form-warranty > span {
+    .todo-form-option > span {
       grid-column: 2;
       grid-row: 1;
       font-weight: 800;
     }
 
-    .todo-form-warranty > small {
+    .todo-form-option > small {
       grid-column: 1 / -1;
       color: var(--muted);
       line-height: 1.35;
     }
+
+    .todo-form-urgent { color: #b3261e !important; }
+
+    .todo-form-late-entry-notice {
+      margin: 0;
+      padding: 9px 11px;
+      border: 1px solid #e7b25b;
+      border-radius: 8px;
+      background: #fff8e5;
+      color: #6e4700;
+      font-size: 13px;
+      font-weight: 700;
+      line-height: 1.4;
+    }
+
+    a.inline-url {
+      color: #0000ee;
+      font-weight: inherit;
+      text-decoration: underline;
+      text-decoration-thickness: 1px;
+      text-underline-offset: 2px;
+      overflow-wrap: anywhere;
+    }
+
+    a.inline-url:visited { color: #551a8b; }
 
     .todo-item.urgent { border-left: 4px solid #d93025; }
     .todo-urgent-chip { background: #d93025; color: #fff; white-space: nowrap; }
@@ -5156,13 +5173,13 @@
         <label id="todoFormMaterialField"><span>Material</span>
           <textarea id="todoFormMaterial" placeholder="Vpi&#353;i predvideni material"></textarea>
         </label>
-        <label class="todo-form-urgent" id="todoFormUrgentField">
+        <label class="todo-form-option todo-form-urgent" id="todoFormUrgentField">
           <input id="todoFormUrgent" type="checkbox">
-          NUJNO
+          <span>NUJNO</span>
         </label>
-        <label class="todo-form-urgent hidden admin-only" id="todoFormImportedField">
+        <label class="todo-form-option todo-form-urgent hidden admin-only" id="todoFormImportedField">
           <input id="todoFormImported" type="checkbox">
-          UVOŽENO
+          <span>UVOŽENO</span>
           <small>Uvožen zapis je prikazan samo v filtru UVOŽENO in se ne vključi v koledar ali obračune.</small>
         </label>
         <div class="todo-form-billing" id="todoFormClientBilling">
@@ -5189,12 +5206,12 @@
             </label>
           </div>
         </div>
-        <label class="todo-form-warranty hidden" id="todoFormWorkFromHomeField">
+        <label class="todo-form-option todo-form-warranty hidden" id="todoFormWorkFromHomeField">
           <input id="todoFormWorkFromHome" type="checkbox">
           <span>Delo od doma</span>
           <small>Pot dom–fabrika se za ta vpis ne prišteje samodejno.</small>
         </label>
-        <label class="todo-form-warranty" id="todoFormWarrantyField">
+        <label class="todo-form-option todo-form-warranty" id="todoFormWarrantyField">
           <input id="todoFormWarranty" type="checkbox">
           <span>Garancija</span>
           <small>Delavcu se vpis normalno obračuna, stranki pa je prikazan brez obračunanih ur in kilometrine.</small>
@@ -5228,6 +5245,7 @@
             </div>
           </div>
         </details>
+        <p class="todo-form-late-entry-notice hidden" id="todoFormLateTimeEntryNotice" role="status"></p>
         <div class="todo-form-attachments" id="todoFormAttachments">
           <div class="todo-form-attachments-head">
             <strong>Priloge</strong>
@@ -7837,6 +7855,11 @@
       return data;
     }
 
+    function announceQueuedLateTimeEntryReport(data) {
+      if (Number(data?.lateTimeEntryReportsQueued || 0) <= 0) return;
+      showNotice("Pozni vpis ur je shranjen. Šef prejme poročilo s primerjavo stanja prej in potem.");
+    }
+
     async function saveTodoToServer(todo) {
       const todoRevision = beginTodoMutation();
       const creating = !todo.id || String(todo.id).startsWith("offline-");
@@ -7856,6 +7879,7 @@
           refreshClientList();
           render();
         }
+        announceQueuedLateTimeEntryReport(data);
         return data;
       } catch (error) {
         if (!isNetworkError(error)) {
@@ -7891,6 +7915,7 @@
           state.todos = data.todos;
           refreshClientList();
         }
+        announceQueuedLateTimeEntryReport(data);
         return data;
       } catch (error) {
         if (!isNetworkError(error)) {
@@ -8934,6 +8959,7 @@
         refreshClientList();
         render();
         if ($("dayTimelineDialog").open && state.dayTimelineDate === day) renderDayTimeline();
+        announceQueuedLateTimeEntryReport(data);
         if (announce) showNotice("Spremembe dnevnega pogleda so shranjene.");
       } finally {
         state.dayTimelineSaving = false;
@@ -12323,6 +12349,17 @@
       renderTodoFormDriveFiles();
       renderTodoFormAssignees([activeWorkerId()], [activeWorkerId()]);
     }
+    function updateTodoFormLateTimeEntryNotice() {
+      const notice = $("todoFormLateTimeEntryNotice");
+      const status = $("todoFormStatus").value;
+      const date = $("todoFormDate").value;
+      const isLateEntry = timeEntryStatusIds.has(status) && Boolean(date) && date < dateKey(new Date());
+      notice.classList.toggle("hidden", !isLateEntry);
+      notice.textContent = isLateEntry
+        ? "Pozni vpis ur: ure vpisuj, dokler si še pri stranki oziroma takoj, ko zaključiš opravilo. Sprememba bo poslana šefu s primerjavo stanja prej in potem."
+        : "";
+    }
+
     function updateTodoFormStatus() {
       updateTodoStatusControl($("todoFormStatus"));
       const completed = $("todoFormStatus").value === "execution";
@@ -12367,6 +12404,7 @@
       $("todoFormUrgentField").classList.toggle("hidden", timeEntry);
       if (timeEntry) $("todoFormUrgent").checked = false;
       syncTodoFormDateRangeControls();
+      updateTodoFormLateTimeEntryNotice();
     }
 
     function renderTodoTaskSuggestions() {
@@ -12475,7 +12513,10 @@
       $("duplicateTodoFromDialog").classList.toggle("hidden", !editing || Boolean(state.todoHoursSourceId));
       $("writeHoursFromTodo").classList.toggle("hidden", !editing || Boolean(state.todoHoursSourceId) || !projectHoursSourceStatuses.has(todoStatus(todo.status).id));
       const isExistingTimeEntry = editing && timeEntryStatusIds.has(todoStatus(todo.status).id);
-      const showCompletionRequest = editing && isAdminView();
+      // Bojan can still work in a worker view.  His authority to ask for a
+      // correction must follow his account role, not the currently selected
+      // presentation mode.
+      const showCompletionRequest = editing && state.user?.role === "boss";
       $("requestTodoCompletion").textContent = isExistingTimeEntry ? "Zahtevaj dopolnitev vnosa ur" : "Zahtevaj dopolnitev";
       $("requestTodoCompletion").setAttribute("aria-label", isExistingTimeEntry ? "Zahtevaj dopolnitev vnosa ur" : "Zahtevaj dopolnitev opravila");
       $("requestTodoCompletion").classList.toggle("hidden", !showCompletionRequest);
@@ -14300,6 +14341,20 @@
         .replaceAll("'", "&#039;");
     }
 
+    function compactExternalLinkLabel(value) {
+      const url = String(value || "");
+      try {
+        const parsed = new URL(url);
+        const host = parsed.hostname.replace(/^www\./i, "");
+        const path = parsed.pathname && parsed.pathname !== "/" ? parsed.pathname : "/";
+        const compact = `${host}${path}`;
+        const visibleLimit = 26;
+        return compact.length > visibleLimit ? `${compact.slice(0, visibleLimit)}…` : compact;
+      } catch {
+        return url.length > 26 ? `${url.slice(0, 26)}…` : url;
+      }
+    }
+
     function linkifyText(value) {
       const text = String(value || "");
       const pattern = /https?:\/\/[^\s<>"']+/gi;
@@ -14309,7 +14364,7 @@
         const raw = match[0];
         const url = raw.replace(/[),.;!?]+$/, "");
         result += escapeHtml(text.slice(lastIndex, match.index));
-        result += `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(url)}</a>`;
+        result += `<a class="inline-url" href="${escapeHtml(url)}" title="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(compactExternalLinkLabel(url))}</a>`;
         result += escapeHtml(raw.slice(url.length));
         lastIndex = match.index + raw.length;
       }
@@ -14942,7 +14997,10 @@
     });
 
     ["todoFormStart", "todoFormEnd"].forEach((id) => $(id).addEventListener("change", normalizeTodoFormTimes));
-    $("todoFormDate").addEventListener("change", () => syncTodoFormEndDate());
+    $("todoFormDate").addEventListener("change", () => {
+      syncTodoFormEndDate();
+      updateTodoFormLateTimeEntryNotice();
+    });
     $("todoFormEndDate").addEventListener("change", () => {
       const date = $("todoFormDate").value;
       const endDate = $("todoFormEndDate");
@@ -14957,6 +15015,7 @@
       $("todoFormStart").value = "";
       $("todoFormEnd").value = "";
       syncTodoFormDateRangeControls();
+      updateTodoFormLateTimeEntryNotice();
       $("todoFormDate").focus();
     });
     ["todoFormStatusField", "todoFormDateTimeSection"].forEach((id) => {

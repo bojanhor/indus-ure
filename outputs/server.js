@@ -79,6 +79,12 @@ const REPORT_PDF_MAX_TOTAL_BYTES = 50 * 1024 * 1024;
 const REPORT_GMAIL_MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;
 const REPORT_GMAIL_MAX_TOTAL_BYTES = 8 * 1024 * 1024;
 const WORKER_DIGEST_RUN_RETENTION_MS = 400 * 24 * 60 * 60 * 1000;
+// A late time-entry report is kept independently of the ordinary daily
+// summary.  A worker may still correct yesterday's entry; the correction is
+// never silently lost and Bojan receives the exact before/after record.
+const LATE_TIME_ENTRY_REPORT_RETENTION_MS = 400 * 24 * 60 * 60 * 1000;
+const LATE_TIME_ENTRY_REPORT_SENDING_TIMEOUT_MS = 30 * 60 * 1000;
+const MAX_LATE_TIME_ENTRY_REPORTS = 10_000;
 let pgPool = null;
 let pgStore = null;
 let pgReady = null;
@@ -93,6 +99,7 @@ const testLoginFailures = new Map();
 const auditLogCooldowns = new Map();
 let archiveRetentionCleanupLastAt = 0;
 let archiveRetentionCleanupPromise = null;
+let lateTimeEntryReportDeliveryScheduled = false;
 
 const TODO_STATUS_DEFINITIONS = Object.freeze({
   open: { label: "Čaka", googleColorId: "8" },
@@ -1117,6 +1124,292 @@ function recordWorkerDigestRun(db, report, details = {}) {
   return workerDigestRunFor(db, workerId, date);
 }
 
+function cleanLateTimeEntryReportText(value, max = 1_600) {
+  return String(value || "")
+    .replace(/\r\n?/g, "\n")
+    .replace(/\u0000/g, "")
+    .trim()
+    .slice(0, max);
+}
+
+function lateTimeEntryReportAttachments(todo) {
+  return [...(Array.isArray(todo?.photos) ? todo.photos : []), ...(Array.isArray(todo?.driveFiles) ? todo.driveFiles : [])]
+    .map((item) => cleanLateTimeEntryReportText(item?.name || item?.comment || "priloga", 160))
+    .filter(Boolean)
+    .slice(0, 20);
+}
+
+function normalizeLateTimeEntryReportSnapshot(input, users = {}) {
+  if (!input || typeof input !== "object") return null;
+  const status = String(input.status || "");
+  const date = isDateKey(input.date) ? String(input.date) : "";
+  if (!TIME_ENTRY_TODO_STATUSES.has(status) || !date) return null;
+  const workerId = cleanUserId(input.workerId || input.syncUser);
+  const workerName = cleanLateTimeEntryReportText(input.workerName || users?.[workerId]?.name || workerId, 120);
+  const attachments = [...new Set((Array.isArray(input.attachments) ? input.attachments : [])
+    .map((item) => cleanLateTimeEntryReportText(item, 160))
+    .filter(Boolean))].slice(0, 20);
+  return {
+    todoId: cleanLateTimeEntryReportText(input.todoId || input.id, 120),
+    assignmentGroupId: cleanLateTimeEntryReportText(input.assignmentGroupId, 120),
+    workerId,
+    workerName,
+    status,
+    statusLabel: cleanLateTimeEntryReportText(input.statusLabel || TODO_STATUS_DEFINITIONS[status]?.label || status, 80),
+    title: cleanLateTimeEntryReportText(input.title || "Brez naslova", 300),
+    client: cleanLateTimeEntryReportText(input.client || "", 300),
+    date,
+    endDate: isDateKey(input.endDate) && String(input.endDate) >= date ? String(input.endDate) : date,
+    start: /^\d{2}:\d{2}$/.test(String(input.start || "")) ? String(input.start) : "",
+    end: /^\d{2}:\d{2}$/.test(String(input.end || "")) ? String(input.end) : "",
+    billingHourlyRate: nonnegativeNumber(input.billingHourlyRate, null, 10_000),
+    billingKm: nonnegativeNumber(input.billingKm, 0, 1_000_000),
+    clientKm: nonnegativeNumber(input.clientKm, 0, 1_000_000),
+    clientVehicle: todoVehicle(input.clientVehicle),
+    workFromHome: Boolean(input.workFromHome),
+    warranty: Boolean(input.warranty),
+    notes: cleanLateTimeEntryReportText(input.notes, 1_600),
+    material: cleanLateTimeEntryReportText(input.material, 1_600),
+    attachments
+  };
+}
+
+function lateTimeEntryReportSnapshot(todo, users = {}) {
+  if (!todo || !TIME_ENTRY_TODO_STATUSES.has(String(todo.status || ""))) return null;
+  const workerId = cleanUserId(todo.syncUser || todo.createdBy);
+  return normalizeLateTimeEntryReportSnapshot({
+    id: todo.id,
+    assignmentGroupId: todo.assignmentGroupId,
+    workerId,
+    workerName: todo.syncUserName || users?.[workerId]?.name || todo.createdByName || workerId,
+    status: todo.status,
+    statusLabel: TODO_STATUS_DEFINITIONS[todo.status]?.label || todo.status,
+    title: todo.title,
+    client: todo.client,
+    date: todo.date,
+    endDate: todo.endDate,
+    start: todo.start,
+    end: todo.end,
+    billingHourlyRate: todo.billingHourlyRate,
+    billingKm: todo.billingKm,
+    clientKm: todo.clientKm,
+    clientVehicle: todo.clientVehicle,
+    workFromHome: todo.workFromHome,
+    warranty: todo.warranty,
+    notes: todo.notes,
+    material: todo.material,
+    attachments: lateTimeEntryReportAttachments(todo)
+  }, users);
+}
+
+function normalizeLateTimeEntryReports(input, users = {}, now = Date.now()) {
+  const oldest = now - LATE_TIME_ENTRY_REPORT_RETENTION_MS;
+  const seen = new Set();
+  return (Array.isArray(input) ? input : [])
+    .map((item) => {
+      const id = String(item?.id || "").trim();
+      const createdAt = String(item?.createdAt || "");
+      const createdAtMs = Date.parse(createdAt);
+      const before = normalizeLateTimeEntryReportSnapshot(item?.before, users);
+      const after = normalizeLateTimeEntryReportSnapshot(item?.after, users);
+      if (!id || seen.has(id) || !Number.isFinite(createdAtMs) || createdAtMs < oldest || (!before && !after)) return null;
+      seen.add(id);
+      const status = ["queued", "sending", "sent"].includes(String(item?.status || "")) ? String(item.status) : "queued";
+      const sendingAt = String(item?.sendingAt || "");
+      const sendingAtMs = Date.parse(sendingAt);
+      const staleSending = status === "sending" && (!Number.isFinite(sendingAtMs) || sendingAtMs < now - LATE_TIME_ENTRY_REPORT_SENDING_TIMEOUT_MS);
+      const sentAt = String(item?.sentAt || "");
+      const normalizedStatus = status === "sent" && Number.isFinite(Date.parse(sentAt)) ? "sent" : (staleSending ? "queued" : status);
+      return {
+        id,
+        status: normalizedStatus,
+        kind: cleanLateTimeEntryReportText(item?.kind || "spremenjeno", 80),
+        actorId: cleanUserId(item?.actorId),
+        actorName: cleanLateTimeEntryReportText(item?.actorName || users?.[cleanUserId(item?.actorId)]?.name || "Neznan uporabnik", 120),
+        createdAt,
+        sendingAt: normalizedStatus === "sending" ? sendingAt : "",
+        sentAt: normalizedStatus === "sent" ? sentAt : "",
+        messageId: cleanLateTimeEntryReportText(item?.messageId, 300),
+        attempts: Math.max(0, Math.min(100, Math.round(Number(item?.attempts || 0)))),
+        lastError: staleSending ? "Pošiljanje je bilo prekinjeno; čaka na ponovni poskus." : cleanLateTimeEntryReportText(item?.lastError, 600),
+        before,
+        after
+      };
+    })
+    .filter(Boolean)
+    .sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)) || left.id.localeCompare(right.id))
+    .slice(0, MAX_LATE_TIME_ENTRY_REPORTS);
+}
+
+function queueLateTimeEntryReport(db, { before, after, user, kind = "spremenjeno", now = new Date() } = {}) {
+  const beforeSnapshot = lateTimeEntryReportSnapshot(before, db?.users);
+  const afterSnapshot = lateTimeEntryReportSnapshot(after, db?.users);
+  const relevant = afterSnapshot || beforeSnapshot;
+  const referenceNow = now instanceof Date ? now : new Date(now);
+  if (!relevant || !isDateKey(relevant.date) || relevant.date >= serverDateKey(referenceNow)) return null;
+  if (JSON.stringify(beforeSnapshot) === JSON.stringify(afterSnapshot)) return null;
+  const report = {
+    id: crypto.randomUUID(),
+    status: "queued",
+    kind: cleanLateTimeEntryReportText(kind, 80),
+    actorId: cleanUserId(user?.id),
+    actorName: cleanLateTimeEntryReportText(user?.name || user?.id || "Neznan uporabnik", 120),
+    createdAt: referenceNow.toISOString(),
+    sendingAt: "",
+    sentAt: "",
+    messageId: "",
+    attempts: 0,
+    lastError: "",
+    before: beforeSnapshot,
+    after: afterSnapshot
+  };
+  db.lateTimeEntryReports = normalizeLateTimeEntryReports([
+    ...(Array.isArray(db?.lateTimeEntryReports) ? db.lateTimeEntryReports : []),
+    report
+  ], db?.users, referenceNow.getTime());
+  return db.lateTimeEntryReports.find((item) => item.id === report.id) || null;
+}
+
+function lateTimeEntryReportSnapshotLines(snapshot) {
+  if (!snapshot) return ["Vpis ne obstaja."];
+  const dateRange = snapshot.endDate && snapshot.endDate !== snapshot.date
+    ? `${reportPdfDate(snapshot.date)} – ${reportPdfDate(snapshot.endDate)}`
+    : reportPdfDate(snapshot.date);
+  const time = snapshot.start && snapshot.end ? `${snapshot.start}–${snapshot.end}` : "brez ure";
+  const vehicle = snapshot.clientVehicle === "van" ? "kombi" : "osebni avto";
+  const lines = [
+    `Izvajalec: ${snapshot.workerName || snapshot.workerId || "-"}`,
+    `Datum in ura: ${dateRange}, ${time}`,
+    `Status: ${snapshot.statusLabel}`,
+    `Opravilo: ${snapshot.title || "Brez naslova"}`,
+    snapshot.client ? `Stranka: ${snapshot.client}` : "",
+    `Urna postavka: ${snapshot.billingHourlyRate === null ? "-" : `${snapshot.billingHourlyRate} EUR/h`}`,
+    `Kilometrina delavca: ${snapshot.billingKm} km`,
+    `Stroški prevoza stranki: ${snapshot.clientKm} km (${vehicle})`,
+    snapshot.workFromHome ? "Delo od doma: da" : "",
+    snapshot.warranty ? "Garancija: da" : "",
+    snapshot.notes ? `Opis del: ${snapshot.notes}` : "",
+    snapshot.material ? `Material: ${snapshot.material}` : "",
+    snapshot.attachments?.length ? `Priloge: ${snapshot.attachments.join(", ")}` : ""
+  ];
+  return lines.filter(Boolean);
+}
+
+function lateTimeEntryReportText(report) {
+  const after = report?.after || report?.before || null;
+  return [
+    "Pozna sprememba vpisa ur",
+    "",
+    `Spremenil: ${report?.actorName || report?.actorId || "Neznan uporabnik"}`,
+    `Vrsta spremembe: ${report?.kind || "spremenjeno"}`,
+    `Zabeleženo: ${new Date(report?.createdAt || Date.now()).toLocaleString("sl-SI", { timeZone: "Europe/Ljubljana" })}`,
+    after?.workerName ? `Izvajalec: ${after.workerName}` : "",
+    "",
+    "PREJ",
+    ...lateTimeEntryReportSnapshotLines(report?.before).map((line) => `- ${line}`),
+    "",
+    "POTEM",
+    ...lateTimeEntryReportSnapshotLines(report?.after).map((line) => `- ${line}`)
+  ].filter((line, index, lines) => line || index === 0 || lines[index - 1] !== "").join("\n");
+}
+
+function gmailLateTimeEntryReportRaw({ to, report }) {
+  const recipient = String(to || "").trim().toLowerCase();
+  if (!validEmailAddress(recipient)) throw new Error("Poročila o pozni spremembi ni mogoče poslati brez veljavnega Bojanovega e-naslova.");
+  const snapshot = report?.after || report?.before || {};
+  const subject = `Pozna sprememba vpisa ur - ${snapshot.workerName || "delavec"} - ${reportPdfDate(snapshot.date)}`;
+  const encodedSubject = `=?UTF-8?B?${Buffer.from(subject, "utf8").toString("base64")}?=`;
+  const messageId = String(report?.id || crypto.randomUUID()).replace(/[^a-zA-Z0-9._-]/g, "").slice(0, 100);
+  const parts = [
+    `To: ${recipient}`,
+    `Subject: ${encodedSubject}`,
+    `Message-ID: <indus-ure-late-${messageId}@ure.indus.si>`,
+    "MIME-Version: 1.0",
+    "Content-Type: text/plain; charset=utf-8",
+    "Content-Transfer-Encoding: base64",
+    "",
+    mimeBase64(lateTimeEntryReportText(report))
+  ];
+  return Buffer.from(parts.join("\r\n")).toString("base64url");
+}
+
+async function deliverQueuedLateTimeEntryReports({ limit = 40 } = {}) {
+  const db = await readDbAsync();
+  const queued = (db.lateTimeEntryReports || []).filter((report) => report.status === "queued").slice(0, Math.max(1, limit));
+  if (!queued.length) return { sent: [], pending: 0 };
+  const owner = googleDriveOwner(db);
+  const recipient = String(owner?.email || GOOGLE_DRIVE_OWNER_EMAIL || "").trim().toLowerCase();
+  if (!validEmailAddress(recipient) || !googleReady() || !googleWorkspaceTokenAvailable(owner)) {
+    await recordOperationalAlert({
+      code: "late-time-entry-report-google-unavailable",
+      severity: "warning",
+      title: "Poročila o poznih vpisih ur čakajo",
+      message: "Google Dokumenti, preglednice in Gmail niso povezani. Poročila bodo poslana samodejno po ponovni povezavi."
+    });
+    return { sent: [], pending: queued.length, unavailable: true };
+  }
+  const { google } = require("googleapis");
+  const gmail = google.gmail({ version: "v1", auth: googleClient({ headers: {}, socket: {} }, owner.google.tokens) });
+  const sent = [];
+  for (const queuedReport of queued) {
+    const report = (db.lateTimeEntryReports || []).find((item) => item.id === queuedReport.id);
+    if (!report || report.status !== "queued") continue;
+    report.status = "sending";
+    report.sendingAt = new Date().toISOString();
+    report.attempts = Math.max(0, Number(report.attempts || 0)) + 1;
+    report.lastError = "";
+    await writeDbAsync(db);
+    try {
+      const message = await gmail.users.messages.send({
+        userId: "me",
+        requestBody: { raw: gmailLateTimeEntryReportRaw({ to: recipient, report }) }
+      });
+      report.status = "sent";
+      report.sentAt = new Date().toISOString();
+      report.sendingAt = "";
+      report.messageId = String(message.data?.id || "").slice(0, 300);
+      await writeDbAsync(db);
+      sent.push(report.id);
+      scheduleAuditLog({
+        actor: { id: "system", name: "Sistem" },
+        action: "system.late_time_entry_report.sent",
+        targetType: "late_time_entry_report",
+        targetId: report.id,
+        severity: "info",
+        context: { workerId: report.after?.workerId || report.before?.workerId || "", date: report.after?.date || report.before?.date || "" }
+      });
+    } catch (error) {
+      report.status = "queued";
+      report.sendingAt = "";
+      report.lastError = cleanLateTimeEntryReportText(error?.message || error, 600);
+      await writeDbAsync(db);
+      await recordOperationalAlert({
+        code: "late-time-entry-report-failed",
+        severity: "warning",
+        title: "Poročilo o pozni spremembi ni bilo poslano",
+        message: "Sprememba je varno shranjena in bo samodejno znova poslana. " + report.lastError
+      });
+      break;
+    }
+  }
+  return { sent, pending: (db.lateTimeEntryReports || []).filter((report) => report.status === "queued").length };
+}
+
+function scheduleLateTimeEntryReportDelivery() {
+  if (lateTimeEntryReportDeliveryScheduled) return;
+  lateTimeEntryReportDeliveryScheduled = true;
+  runSerializedWork(async () => {
+    try {
+      await deliverQueuedLateTimeEntryReports();
+    } finally {
+      lateTimeEntryReportDeliveryScheduled = false;
+    }
+  }).catch((error) => {
+    lateTimeEntryReportDeliveryScheduled = false;
+    console.error(`Poročil o poznih spremembah ni bilo mogoče poslati: ${error.message || error}`);
+  });
+}
+
 function normalizeDb(db = {}) {
   let changed = false;
 
@@ -1213,6 +1506,12 @@ function normalizeDb(db = {}) {
   const normalizedWorkerDigestRuns = normalizeWorkerDigestRuns(db.workerDigestRuns);
   if (!hasWorkerDigestRuns || JSON.stringify(db.workerDigestRuns) !== JSON.stringify(normalizedWorkerDigestRuns)) {
     db.workerDigestRuns = normalizedWorkerDigestRuns;
+    changed = true;
+  }
+  const hasLateTimeEntryReports = Array.isArray(db.lateTimeEntryReports);
+  const normalizedLateTimeEntryReports = normalizeLateTimeEntryReports(db.lateTimeEntryReports, db.users);
+  if (!hasLateTimeEntryReports || JSON.stringify(db.lateTimeEntryReports) !== JSON.stringify(normalizedLateTimeEntryReports)) {
+    db.lateTimeEntryReports = normalizedLateTimeEntryReports;
     changed = true;
   }
 
@@ -1974,6 +2273,7 @@ function initialDatabaseState() {
     clientBills: [],
     todoCreateReceipts: {},
     workerDigestRuns: [],
+    lateTimeEntryReports: [],
     auditLog: [],
     settings: {},
     calendarToken: crypto.randomBytes(24).toString("hex"),
@@ -5731,6 +6031,10 @@ async function runOperationalMonitor() {
       console.error(`Revizijskega dnevnika ni bilo mogoče počistiti: ${error.message || error}`);
     }
   }
+  // A transient Gmail/Google outage must not make a late time-entry report
+  // disappear.  The monitor retries the durable queue independently of user
+  // traffic, while avoiding parallel deliveries.
+  scheduleLateTimeEntryReportDelivery();
   scheduleArchiveRetentionCleanup().catch((error) => console.error(`Čiščenje arhiva ni uspelo: ${error.message || error}`));
 }
 
@@ -7333,10 +7637,20 @@ async function handleApi(req, res) {
           createdAt: now
         };
       }
+      const lateTimeEntryReports = createdTodoIds
+        .map((todoId) => queueLateTimeEntryReport(db, {
+          before: null,
+          after: db.todos.find((item) => item.id === todoId),
+          user,
+          kind: "dodan pozni vpis ur"
+        }))
+        .filter(Boolean);
       await writeDbAsync(db);
+      if (lateTimeEntryReports.length) scheduleLateTimeEntryReportDelivery();
       sendJson(res, 200, {
         todos: visibleTodosForUser(db, user),
-        assignedTo: assigneeIds.map((id) => publicDirectoryUser(db.users[id]))
+        assignedTo: assigneeIds.map((id) => publicDirectoryUser(db.users[id])),
+        lateTimeEntryReportsQueued: lateTimeEntryReports.length
       });
       return;
     }
@@ -7926,8 +8240,17 @@ async function handleApi(req, res) {
           history: [...(item.history || []), audit(user, action)]
         };
       });
+      const lateTimeEntryReports = operations
+        .map((operation) => queueLateTimeEntryReport(db, {
+          before: operation.previousTodo,
+          after: db.todos.find((item) => item.id === operation.previousTodo.id),
+          user,
+          kind: operation.previousTodo.date === operation.date ? "spremenjen pozni vpis ur" : "prestavljen pozni vpis ur"
+        }))
+        .filter(Boolean);
       await writeDbAsync(db);
-      sendJson(res, 200, { todos: visibleTodosForUser(db, user) });
+      if (lateTimeEntryReports.length) scheduleLateTimeEntryReportDelivery();
+      sendJson(res, 200, { todos: visibleTodosForUser(db, user), lateTimeEntryReportsQueued: lateTimeEntryReports.length });
       return;
     }
 
@@ -7987,9 +8310,16 @@ async function handleApi(req, res) {
         updatedAt: now,
         history: [...(item.history || []), audit(user, date === previousTodo.date ? "prestavljen v časovnici" : `prestavljen na ${date} v časovnici`)]
       } : item);
+      const lateTimeEntryReport = queueLateTimeEntryReport(db, {
+        before: previousTodo,
+        after: db.todos.find((item) => item.id === previousTodo.id),
+        user,
+        kind: previousTodo.date === date ? "spremenjen pozni vpis ur" : "prestavljen pozni vpis ur"
+      });
       await writeDbAsync(db);
       releaseTodoAssignmentEditLock(db, previousTodo, user, editLockToken);
-      sendJson(res, 200, { todos: visibleTodosForUser(db, user) });
+      if (lateTimeEntryReport) scheduleLateTimeEntryReportDelivery();
+      sendJson(res, 200, { todos: visibleTodosForUser(db, user), lateTimeEntryReportsQueued: lateTimeEntryReport ? 1 : 0 });
       return;
     }
     const todoRestoreMatch = url.pathname.match(/^\/api\/todos\/([^/]+)\/restore$/);
@@ -8008,8 +8338,15 @@ async function handleApi(req, res) {
         return;
       }
       restoreTrashedTodoGroup(db, todo, user);
+      const lateTimeEntryReport = queueLateTimeEntryReport(db, {
+        before: null,
+        after: (db.todos || []).find((item) => item.id === todo.id),
+        user,
+        kind: "obnovljen pozni vpis ur"
+      });
       await writeDbAsync(db);
-      sendJson(res, 200, { todos: visibleTodosForUser(db, user), deletedTodos: visibleTrashedTodosForUser(db, user) });
+      if (lateTimeEntryReport) scheduleLateTimeEntryReportDelivery();
+      sendJson(res, 200, { todos: visibleTodosForUser(db, user), deletedTodos: visibleTrashedTodosForUser(db, user), lateTimeEntryReportsQueued: lateTimeEntryReport ? 1 : 0 });
       return;
     }
     const todoMatch = url.pathname.match(/^\/api\/todos\/([^/]+)$/);
@@ -8234,11 +8571,22 @@ releaseTodoAssignmentEditLock(db, previousTodo, user, editLockToken);
       const oldGroupIds = new Set(assignmentItems.map((item) => item.id));
       db.todos = db.todos.filter((item) => !oldGroupIds.has(item.id));
       db.todos.push(...updatedGroup);
+      const updatedOpenedTodo = updatedGroup.find((item) => item.id === previousTodo.id)
+        || updatedGroup.find((item) => item.syncUser === previousTodo.syncUser)
+        || updatedGroup[0]
+        || null;
+      const lateTimeEntryReport = queueLateTimeEntryReport(db, {
+        before: previousTodo,
+        after: updatedOpenedTodo,
+        user,
+        kind: "spremenjen pozni vpis ur"
+      });
       pruneUnusedTodoAttachments(db);
       pruneUnusedAdHocClients(db);
       await writeDbAsync(db);
       releaseTodoAssignmentEditLock(db, previousTodo, user, editLockToken);
-      sendJson(res, 200, { todos: visibleTodosForUser(db, user) });
+      if (lateTimeEntryReport) scheduleLateTimeEntryReportDelivery();
+      sendJson(res, 200, { todos: visibleTodosForUser(db, user), lateTimeEntryReportsQueued: lateTimeEntryReport ? 1 : 0 });
       return;
     }
 
@@ -8281,10 +8629,17 @@ releaseTodoAssignmentEditLock(db, previousTodo, user, editLockToken);
         return;
       }
       releaseTodoAssignmentEditLock(db, todo, user, editLockToken);
+      const lateTimeEntryReport = queueLateTimeEntryReport(db, {
+        before: todo,
+        after: null,
+        user,
+        kind: "izbrisan pozni vpis ur"
+      });
       trashTodoGroup(db, todo, user);
       await writeDbAsync(db);
       releaseTodoAssignmentEditLock(db, todo, user, editLockToken);
-      sendJson(res, 200, { todos: visibleTodosForUser(db, user), deletedTodos: visibleTrashedTodosForUser(db, user) });
+      if (lateTimeEntryReport) scheduleLateTimeEntryReportDelivery();
+      sendJson(res, 200, { todos: visibleTodosForUser(db, user), deletedTodos: visibleTrashedTodosForUser(db, user), lateTimeEntryReportsQueued: lateTimeEntryReport ? 1 : 0 });
       return;
     }
 
@@ -8479,6 +8834,11 @@ module.exports = {
   gmailDraftRaw,
   gmailWorkerDigestDraftRaw,
   gmailWorkerDigestMessageRaw,
+  gmailLateTimeEntryReportRaw,
+  lateTimeEntryReportText,
+  lateTimeEntryReportSnapshot,
+  normalizeLateTimeEntryReports,
+  queueLateTimeEntryReport,
   workerDigestRunKey,
   workerDigestRunFor,
   recordWorkerDigestRun,

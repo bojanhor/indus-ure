@@ -531,8 +531,14 @@ test("calendar-only task controls are date-bound, unavailable for time entries, 
   assert.match(html, /\$\("todoFormStatusField"\)\.open = false;\s*\$\("todoFormDateTimeSection"\)\.open = false;/);
   assert.match(html, /#todoDialog \.todo-form-date-time-grid \{\s*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);/);
   assert.match(html, /id="todoFormWarrantyField"/);
-  assert.match(html, /class="todo-form-warranty" id="todoFormWarrantyField"/);
+  assert.match(html, /class="todo-form-option todo-form-warranty" id="todoFormWarrantyField"/);
+  assert.match(html, /class="todo-form-option todo-form-urgent" id="todoFormUrgentField"/);
+  assert.match(html, /id="todoFormLateTimeEntryNotice"/);
+  assert.match(html, /function updateTodoFormLateTimeEntryNotice\(\)/);
+  assert.match(html, /state\.user\?\.role === "boss"/);
   assert.match(html, /Zahtevaj dopolnitev vnosa ur/);
+  assert.match(html, /function compactExternalLinkLabel\(value\)/);
+  assert.match(html, /class="inline-url"/);
   assert.match(html, /id="todoFormCalendarOnly"/);
   assert.match(html, /id="todoFormCalendarOnlyField"/);
   assert.match(html, /const isTimeEntry = timeEntryStatusIds\.has\(\$\('todoFormStatus'\)\.value\);[\s\S]*?const canShowOnlyInCalendar = Boolean\(date && !isTimeEntry\);/);
