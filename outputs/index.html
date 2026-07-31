@@ -1404,12 +1404,51 @@
 
     .todo-status-direct-field {
       display: grid;
-      gap: 7px;
+      gap: 10px;
+      padding: 11px 12px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #f8faf8;
     }
 
-    .todo-status-direct-label {
+    .todo-status-direct-field > summary {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      color: var(--ink);
+      font-weight: 800;
+      cursor: pointer;
+      list-style: none;
+    }
+
+    .todo-status-direct-field > summary::-webkit-details-marker { display: none; }
+    .todo-status-direct-field > summary::after {
+      content: "⌄";
+      flex: 0 0 auto;
       color: var(--muted);
+      font-size: 18px;
+      line-height: 1;
+      transition: transform .16s ease;
+    }
+    .todo-status-direct-field[open] > summary::after { transform: rotate(180deg); }
+
+    .todo-status-summary {
+      display: inline-flex;
+      align-items: center;
+      min-height: 28px;
+      max-width: min(62vw, 260px);
+      padding: 4px 8px;
+      border-radius: 7px;
       font-size: 13px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .todo-status-direct-content {
+      display: grid;
+      gap: 7px;
     }
 
     .todo-status-open { --todo-bg: #e1e1e1; --todo-fg: #202124; --todo-border: #9aa0a6; }
@@ -3422,6 +3461,7 @@
       padding: 10px;
       background: #11181c;
       overscroll-behavior: contain;
+      scroll-behavior: auto;
       touch-action: none;
       cursor: grab;
     }
@@ -3691,6 +3731,7 @@
       padding: 10px;
       background: #11181c;
       overscroll-behavior: contain;
+      scroll-behavior: auto;
       touch-action: none;
     }
 
@@ -4548,7 +4589,6 @@
       }
       .modal-grid,
       .todo-date-range-field,
-      .todo-form-date-time-grid,
       .boss-panel,
       .month-debt-grid,
       .todo-layout,
@@ -4559,6 +4599,10 @@
       .todo-actions-bar .primary { width: 100%; }
       .client-work-row button {
         justify-self: stretch;
+      }
+      #todoDialog .todo-form-date-time-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
       }
       .client-row {
         grid-template-columns: 1fr;
@@ -5085,12 +5129,14 @@
             <div class="todo-client-contact-selected" id="todoFormClientContactSelected"></div>
           </section>
         </div>
-        <div class="todo-status-direct-field" id="todoFormStatusField">
-          <span class="todo-status-direct-label">Status</span>
-          <input id="todoFormStatus" type="hidden" value="open">
-          <div class="todo-status-mobile-options" id="todoFormStatusChoices" aria-label="Status opravila"></div>
-          <p class="todo-meta hidden" id="todoFormMealNote"></p>
-        </div>
+        <details class="todo-status-direct-field" id="todoFormStatusField">
+          <summary><span>Status</span><span class="todo-status-summary" id="todoFormStatusSummary">Čaka</span></summary>
+          <div class="todo-status-direct-content">
+            <input id="todoFormStatus" type="hidden" value="open">
+            <div class="todo-status-mobile-options" id="todoFormStatusChoices" aria-label="Status opravila"></div>
+            <p class="todo-meta hidden" id="todoFormMealNote"></p>
+          </div>
+        </details>
         <label class="todo-form-ordered hidden" id="todoFormOrderedField">
           <input id="todoFormOrdered" type="checkbox">
           <span>Naročeno</span>
@@ -5670,6 +5716,11 @@
 
     function renderTodoStatusChoices(selected) {
       const current = todoStatus(selected).id;
+      const summary = $("todoFormStatusSummary");
+      if (summary) {
+        summary.textContent = todoStatus(current).label;
+        summary.className = `todo-status-summary todo-status-color ${todoStatusClass(current)}`;
+      }
       const standaloneHours = Boolean(state.todoStandaloneHours && !state.todoHoursSourceId);
       const availableStatuses = standaloneHours
         ? todoStatusDefinitions.filter((status) => timeEntryStatusIds.has(status.id))
@@ -5686,6 +5737,18 @@
     function updateTodoStatusControl(control) {
       $("todoFormStatusChoices")?.querySelectorAll("[data-status]").forEach((button) => {
         button.setAttribute("aria-pressed", String(button.dataset.status === control.value));
+      });
+      const summary = $("todoFormStatusSummary");
+      if (summary) {
+        const status = todoStatus(control.value);
+        summary.textContent = status.label;
+        summary.className = `todo-status-summary todo-status-color ${todoStatusClass(status.id)}`;
+      }
+    }
+
+    function closeOtherTodoFormFoldouts(opened) {
+      [$("todoFormStatusField"), $("todoFormDateTimeSection")].forEach((section) => {
+        if (section && section !== opened) section.open = false;
       });
     }
 
@@ -11055,6 +11118,44 @@
       body.scrollTop = 0;
     }
 
+    // Pointer events arrive independently for both fingers.  Coalescing them
+    // into one animation frame keeps a pinch from applying the same movement
+    // twice and prevents zoom anchoring from fighting the pan adjustment.
+    function flushAttachmentPreviewGesture(preview = state.attachmentPreview) {
+      if (!preview || state.attachmentPreview !== preview) return;
+      preview.gestureFrame = 0;
+      const pending = preview.pendingGesture;
+      preview.pendingGesture = null;
+      if (!pending) return;
+      const body = $("attachmentPreviewImage").closest(".attachment-preview-body");
+      const gesture = preview.gesture;
+      if (!body || !gesture) return;
+      if (pending.type === "pinch") {
+        if (preview.pointers.size < 2 || gesture.type !== "pinch") return;
+        const rawRatio = pending.metrics.distance / Math.max(1, gesture.lastDistance);
+        const ratio = Math.max(0.8, Math.min(1.25, rawRatio));
+        // Scale around the previous finger centre, then move the image by the
+        // centre delta.  These are complementary operations, not competing
+        // anchor points.
+        if (Math.abs(rawRatio - 1) >= 0.004) setAttachmentPreviewZoom(preview.zoom * ratio, gesture.lastCenter);
+        body.scrollLeft -= pending.metrics.center.x - gesture.lastCenter.x;
+        body.scrollTop -= pending.metrics.center.y - gesture.lastCenter.y;
+        preview.gesture = { type: "pinch", lastDistance: pending.metrics.distance, lastCenter: pending.metrics.center };
+        return;
+      }
+      if (pending.type !== "pan" || gesture.type !== "pan" || gesture.pointerId !== pending.pointerId) return;
+      body.scrollLeft -= pending.x - gesture.lastX;
+      body.scrollTop -= pending.y - gesture.lastY;
+      preview.gesture = { type: "pan", pointerId: pending.pointerId, lastX: pending.x, lastY: pending.y };
+    }
+
+    function queueAttachmentPreviewGesture(preview, next) {
+      if (!preview || state.attachmentPreview !== preview) return;
+      preview.pendingGesture = next;
+      if (preview.gestureFrame) return;
+      preview.gestureFrame = requestAnimationFrame(() => flushAttachmentPreviewGesture(preview));
+    }
+
     function previewableAttachmentPhotos(photos) {
       return (photos || []).filter((item) => !isPdfAttachment(item) && !isVideoAttachment(item) && Boolean(attachmentSource(item)));
     }
@@ -11111,7 +11212,9 @@
         index,
         zoom: 100,
         pointers: new Map(),
-        gesture: null
+        gesture: null,
+        gestureFrame: 0,
+        pendingGesture: null
       };
       const image = $("attachmentPreviewImage");
       image.draggable = false;
@@ -11435,6 +11538,9 @@
     function beginPhotoEditorPinch(editor, shell) {
       const metrics = photoEditorTouchPinchMetrics(editor);
       if (!metrics) return false;
+      if (editor.panFrame) cancelAnimationFrame(editor.panFrame);
+      editor.panFrame = 0;
+      flushPhotoEditorPan(editor);
       const textInteraction = editor.textInteraction;
       if (textInteraction) {
         const text = selectedPhotoEditorText();
@@ -11453,23 +11559,47 @@
       return true;
     }
 
+    function flushPhotoEditorPan(editor = state.photoEditor) {
+      if (!editor || state.photoEditor !== editor) return;
+      editor.panFrame = 0;
+      const pending = editor.pendingPan;
+      editor.pendingPan = null;
+      const pan = editor.pan;
+      if (!pending || !pan || pan.pointerId !== pending.pointerId) return;
+      const shell = $("photoEditorCanvas").closest(".photo-editor-canvas-shell");
+      if (!shell) return;
+      shell.scrollLeft -= pending.x - pan.lastX;
+      shell.scrollTop -= pending.y - pan.lastY;
+      pan.lastX = pending.x;
+      pan.lastY = pending.y;
+    }
+
+    function queuePhotoEditorPan(editor, next) {
+      if (!editor || state.photoEditor !== editor) return;
+      editor.pendingPan = next;
+      if (editor.panFrame) return;
+      editor.panFrame = requestAnimationFrame(() => flushPhotoEditorPan(editor));
+    }
+
     function queuePhotoEditorPinch(metrics) {
       const editor = state.photoEditor;
       if (!editor || !metrics || !editor.pinch) return;
       editor.pendingPinch = metrics;
       if (editor.pinchFrame) return;
       editor.pinchFrame = requestAnimationFrame(() => {
+        if (state.photoEditor !== editor) return;
         editor.pinchFrame = 0;
         const next = editor.pendingPinch;
         editor.pendingPinch = null;
         if (!next || !editor.pinch || !photoEditorTouchPinchMetrics(editor)) return;
         const previous = editor.pinch;
         const rawRatio = next.distance / Math.max(1, previous.lastDistance);
-        const ratio = Math.max(0.65, Math.min(1.55, rawRatio));
+        const ratio = Math.max(0.8, Math.min(1.25, rawRatio));
         const shell = $("photoEditorCanvas").closest(".photo-editor-canvas-shell");
-        // Parallel two-finger movement pans smoothly. Tiny asynchronous distance
-        // changes do not also zoom, which avoids the visual jitter on touch.
-        if (Math.abs(rawRatio - 1) >= 0.012) setPhotoEditorZoom(editor.zoom * ratio, next.center);
+        if (!shell) return;
+        // Keep one anchor for the scale and apply the two-finger translation
+        // separately. Using the new centre for both made zoom and pan fight.
+        if (Math.abs(rawRatio - 1) >= 0.004) setPhotoEditorZoom(editor.zoom * ratio, previous.lastCenter);
         shell.scrollLeft -= next.center.x - previous.lastCenter.x;
         shell.scrollTop -= next.center.y - previous.lastCenter.y;
         editor.pinch = { lastDistance: next.distance, lastCenter: next.center };
@@ -11516,6 +11646,8 @@
           pinchFrame: 0,
           pendingPinch: null,
           pan: null,
+          panFrame: 0,
+          pendingPan: null,
           gestureUsed: false
         };
         $("photoEditorText").value = "";
@@ -12136,8 +12268,6 @@
       const calendarOnly = $('todoFormCalendarOnly');
       const calendarOnlyField = $('todoFormCalendarOnlyField');
       const isTimeEntry = timeEntryStatusIds.has($('todoFormStatus').value);
-      const dateTimeSection = $('todoFormDateTimeSection');
-      if (isTimeEntry) dateTimeSection.open = true;
       const canShowOnlyInCalendar = Boolean(date && !isTimeEntry);
       calendarOnlyField.classList.toggle('hidden', !canShowOnlyInCalendar);
       if (!canShowOnlyInCalendar) calendarOnly.checked = false;
@@ -12199,7 +12329,10 @@
       const meal = $("todoFormStatus").value === "meal";
       const standaloneHours = Boolean(state.todoStandaloneHours && !state.todoHoursSourceId);
       const selectedStatus = $("todoFormStatus").value;
-      $("todoFormStatusField").classList.toggle("hidden", !standaloneHours && (Boolean(state.todoHoursSourceId) || state.todoMealEntry || timeEntryStatusIds.has(selectedStatus)));
+      const statusField = $("todoFormStatusField");
+      const hideStatusField = !standaloneHours && (Boolean(state.todoHoursSourceId) || state.todoMealEntry || timeEntryStatusIds.has(selectedStatus));
+      statusField.classList.toggle("hidden", hideStatusField);
+      if (hideStatusField) statusField.open = false;
       const mealNote = $("todoFormMealNote");
       mealNote.classList.toggle("hidden", !meal);
       mealNote.textContent = meal ? `Malica se stranki ne obračuna. Delavcu se plača največ ${mealPaidMinutes()} min.` : "";
@@ -12308,7 +12441,11 @@
       $("todoFormWorkFromHome").checked = Boolean(todo.workFromHome);
       $("todoFormImported").checked = Boolean(todo.imported);
       $("todoFormCalendarOnly").checked = Boolean(!timeEntryStatusIds.has(todoStatus(todo.status || "open").id) && todo.calendarOnly && todo.date);
-      $("todoFormDateTimeSection").open = Boolean(editing || state.todoHoursSourceId || state.todoStandaloneHours || state.todoMealEntry || timeEntryStatusIds.has($('todoFormStatus').value));
+      // Keep both optional sections compact when the form opens. Validation
+      // opens the relevant one automatically if a required date or time is
+      // missing, so a short form never hides the reason it cannot save.
+      $("todoFormStatusField").open = false;
+      $("todoFormDateTimeSection").open = false;
       updateTodoFormStatus();
       syncTodoFormClientContacts({ preserve: true });
        autosizeTodoNarrativeFields();
@@ -12337,7 +12474,10 @@
       $("deleteTodoFromDialog").classList.toggle("hidden", !editing);
       $("duplicateTodoFromDialog").classList.toggle("hidden", !editing || Boolean(state.todoHoursSourceId));
       $("writeHoursFromTodo").classList.toggle("hidden", !editing || Boolean(state.todoHoursSourceId) || !projectHoursSourceStatuses.has(todoStatus(todo.status).id));
+      const isExistingTimeEntry = editing && timeEntryStatusIds.has(todoStatus(todo.status).id);
       const showCompletionRequest = editing && isAdminView();
+      $("requestTodoCompletion").textContent = isExistingTimeEntry ? "Zahtevaj dopolnitev vnosa ur" : "Zahtevaj dopolnitev";
+      $("requestTodoCompletion").setAttribute("aria-label", isExistingTimeEntry ? "Zahtevaj dopolnitev vnosa ur" : "Zahtevaj dopolnitev opravila");
       $("requestTodoCompletion").classList.toggle("hidden", !showCompletionRequest);
       $("todoFormFooterActions").classList.toggle("hidden", !showCompletionRequest);
       renderTodoFormAudit(todo);
@@ -14819,6 +14959,11 @@
       syncTodoFormDateRangeControls();
       $("todoFormDate").focus();
     });
+    ["todoFormStatusField", "todoFormDateTimeSection"].forEach((id) => {
+      $(id).addEventListener("toggle", (event) => {
+        if (event.currentTarget.open) closeOtherTodoFormFoldouts(event.currentTarget);
+      });
+    });
     $("todoFormStatusChoices").addEventListener("click", (event) => {
       const button = event.target.closest("[data-status]");
       if (!button) return;
@@ -14826,6 +14971,7 @@
       if (button.dataset.status === "meal") applyMealDefaults();
       renderTodoStatusChoices(button.dataset.status);
       updateTodoFormStatus();
+      $("todoFormStatusField").open = false;
     });
     ["todoFormNotes", "todoFormMaterial"].forEach((id) => $(id).addEventListener("input", autosizeTodoNarrativeFields));
     $("todoFormHourlyRate").addEventListener("input", () => {
@@ -15389,11 +15535,7 @@
       }
       const pan = editor.pan;
       if (pan?.pointerId === event.pointerId) {
-        const shell = $("photoEditorCanvas").closest(".photo-editor-canvas-shell");
-        shell.scrollLeft -= event.clientX - pan.lastX;
-        shell.scrollTop -= event.clientY - pan.lastY;
-        pan.lastX = event.clientX;
-        pan.lastY = event.clientY;
+        queuePhotoEditorPan(editor, { pointerId: event.pointerId, x: event.clientX, y: event.clientY });
         return;
       }
       const interaction = editor.textInteraction;
@@ -15423,6 +15565,9 @@
       if (!editor) return;
       const shell = $("photoEditorCanvas").closest(".photo-editor-canvas-shell");
       if (editor.pan?.pointerId === event.pointerId) {
+        if (editor.panFrame) cancelAnimationFrame(editor.panFrame);
+        editor.panFrame = 0;
+        flushPhotoEditorPan(editor);
         editor.pan = null;
         shell.classList.remove("is-panning");
       }
@@ -15452,6 +15597,11 @@
         editor.pinchFrame = 0;
         editor.pendingPinch = null;
         editor.pinch = null;
+      }
+      if (!editor.pan) {
+        if (editor.panFrame) cancelAnimationFrame(editor.panFrame);
+        editor.panFrame = 0;
+        editor.pendingPan = null;
       }
       if (!editor.pointers.size) {
         editor.gestureUsed = false;
@@ -15552,6 +15702,9 @@
       }
     });
     $("photoEditorDialog").addEventListener("close", () => {
+      const editor = state.photoEditor;
+      if (editor?.pinchFrame) cancelAnimationFrame(editor.pinchFrame);
+      if (editor?.panFrame) cancelAnimationFrame(editor.panFrame);
       state.photoEditor = null;
       const canvas = $("photoEditorCanvas");
       canvas.width = 1;
@@ -15601,10 +15754,14 @@
       if (!preview || (event.pointerType === "mouse" && event.button !== 0)) return;
       event.preventDefault();
       attachmentPreviewBody.setPointerCapture(event.pointerId);
+      if (preview.gestureFrame) cancelAnimationFrame(preview.gestureFrame);
+      preview.gestureFrame = 0;
+      flushAttachmentPreviewGesture(preview);
       preview.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
       attachmentPreviewBody.classList.add("is-panning");
       if (preview.pointers.size >= 2) {
         const metrics = pointerGestureMetrics(preview.pointers);
+        preview.pendingGesture = null;
         preview.gesture = metrics ? { type: "pinch", lastDistance: metrics.distance, lastCenter: metrics.center } : null;
       } else {
         preview.gesture = { type: "pan", pointerId: event.pointerId, lastX: event.clientX, lastY: event.clientY };
@@ -15622,24 +15779,21 @@
           preview.gesture = { type: "pinch", lastDistance: metrics.distance, lastCenter: metrics.center };
           return;
         }
-        const ratio = metrics.distance / Math.max(1, preview.gesture.lastDistance);
-        setAttachmentPreviewZoom(preview.zoom * ratio, preview.gesture.lastCenter);
-        attachmentPreviewBody.scrollLeft -= metrics.center.x - preview.gesture.lastCenter.x;
-        attachmentPreviewBody.scrollTop -= metrics.center.y - preview.gesture.lastCenter.y;
-        preview.gesture = { type: "pinch", lastDistance: metrics.distance, lastCenter: metrics.center };
+        queueAttachmentPreviewGesture(preview, { type: "pinch", metrics });
         return;
       }
       const gesture = preview.gesture;
       if (gesture?.type !== "pan" || gesture.pointerId !== event.pointerId) return;
-      attachmentPreviewBody.scrollLeft -= event.clientX - gesture.lastX;
-      attachmentPreviewBody.scrollTop -= event.clientY - gesture.lastY;
-      gesture.lastX = event.clientX;
-      gesture.lastY = event.clientY;
+      queueAttachmentPreviewGesture(preview, { type: "pan", pointerId: event.pointerId, x: event.clientX, y: event.clientY });
     });
     function finishAttachmentPreviewPointer(event) {
       const preview = state.attachmentPreview;
       if (!preview) return;
+      if (preview.gestureFrame) cancelAnimationFrame(preview.gestureFrame);
+      preview.gestureFrame = 0;
+      flushAttachmentPreviewGesture(preview);
       preview.pointers.delete(event.pointerId);
+      preview.pendingGesture = null;
       const remaining = [...preview.pointers.entries()][0];
       if (remaining) {
         preview.gesture = { type: "pan", pointerId: remaining[0], lastX: remaining[1].x, lastY: remaining[1].y };
@@ -15650,6 +15804,7 @@
     }
     attachmentPreviewBody.addEventListener("pointerup", finishAttachmentPreviewPointer);
     attachmentPreviewBody.addEventListener("pointercancel", finishAttachmentPreviewPointer);
+    attachmentPreviewBody.addEventListener("lostpointercapture", finishAttachmentPreviewPointer);
 
     $("attachmentPreviewEdit").addEventListener("click", async () => {
       const preview = state.attachmentPreview;
@@ -15670,6 +15825,8 @@
     });
 
     $("attachmentPreviewDialog").addEventListener("close", () => {
+      const preview = state.attachmentPreview;
+      if (preview?.gestureFrame) cancelAnimationFrame(preview.gestureFrame);
       const image = $("attachmentPreviewImage");
       image.removeAttribute("src");
       image.style.width = "";

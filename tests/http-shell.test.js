@@ -35,6 +35,10 @@ test("front-end naročila in foto urejevalnik ohranita dogovorjeni mobilni prika
   assert.match(html, /function confirmPhotoEditorPendingOperation\(\)/);
   assert.match(html, /function cancelPhotoEditorPendingOperation\(\)/);
   assert.match(html, /function beginPhotoEditorPinch\(editor, shell\)/);
+  assert.match(html, /function queuePhotoEditorPan\(editor, next\)/);
+  assert.match(html, /function queueAttachmentPreviewGesture\(preview, next\)/);
+  assert.match(html, /setAttachmentPreviewZoom\(preview\.zoom \* ratio, gesture\.lastCenter\)/);
+  assert.match(html, /setPhotoEditorZoom\(editor\.zoom \* ratio, previous\.lastCenter\)/);
   assert.match(html, /lostpointercapture/);
   assert.doesNotMatch(html, /photoEditorCropActions|photoEditorApplyCrop|photoEditorCancelCrop/);
   assert.match(html, /todoFormFooterActions/);
@@ -521,7 +525,14 @@ test("calendar-only task controls are date-bound, unavailable for time entries, 
   assert.ok(materialIndex >= 0 && dateTimeIndex > materialIndex && attachmentsIndex > dateTimeIndex);
   assert.match(html, /<details class="todo-form-date-time" id="todoFormDateTimeSection">/);
   assert.match(html, /placeholder="Vpi&#353;i predvideni material"/);
-  assert.match(html, /\$\("todoFormDateTimeSection"\)\.open = Boolean\(editing \|\| state\.todoHoursSourceId/);
+  assert.match(html, /<details class="todo-status-direct-field" id="todoFormStatusField">/);
+  assert.match(html, /id="todoFormStatusSummary"/);
+  assert.match(html, /function closeOtherTodoFormFoldouts\(opened\)/);
+  assert.match(html, /\$\("todoFormStatusField"\)\.open = false;\s*\$\("todoFormDateTimeSection"\)\.open = false;/);
+  assert.match(html, /#todoDialog \.todo-form-date-time-grid \{\s*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);/);
+  assert.match(html, /id="todoFormWarrantyField"/);
+  assert.match(html, /class="todo-form-warranty" id="todoFormWarrantyField"/);
+  assert.match(html, /Zahtevaj dopolnitev vnosa ur/);
   assert.match(html, /id="todoFormCalendarOnly"/);
   assert.match(html, /id="todoFormCalendarOnlyField"/);
   assert.match(html, /const isTimeEntry = timeEntryStatusIds\.has\(\$\('todoFormStatus'\)\.value\);[\s\S]*?const canShowOnlyInCalendar = Boolean\(date && !isTimeEntry\);/);

@@ -36,7 +36,13 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
         await localLogin(page, "ibro");
         await page.locator("#newTodoButton").click();
         await expect(page.locator("#todoDialog")).toBeVisible();
+        await expect(page.locator("#todoFormStatusField")).not.toHaveAttribute("open", "");
         await expect(page.locator("#todoFormDateTimeSection")).not.toHaveAttribute("open", "");
+        await page.locator("#todoFormStatusField > summary").click();
+        await expect(page.locator("#todoFormStatusField")).toHaveAttribute("open", "");
+        await page.locator("#todoFormDateTimeSection > summary").click();
+        await expect(page.locator("#todoFormStatusField")).not.toHaveAttribute("open", "");
+        await expect(page.locator("#todoFormDateTimeSection")).toHaveAttribute("open", "");
         await expect(page.locator("#todoFormAttachmentInput")).toBeAttached();
         await expect(page.locator("#todoFormAttachmentMenu > summary")).toContainText("Dodaj prilogo");
         await page.locator("#todoFormAttachmentMenu > summary").click();
@@ -118,6 +124,7 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
       await expect(page.locator("#todoFormTitle")).toHaveText("Vpis ur");
       await expect(page.locator("#todoFormStatus")).toHaveValue("execution");
       await expect(page.locator("#todoFormHourlyRateField")).toBeHidden();
+      await expect(page.locator("#todoFormDateTimeSection")).not.toHaveAttribute("open", "");
 
       await page.locator("#todoFormNotes").fill("Podroben opis opravljenega dela. ".repeat(28));
       const notesMetrics = await page.locator("#todoFormNotes").evaluate((field) => ({
@@ -135,6 +142,7 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
       await expect(page.locator("#quickClientDialog")).toBeHidden();
 
       await page.locator("#todoFormTask").fill(ENTRY_TITLE);
+      await page.locator("#todoFormDateTimeSection > summary").click();
       await page.locator("#todoFormDate").fill(ENTRY_DATE);
       await page.locator("#todoFormStart").fill("08:00");
       await page.locator("#todoFormEnd").fill("10:00");
@@ -244,6 +252,7 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
       await workerPage.locator("#writeHoursButton").click();
       await workerPage.locator("#todoFormTask").fill("PW hitri obračunski datum");
       await workerPage.locator("#todoFormClient").fill(CLIENT_ALIAS);
+      await workerPage.locator("#todoFormDateTimeSection > summary").click();
       await workerPage.locator("#todoFormDate").fill(today);
       await workerPage.locator("#todoFormStart").fill("09:00");
       await workerPage.locator("#todoFormEnd").fill("10:00");
@@ -620,6 +629,11 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
       await page.evaluate(async () => {
         const database = await new Promise((resolve, reject) => {
           const request = indexedDB.open("indus-ure-offline", 3);
+          request.onupgradeneeded = () => {
+            const db = request.result;
+            if (!db.objectStoreNames.contains("todoOps")) db.createObjectStore("todoOps", { keyPath: "id", autoIncrement: true });
+            if (!db.objectStoreNames.contains("snapshots")) db.createObjectStore("snapshots", { keyPath: "userId" });
+          };
           request.onerror = () => reject(request.error);
           request.onsuccess = () => resolve(request.result);
         });
