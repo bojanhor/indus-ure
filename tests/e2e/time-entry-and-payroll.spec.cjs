@@ -684,4 +684,44 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
       await context.close();
     }
   });
+
+  test("AJPES search fills an editable client draft without creating it", async ({ browser }) => {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    try {
+      await localLogin(page, "bojan");
+      await page.locator("#toolsMenu > summary").click();
+      await page.locator("#clientsMenuBtn").click();
+      await expect(page.locator("#ajpesSearch")).toBeVisible();
+      await page.route("**/api/ajpes/search?**", async (route) => {
+        await route.fulfill({
+          contentType: "application/json",
+          body: JSON.stringify({
+            results: [{
+              registryNumber: "5000152000",
+              name: "PIETA - POGREBNA DEJAVNOST FRANC TR\u0160AR S.P.",
+              search: "PIETA - POGREBNA DEJAVNOST FRANC TR\u0160AR S.P.",
+              address: "Gabr\u010de 009",
+              postal: "1360",
+              city: "Vrhnika",
+              country: "Slovenija",
+              legalForm: "Samostojni podjetnik posameznik s.p."
+            }]
+          })
+        });
+      });
+      await page.locator("#newClientSearch").fill("Pieta");
+      await page.locator("#ajpesSearch").fill("PIETA");
+      await page.locator("#ajpesSearchButton").click();
+      await expect(page.locator(".ajpes-result")).toContainText("PIETA - POGREBNA DEJAVNOST");
+      await page.locator(".ajpes-result").click();
+      await expect(page.locator("#newClientName")).toHaveValue("PIETA - POGREBNA DEJAVNOST FRANC TR\u0160AR S.P.");
+      await expect(page.locator("#newClientSearch")).toHaveValue("Pieta");
+      await expect(page.locator("#newClientAddress")).toHaveValue("Gabr\u010de 009");
+      await expect(page.locator("#newClientRegistryNumber")).toHaveValue("5000152000");
+      await expect(page.locator("#ajpesResults")).toBeHidden();
+    } finally {
+      await context.close();
+    }
+  });
 });

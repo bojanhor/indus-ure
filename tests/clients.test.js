@@ -7,6 +7,7 @@ const {
   createClientId,
   isStableClientId,
   isUsableTaxId,
+  normalizeRegistryNumber,
   normalizeStoredClient,
   normalizeTaxId,
   resolveStableClientId
@@ -16,6 +17,8 @@ const {
   pruneUnusedAdHocClients,
   validateTodo,
   cleanClient,
+  ajpesRecordToClientDraft,
+  searchAjpesPublicRegister,
   validateClient,
   clientDeletionBlocker,
   deleteClientIfSafe,
@@ -85,6 +88,62 @@ test("telefon stranke se varno prevede v stabilne kontakte", () => {
   assert.equal(preserved.contacts[0].id, valid.contacts[0].id);
   assert.equal(preserved.contacts[0].phone, "+386 40 999 999");
   assert.equal(preserved.contacts[1].id, valid.contacts[1].id);
+});
+
+test("AJPES mati\u010dna \u0161tevilka je zunanji podatek, lokalni ID pa ostane UUID", () => {
+  const client = normalizeStoredClient({
+    name: "Primer d.o.o.",
+    search: "Primer",
+    registryNumber: "5000152-000",
+    source: "ajpes"
+  });
+  assert.equal(normalizeRegistryNumber("5000152-000"), "5000152000");
+  assert.equal(normalizeRegistryNumber("123"), "");
+  assert.equal(client.registryNumber, "5000152000");
+  assert.equal(client.source, "ajpes");
+  assert.equal(isStableClientId(client.clientId), true);
+  assert.notEqual(client.clientId, client.registryNumber);
+  assert.equal(resolveStableClientId([client], "5000152000"), client.clientId);
+});
+
+test("javni AJPES zapis se varno prevede v osnutek stranke", async () => {
+  const sourceRecord = {
+    "Mati\u010dna \u0161tevilka": "5000152000",
+    "Popolno ime": "PRIMER PODJETJE d.o.o.",
+    "Pravnoorganizacijska oblika": "Dru\u017eba z omejeno odgovornostjo d.o.o.",
+    "Registrski organ": "Okro\u017eno sodi\u0161\u010de v Ljubljani",
+    "Ulica": "Testna cesta",
+    "Hi\u0161na \u0161t": "12",
+    "Hi\u0161na \u0161t  dodatek": "A",
+    "Po\u0161tna \u0161t": "1000",
+    "Po\u0161ta": "Ljubljana",
+    "Dr\u017eava": "SLOVENIJA"
+  };
+  const draft = ajpesRecordToClientDraft(sourceRecord);
+  assert.deepEqual(draft, {
+    registryNumber: "5000152000",
+    name: "PRIMER PODJETJE d.o.o.",
+    search: "PRIMER PODJETJE d.o.o.",
+    address: "Testna cesta 12 A",
+    postal: "1000",
+    city: "Ljubljana",
+    country: "Slovenija",
+    legalForm: "Dru\u017eba z omejeno odgovornostjo d.o.o.",
+    registryOffice: "Okro\u017eno sodi\u0161\u010de v Ljubljani"
+  });
+
+  let requestedUrl = null;
+  const result = await searchAjpesPublicRegister("Primer", {
+    fetchImpl: async (url) => {
+      requestedUrl = new URL(url);
+      return { ok: true, json: async () => ({ success: true, result: { records: [sourceRecord] } }) };
+    }
+  });
+  assert.equal(requestedUrl.origin, "https://podatki.gov.si");
+  assert.equal(requestedUrl.pathname, "/api/3/action/datastore_search");
+  assert.equal(requestedUrl.searchParams.get("resource_id"), "beb70929-3d0d-41c6-9af2-25d525d906d3");
+  assert.equal(requestedUrl.searchParams.get("q"), "Primer");
+  assert.deepEqual(result, [draft]);
 });
 
 test("posodobitev stranke brez ID-jev kontaktov ohrani izbrane osebe", () => {

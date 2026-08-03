@@ -208,6 +208,34 @@ test("imenik strank podpira več stabilnih kontaktov in varno brisanje", async (
   assert.match(html, /\/api\/clients\/\$\{encodeURIComponent\(clientId\)\}/);
   assert.match(html, /function canDeleteClient\(\)[\s\S]*?state\.user\?\.role === "boss"/);
 });
+test("AJPES iskalnik polni le osnutek lokalne stranke, brez prikaza notranjega ID-ja med zadetki", async () => {
+  const [html, server] = await Promise.all([
+    fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8"),
+    fs.readFile(path.join(__dirname, "..", "outputs", "server.js"), "utf8")
+  ]);
+  assert.match(html, /id="ajpesSearch"/);
+  assert.match(html, /id="ajpesResults"/);
+  assert.match(html, /function searchAjpesClients\(\)/);
+  assert.match(html, /function applyAjpesClientDraft\(draft = \{\}\)/);
+  assert.match(html, /newClientRegistryNumber/);
+  assert.match(html, /clientDirectoryRow\(client, \{ showInternalId: !query \}\)/);
+  assert.doesNotMatch(html, /Tajnica jo lahko pozneje dopolni/);
+  assert.match(server, /url\.pathname === "\/api\/ajpes\/search"/);
+  assert.match(server, /OPSI_PRS_RESOURCE_ID/);
+  assert.match(server, /searchAjpesPublicRegister/);
+});
+
+test("mese\u010dni in dnevni pogled ohranita berljivost nujnih in zaklju\u010denih dogodkov", async () => {
+  const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  assert.match(html, /\.day-todo\.done\.todo-status-execution/);
+  assert.match(html, /\.day-todo\.urgent/);
+  assert.match(html, /\.day-multiday-event\.urgent\.is-span-start/);
+  assert.match(html, /todo\.urgent \? 'urgent' : ''/);
+  assert.match(html, /function dayTimelineResizeModeAtPointer\(/);
+  assert.match(html, /const preferredZone = event\.pointerType === "touch" \? 42 : 28/);
+  assert.doesNotMatch(html, /Zgoraj\/dol spremeni uro/);
+});
+
 function request(port, pathname, { method = "GET", headers = {}, body = "" } = {}) {
   return new Promise((resolve, reject) => {
     const request = http.request({ host: "127.0.0.1", port, path: pathname, method, headers }, (response) => {

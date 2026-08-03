@@ -31,6 +31,14 @@ function isUsableTaxId(value) {
   return /^(?=.{8,20}$)(?=.*\d)[A-Z0-9]+$/.test(taxId);
 }
 
+// AJPES' mati\u010dna \u0161tevilka is a useful external reference, but it must
+// never replace our UUID.  Keeping both lets an imported company be found
+// again even if its name or alias is later corrected locally.
+function normalizeRegistryNumber(value) {
+  const digits = String(value || "").replace(/\D/g, "");
+  return /^\d{10}$/.test(digits) ? digits : "";
+}
+
 function taxIdFromClient(client = {}) {
   const direct = normalizeTaxId(client.taxId);
   if (isUsableTaxId(direct)) return direct;
@@ -40,7 +48,7 @@ function taxIdFromClient(client = {}) {
 
 function normalizedClientSource(value) {
   const source = String(value || "").trim().toLowerCase();
-  if (["local", "ad-hoc", "legacy-import"].includes(source)) return source;
+  if (["local", "ad-hoc", "legacy-import", "ajpes"].includes(source)) return source;
   return source ? "legacy-import" : "local";
 }
 
@@ -72,6 +80,7 @@ function normalizeClientContacts(value, legacyPhone = "") {
 
 function normalizeStoredClient(client = {}) {
   const taxId = taxIdFromClient(client);
+  const registryNumber = normalizeRegistryNumber(client.registryNumber || client.ajpesRegistryNumber);
   const legacyId = String(client.clientId || client.id || "").trim();
   const clientId = isStableClientId(legacyId) ? legacyId : createClientId();
   const importIssue = String(client.syncError || client.importIssue || "").trim();
@@ -92,6 +101,7 @@ function normalizeStoredClient(client = {}) {
     postal: String(client.postal || "").trim(),
     country: String(client.country || "").trim(),
     taxId,
+    registryNumber,
     vatPayer: Boolean(client.vatPayer),
     source,
     needsReview: client.needsReview === undefined ? Boolean(!taxId || importIssue) : Boolean(client.needsReview),
@@ -105,7 +115,7 @@ function normalizeStoredClient(client = {}) {
 function resolveStableClientId(clients, value) {
   const key = normalizedText(value);
   if (!key) return "";
-  const exact = (clients || []).find((client) => [client.clientId, client.id, client.taxId, client.search, client.name]
+  const exact = (clients || []).find((client) => [client.clientId, client.id, client.taxId, client.registryNumber, client.search, client.name]
     .some((candidate) => normalizedText(candidate) === key));
   return exact?.clientId || "";
 }
@@ -117,6 +127,7 @@ module.exports = {
   normalizeStoredClient,
   normalizeClientContacts,
   normalizeTaxId,
+  normalizeRegistryNumber,
   normalizedText,
   resolveStableClientId,
   taxIdFromClient

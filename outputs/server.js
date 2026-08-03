@@ -14,6 +14,7 @@ const {
   normalizeStoredClient,
   normalizeClientContacts,
   normalizeTaxId,
+  normalizeRegistryNumber,
   normalizedText
 } = require("./client-identity");
 
@@ -54,6 +55,12 @@ const GOOGLE_GMAIL_COMPOSE_SCOPE = "https://www.googleapis.com/auth/gmail.compos
 const GOOGLE_DRIVE_TASKS_FOLDER_ID = String(process.env.GOOGLE_DRIVE_TASKS_FOLDER_ID || "").trim();
 const GOOGLE_DRIVE_ATTACHMENTS_FOLDER_ID = String(process.env.GOOGLE_DRIVE_ATTACHMENTS_FOLDER_ID || "").trim();
 const GOOGLE_DRIVE_OWNER_EMAIL = String(process.env.GOOGLE_DRIVE_OWNER_EMAIL || "bojan@indus.si").trim().toLowerCase();
+// Public PRS records are published by AJPES through OPSI.  The endpoint and
+// resource ID are deliberately fixed: this is a bounded server-side lookup,
+// not a proxy capable of fetching an arbitrary user-supplied URL.
+const OPSI_PRS_RESOURCE_ID = "beb70929-3d0d-41c6-9af2-25d525d906d3";
+const OPSI_PRS_SEARCH_URL = "https://podatki.gov.si/api/3/action/datastore_search";
+const AJPES_LOOKUP_TIMEOUT_MS = 8_000;
 const INDUS_GOOGLE_APP_ID = "indus-ure-v1";
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const SESSION_COOKIE_NAME = NODE_ENV === "production" ? "__Host-indus-ure" : "indus-ure-session";
@@ -378,7 +385,7 @@ const CLIENT_REFERENCE_MIGRATIONS = Object.freeze([
 ]);
 
 function clientIdentityTexts(client = {}) {
-  return [client.clientId, client.id, client.name, client.search, client.taxId]
+  return [client.clientId, client.id, client.name, client.search, client.taxId, client.registryNumber]
     .map(normalizedText)
     .filter(Boolean);
 }
@@ -1618,7 +1625,7 @@ function normalizeDb(db = {}) {
 
   const clientByText = new Map();
   for (const client of db.clients) {
-    [client.clientId, client.name, client.search, client.taxId].filter(Boolean).forEach((value) => {
+    [client.clientId, client.name, client.search, client.taxId, client.registryNumber].filter(Boolean).forEach((value) => {
       clientByText.set(String(value).toLowerCase(), client);
     });
   }
@@ -3318,7 +3325,7 @@ function clientForBilling(db, input = {}) {
     .map((value) => String(value || "").trim().toLowerCase())
     .filter(Boolean);
   if (!wanted.length) return null;
-  return (db.clients || []).find((client) => [client.clientId, client.id, client.name, client.search, client.taxId]
+  return (db.clients || []).find((client) => [client.clientId, client.id, client.name, client.search, client.taxId, client.registryNumber]
     .filter(Boolean)
     .some((value) => wanted.includes(String(value).trim().toLowerCase()))) || null;
 }
@@ -4703,6 +4710,7 @@ function reconcileClientContacts(inputContacts, existingContacts = []) {
 
 function cleanClient(input = {}, { existingClient = null } = {}) {
   const taxId = normalizeTaxId(input.taxId || input.clientId || input.id);
+  const registryNumber = normalizeRegistryNumber(input.registryNumber || existingClient?.registryNumber);
   const requestedId = String(input.clientId || input.id || "").trim();
   const hasContacts = Array.isArray(input.contacts);
   const hasLegacyPhone = Object.hasOwn(input, "phone");
@@ -4735,14 +4743,83 @@ function cleanClient(input = {}, { existingClient = null } = {}) {
     postal: String(input.postal || "").trim(),
     country: String(input.country || "").trim(),
     taxId,
+    registryNumber,
     vatPayer: Boolean(input.vatPayer),
-    source: input.source || existingClient?.source || (taxId ? "local" : "ad-hoc"),
+    source: input.source || existingClient?.source || (registryNumber ? "ajpes" : (taxId ? "local" : "ad-hoc")),
     needsReview: input.needsReview === undefined ? (existingClient?.needsReview ?? !taxId) : Boolean(input.needsReview),
     createdBy: input.createdBy || existingClient?.createdBy || "system",
     createdAt: input.createdAt || existingClient?.createdAt,
     updatedAt: input.updatedAt || existingClient?.updatedAt
   });
 }
+
+function ajpesRecordValue(record, field) {
+  return String(record?.[field] || "").trim().replace(/\s+/g, " ");
+}
+
+function ajpesRecordToClientDraft(record = {}) {
+  const registryNumber = normalizeRegistryNumber(ajpesRecordValue(record, "Mati\u010dna \u0161tevilka"));
+  const houseNumber = [
+    ajpesRecordValue(record, "Hi\u0161na \u0161t"),
+    ajpesRecordValue(record, "Hi\u0161na \u0161t  dodatek")
+  ].filter(Boolean).join(" ");
+  const address = [ajpesRecordValue(record, "Ulica"), houseNumber].filter(Boolean).join(" ");
+  const rawCountry = ajpesRecordValue(record, "Dr\u017eava");
+  const country = normalizedText(rawCountry) === "slovenija" ? "Slovenija" : rawCountry;
+  return {
+    registryNumber,
+    name: ajpesRecordValue(record, "Popolno ime"),
+    search: ajpesRecordValue(record, "Popolno ime"),
+    address,
+    postal: ajpesRecordValue(record, "Po\u0161tna \u0161t"),
+    city: ajpesRecordValue(record, "Po\u0161ta") || ajpesRecordValue(record, "Naselje"),
+    country,
+    legalForm: ajpesRecordValue(record, "Pravnoorganizacijska oblika"),
+    registryOffice: ajpesRecordValue(record, "Registrski organ")
+  };
+}
+
+function ajpesLookupError(message, status = 502) {
+  const error = new Error(message);
+  error.status = status;
+  error.publicMessage = message;
+  return error;
+}
+
+async function searchAjpesPublicRegister(value, { fetchImpl = globalThis.fetch } = {}) {
+  const query = String(value || "").trim().replace(/\s+/g, " ");
+  if (query.length < 2) throw ajpesLookupError("Vpi\u0161i vsaj dva znaka za iskanje po AJPES-u.", 400);
+  if (query.length > 120) throw ajpesLookupError("Iskalni niz AJPES je predolg.", 400);
+  if (typeof fetchImpl !== "function") throw ajpesLookupError("AJPES iskalnik na stre\u017eniku trenutno ni na voljo.");
+
+  const requestUrl = new URL(OPSI_PRS_SEARCH_URL);
+  requestUrl.searchParams.set("resource_id", OPSI_PRS_RESOURCE_ID);
+  requestUrl.searchParams.set("q", query);
+  requestUrl.searchParams.set("limit", "8");
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), AJPES_LOOKUP_TIMEOUT_MS);
+  try {
+    const response = await fetchImpl(requestUrl, {
+      headers: { accept: "application/json" },
+      signal: controller.signal
+    });
+    if (!response?.ok) throw ajpesLookupError("AJPES iskalnik trenutno ni dosegljiv. Poskusi znova.");
+    const payload = await response.json();
+    if (!payload?.success || !Array.isArray(payload?.result?.records)) {
+      throw ajpesLookupError("AJPES je vrnil neveljaven odgovor. Poskusi znova.");
+    }
+    return payload.result.records
+      .map(ajpesRecordToClientDraft)
+      .filter((client) => client.registryNumber && client.name);
+  } catch (error) {
+    if (error?.status) throw error;
+    if (error?.name === "AbortError") throw ajpesLookupError("AJPES iskanje je trajalo predolgo. Poskusi znova.", 504);
+    throw ajpesLookupError("AJPES iskalnik trenutno ni dosegljiv. Poskusi znova.");
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 function cleanDebt(input) {
   return {
     month: String(input.month || "").trim(),
@@ -7113,6 +7190,18 @@ async function handleApi(req, res) {
       sendJson(res, 200, { todos: visibleTodosForUser(db, user) });
       return;
     }
+    if (url.pathname === "/api/ajpes/search" && req.method === "GET") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      try {
+        const results = await searchAjpesPublicRegister(url.searchParams.get("q") || "");
+        sendJson(res, 200, { results });
+      } catch (error) {
+        sendJson(res, Number(error?.status) || 502, { error: error?.publicMessage || "AJPES iskalnik trenutno ni dosegljiv. Poskusi znova." });
+      }
+      return;
+    }
+
     if (url.pathname === "/api/clients" && req.method === "GET") {
       const user = await requireUser(req, res);
       if (!user) return;
@@ -7389,6 +7478,7 @@ async function handleApi(req, res) {
       const db = await readDbAsync();
       const clientText = [requested.name, requested.search].map((value) => String(value || "").trim().toLowerCase());
       const existingIndex = db.clients.findIndex((row) => row.clientId === requested.clientId
+        || (requested.registryNumber && row.registryNumber === requested.registryNumber)
         || (requested.taxId && row.taxId === requested.taxId)
         || [row.name, row.search].some((value) => clientText.includes(String(value || "").trim().toLowerCase())));
       const existingClient = existingIndex >= 0 ? db.clients[existingIndex] : null;
@@ -8330,7 +8420,7 @@ async function handleApi(req, res) {
       const db = await readDbAsync();
       const todo = (db.todos || []).find((item) => item.id === id);
       if (!todo || !isTrashedTodo(todo)) {
-        sendJson(res, 404, { error: "Opravila v Izbrisano ni vec ali pa je bilo ze obnovljeno." });
+        sendJson(res, 404, { error: "Opravila v Izbrisano ni ve\u010d ali pa je bilo \u017ee obnovljeno." });
         return;
       }
       if (!canManageTodo(user, todo)) {
@@ -8881,6 +8971,8 @@ module.exports = {
   payrollMinutesForTodo,
   pruneUnusedAdHocClients,
   cleanClient,
+  ajpesRecordToClientDraft,
+  searchAjpesPublicRegister,
   validateClient,
   activeClientTodoReferences,
   activeClientEntryReferences,

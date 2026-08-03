@@ -186,7 +186,7 @@ Paket ne vsebuje OAuth žetona, aktivnih sej, hashov gesel, ICS povezav ali /etc
 
 ## Nocni HTML povzetki ur
 
-Vsak dan ob 01:00 (Europe/Ljubljana) `indus-ure-worker-digest.timer` poslje Bojanu en HTML e-mail za vsakega uporabnika z vlogo sef ali delavec, tudi kadar ta dan nima vpisanih ur. Vsak mail predstavlja samo enega delavca in prejsnji koledarski dan. To niso vec Gmail osnutki in PDF ni pripet.
+Vsak dan ob 01:00 (Europe/Ljubljana) `indus-ure-worker-digest.timer` pošlje Bojanu en HTML e-mail za vsakega uporabnika z vlogo šef ali delavec, tudi kadar ta dan nima vpisanih ur. Vsak mail predstavlja samo enega delavca in prejšnji koledarski dan. To niso več Gmail osnutki in PDF ni pripet.
 
 V glavi maila je povezava **Odpri dnevni povzetek**, ki po prijavi odpre samo-za-branje porocilo v INDUS URE. Naslov vsakega vpisa v mailu je normalna povezava, ki po prijavi odpre prav ta vpis v obrazcu za urejanje. Dostop preveri aplikacija: sef vidi vse povzetke, delavec samo svojega.
 
@@ -200,7 +200,7 @@ Rocno preverjanje brez posiljanja e-mailov:
 sudo -u indus-ure /usr/bin/node /opt/indus-ure/current/scripts/daily-worker-digest.js --dry-run
 systemctl status indus-ure-worker-digest.timer --no-pager
 ```
-## Samodejno ciscenje starih izdaj
+## Samodejno čiščenje starih izdaj
 
 Vsaka objava prek `scripts/deploy.ps1` po uspesnem preklopu namesti
 `/usr/local/sbin/prune-indus-ure-releases` in samodejno obdrzi samo aktivno

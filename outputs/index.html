@@ -2347,6 +2347,45 @@
       margin: 4px 0 8px;
     }
 
+    .ajpes-lookup {
+      display: grid;
+      gap: 8px;
+      margin: 12px 0;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #f7faf7;
+    }
+
+    .ajpes-lookup-head,
+    .ajpes-search-row,
+    .ajpes-result { display: flex; gap: 8px; align-items: center; }
+    .ajpes-lookup-head { justify-content: space-between; }
+    .ajpes-lookup-head small { color: var(--muted); font-weight: 700; }
+    .ajpes-search-row label { flex: 1 1 auto; min-width: 0; }
+    .ajpes-search-row input { width: 100%; }
+    .ajpes-results { display: grid; gap: 6px; }
+    .ajpes-result {
+      width: 100%;
+      padding: 9px 10px;
+      justify-content: space-between;
+      text-align: left;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      color: var(--ink);
+      background: #fff;
+      font: inherit;
+      cursor: pointer;
+    }
+    .ajpes-result:hover,
+    .ajpes-result:focus-visible { border-color: var(--accent); background: #edf8f3; }
+    .ajpes-result-main,
+    .ajpes-result-meta { display: grid; gap: 2px; min-width: 0; }
+    .ajpes-result-main strong,
+    .ajpes-result-main span,
+    .ajpes-result-meta span { overflow-wrap: anywhere; }
+    .ajpes-result-meta { color: var(--muted); font-size: 12px; text-align: right; }
+
     .client-row {
       display: grid;
       grid-template-columns: 1fr auto;
@@ -2435,6 +2474,17 @@
       text-decoration: line-through;
     }
 
+    /* A green time entry is completed by definition, but its title must stay
+       legible in the monthly view. */
+    .day-todo.done.todo-status-execution {
+      opacity: 1;
+      text-decoration: none;
+    }
+
+    .day-todo.urgent {
+      border-left-color: #d93025 !important;
+    }
+
     /* Večdnevni dogodki dobijo skupno, po vrsticah poravnano stezo. Posamezna
        nadaljevanja se stikajo čez rob dneva, naslov pa ostane le na začetku. */
     .day-multiday-lanes {
@@ -2486,6 +2536,10 @@
 
     .day-multiday-event:not(.is-span-end) {
       border-right-width: 0;
+    }
+
+    .day-multiday-event.urgent.is-span-start {
+      border-left-color: #d93025 !important;
     }
 
     .day-multiday-event-title {
@@ -2828,6 +2882,12 @@
       z-index: 4;
       cursor: ns-resize;
       touch-action: none;
+    }
+
+    /* The top and bottom edges get an additional safe resize zone in JS on
+       touch screens; this larger visible grip makes that affordance clear. */
+    @media (pointer: coarse) {
+      .day-resize-handle { width: 68px; height: 40px; }
     }
 
     /* Velik prijemni pas je v kartici, zato ga overflow ne odreze. */
@@ -4624,6 +4684,10 @@
       .client-row {
         grid-template-columns: 1fr;
       }
+      .ajpes-search-row { align-items: stretch; flex-direction: column; }
+      .ajpes-search-row > button { width: 100%; }
+      .ajpes-result { align-items: flex-start; flex-direction: column; }
+      .ajpes-result-meta { text-align: left; }
       .result { grid-template-columns: 1fr; gap: 5px; }
       #dayTimelineDialog { width: 100vw; height: 100svh; max-height: none; border-radius: 0; }
       #dayTimelineDialog .modal-head { padding: 13px 14px; }
@@ -4916,12 +4980,25 @@
           <input class="search" id="clientsSearch" placeholder="I&#353;&#269;i po bazi strank">
         </div>
         <div id="clientsSearchResults" class="client-search-results hidden"></div>
+        <section class="ajpes-lookup" aria-labelledby="ajpesLookupTitle">
+          <div class="ajpes-lookup-head">
+            <strong id="ajpesLookupTitle">AJPES iskalnik</strong>
+            <small>Javni podatki PRS / OPSI</small>
+          </div>
+          <div class="ajpes-search-row">
+            <label for="ajpesSearch"><span class="sr-only">I&#353;&#269;i podjetje v AJPES-u</span><input id="ajpesSearch" type="search" autocomplete="off" placeholder="Naziv ali mati&#269;na &#353;tevilka"></label>
+            <button class="secondary" id="ajpesSearchButton" type="button">I&#353;&#269;i AJPES</button>
+          </div>
+          <div id="ajpesResults" class="ajpes-results hidden" aria-live="polite"></div>
+        </section>
         <div class="report-controls">
+          <input type="hidden" id="newClientRegistryNumber">
+          <input type="hidden" id="newClientSource">
           <label>Naziv stranke
             <input id="newClientName" placeholder="Naziv stranke">
           </label>
-          <label>Search / vzdevek
-            <input id="newClientSearch" placeholder="Kako jo isces">
+          <label>Vzdevek / iskanje
+            <input id="newClientSearch" placeholder="Kako jo i&#353;&#269;e&#353;">
           </label>
           <label>Dav&#269;na &#353;tevilka (lahko pozneje)
             <input id="newClientTax" placeholder="npr. SI12345678">
@@ -5080,7 +5157,6 @@
           <button class="secondary zoom-step day-timeline-control" id="dayTimelineZoomIn" type="button" title="Pove&#269;aj &#269;asovnico" aria-label="Pove&#269;aj &#269;asovnico">&plus;</button>
           <button class="secondary day-timeline-control" id="dayTimelineFit" type="button" title="Prika&#382;i vseh 24 ur" aria-label="Prika&#382;i vseh 24 ur">&#8597;</button>
         </div>
-        <span class="day-timeline-hint">Zgoraj/dol spremeni uro · vodoravno povleci dogodek čez rob za drug dan</span>
       </div>
       <div class="day-all-day hidden" id="dayAllDay">
         <span class="day-all-day-label">VES DAN</span>
@@ -5298,8 +5374,8 @@
         <fieldset class="completion-request-recipients" id="completionRequestRecipients">
           <legend>Prejemniki</legend>
         </fieldset>
-        <label>Vprasanje ali komentar
-          <textarea id="completionRequestComment" maxlength="2000" placeholder="Napisi, kaj naj delavec dopolni"></textarea>
+        <label>Vprašanje ali komentar
+          <textarea id="completionRequestComment" maxlength="2000" placeholder="Napiši, kaj naj delavec dopolni"></textarea>
         </label>
         <p class="todo-meta">Povezava velja 14 dni in po prijavi odpre to opravilo.</p>
         <p class="completion-request-status" id="completionRequestStatus" role="status" aria-live="polite" hidden></p>
@@ -5375,7 +5451,7 @@
           <label>Naziv stranke
             <input id="clientEditName" required>
           </label>
-          <label>Search / vzdevek
+          <label>Vzdevek / iskanje
             <input id="clientEditSearch">
           </label>
           <label>Dav&#269;na &#353;tevilka
@@ -8506,7 +8582,7 @@
           const actualEnd = todoEndDate(todo) === key;
           const item = document.createElement('button');
           item.type = 'button';
-          item.className = `day-multiday-event todo-status-color ${todoStatusClass(todo.status)} ${actualStart ? 'is-span-start' : 'is-span-continuation'} ${actualEnd ? 'is-span-end' : ''}`;
+          item.className = `day-multiday-event todo-status-color ${todoStatusClass(todo.status)} ${todo.urgent ? 'urgent' : ''} ${actualStart ? 'is-span-start' : 'is-span-continuation'} ${actualEnd ? 'is-span-end' : ''}`;
           const title = `${todo.urgent ? `NUJNO ${String.fromCharCode(183)} ` : ''}${todo.title || 'Brez naslova'}`;
           item.setAttribute('aria-label', `${title}; ${todoDateTimeLabel(todo)}`);
           if (actualStart) {
@@ -8762,7 +8838,7 @@
             const item = document.createElement('button');
             item.type = 'button';
             const settlementIndicators = dayTodoSettlementIndicators(todo);
-            item.className = `day-todo todo-status-color ${todoStatusClass(todo.status)} ${todo.done ? 'done' : ''} ${settlementIndicators ? 'has-settlements' : ''}`;
+            item.className = `day-todo todo-status-color ${todoStatusClass(todo.status)} ${todo.done ? 'done' : ''} ${todo.urgent ? 'urgent' : ''} ${settlementIndicators ? 'has-settlements' : ''}`;
             const time = todo.start && todo.end ? `${escapeHtml(todo.start)}&ndash;${escapeHtml(todo.end)}` : 'Brez ure';
             const client = todoClientCalendarName(todo, 'Brez stranke');
             const title = `${todo.urgent ? `NUJNO ${String.fromCharCode(183)} ` : ''}${todo.title || 'Brez naslova'}`;
@@ -9419,17 +9495,24 @@
       openDayTimeline(dateKey(date), { includeArchived: state.dayTimelineIncludeArchived });
     }
 
+    function dayTimelineResizeModeAtPointer(event, eventElement) {
+      const bounds = eventElement.getBoundingClientRect();
+      const relativeY = Math.max(0, Math.min(bounds.height, event.clientY - bounds.top));
+      // A phone needs a forgiving edge zone.  This deliberately applies to the
+      // whole event width: a hold started near either time boundary always
+      // resizes and can never accidentally move the event to another day.
+      const preferredZone = event.pointerType === "touch" ? 42 : 28;
+      const edgeZone = Math.min(preferredZone, bounds.height / 2);
+      if (relativeY <= edgeZone) return "resize-start";
+      if (relativeY >= bounds.height - edgeZone) return "resize-end";
+      return event.target?.closest?.(".day-resize-handle")?.dataset.mode || "move";
+    }
+
     function beginDayTimelineEventPointer(event, todo) {
       if (state.dayTimelineSaving || todoIsMultiDayCalendarSpan(todo)) return;
       if (event.pointerType === "mouse" && event.button !== 0) return;
       const eventElement = event.currentTarget;
-      const resizeHandle = event.target.closest(".day-resize-handle");
-      let mode = resizeHandle?.dataset.mode || "move";
-      if (resizeHandle) {
-        const bounds = eventElement.getBoundingClientRect();
-        const overlapHeight = 30;
-        if (bounds.height <= overlapHeight * 2) mode = event.clientY - bounds.top <= bounds.height / 2 ? "resize-start" : "resize-end";
-      }
+      const mode = dayTimelineResizeModeAtPointer(event, eventElement);
       const startMinute = dayTimelineMinutes(todo.start);
       const endMinute = dayTimelineMinutes(todo.end);
       if (startMinute === null || endMinute === null) return;
@@ -10506,6 +10589,33 @@
       return state.todos.some((todo) => String(todo.clientId || "").trim() === clientId
         || (!todo.clientId && clientName && normalizeText(todo.client || "") === clientName));
     }
+
+    function clientDirectoryRow(client, { showInternalId = false } = {}) {
+      const detail = [client.search, client.taxId, client.email, clientContactSummary(client), client.address, client.postal, client.city]
+        .filter(Boolean)
+        .join(" | ");
+      const identity = showInternalId
+        ? [
+          client.registryNumber ? `Mati\u010dna \u0161t.: ${client.registryNumber}` : "",
+          `Eviden\u010dni ID: ${client.clientId || "MANJKA ALI JE PODVOJENA"}`
+        ].filter(Boolean).join(" | ")
+        : "";
+      return `
+        <div class="client-row">
+          <div>
+            <strong>${escapeHtml(client.name)}</strong>
+            ${detail ? `<span class="todo-meta">${escapeHtml(detail)}</span>` : ""}
+            ${identity ? `<span class="todo-meta">${escapeHtml(identity)}</span>` : ""}
+            ${client.syncError ? `<span class="todo-meta error">${escapeHtml(client.syncError)}</span>` : ""}
+          </div>
+          <div class="client-row-actions">
+            ${isAdminView() && clientHasEntries(client) ? `<button class="secondary open-client-billing" type="button" data-client-id="${escapeHtml(client.clientId || "")}" data-client-name="${escapeHtml(client.name)}">Obra&#269;un</button>` : ""}
+            <button class="secondary open-client" type="button" data-client-id="${escapeHtml(client.clientId || "")}" data-client-name="${escapeHtml(client.name)}" ${client.clientId ? "" : "disabled"}>Uredi</button>
+          </div>
+        </div>
+      `;
+    }
+
     function renderClients() {
       const list = $("clientsList");
       const searchResults = $("clientsSearchResults");
@@ -10517,20 +10627,7 @@
       const usable = visibleRecords.filter((client) => client.clientId).length;
       const count = `${visibleRecords.length}${query ? ` od ${records.length}` : ""} strank, ${usable} uporabnih`;
       $("clientsCount").textContent = count;
-      const rows = visibleRecords.map((client) => `
-        <div class="client-row">
-          <div>
-            <strong>${escapeHtml(client.name)}</strong>
-            <span class="todo-meta">${escapeHtml([client.search, client.taxId, client.email, clientContactSummary(client), client.address, client.postal, client.city].filter(Boolean).join(" | "))}</span>
-            <span class="todo-meta">Dav&#269;na / ID: ${escapeHtml(client.clientId || "MANJKA ALI JE PODVOJENA")}</span>
-            ${client.syncError ? `<span class="todo-meta error">${escapeHtml(client.syncError)}</span>` : ""}
-          </div>
-          <div class="client-row-actions">
-            ${isAdminView() && clientHasEntries(client) ? `<button class="secondary open-client-billing" type="button" data-client-id="${escapeHtml(client.clientId || "")}" data-client-name="${escapeHtml(client.name)}">Obra&#269;un</button>` : ""}
-            <button class="secondary open-client" type="button" data-client-id="${escapeHtml(client.clientId || "")}" data-client-name="${escapeHtml(client.name)}" ${client.clientId ? "" : "disabled"}>Uredi</button>
-          </div>
-        </div>
-      `).join("") || "<p>Ni strank za to iskanje.</p>";
+      const rows = visibleRecords.map((client) => clientDirectoryRow(client, { showInternalId: !query })).join("") || "<p>Ni strank za to iskanje.</p>";
       if (query) {
         searchResults.classList.remove("hidden");
         searchResults.innerHTML = `<div class="todo-head"><strong>Rezultati iskanja</strong><span class="todo-meta">${escapeHtml(count)}</span></div><div class="client-directory">${rows}</div>`;
@@ -10548,6 +10645,91 @@
 
     function normalizeTaxId(value) {
       return String(value || "").trim().replace(/^tax:/i, "").replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+    }
+
+    function setAjpesResultsMessage(message) {
+      const results = $("ajpesResults");
+      results.replaceChildren();
+      results.classList.remove("hidden");
+      const text = document.createElement("p");
+      text.className = "todo-meta";
+      text.textContent = message;
+      results.appendChild(text);
+    }
+
+    function applyAjpesClientDraft(draft = {}) {
+      $("newClientName").value = String(draft.name || "").trim();
+      // A worker may already have typed the familiar alias; AJPES does not
+      // know it, so keep it unless the field is still empty.
+      if (!$("newClientSearch").value.trim()) $("newClientSearch").value = String(draft.search || draft.name || "").trim();
+      $("newClientAddress").value = String(draft.address || "").trim();
+      $("newClientCity").value = String(draft.city || "").trim();
+      $("newClientPostal").value = String(draft.postal || "").trim();
+      $("newClientCountry").value = String(draft.country || "Slovenija").trim() || "Slovenija";
+      $("newClientRegistryNumber").value = String(draft.registryNumber || "").trim();
+      $("newClientSource").value = "ajpes";
+      $("ajpesResults").replaceChildren();
+      $("ajpesResults").classList.add("hidden");
+      $("newClientName").focus();
+      showNotice("Podatki iz AJPES-a so vneseni. Pred shranjevanjem jih lahko poljubno popravi\u0161.");
+    }
+
+    function renderAjpesResults(results = []) {
+      const container = $("ajpesResults");
+      container.replaceChildren();
+      container.classList.remove("hidden");
+      if (!results.length) {
+        const empty = document.createElement("p");
+        empty.className = "todo-meta";
+        empty.textContent = "Ni zadetkov v javnih podatkih AJPES-a.";
+        container.appendChild(empty);
+        return;
+      }
+      results.forEach((draft) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "ajpes-result";
+        const main = document.createElement("span");
+        main.className = "ajpes-result-main";
+        const name = document.createElement("strong");
+        name.textContent = draft.name;
+        const address = document.createElement("span");
+        address.textContent = [draft.address, [draft.postal, draft.city].filter(Boolean).join(" ")].filter(Boolean).join(", ");
+        main.append(name, address);
+        const meta = document.createElement("span");
+        meta.className = "ajpes-result-meta";
+        const registry = document.createElement("span");
+        registry.textContent = `Mati\u010dna \u0161t. ${draft.registryNumber}`;
+        meta.appendChild(registry);
+        if (draft.legalForm) {
+          const legalForm = document.createElement("span");
+          legalForm.textContent = draft.legalForm;
+          meta.appendChild(legalForm);
+        }
+        button.append(main, meta);
+        button.addEventListener("click", () => applyAjpesClientDraft(draft));
+        container.appendChild(button);
+      });
+    }
+
+    async function searchAjpesClients() {
+      const query = $("ajpesSearch").value.trim();
+      if (query.length < 2) {
+        setAjpesResultsMessage("Vpi\u0161i vsaj dva znaka za iskanje po AJPES-u.");
+        $("ajpesSearch").focus();
+        return;
+      }
+      const button = $("ajpesSearchButton");
+      button.disabled = true;
+      setAjpesResultsMessage("I\u0161\u010dem po javnih podatkih AJPES-a \u2026");
+      try {
+        const data = await api(`/api/ajpes/search?q=${encodeURIComponent(query)}`);
+        renderAjpesResults(Array.isArray(data?.results) ? data.results : []);
+      } catch (error) {
+        setAjpesResultsMessage(error.message || "AJPES iskalnik trenutno ni dosegljiv. Poskusi znova.");
+      } finally {
+        button.disabled = false;
+      }
     }
 
     function openQuickClientDialog() {
@@ -10599,6 +10781,8 @@
         name,
         search: alias || name,
         taxId,
+        registryNumber: $("newClientRegistryNumber").value.trim(),
+        source: $("newClientSource").value.trim(),
         email: $("newClientEmail").value.trim(),
         phone: $("newClientPhone").value.trim(),
         address: $("newClientAddress").value.trim(),
@@ -10607,11 +10791,11 @@
         country: $("newClientCountry").value.trim() || "Slovenija",
         vatPayer: $("newClientVatPayer").value === "true"
       });
-      ["newClientName", "newClientSearch", "newClientTax", "newClientEmail", "newClientPhone", "newClientAddress", "newClientCity", "newClientPostal"].forEach((id) => { $(id).value = ""; });
+      ["newClientName", "newClientSearch", "newClientTax", "newClientEmail", "newClientPhone", "newClientAddress", "newClientCity", "newClientPostal", "newClientRegistryNumber", "newClientSource"].forEach((id) => { $(id).value = ""; });
       $("newClientCountry").value = "Slovenija";
       $("newClientVatPayer").value = "false";
       renderClients();
-      showNotice("Stranka je shranjena v bazo INDUS URE. Tajnica jo lahko pozneje dopolni.");
+      showNotice("Stranka je shranjena v bazo INDUS URE.");
 
     }
 
@@ -13750,6 +13934,7 @@
         client.name,
         client.search,
         client.taxId,
+        client.registryNumber,
         client.email,
         client.phone,
         clientContactSummary(client),
@@ -13787,6 +13972,7 @@
           clientId: existing?.clientId || source.clientId || source.id || "",
           id: existing?.id || source.clientId || source.id || "",
           taxId: existing?.taxId || source.taxId || "",
+          registryNumber: existing?.registryNumber || source.registryNumber || "",
           email: existing?.email || source.email || "",
           phone: existing?.phone || source.phone || combinedContacts[0]?.phone || "",
           contacts: combinedContacts,
@@ -13821,7 +14007,7 @@
       const input = String(value || "").trim();
       if (!input) return "";
       const records = allClientRecords();
-      const exact = records.find((client) => normalizeText(client.name) === normalizeText(input) || normalizeText(client.search) === normalizeText(input) || normalizeText(client.clientId) === normalizeText(input) || normalizeText(client.taxId) === normalizeText(input));
+      const exact = records.find((client) => normalizeText(client.name) === normalizeText(input) || normalizeText(client.search) === normalizeText(input) || normalizeText(client.clientId) === normalizeText(input) || normalizeText(client.taxId) === normalizeText(input) || normalizeText(client.registryNumber) === normalizeText(input));
       if (exact) return exact.name;
       const partial = records.find((client) => clientMatches(client, input));
       return partial ? partial.name : input;
@@ -15240,6 +15426,12 @@
     $("exportReportPdf").addEventListener("click", () => downloadClientReportPdf().catch((error) => showNotice(error.message)));
     $("createReportGmailDraft").addEventListener("click", () => createClientReportGmailDraft().catch((error) => showNotice(error.message)));
     $("addClientBtn").addEventListener("click", () => addClientFromForm().catch((error) => showNotice(error.message)));
+    $("ajpesSearchButton").addEventListener("click", () => searchAjpesClients());
+    $("ajpesSearch").addEventListener("keydown", (event) => {
+      if (event.key !== "Enter") return;
+      event.preventDefault();
+      searchAjpesClients();
+    });
     $("closeAppNotice").addEventListener("click", closeAppNotice);
     $("quickAddClientBtn").addEventListener("click", openQuickClientDialog);
     $("quickClientForm").addEventListener("submit", (event) => { event.preventDefault(); saveQuickClientFromDialog().catch((error) => showFormValidationError($("quickClientForm"), error.message || "Stranke ni bilo mogoče dodati.", $("quickClientName"))); });

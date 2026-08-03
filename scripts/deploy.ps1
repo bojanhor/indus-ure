@@ -85,7 +85,7 @@ try {
   $remoteWorkerDigestWrapper = "/tmp/indus-ure-worker-digest-$release"
   $remoteWorkerDigestService = "/tmp/indus-ure-worker-digest-$release.service"
   $remoteWorkerDigestTimer = "/tmp/indus-ure-worker-digest-$release.timer"
-  Write-Host "[5/8] Nginx, nocni povzetki in ciscenje izdaj"
+  Write-Host "[5/8] Nginx, no\u010dni povzetki in \u010di\u0161\u010denje izdaj"
   Invoke-Native scp @sshOptions $nginxConfig "${target}:$remoteNginxConfig"
   Invoke-Native scp @sshOptions $pruneScript "${target}:$remotePruneScript"
   Invoke-Native scp @sshOptions $workerDigestWrapper "${target}:$remoteWorkerDigestWrapper"
