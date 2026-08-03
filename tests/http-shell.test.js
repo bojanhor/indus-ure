@@ -542,8 +542,30 @@ test("boss can create a task for workers directly from admin view", async () => 
   assert.match(html, /\$\("newTodoButton"\)\.textContent = "Dodaj opravilo";/);
   assert.match(html, /add\.title = isAdminView\(\) \? 'Dodaj opravilo'/);
   assert.doesNotMatch(html, /Dodaj opravilo za delavca/);
-  assert.match(html, /function openStandaloneHoursDialog\(date = dateKey\(new Date\(\)\), \{ adminCreate = false \} = \{\}\)/);
-  assert.match(html, /openStandaloneHoursDialog\(date, \{ adminCreate: isAdminView\(\) \}\)/);
+  assert.match(html, /function openStandaloneHoursDialog\(date = dateKey\(new Date\(\)\), \{ adminCreate = false, draft = \{\} \} = \{\}\)/);
+  assert.match(html, /\$\("writeHoursButton"\)\.addEventListener\("click", \(\) => openStandaloneHoursDialog\(\)\.catch/);
+});
+
+test("nova forma opravila ohrani osnutek med vrstama vnosa in ne podeduje stranke iz obra\u010duna", async () => {
+  const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  assert.match(html, /#todoDialog #todoFormStatusField \{ order: -1; \}/);
+  assert.match(html, /\$\("todoFormClient"\)\.value = client\?\.search \|\| todo\.client \|\| "";/);
+  assert.doesNotMatch(html, /\$\("todoFormClient"\)\.value = client\?\.search \|\| todo\.client \|\| \$\("reportClient"\)/);
+  assert.match(html, /function todoCreationDraftFromForm\(\)/);
+  assert.match(html, /openStandaloneHoursDialog\(date, \{ adminCreate: isAdminView\(\), draft \}\)/);
+  assert.match(html, /status: draft\._taskStatus \|\| "open"/);
+  assert.match(html, /const todoInternalCompanyStatusIds = new Set\(\["internal", \.\.\.todoOrderStatusIds\]\);/);
+  assert.match(html, /function applyTodoFormInternalCompanyClient\(\)/);
+  assert.match(html, /todoStatusUsesInternalCompanyClient\(button\.dataset\.status\)/);
+});
+
+test("iskanje omogo\u010da skok do opravila z za\u010dasno poudaritvijo", async () => {
+  const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  assert.match(html, /class="search-result-locate icon-btn"/);
+  assert.match(html, /function revealTodoFromSearch\(todo\)/);
+  assert.match(html, /target\.scrollIntoView\(\{ behavior: "smooth", block: "center", inline: "nearest" \}\)/);
+  assert.match(html, /target\.classList\.add\("search-result-highlight"\)/);
+  assert.match(html, /@keyframes search-result-highlight/);
 });
 test("calendar-only task controls are date-bound, unavailable for time entries, and excluded only from task lists", async () => {
   const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");

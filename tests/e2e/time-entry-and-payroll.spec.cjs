@@ -77,6 +77,36 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
     }
   });
 
+  test("new task keeps its draft when switching to hours and resets its client on the next task", async ({ browser }) => {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    try {
+      await localLogin(page, "ibro");
+      await page.locator("#newTodoButton").click();
+      await page.locator("#todoFormTask").fill("PW preklop osnutka");
+      await page.locator("#todoFormNotes").fill("Besedilo mora ostati.");
+      await page.locator("#todoFormStatusField > summary").click();
+      await page.locator('[data-status="internal"]').click();
+      await expect(page.locator("#todoFormClient")).toHaveValue("Bojan Horvat s.p.");
+
+      await page.locator('[data-create-mode="hours"]').click();
+      await expect(page.locator("#todoFormTitle")).toHaveText("Vpis ur");
+      await expect(page.locator("#todoFormStatus")).toHaveValue("execution");
+      await expect(page.locator("#todoFormTask")).toHaveValue("PW preklop osnutka");
+      await expect(page.locator("#todoFormNotes")).toHaveValue("Besedilo mora ostati.");
+      await expect(page.locator("#todoFormClient")).toHaveValue("Bojan Horvat s.p.");
+
+      await page.locator('[data-create-mode="task"]').click();
+      await expect(page.locator("#todoFormStatus")).toHaveValue("internal");
+      await expect(page.locator("#todoFormTask")).toHaveValue("PW preklop osnutka");
+      await page.locator("#closeTodoDialog").click();
+      await page.locator("#newTodoButton").click();
+      await expect(page.locator("#todoFormClient")).toHaveValue("");
+    } finally {
+      await context.close();
+    }
+  });
+
   test("saving an event gives immediate feedback and blocks duplicate interaction", async ({ browser }) => {
     const context = await browser.newContext();
     const page = await context.newPage();

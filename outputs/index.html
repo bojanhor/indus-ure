@@ -1411,6 +1411,10 @@
       background: #f8faf8;
     }
 
+    /* The status determines the remaining fields, so it belongs first in the
+       task form even though the DOM keeps related client controls together. */
+    #todoDialog #todoFormStatusField { order: -1; }
+
     .todo-status-direct-field > summary {
       display: flex;
       align-items: center;
@@ -2947,8 +2951,8 @@
     .result {
       width: 100%;
       display: grid;
-      grid-template-columns: 120px 120px 1fr 130px;
-      gap: 12px;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px;
       align-items: center;
       padding: 10px 0;
       border-bottom: 1px solid var(--line);
@@ -2956,6 +2960,47 @@
       color: var(--ink);
       text-align: left;
       font-size: 14px;
+    }
+
+    .search-result-open {
+      min-width: 0;
+      display: grid;
+      grid-template-columns: 120px 120px minmax(0, 1fr) minmax(0, 130px);
+      gap: 12px;
+      align-items: center;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      color: inherit;
+      font: inherit;
+      text-align: inherit;
+      cursor: pointer;
+    }
+
+    .search-result-open:hover strong,
+    .search-result-open:focus-visible strong { color: var(--accent-dark); }
+
+    .search-result-locate {
+      width: 38px;
+      min-width: 38px;
+      min-height: 38px;
+      padding: 8px;
+      color: var(--accent-dark);
+      background: #edf6f4;
+      border-color: #bad9d2;
+    }
+
+    .search-result-locate svg { width: 19px; height: 19px; }
+
+    .todo-item.search-result-highlight {
+      position: relative;
+      z-index: 2;
+      animation: search-result-highlight 3.4s ease-in-out both;
+    }
+
+    @keyframes search-result-highlight {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(22, 123, 150, 0); }
+      14%, 58% { box-shadow: 0 0 0 4px rgba(22, 123, 150, 0.72), 0 0 0 9px rgba(22, 123, 150, 0.17); }
     }
 
     .badge {
@@ -4688,7 +4733,8 @@
       .ajpes-search-row > button { width: 100%; }
       .ajpes-result { align-items: flex-start; flex-direction: column; }
       .ajpes-result-meta { text-align: left; }
-      .result { grid-template-columns: 1fr; gap: 5px; }
+      .result { grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+      .search-result-open { grid-template-columns: 1fr; gap: 5px; }
       #dayTimelineDialog { width: 100vw; height: 100svh; max-height: none; border-radius: 0; }
       #dayTimelineDialog .modal-head { padding: 13px 14px; }
       .day-timeline-toolbar { align-items: flex-start; }
@@ -5797,8 +5843,30 @@
     const todoStatusById = Object.fromEntries(todoStatusDefinitions.map((status) => [status.id, status]));
     const todoOrderStatusIds = new Set(["order", "order_car", "order_warehouse"]);
     const todoLogisticsStatusIds = new Set(["order", "order_car", "order_warehouse", "add_to_car", "return_and_bill", "bill", "return"]);
+    const todoInternalCompanyStatusIds = new Set(["internal", ...todoOrderStatusIds]);
+    const internalCompanyClientName = "Bojan Horvat s.p.";
     function todoStatus(status) {
       return todoStatusById[status] || todoStatusById.open;
+    }
+
+    function todoStatusUsesInternalCompanyClient(status) {
+      return todoInternalCompanyStatusIds.has(todoStatus(status).id);
+    }
+
+    function internalCompanyClient() {
+      const expected = normalizeText(internalCompanyClientName);
+      return allClientRecords().find((client) => [client?.name, client?.search]
+        .some((value) => normalizeText(value) === expected)) || null;
+    }
+
+    function applyTodoFormInternalCompanyClient() {
+      const client = internalCompanyClient();
+      $("todoFormClient").value = client?.name || internalCompanyClientName;
+      state.todoDialogClientContactIds = [];
+      state.todoDialogClientContactClientId = String(client?.clientId || client?.id || "");
+      state.todoDialogClientContactPickerOpen = false;
+      hideTodoClientSuggestions();
+      renderTodoFormClientContacts();
     }
 
     function todoUsesOrderConfirmation(todo) {
@@ -5882,6 +5950,7 @@
       todoHoursSourceId: "",
       todoStandaloneHours: false,
       todoMealEntry: false,
+      todoCreationTaskStatus: "open",
       todoHoursSourceOriginal: null,
       todoDraftSourceProjectTodoId: "",
       todoDraftSourceProjectTitle: "",
@@ -5935,6 +6004,7 @@
       todoSortMode: "manual",
       showCompletedCalendarTodos: false,
       searchReturnState: null,
+      todoSearchHighlightTimer: null,
       sharedDataRefreshing: false,
       todoEditLock: null,
       todoLockHeartbeat: null,
@@ -12619,13 +12689,53 @@
       });
     }
 
+    function todoCreationDraftFromForm() {
+      const selectedClient = todoFormSelectedClient();
+      const selectedStatus = todoStatus($("todoFormStatus").value).id;
+      const taskStatus = todoStatus(
+        state.todoCreationTaskStatus || (timeEntryStatusIds.has(selectedStatus) ? "open" : selectedStatus)
+      ).id;
+      const optionalNumber = (id) => {
+        const value = String($(id).value || "").trim();
+        return value === "" ? undefined : Number(value);
+      };
+      return {
+        _taskStatus: timeEntryStatusIds.has(taskStatus) ? "open" : taskStatus,
+        _draftAssigneeIds: selectedTodoFormAssignees(),
+        client: $("todoFormClient").value.trim(),
+        clientId: selectedClient?.clientId || selectedClient?.id || "",
+        clientContactIds: [...state.todoDialogClientContactIds],
+        title: $("todoFormTask").value,
+        notes: $("todoFormNotes").value,
+        material: $("todoFormMaterial").value,
+        date: $("todoFormDate").value,
+        endDate: $("todoFormEndDate").value,
+        start: $("todoFormStart").value,
+        end: $("todoFormEnd").value,
+        urgent: $("todoFormUrgent").checked,
+        ordered: $("todoFormOrdered").checked,
+        warranty: $("todoFormWarranty").checked,
+        workFromHome: $("todoFormWorkFromHome").checked,
+        calendarOnly: $("todoFormCalendarOnly").checked,
+        billingHourlyRate: optionalNumber("todoFormHourlyRate"),
+        billingKm: optionalNumber("todoFormBillingKm"),
+        clientKm: optionalNumber("todoFormClientKm"),
+        clientVehicle: $("todoFormClientVehicle").value,
+        photos: state.todoDialogPhotos.map((photo) => ({ ...photo })),
+        driveFiles: state.todoDialogDriveFiles.map((file) => ({ ...file }))
+      };
+    }
+
     async function openTodoDialog(todo = {}) {
       setTodoDialogSaving(false);
       const editing = Boolean(todo.id);
+      const requestedStatus = todoStatus(todo.status || "open").id;
+      const requestedTaskStatus = todoStatus(todo._taskStatus || (timeEntryStatusIds.has(requestedStatus) ? "open" : requestedStatus)).id;
       state.todoHoursSourceId = String(todo._hoursSourceId || "");
       state.todoStandaloneHours = Boolean(todo._standaloneHours);
       $("todoFormAssigneeLabel").textContent = isAdminView() ? "Dodeli delavcem" : "Delo opravil";
       state.todoMealEntry = Boolean(todo._mealEntry);
+      state.todoCreationTaskStatus = !editing && !timeEntryStatusIds.has(requestedTaskStatus) ? requestedTaskStatus : "open";
       state.todoDraftSourceProjectTodoId = String(todo.sourceProjectTodoId || "");
       state.todoDraftSourceProjectTitle = String(todo.sourceProjectTitle || sourceProjectDetailsForTodo(todo).source?.title || "").trim().slice(0, 300);
       const canChooseCreationMode = !editing && !state.todoHoursSourceId;
@@ -12644,7 +12754,7 @@
       $("todoFormDate").value = todo.date || "";
       $("todoFormEndDate").value = todo.date ? todoEndDate(todo) : "";
       $("todoFormEndDate").dataset.auto = String(!todo.date || todoEndDate(todo) === todo.date);
-      $("todoFormClient").value = client?.search || todo.client || $("reportClient").value || "";
+      $("todoFormClient").value = client?.search || todo.client || "";
       state.todoDialogClientContactClientId = String(client?.clientId || client?.id || "");
       state.todoDialogClientContactIds = Array.isArray(todo.clientContactIds)
         ? todo.clientContactIds.map((id) => String(id || "")).filter(Boolean)
@@ -12655,7 +12765,7 @@
       renderTodoTaskSuggestions();
       $("todoFormNotes").value = state.todoHoursSourceId ? "" : todo.notes || "";
       $("todoFormMaterial").value = state.todoHoursSourceId ? "" : todo.material || "";
-      $("todoFormStatus").value = todoStatus(todo.status || "open").id;
+      $("todoFormStatus").value = requestedStatus;
       renderTodoStatusChoices(todo.status || "open");
       $("todoFormUrgent").checked = Boolean(todo.urgent);
       $("todoFormOrdered").checked = todoOrderStatusIds.has(todoStatus(todo.status || "open").id) && Boolean(todo.ordered);
@@ -12672,9 +12782,11 @@
       syncTodoFormClientContacts({ preserve: true });
        autosizeTodoNarrativeFields();
        if (state.todoMealEntry && !editing) applyMealDefaults();
-      const draftAssignees = todo._adminCreate
-        ? []
-        : todo._hoursAssigneeIds?.length
+      const draftAssignees = Array.isArray(todo._draftAssigneeIds)
+        ? todo._draftAssigneeIds
+        : todo._adminCreate
+          ? []
+          : todo._hoursAssigneeIds?.length
         ? todo._hoursAssigneeIds
         : (todo._duplicateAssigneeIds?.length ? todo._duplicateAssigneeIds : [activeWorkerId()]);
       const selectedAssignees = editing ? todoAssigneeIds(todo) : draftAssignees;
@@ -12997,14 +13109,15 @@
         clientVehicle: "personal"
       });
     }
-    async function openStandaloneHoursDialog(date = dateKey(new Date()), { adminCreate = false } = {}) {
+    async function openStandaloneHoursDialog(date = dateKey(new Date()), { adminCreate = false, draft = {} } = {}) {
       await openTodoDialog({
+        ...draft,
         _standaloneHours: true,
         _adminCreate: adminCreate,
-        date,
+        date: draft.date || date || dateKey(new Date()),
         status: "execution",
         urgent: false,
-        photos: []
+        photos: draft.photos || []
       });
     }
 
@@ -14092,17 +14205,52 @@
         return;
       }
       results.forEach((todo) => {
-        const item = document.createElement("button");
-        item.type = "button";
+        const item = document.createElement("div");
         item.className = "result";
         item.innerHTML = `
-          <strong>${todo.date ? formatDate(todo.date) : "Brez datuma"}</strong>
-          <span>${escapeHtml(todo.client || "Brez stranke")}</span>
-          <span>${escapeHtml(todo.title)}${todo.notes ? `<br><small>${escapeHtml(todo.notes)}</small>` : ""}</span>
-          <span class="todo-chip todo-status-color ${todoStatusClass(todo.status)}">${todoStatus(todo.status).label}</span>
+          <button class="search-result-open" type="button" aria-label="Odpri opravilo: ${escapeHtml(todo.title || "Brez naslova")}">
+            <strong>${todo.date ? formatDate(todo.date) : "Brez datuma"}</strong>
+            <span>${escapeHtml(todo.client || "Brez stranke")}</span>
+            <span>${escapeHtml(todo.title)}${todo.notes ? `<br><small>${escapeHtml(todo.notes)}</small>` : ""}</span>
+            <span class="todo-chip todo-status-color ${todoStatusClass(todo.status)}">${todoStatus(todo.status).label}</span>
+          </button>
+          <button class="search-result-locate icon-btn" type="button" title="Pokaži v seznamu" aria-label="Pokaži v seznamu: ${escapeHtml(todo.title || "Brez naslova")}">
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8.5" cy="8.5" r="4.75"></circle><path d="m12 12 4.25 4.25"></path><path d="M8.5 6.5v4M6.5 8.5h4"></path></svg>
+          </button>
         `;
-        item.addEventListener("click", () => openTodoDialog(todo));
+        item.querySelector(".search-result-open").addEventListener("click", () => openTodoDialog(todo));
+        item.querySelector(".search-result-locate").addEventListener("click", () => revealTodoFromSearch(todo));
         panel.appendChild(item);
+      });
+    }
+
+    function revealTodoFromSearch(todo) {
+      if (!todo?.id) return;
+      if (state.view !== "todos") setView("todos");
+      if (state.todoSortMode === "client") {
+        setClientTodoGroupExpanded(clientTodoGroupKey(todo), true);
+        renderTodos();
+      } else if (state.todoSortMode === "manual" && todoManualCategory(todo) === "ordering" && collapsedTodoSections().has("ordering")) {
+        setTodoSectionCollapsed("ordering", false);
+        renderTodos();
+      }
+      requestAnimationFrame(() => {
+        const target = [...document.querySelectorAll("#todoItems .todo-item")]
+          .find((item) => item.dataset.todoId === todo.id);
+        if (!target) {
+          showNotice("Opravilo v trenutnem prikazu ni vidno. Odpri ga neposredno iz iskalnika.");
+          return;
+        }
+        if (state.todoSearchHighlightTimer) window.clearTimeout(state.todoSearchHighlightTimer);
+        target.classList.remove("search-result-highlight");
+        void target.offsetWidth;
+        target.classList.add("search-result-highlight");
+        target.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+        target.querySelector(".todo-summary")?.focus({ preventScroll: true });
+        state.todoSearchHighlightTimer = window.setTimeout(() => {
+          target.classList.remove("search-result-highlight");
+          state.todoSearchHighlightTimer = null;
+        }, 3400);
       });
     }
     function refreshClientList() {
@@ -15031,11 +15179,15 @@
     $("todoCreationTabs").addEventListener("click", (event) => {
       const tab = event.target.closest("[data-create-mode]");
       if (!tab) return;
-      const date = $("todoCreationTabs").dataset.date || $("todoFormDate").value || dateKey(new Date());
+      const draft = todoCreationDraftFromForm();
+      const date = draft.date || $("todoCreationTabs").dataset.date || dateKey(new Date());
       const wantsHours = tab.dataset.createMode === "hours";
       if (wantsHours === state.todoStandaloneHours) return;
       $("todoDialog").close();
-      (wantsHours ? openStandaloneHoursDialog(date, { adminCreate: isAdminView() }) : openTodoDialog({ date, _adminCreate: isAdminView() })).catch((error) => showNotice(error.message));
+      (wantsHours
+        ? openStandaloneHoursDialog(date, { adminCreate: isAdminView(), draft })
+        : openTodoDialog({ ...draft, date, status: draft._taskStatus || "open", _adminCreate: isAdminView() })
+      ).catch((error) => showNotice(error.message));
     });
 
     document.querySelectorAll(".debt-stat").forEach((button) => {
@@ -15243,6 +15395,10 @@
       const button = event.target.closest("[data-status]");
       if (!button) return;
       $("todoFormStatus").value = button.dataset.status;
+      if (!state.todoHoursSourceId && !state.todoMealEntry && !timeEntryStatusIds.has(button.dataset.status)) {
+        state.todoCreationTaskStatus = button.dataset.status;
+      }
+      if (todoStatusUsesInternalCompanyClient(button.dataset.status)) applyTodoFormInternalCompanyClient();
       if (button.dataset.status === "meal") applyMealDefaults();
       renderTodoStatusChoices(button.dataset.status);
       updateTodoFormStatus();
