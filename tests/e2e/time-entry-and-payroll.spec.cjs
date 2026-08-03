@@ -160,6 +160,38 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
     }
   });
 
+  test("boss downloads the selected customer report as a real PDF on a touch browser", async ({ browser }) => {
+    const context = await browser.newContext({
+      acceptDownloads: true,
+      viewport: { width: 390, height: 844 },
+      isMobile: true,
+      hasTouch: true
+    });
+    const page = await context.newPage();
+    try {
+      await localLogin(page, "bojan");
+      await page.locator("#toolsMenu > summary").click();
+      await page.locator("#clientBillingMenuBtn").click();
+      await expect(page.locator(".report-screen")).toBeVisible();
+      await page.locator("#reportClient").fill(CLIENT_ALIAS);
+      await expect(page.locator("#exportReportPdf")).toBeEnabled();
+      expect(await page.evaluate(() => window.matchMedia("(pointer: coarse)").matches)).toBeTruthy();
+
+      const popupPromise = page.waitForEvent("popup");
+      await page.locator("#exportReportPdf").click();
+      const popup = await popupPromise;
+      const downloadPromise = popup.waitForEvent("download");
+      const download = await downloadPromise;
+      expect(download.suggestedFilename()).toMatch(/^obračun-.*\.pdf$/i);
+      const stream = await download.createReadStream();
+      const chunks = [];
+      for await (const chunk of stream) chunks.push(chunk);
+      expect(Buffer.concat(chunks).subarray(0, 4).toString()).toBe("%PDF");
+    } finally {
+      await context.close();
+    }
+  });
+
   test("e-mail task link opens its editor before the full task snapshot", async ({ browser }) => {
     const context = await browser.newContext();
     const page = await context.newPage();

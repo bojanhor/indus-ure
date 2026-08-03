@@ -627,3 +627,24 @@ test("logistična statusa sta ločena, Vrni nima več stare oznake in ročni fil
   assert.match(server, /bill: \{ label: "Poračunaj", googleColorId: "6" \}/);
   assert.match(server, /return: \{ label: "Vrni", googleColorId: "3" \}/);
 });
+
+test("PDF poročilo uporabi seji vezan neposredni prenos, tudi na mobilnem Firefoxu", async () => {
+  const [html, server, nginx] = await Promise.all([
+    fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8"),
+    fs.readFile(path.join(__dirname, "..", "outputs", "server.js"), "utf8"),
+    fs.readFile(path.join(__dirname, "..", "deploy", "nginx-indus-ure.conf"), "utf8")
+  ]);
+  assert.match(html, /function requestClientReportPdfDownload\(payload, retried = false\)/);
+  assert.match(html, /\/api\/client-report\/pdf-ticket/);
+  assert.match(html, /function clientReportDownloadWindow\(\)/);
+  assert.match(html, /window\.open\("about:blank", "_blank"\)/);
+  assert.match(html, /function startClientReportDownload\(downloadUrl, targetWindow = null\)/);
+  assert.doesNotMatch(html, /function fetchClientReportPdf\(/);
+  assert.match(server, /CLIENT_REPORT_DOWNLOAD_TICKET_TTL_MS/);
+  assert.match(server, /function createClientReportDownloadTicket\(/);
+  assert.match(server, /function clientReportDownloadTicketForRequest\(/);
+  assert.match(server, /url\.pathname === "\/api\/client-report\/pdf-ticket"/);
+  assert.match(server, /url\.pathname === "\/api\/client-report\/pdf-download"/);
+  assert.match(server, /sameSession/);
+  assert.match(nginx, /location = \/api\/client-report\/pdf-download \{[\s\S]*?access_log off;/);
+});

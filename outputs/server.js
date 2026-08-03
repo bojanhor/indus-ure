@@ -85,6 +85,11 @@ const MONITOR_DISK_WARNING_PERCENT = Math.min(99, Math.max(90, Number(process.en
 const REPORT_PDF_MAX_TOTAL_BYTES = 50 * 1024 * 1024;
 const REPORT_GMAIL_MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;
 const REPORT_GMAIL_MAX_TOTAL_BYTES = 8 * 1024 * 1024;
+// A direct browser navigation is more reliable than a fetch-to-Blob download
+// on mobile Firefox.  The ticket contains no report data, expires quickly and
+// is bound to the session that created it.
+const CLIENT_REPORT_DOWNLOAD_TICKET_TTL_MS = 5 * 60 * 1000;
+const MAX_CLIENT_REPORT_DOWNLOAD_TICKETS = 200;
 const WORKER_DIGEST_RUN_RETENTION_MS = 400 * 24 * 60 * 60 * 1000;
 // A late time-entry report is kept independently of the ordinary daily
 // summary.  A worker may still correct yesterday's entry; the correction is
@@ -104,6 +109,7 @@ let alertTransport = null;
 const monitorAlertCooldowns = new Map();
 const testLoginFailures = new Map();
 const auditLogCooldowns = new Map();
+const clientReportDownloadTickets = new Map();
 let archiveRetentionCleanupLastAt = 0;
 let archiveRetentionCleanupPromise = null;
 let lateTimeEntryReportDeliveryScheduled = false;
@@ -3464,6 +3470,58 @@ function clientReportSelection(db, input = {}) {
   };
 }
 
+function clientReportRequestIsValid(input) {
+  return Boolean(input && typeof input === "object" && !Array.isArray(input))
+    && (input.eventIds === undefined || Array.isArray(input.eventIds));
+}
+
+function clientReportDownloadPayload(input = {}) {
+  const cleanList = (value, max = 1_000) => Array.isArray(value)
+    ? [...new Set(value.map((item) => String(item || "").trim().slice(0, 240)).filter(Boolean))].slice(0, max)
+    : undefined;
+  return {
+    clientId: String(input.clientId || "").trim().slice(0, 160),
+    clientName: String(input.clientName || "").trim().slice(0, 240),
+    from: isDateKey(input.from) ? String(input.from) : "",
+    to: isDateKey(input.to) ? String(input.to) : "",
+    eventIds: cleanList(input.eventIds),
+    attachmentIds: cleanList(input.attachmentIds),
+    exportOptions: clientReportExportOptions(input.exportOptions)
+  };
+}
+
+function pruneClientReportDownloadTickets(now = Date.now()) {
+  for (const [token, ticket] of clientReportDownloadTickets) {
+    if (Number(ticket?.expiresAt || 0) <= now) clientReportDownloadTickets.delete(token);
+  }
+  while (clientReportDownloadTickets.size > MAX_CLIENT_REPORT_DOWNLOAD_TICKETS) {
+    const oldest = clientReportDownloadTickets.keys().next().value;
+    if (!oldest) break;
+    clientReportDownloadTickets.delete(oldest);
+  }
+}
+
+function createClientReportDownloadTicket(req, user, payload) {
+  pruneClientReportDownloadTickets();
+  const token = crypto.randomBytes(32).toString("base64url");
+  clientReportDownloadTickets.set(token, {
+    userId: String(user?.id || ""),
+    sessionHash: sessionTokenHash(sessionTokenFromRequest(req)),
+    payload: clientReportDownloadPayload(payload),
+    expiresAt: Date.now() + CLIENT_REPORT_DOWNLOAD_TICKET_TTL_MS
+  });
+  return token;
+}
+
+function clientReportDownloadTicketForRequest(req, user, token) {
+  pruneClientReportDownloadTickets();
+  const ticket = clientReportDownloadTickets.get(String(token || ""));
+  if (!ticket) return null;
+  const sameUser = ticket.userId && ticket.userId === String(user?.id || "");
+  const sameSession = ticket.sessionHash && ticket.sessionHash === sessionTokenHash(sessionTokenFromRequest(req));
+  return sameUser && sameSession ? ticket : null;
+}
+
 function safeReportFileName(value, fallback = "priloga") {
   const cleaned = String(value || "").trim()
     .replace(/[\\/:*?"<>|\u0000-\u001f]+/g, "-")
@@ -3767,6 +3825,41 @@ function buildClientReportPdf(db, report, attachments = [], exportOptions = {}) 
     }
   });
 }
+
+async function sendClientReportPdf(res, db, body) {
+  const report = clientReportSelection(db, body);
+  if (!report) {
+    sendJson(res, 409, { error: "Izbrani vpisi niso več na voljo za poročilo. Osveži pogled in preveri izbor." });
+    return false;
+  }
+  let attachments;
+  try {
+    const requestedAttachments = clientReportAttachmentSelection(report, body.attachmentIds);
+    attachments = await loadClientReportAttachments(db, requestedAttachments, { destination: "PDF" });
+  } catch (error) {
+    console.error("Prilog za PDF poročilo ni bilo mogoče pripraviti:", error?.message || error);
+    sendJson(res, 400, { error: "Izbrane priloge za PDF poročilo niso na voljo. Osveži pogled in poskusi znova." });
+    return false;
+  }
+  let pdf;
+  try {
+    pdf = await buildClientReportPdf(db, report, attachments, body.exportOptions);
+  } catch (error) {
+    console.error("PDF poročila ni bilo mogoče ustvariti:", error?.message || error);
+    sendJson(res, 500, { error: "PDF poročila ni bilo mogoče pripraviti. Poskusi znova." });
+    return false;
+  }
+  const filename = clientReportFilename(report.client);
+  res.writeHead(200, securityHeaders({
+    "Content-Type": "application/pdf",
+    "Content-Length": pdf.length,
+    "Content-Disposition": attachmentContentDisposition(filename),
+    "Cache-Control": "no-store"
+  }));
+  res.end(pdf);
+  return true;
+}
+
 function workerDigestBaseUrl() {
   return PUBLIC_BASE_URL || `http://127.0.0.1:${PORT}`;
 }
@@ -6593,6 +6686,52 @@ async function handleApi(req, res) {
       if (!user) return;
       const db = await readDbAsync();
       sendJson(res, 200, { payrolls: payrollForUser(db, user) });
+      return;
+    }
+
+    if (url.pathname === "/api/client-report/pdf-ticket" && req.method === "POST") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      if (user.role !== "boss") {
+        sendJson(res, 403, { error: "PDF poročilo za stranko lahko pripravi samo šef." });
+        return;
+      }
+      const body = await readBody(req);
+      if (!clientReportRequestIsValid(body)) {
+        sendJson(res, 400, { error: "Izbrani vpisi za poročilo niso pravilni." });
+        return;
+      }
+      const db = await readDbAsync();
+      const report = clientReportSelection(db, body);
+      if (!report) {
+        sendJson(res, 409, { error: "Izbrani vpisi niso več na voljo za poročilo. Osveži pogled in preveri izbor." });
+        return;
+      }
+      try {
+        clientReportAttachmentSelection(report, body.attachmentIds);
+      } catch {
+        sendJson(res, 400, { error: "Izbrane priloge za PDF poročilo niso pravilne." });
+        return;
+      }
+      const token = createClientReportDownloadTicket(req, user, body);
+      sendJson(res, 201, { downloadUrl: `/api/client-report/pdf-download?ticket=${encodeURIComponent(token)}` });
+      return;
+    }
+
+    if (url.pathname === "/api/client-report/pdf-download" && req.method === "GET") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      if (user.role !== "boss") {
+        sendJson(res, 403, { error: "PDF poročilo za stranko lahko pripravi samo šef." });
+        return;
+      }
+      const ticket = clientReportDownloadTicketForRequest(req, user, url.searchParams.get("ticket"));
+      if (!ticket) {
+        sendJson(res, 410, { error: "Povezava za prenos PDF-ja je potekla. Ponovno klikni Prenesi PDF." });
+        return;
+      }
+      const db = await readDbAsync();
+      await sendClientReportPdf(res, db, ticket.payload);
       return;
     }
 

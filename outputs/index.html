@@ -13591,10 +13591,10 @@
       const slug = (selection.name || "vse-stranke").replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase() || "stranka";
       downloadText(html, `indus-poročilo-${slug}.xls`, "application/vnd.ms-excel;charset=utf-8");
     }
-    async function fetchClientReportPdf(payload, retried = false) {
+    async function requestClientReportPdfDownload(payload, retried = false) {
       let response;
       try {
-        response = await fetch("/api/client-report/pdf", {
+        response = await fetch("/api/client-report/pdf-ticket", {
           method: "POST",
           credentials: "same-origin",
           headers: { "Content-Type": "application/json", "X-CSRF-Token": state.csrfToken || "" },
@@ -13607,34 +13607,64 @@
         const failure = await response.clone().json().catch(() => null);
         if (/varnostna potrditev seje manjka/i.test(String(failure?.error || ""))) {
           await refreshSessionSecurityContext();
-          return fetchClientReportPdf(payload, true);
+          return requestClientReportPdfDownload(payload, true);
         }
       }
       if (!response.ok) {
         const failure = await response.json().catch(() => null);
-        throw new Error(failure?.error || "PDF poročila ni bilo mogoče pripraviti.");
+        throw new Error(failure?.error || "Prenosa PDF poročila ni bilo mogoče pripraviti.");
       }
-      return response;
+      const result = await response.json().catch(() => null);
+      const downloadUrl = String(result?.downloadUrl || "");
+      if (!downloadUrl.startsWith("/api/client-report/pdf-download?ticket=")) {
+        throw new Error("Varne povezave za prenos PDF-ja ni bilo mogoče pripraviti.");
+      }
+      return downloadUrl;
     }
 
-    function reportDownloadFileName(response, fallback = "obračun.pdf") {
-      const header = String(response.headers.get("content-disposition") || "");
-      const match = /filename="?([^";]+)"?/i.exec(header);
-      return (match?.[1] || fallback).replace(/[\\/:*?"<>|]/g, "-");
+    function clientReportDownloadWindow() {
+      // Firefox on Android can receive a fetched Blob but then suppress its
+      // artificial download click. Reserve a browser tab while the original
+      // button gesture is still active, then navigate that tab to a normal
+      // Content-Disposition download response.
+      if (!window.matchMedia?.("(pointer: coarse)").matches) return null;
+      const target = window.open("about:blank", "_blank");
+      if (!target) return null;
+      try {
+        target.opener = null;
+        target.document.title = "INDUS URE – PDF poročilo";
+        target.document.body.textContent = "Pripravljam PDF poročilo …";
+      } catch {
+        // The direct-link fallback below still works if a browser limits the
+        // temporary window object.
+      }
+      return target;
+    }
+
+    function startClientReportDownload(downloadUrl, targetWindow = null) {
+      if (targetWindow && !targetWindow.closed) {
+        targetWindow.location.replace(downloadUrl);
+        return;
+      }
+      const link = document.createElement("a");
+      link.href = downloadUrl;
+      link.download = "";
+      link.style.display = "none";
+      document.body.append(link);
+      link.click();
+      link.remove();
     }
 
     async function downloadClientReportPdf() {
       const payload = reportExportPayload();
-      const response = await fetchClientReportPdf(payload);
-      const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = reportDownloadFileName(response);
-      document.body.append(link);
-      link.click();
-      link.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      const targetWindow = clientReportDownloadWindow();
+      try {
+        const downloadUrl = await requestClientReportPdfDownload(payload);
+        startClientReportDownload(downloadUrl, targetWindow);
+      } catch (error) {
+        if (targetWindow && !targetWindow.closed) targetWindow.close();
+        throw error;
+      }
     }
 
     async function createClientReportGmailDraft() {
