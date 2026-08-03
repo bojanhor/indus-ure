@@ -6629,6 +6629,48 @@ async function handleApi(req, res) {
       return;
     }
 
+    // The initial application snapshot deliberately reads PostgreSQL only
+    // once.  Previously the browser requested each collection separately;
+    // each request reconstructed the complete relational state, so a normal
+    // launch could trigger more than a hundred SQL queries before anything
+    // useful was shown.  Keep this endpoint read-only and use the same
+    // per-role projections as the individual collection endpoints.
+    if (url.pathname === "/api/bootstrap" && req.method === "GET") {
+      const user = await requireUserForLightweightSession(req, res);
+      if (!user) return;
+      const db = await readDbAsync();
+      req.indusDb = db;
+      const workers = Object.values(db.users || {})
+        .filter((worker) => user.role === "boss" || worker.id === user.id)
+        .map((worker) => ({
+          id: worker.id,
+          name: worker.name,
+          role: worker.role,
+          hourlyRate: defaultHourlyRateForUser(db, worker.id),
+          exportTitle: String(worker.billing?.exportTitle || ""),
+          commuteKmOneWay: commuteKmOneWayForUser(db, worker.id)
+        }));
+      sendJson(res, 200, {
+        user: publicUser(user),
+        csrfToken: req.indusSession?.csrfToken || "",
+        sessionExpiresAt: req.indusSession?.expiresAt || 0,
+        syncRevision: Number(db.syncRevision || 0),
+        users: Object.values(db.users || {}).map(publicDirectoryUser),
+        entries: visibleEntriesForUser(db, user),
+        todos: visibleTodosForUser(db, user),
+        debts: visibleDebtsForUser(db, user),
+        advances: visibleAdvancesForUser(db, user),
+        purchases: visiblePersonalPurchasesForUser(db, user),
+        clients: db.clients || [],
+        settings: db.settings || {},
+        billingLocks: db.billingLocks || [],
+        workers,
+        payrolls: payrollForUser(db, user),
+        clientBills: user.role === "boss" ? (db.clientBills || []) : []
+      });
+      return;
+    }
+
     if (url.pathname === "/api/sync-state" && req.method === "GET") {
       const user = await requireUserForSyncState(req, res);
       if (!user) return;

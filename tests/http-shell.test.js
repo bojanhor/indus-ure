@@ -333,6 +333,17 @@ test("lokalna testna instanca omogoča ločeno prijavo samo v testnem načinu", 
     assert.equal(users.status, 200);
     assert.ok(JSON.parse(users.body).users.some((user) => user.id === "bojan"));
     assert.ok(JSON.parse(users.body).users.some((user) => user.id === "ibro"));
+    const bootstrap = await request(port, "/api/bootstrap", { headers: { Cookie: cookie } });
+    assert.equal(bootstrap.status, 200, bootstrap.body);
+    const bootstrapData = JSON.parse(bootstrap.body);
+    assert.equal(bootstrapData.user.id, "bojan");
+    assert.ok(Array.isArray(bootstrapData.users));
+    assert.ok(Array.isArray(bootstrapData.todos));
+    assert.ok(Array.isArray(bootstrapData.entries));
+    assert.ok(Array.isArray(bootstrapData.clients));
+    assert.ok(Array.isArray(bootstrapData.workers));
+    assert.ok(Array.isArray(bootstrapData.payrolls));
+    assert.ok(Array.isArray(bootstrapData.clientBills));
 
     const missingTodoLock = await request(port, "/api/todos/missing-id/lock", {
       method: "POST",
@@ -512,7 +523,9 @@ test("e-poštna povezava odpre ciljno opravilo pred celotnim nalaganjem", async 
   assert.match(store, /async completionRequestGroup\(requestedAssignmentId, tokenHash\) \{/);
   assert.match(html, /function hasTodoLink\(\) \{/);
   assert.match(html, /async function openTodoFromLink\(\{ render = true \} = \{\}\)/);
-  assert.match(html, /if \(hasTodoLink\(\)\) \{[\s\S]*?await openTodoFromLink\(\{ render: false \}\);[\s\S]*?await loadAll\(\);/);
+  const bootSource = html.slice(html.indexOf("async function boot()"), html.indexOf("async function reconnectAfterOffline()"));
+  assert.match(bootSource, /const snapshot = await api\("\/api\/bootstrap", \{ recoverSession: false \}\);[\s\S]*?applyBootstrapSnapshot\(snapshot\);[\s\S]*?showApp\(\);[\s\S]*?await openTodoFromLink\(\);/);
+  assert.doesNotMatch(bootSource, /await loadAll\(\);/);
   assert.match(html, /if \(render\) \{\s*renderTodos\(\);\s*renderMonth\(\);\s*\}/);
 });
 test("zagonska identiteta in imenik v PostgreSQL ostaneta ozka", async () => {
@@ -521,11 +534,35 @@ test("zagonska identiteta in imenik v PostgreSQL ostaneta ozka", async () => {
     fs.readFile(path.join(__dirname, "..", "outputs", "postgres-store.js"), "utf8")
   ]);
   assert.match(server, /async function requireUserForLightweightSession\(req, res\) \{/);
+  const bootstrapStart = server.indexOf('if (url.pathname === "/api/bootstrap" && req.method === "GET")');
+  const bootstrapEnd = server.indexOf('if (url.pathname === "/api/sync-state"', bootstrapStart);
+  const bootstrap = server.slice(bootstrapStart, bootstrapEnd);
+  assert.ok(bootstrapStart >= 0 && bootstrapEnd > bootstrapStart);
+  assert.match(bootstrap, /await requireUserForLightweightSession\(req, res\)/);
+  assert.equal((bootstrap.match(/readDbAsync\(/g) || []).length, 1);
+  assert.match(bootstrap, /entries: visibleEntriesForUser\(db, user\)/);
+  assert.match(bootstrap, /todos: visibleTodosForUser\(db, user\)/);
+  assert.match(bootstrap, /payrolls: payrollForUser\(db, user\)/);
+  assert.match(bootstrap, /clientBills: user\.role === "boss"/);
   assert.match(server, /if \(url\.pathname === "\/api\/me"\) \{[\s\S]*?await requireUserForLightweightSession\(req, res\)/);
   assert.match(server, /if \(url\.pathname === "\/api\/users" && req\.method === "GET"\) \{[\s\S]*?await requireUserForLightweightSession\(req, res\);[\s\S]*?getPgStore\(\)\.publicUserDirectory\(\)/);
   assert.match(store, /async sessionWithRevision\(tokenHash\) \{[\s\S]*?jsonb_build_object\(/);
   assert.match(store, /async publicUserDirectory\(\) \{/);
   assert.doesNotMatch(store, /async publicUserDirectory\(\) \{[\s\S]{0,900}this\.load\(\)/);
+});
+
+test("initial application shell waits for one snapshot and renders only the active view", async () => {
+  const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  const bootSource = html.slice(html.indexOf("async function boot()"), html.indexOf("async function reconnectAfterOffline()"));
+  const renderSource = html.slice(html.indexOf("function render()"), html.indexOf("function calendarDayTodoSort"));
+  assert.match(html, /<body class="booting">/);
+  assert.match(html, /body\.booting #loginScreen,[\s\S]*?body\.booting #app/);
+  assert.match(html, /body\.login-ready \.login-screen[\s\S]*?url\("assets\/indus-hero-electro\.png"\)/);
+  assert.match(bootSource, /const snapshot = await api\("\/api\/bootstrap", \{ recoverSession: false \}\);/);
+  assert.match(bootSource, /finishStartupInBackground\(\);/);
+  assert.match(renderSource, /if \(state\.view === "calendar"\) renderMonth\(\);/);
+  assert.match(renderSource, /if \(state\.view === "todos"\) renderTodos\(\);/);
+  assert.match(renderSource, /if \(state\.view === "billing"\) renderBillingView\(\);/);
 });
 
 test("boss can create a task for workers directly from admin view", async () => {

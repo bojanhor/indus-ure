@@ -222,6 +222,29 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
     }
   });
 
+  test("authenticated reload uses one bootstrap snapshot without the login image", async ({ browser }) => {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    try {
+      await localLogin(page, "ibro");
+      const requestedApiPaths = [];
+      page.on("request", (request) => {
+        const url = new URL(request.url());
+        if (url.origin === app.baseUrl) requestedApiPaths.push(url.pathname);
+      });
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await expect(page.locator("#app")).toBeVisible();
+      await expect.poll(() => requestedApiPaths.includes("/api/bootstrap")).toBeTruthy();
+      expect(requestedApiPaths).not.toContain("/api/todos");
+      expect(requestedApiPaths).not.toContain("/api/entries");
+      expect(requestedApiPaths).not.toContain("/api/clients");
+      const resources = await page.evaluate(() => performance.getEntriesByType("resource").map((entry) => entry.name));
+      expect(resources.some((name) => name.includes("indus-hero-electro.png"))).toBeFalsy();
+    } finally {
+      await context.close();
+    }
+  });
+
   test("e-mail task link opens its editor before the full task snapshot", async ({ browser }) => {
     const context = await browser.newContext();
     const page = await context.newPage();
@@ -245,9 +268,9 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
       let markFullSnapshotStarted = () => {};
       const fullSnapshotStarted = new Promise((resolve) => { markFullSnapshotStarted = resolve; });
       const allowFullSnapshot = new Promise((resolve) => { releaseFullSnapshot = resolve; });
-      await page.route("**/api/todos", async (route, request) => {
+      await page.route("**/api/bootstrap", async (route, request) => {
         const requestUrl = new URL(request.url());
-        if (request.method() === "GET" && requestUrl.pathname === "/api/todos") {
+        if (request.method() === "GET" && requestUrl.pathname === "/api/bootstrap") {
           markFullSnapshotStarted();
           await allowFullSnapshot;
         }
@@ -259,11 +282,11 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
       await fullSnapshotStarted;
       const resumedSnapshot = page.waitForResponse((response) => {
         const requestUrl = new URL(response.url());
-        return response.request().method() === "GET" && requestUrl.pathname === "/api/todos" && response.ok();
+        return response.request().method() === "GET" && requestUrl.pathname === "/api/bootstrap" && response.ok();
       });
       releaseFullSnapshot();
       await resumedSnapshot;
-      await page.unroute("**/api/todos");
+      await page.unroute("**/api/bootstrap");
     } finally {
       await context.close();
     }

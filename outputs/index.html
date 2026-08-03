@@ -41,6 +41,35 @@
       -webkit-text-size-adjust: 100%;
     }
 
+    /* Keep a returning user on a small neutral shell while the authenticated
+       snapshot arrives. This prevents both the login-image flash and its
+       multi-megabyte hero download on every normal application launch. */
+    body.booting { background: #0d1b1f; }
+    #bootScreen {
+      display: none;
+      min-height: 100svh;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      padding: 24px;
+      color: #f8faf6;
+      background: #0d1b1f;
+      font-weight: 800;
+    }
+    #bootScreen::before {
+      content: "";
+      width: 22px;
+      height: 22px;
+      border: 3px solid rgba(248, 250, 246, 0.28);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: boot-spin 0.7s linear infinite;
+    }
+    @keyframes boot-spin { to { transform: rotate(360deg); } }
+    body.booting #bootScreen { display: flex; }
+    body.booting #loginScreen,
+    body.booting #app { display: none; }
+
     html.modal-open,
     body.modal-open { overflow: hidden; overscroll-behavior: none; }
     body.modal-open { position: fixed; inset: 0; width: 100%; }
@@ -65,15 +94,18 @@
       justify-content: flex-start;
       padding: 84px clamp(18px, 6vw, 86px) 42px;
       background-color: #0d1b1f;
+      background: linear-gradient(90deg, rgba(13, 27, 31, 0.9) 0%, rgba(20, 47, 54, 0.78) 42%, rgba(20, 47, 54, 0.18) 74%);
+      position: relative;
+      color: #f8faf6;
+    }
+
+    body.login-ready .login-screen {
       background:
         linear-gradient(90deg, rgba(13, 27, 31, 0.9) 0%, rgba(20, 47, 54, 0.78) 42%, rgba(20, 47, 54, 0.18) 74%),
         url("assets/indus-hero-electro.png");
       background-size: cover, contain;
       background-repeat: no-repeat;
       background-position: center right;
-      background-color: #0d1b1f;
-      position: relative;
-      color: #f8faf6;
     }
 
     .login-card {
@@ -4449,7 +4481,7 @@
       .todo-chip {
         overflow-wrap: normal;
       }
-      .login-screen {
+      body.login-ready .login-screen {
         min-height: 100svh;
         align-items: flex-end;
         padding: 86px 18px 28px;
@@ -4857,7 +4889,9 @@
     }
   </style>
 </head>
-<body>
+<body class="booting">
+  <section id="bootScreen" aria-live="polite" aria-label="Odpiram INDUS URE">Odpiram INDUS URE</section>
+  <noscript><style>body.booting #bootScreen{display:none}body.booting #loginScreen{display:flex}</style></noscript>
   <section class="login-screen" id="loginScreen">
     <form class="login-card" id="loginForm">
       <div class="login-logo">IU</div>
@@ -7011,50 +7045,121 @@
       }
     }
 
+    function applyLightweightSession(data, users = []) {
+      if (!data?.user?.id) throw new Error("Začetnih podatkov ni bilo mogoče prebrati.");
+      state.token = "cookie";
+      state.csrfToken = data.csrfToken || "";
+      state.sessionExpiresAt = Number(data.sessionExpiresAt || 0);
+      state.syncRevision = Number(data.syncRevision || 0);
+      state.lastServerSyncAt = new Date().toISOString();
+      state.offlineMode = false;
+      state.user = data.user;
+      state.users = [...new Map([...(users || []), state.user].map((user) => [user.id, user])).values()];
+      localStorage.setItem(googleEmailKey, state.user.email || "");
+      localStorage.setItem("indus-ure-offline-user", state.user.id || "");
+    }
+
+    function applyBootstrapSnapshot(data, { preserveTodoMutations = false, todoRevision = state.todoRevision, todoSnapshotWasStable = state.todoMutationPending === 0 } = {}) {
+      if (!data?.user?.id) throw new Error("Začetnih podatkov ni bilo mogoče prebrati.");
+      state.token = "cookie";
+      state.csrfToken = data.csrfToken || "";
+      state.sessionExpiresAt = Number(data.sessionExpiresAt || 0);
+      state.syncRevision = Number(data.syncRevision || 0);
+      state.lastServerSyncAt = new Date().toISOString();
+      state.offlineMode = false;
+      state.user = data.user;
+      state.users = [...new Map([...(data.users || []), state.user].map((user) => [user.id, user])).values()];
+      state.entries = data.entries || [];
+      if (!preserveTodoMutations || canApplyTodoSnapshot(todoRevision, todoSnapshotWasStable)) {
+        state.todos = data.todos || [];
+        state.todoSnapshotLoaded = true;
+      }
+      state.debts = data.debts || [];
+      state.advances = data.advances || [];
+      state.personalPurchases = data.purchases || [];
+      state.clients = data.clients || [];
+      state.settings = data.settings || state.settings;
+      state.billingLocks = data.billingLocks || [];
+      state.workerBilling = data.workers || [];
+      state.payrolls = data.payrolls || [];
+      state.clientBills = data.clientBills || [];
+      localStorage.setItem(googleEmailKey, state.user.email || "");
+      localStorage.setItem("indus-ure-offline-user", state.user.id || "");
+      refreshClientList();
+      refreshOpenTodoSourceProject();
+    }
+
+    function finishStartupInBackground() {
+      void Promise.allSettled([
+        refreshNotifications(),
+        refreshGoogleDriveConnectionStatus(),
+        refreshServerStatus(),
+        updateOfflineSyncNotice(),
+        flushOfflineTodoQueue()
+      ]);
+    }
+
+    function refreshBootstrapAfterTodoLink() {
+      const todoRevision = state.todoRevision;
+      const todoSnapshotWasStable = state.todoMutationPending === 0;
+      void api("/api/bootstrap", { recoverSession: false })
+        .then((snapshot) => {
+          applyBootstrapSnapshot(snapshot, { preserveTodoMutations: true, todoRevision, todoSnapshotWasStable });
+          render();
+          saveOfflineSnapshotSoon();
+        })
+        .catch(() => {});
+    }
+
     async function boot() {
-      await loadLocalTestMode();
       setDefaultReportRange();
       if (location.protocol === "file:") {
+        showLoginScreen();
         $("serverWarning").classList.remove("hidden");
         return;
       }
+      // Test login is available only on a local development host. Production
+      // no longer waits for, or even sends, this otherwise unused request.
+      const localTestModePromise = ["localhost", "127.0.0.1"].includes(location.hostname)
+        ? loadLocalTestMode()
+        : Promise.resolve();
       try {
-        const me = await api("/api/me", { recoverSession: false });
-        state.token = "cookie";
-        state.csrfToken = me.csrfToken || "";
-        state.sessionExpiresAt = Number(me.sessionExpiresAt || 0);
-        state.syncRevision = Number(me.syncRevision || 0);
-        state.lastServerSyncAt = new Date().toISOString();
-        state.offlineMode = false;
-        state.user = me.user;
-        localStorage.setItem(googleEmailKey, state.user.email || "");
-        localStorage.setItem("indus-ure-offline-user", state.user.id || "");
-        const availableUsers = (await api("/api/users")).users;
-        state.users = [...new Map([...availableUsers, state.user].map((user) => [user.id, user])).values()];
+        // A direct e-mail link is intentionally special: open its one task
+        // from the lightweight route first, then hydrate the normal snapshot
+        // behind the editor. This keeps the link quick even for a large
+        // history while ordinary launches still use exactly one data request.
+        if (hasTodoLink()) {
+          const [me, directory] = await Promise.all([
+            api("/api/me", { recoverSession: false }),
+            api("/api/users", { recoverSession: false })
+          ]);
+          applyLightweightSession(me, directory.users || []);
+          initializeWorkContext();
+          const restoredSessionUi = restoreSessionRecoveryUiState();
+          showApp();
+          if (restoredSessionUi) showNotice("Obnovljen je prejĹˇnji pogled.");
+          await openTodoFromLink({ render: false });
+          refreshBootstrapAfterTodoLink();
+          finishStartupInBackground();
+          return;
+        }
+        const snapshot = await api("/api/bootstrap", { recoverSession: false });
+        applyBootstrapSnapshot(snapshot);
         initializeWorkContext();
         const restoredSessionUi = restoreSessionRecoveryUiState();
         showApp();
         if (restoredSessionUi) showNotice("Obnovljen je prejšnji pogled.");
-        // Direct links from e-mail must not wait for the potentially much
-        // larger task list.  The focused endpoint gives the dialog just the
-        // selected task; the normal snapshot then catches up behind it.
-        if (hasTodoLink()) {
-          await openTodoFromLink({ render: false });
-          await loadAll();
-        } else {
-          await loadAll();
-          await openTodoFromLink();
-        }
+        await openTodoFromLink();
         await openWorkerDailyDigestFromLink();
-        await Promise.all([refreshNotifications(), refreshGoogleDriveConnectionStatus(), refreshServerStatus()]);
-        await updateOfflineSyncNotice();
-        await flushOfflineTodoQueue();
+        finishStartupInBackground();
       } catch (error) {
         const openedOffline = isNetworkError(error) ? await activateOfflineSnapshot().catch(() => false) : false;
         if (openedOffline) return;
         state.token = "";
         state.csrfToken = "";
         state.offlineMode = false;
+        await localTestModePromise;
+        showLoginScreen();
       }
     }
     async function reconnectAfterOffline() {
@@ -7358,15 +7463,22 @@
         requestAnimationFrame(() => { input.focus(); input.select(); });
       });
     }
+    function showLoginScreen() {
+      document.body.classList.remove("booting");
+      document.body.classList.add("login-ready");
+      $("app").classList.add("hidden");
+      $("loginScreen").classList.remove("hidden");
+    }
+
     function showApp() {
       protectLoggedInHistory();
+      document.body.classList.remove("booting", "login-ready");
       $("loginScreen").classList.add("hidden");
       $("app").classList.remove("hidden");
       $("userName").textContent = state.user.name;
       updateAvatar("topAvatar", state.user);
       applyWorkContextUi();
       setView(state.view);
-      render();
     }
 
     function initializeWorkContext() {
@@ -8571,17 +8683,16 @@
     }
 
     function render() {
-      if (!$("app").classList.contains("hidden")) {
-        renderMonth();
-        renderSearch();
-        renderTodos();
-        renderClients();
-        renderReport();
-        renderBillingView();
-        renderWorkerBillingTable();
-        renderServerStatus();
-        if ($("dayTimelineDialog").open) renderDayTimeline();
-      }
+      if ($("app").classList.contains("hidden")) return;
+      renderSearch();
+      if (state.view === "calendar") renderMonth();
+      if (state.view === "todos") renderTodos();
+      if (state.view === "clients") renderClients();
+      if (state.view === "report") renderReport();
+      if (state.view === "billing") renderBillingView();
+      if ($("appSettingsDialog").open) renderWorkerBillingTable();
+      if ($("serverStatusDialog").open) renderServerStatus();
+      if ($("dayTimelineDialog").open) renderDayTimeline();
     }
 
     function calendarDayTodoSort(a, b) {
