@@ -162,6 +162,8 @@ class PostgresStore {
       );
       create index if not exists indus_tasks_client_idx on indus_tasks (client_id);
       create index if not exists indus_tasks_scheduled_date_idx on indus_tasks (scheduled_date);
+      create index if not exists indus_tasks_active_schedule_idx on indus_tasks (scheduled_date desc, updated_at desc) where archived_at is null;
+      create index if not exists indus_tasks_archived_schedule_idx on indus_tasks (archived_at desc, scheduled_date desc) where archived_at is not null;
       create table if not exists indus_task_assignments (
         id text primary key,
         task_id text not null references indus_tasks(id) on delete cascade,
@@ -172,6 +174,7 @@ class PostgresStore {
       );
       create index if not exists indus_task_assignments_task_idx on indus_task_assignments (task_id);
       create index if not exists indus_task_assignments_worker_idx on indus_task_assignments (worker_id);
+      create index if not exists indus_task_assignments_worker_order_idx on indus_task_assignments (worker_id, manual_order, updated_at desc);
       create table if not exists indus_entries (
         id text primary key,
         client_id text not null default '',
@@ -181,6 +184,7 @@ class PostgresStore {
         updated_at timestamptz not null default now()
       );
       create index if not exists indus_entries_date_idx on indus_entries (entry_date);
+      create index if not exists indus_entries_worker_date_idx on indus_entries (worker_id, entry_date desc);
       create table if not exists indus_attachments (
         id text primary key,
         mime_type text not null default 'application/octet-stream',
@@ -211,6 +215,7 @@ class PostgresStore {
         updated_at timestamptz not null default now()
       );
       create index if not exists indus_client_bills_client_idx on indus_client_bills (client_id, updated_at desc);
+      create index if not exists indus_client_bills_status_updated_idx on indus_client_bills (status, updated_at desc);
       create table if not exists indus_billing_locks (
         id text primary key,
         data jsonb not null,

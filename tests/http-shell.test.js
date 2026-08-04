@@ -537,7 +537,7 @@ test("e-poštna povezava odpre ciljno opravilo pred celotnim nalaganjem", async 
   assert.match(html, /function hasTodoLink\(\) \{/);
   assert.match(html, /async function openTodoFromLink\(\{ render = true \} = \{\}\)/);
   const bootSource = html.slice(html.indexOf("async function boot()"), html.indexOf("async function reconnectAfterOffline()"));
-  assert.match(bootSource, /const snapshot = await api\("\/api\/bootstrap", \{ recoverSession: false \}\);[\s\S]*?applyBootstrapSnapshot\(snapshot\);[\s\S]*?showApp\(\);[\s\S]*?await openTodoFromLink\(\);/);
+  assert.match(bootSource, /const bootstrapPromise = api\("\/api\/bootstrap", \{ recoverSession: false \}\);[\s\S]*?applyLightweightSession\(me, directory\.users \|\| \[\]\);[\s\S]*?const snapshot = await bootstrapPromise;[\s\S]*?applyBootstrapSnapshot\(snapshot\);[\s\S]*?await openTodoFromLink\(\);/);
   assert.doesNotMatch(bootSource, /await loadAll\(\);/);
   assert.match(html, /if \(render\) \{\s*renderTodos\(\);\s*renderMonth\(\);\s*\}/);
 });
@@ -571,7 +571,7 @@ test("initial application shell waits for one snapshot and renders only the acti
   assert.match(html, /<body class="booting">/);
   assert.match(html, /body\.booting #loginScreen,[\s\S]*?body\.booting #app/);
   assert.match(html, /body\.login-ready \.login-screen[\s\S]*?url\("assets\/indus-hero-electro\.png"\)/);
-  assert.match(bootSource, /const snapshot = await api\("\/api\/bootstrap", \{ recoverSession: false \}\);/);
+  assert.match(bootSource, /const bootstrapPromise = api\("\/api\/bootstrap", \{ recoverSession: false \}\);/);
   assert.match(bootSource, /finishStartupInBackground\(\);/);
   assert.match(renderSource, /if \(state\.view === "calendar"\) renderMonth\(\);/);
   assert.match(renderSource, /if \(state\.view === "todos"\) renderTodos\(\);/);
@@ -744,4 +744,21 @@ test("skupni obračun strank loči status in izvozi samo podatke za račune", as
   assert.match(html, /function exportInvoiceDataExcel\(\)/);
   assert.match(html, /exportInvoicesExcel"\)\.addEventListener\("click", exportInvoiceDataExcel\)/);
   assert.match(html, /Samo neobra\\u010dunane zaklju\\u010dene storitve/);
+});
+test("prijavljen uporabnik dobi neblokirajoč zagonski okvir in PostgreSQL indekse", async () => {
+  const [html, store] = await Promise.all([
+    fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8"),
+    fs.readFile(path.join(__dirname, "..", "outputs", "postgres-store.js"), "utf8")
+  ]);
+  assert.match(html, /id="appStartupStatus"/);
+  assert.match(html, /function applyOnlineCachedSnapshot\(snapshot\)/);
+  assert.match(html, /const bootstrapPromise = api\("\/api\/bootstrap", \{ recoverSession: false \}\);/);
+  assert.match(html, /const cachedSnapshotPromise = usableOfflineSnapshot\(\)\.catch\(\(\) => null\);/);
+  assert.match(html, /body\.app-hydrating #app \.main \{ pointer-events: none; \}/);
+  assert.match(html, /setStartupHydrating\(false\);/);
+  assert.match(store, /indus_tasks_active_schedule_idx/);
+  assert.match(store, /indus_tasks_archived_schedule_idx/);
+  assert.match(store, /indus_task_assignments_worker_order_idx/);
+  assert.match(store, /indus_entries_worker_date_idx/);
+  assert.match(store, /indus_client_bills_status_updated_idx/);
 });

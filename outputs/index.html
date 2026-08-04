@@ -70,6 +70,30 @@
     body.booting #loginScreen,
     body.booting #app { display: none; }
 
+    .app-startup-status {
+      display: none;
+      align-items: center;
+      gap: 10px;
+      margin: 12px 0;
+      padding: 12px 14px;
+      border: 1px solid #b8dbe7;
+      border-radius: 12px;
+      background: #f4fbfd;
+      color: #164e63;
+      font-weight: 700;
+    }
+    .app-startup-status::before {
+      content: "";
+      width: 15px;
+      height: 15px;
+      border: 2px solid rgba(22, 78, 99, 0.25);
+      border-top-color: currentColor;
+      border-radius: 50%;
+      animation: boot-spin 0.7s linear infinite;
+    }
+    body.app-hydrating .app-startup-status { display: flex; }
+    body.app-hydrating #app .main { pointer-events: none; }
+    body.app-hydrating #app { cursor: progress; }
     html.modal-open,
     body.modal-open { overflow: hidden; overscroll-behavior: none; }
     body.modal-open { position: fixed; inset: 0; width: 100%; }
@@ -4980,6 +5004,7 @@
     <datalist id="clientList"></datalist>
 
     <main class="main">
+      <div class="app-startup-status" id="appStartupStatus" role="status" aria-live="polite">Osvežujem delovne podatke …</div>
       <section class="topbar">
         <div class="topbar-view-row">
           <div class="view-switch" aria-label="Pogled">
@@ -6044,6 +6069,7 @@
       entries: [],
       todos: [],
       todoSnapshotLoaded: false,
+      startupHydrating: false,
       deletedTodos: [],
       deletedTodoRetentionDays: 30,
       auditEvents: [],
@@ -6882,6 +6908,7 @@
     async function activateOfflineSnapshot() {
       const snapshot = await usableOfflineSnapshot();
       if (!snapshot) return false;
+      setStartupHydrating(false);
       state.user = snapshot.user;
       state.users = snapshot.users || [snapshot.user];
       state.entries = snapshot.entries || [];
@@ -7236,6 +7263,7 @@
       state.workerBilling = data.workers || [];
       state.payrolls = data.payrolls || [];
       state.clientBills = data.clientBills || [];
+      setStartupHydrating(false);
       localStorage.setItem(googleEmailKey, state.user.email || "");
       localStorage.setItem("indus-ure-offline-user", state.user.id || "");
       refreshClientList();
@@ -7296,12 +7324,29 @@
           finishStartupInBackground();
           return;
         }
-        const snapshot = await api("/api/bootstrap", { recoverSession: false });
-        applyBootstrapSnapshot(snapshot);
+        // Start the full snapshot immediately, but do not make a signed-in
+        // person stare at the login screen while a large history arrives.
+        const bootstrapPromise = api("/api/bootstrap", { recoverSession: false });
+        const cachedSnapshotPromise = usableOfflineSnapshot().catch(() => null);
+        const [me, directory] = await Promise.all([
+          api("/api/me", { recoverSession: false }),
+          api("/api/users", { recoverSession: false })
+        ]);
+        applyLightweightSession(me, directory.users || []);
+        const cachedSnapshot = await cachedSnapshotPromise;
+        applyOnlineCachedSnapshot(cachedSnapshot);
         initializeWorkContext();
         const restoredSessionUi = restoreSessionRecoveryUiState();
+        setStartupHydrating(true);
         showApp();
+        render();
         if (restoredSessionUi) showNotice("Obnovljen je prejšnji pogled.");
+        const snapshot = await bootstrapPromise;
+        applyBootstrapSnapshot(snapshot);
+        initializeWorkContext();
+        showApp();
+        render();
+        saveOfflineSnapshotSoon();
         await openTodoFromLink();
         await openWorkerDailyDigestFromLink();
         await openQuickCreateFromLink();
@@ -7640,7 +7685,31 @@
         requestAnimationFrame(() => { input.focus(); input.select(); });
       });
     }
+    function setStartupHydrating(value) {
+      state.startupHydrating = Boolean(value);
+      document.body.classList.toggle("app-hydrating", state.startupHydrating);
+      const status = $("appStartupStatus");
+      if (status) status.textContent = state.startupHydrating ? "Osvežujem delovne podatke …" : "";
+    }
+
+    function applyOnlineCachedSnapshot(snapshot) {
+      if (!snapshot || String(snapshot.userId || "") !== String(state.user?.id || "")) return false;
+      state.entries = snapshot.entries || [];
+      state.todos = snapshot.todos || [];
+      state.todoSnapshotLoaded = true;
+      state.debts = snapshot.debts || [];
+      state.advances = snapshot.advances || [];
+      state.personalPurchases = snapshot.personalPurchases || [];
+      state.clients = snapshot.clients || [];
+      state.settings = snapshot.settings || state.settings;
+      state.billingLocks = snapshot.billingLocks || [];
+      state.payrolls = snapshot.payrolls || [];
+      state.clientBills = snapshot.clientBills || [];
+      state.workerBilling = snapshot.workerBilling || [];
+      return true;
+    }
     function showLoginScreen() {
+      setStartupHydrating(false);
       document.body.classList.remove("booting");
       document.body.classList.add("login-ready");
       $("app").classList.add("hidden");
