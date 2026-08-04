@@ -1277,6 +1277,65 @@
       font-weight: 800;
     }
 
+    .tools-menu-quick-links {
+      display: grid;
+      gap: 7px;
+      padding: 0 8px 8px;
+    }
+
+    .tools-menu-quick-link {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto auto;
+      align-items: center;
+      gap: 6px;
+      color: var(--ink);
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .tools-menu-quick-link span { min-width: 0; overflow-wrap: anywhere; }
+    .tools-menu-quick-link a,
+    .tools-menu-quick-link button {
+      min-height: 32px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      padding: 5px 7px;
+      background: #f7faf8;
+      color: var(--accent-dark);
+      font: inherit;
+      font-size: 12px;
+      font-weight: 800;
+      text-decoration: none;
+      white-space: nowrap;
+      cursor: pointer;
+    }
+
+    .tools-menu-quick-link button { color: var(--ink); }
+    .tools-menu-quick-link a:hover,
+    .tools-menu-quick-link button:hover { border-color: var(--accent); background: #eef8f8; }
+
+    .todo-billing-filters {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px 12px;
+      padding: 9px 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #f6faf8;
+    }
+
+    .todo-billing-filters label {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      color: var(--ink);
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .todo-billing-filters input { inline-size: 17px; block-size: 17px; accent-color: var(--accent); }
+
     .todo-client-group-title {
       display: flex;
       justify-content: space-between;
@@ -4962,6 +5021,11 @@
               <button class="menu-action view-menu-action admin-only" id="clientBillingMenuBtn" type="button">Obra&#269;un strank</button>
               <button class="menu-action view-menu-action" id="clientsMenuBtn" type="button">Stranke</button>
               <button class="menu-action admin-only" id="requestCompletionMenuBtn" type="button">Zahtevaj dopolnitev</button>
+              <span class="tools-menu-label">Hitre bližnjice</span>
+              <div class="tools-menu-quick-links" aria-label="Povezave za namizne bližnjice">
+                <div class="tools-menu-quick-link"><span>Nov dogodek</span><a href="?quick=task" data-quick-open="task">Odpri</a><button type="button" data-copy-quick-link="task">Kopiraj povezavo</button></div>
+                <div class="tools-menu-quick-link"><span>Vpis ur</span><a href="?quick=hours" data-quick-open="hours">Odpri</a><button type="button" data-copy-quick-link="hours">Kopiraj povezavo</button></div>
+              </div>
               <span class="tools-menu-label">Podpora in razvoj</span>
               <a class="menu-action menu-link" href="https://docs.google.com/document/d/1mgQMSOCPml664Fx6uJq6W79XdE1duSKGejEOO6bpnEY/edit" target="_blank" rel="noopener noreferrer">Razvojni TODO</a>
 
@@ -5139,6 +5203,10 @@
                 </select>
               </label>
             </div>
+          </div>
+          <div class="todo-billing-filters hidden" id="todoBillingFilters" aria-label="Filter zaključenih opravil">
+            <label><input id="todoShowUnbilled" type="checkbox" checked> Prikaži neobračunano</label>
+            <label><input id="todoShowBilled" type="checkbox"> Prikaži obračunano</label>
           </div>
           <div id="todoItems"></div>
         </div>
@@ -5829,6 +5897,7 @@
     const workContextKey = "indus-ure-work-context";
     const todoSectionCollapseKey = "indus-ure-todo-section-collapse";
     const todoSortModeKey = "indus-ure-todo-sort-mode";
+    const todoBillingFilterKey = "indus-ure-todo-billing-filter";
     const calendarCompletedFilterKey = "indus-ure-calendar-show-completed";
     const billingWorkerKey = "indus-ure-billing-worker";
     const todoSortModes = ["manual", "client", "date", "order", "completed", "open", "in_progress", "imported"];
@@ -6036,6 +6105,8 @@
       workerBilling: [],
       workContext: "",
       todoSortMode: "manual",
+      showBilledCompletedTodos: false,
+      showUnbilledCompletedTodos: true,
       showCompletedCalendarTodos: false,
       searchReturnState: null,
       todoSearchHighlightTimer: null,
@@ -6090,6 +6161,32 @@
       const stored = localStorage.getItem(todoSortStorageKey());
       state.todoSortMode = todoSortModes.includes(stored) ? stored : "manual";
       if ($("todoSortMode")) $("todoSortMode").value = state.todoSortMode;
+    }
+
+    function todoBillingFilterStorageKey() {
+      const userId = state.user?.id || "anonymous";
+      const context = state.workContext || `worker:${userId}`;
+      return `${todoBillingFilterKey}:${userId}:${context}`;
+    }
+
+    function loadTodoBillingFilters() {
+      try {
+        const saved = JSON.parse(localStorage.getItem(todoBillingFilterStorageKey()) || "{}");
+        state.showBilledCompletedTodos = saved?.billed === true;
+        state.showUnbilledCompletedTodos = saved?.unbilled !== false;
+      } catch {
+        state.showBilledCompletedTodos = false;
+        state.showUnbilledCompletedTodos = true;
+      }
+      if ($("todoShowBilled")) $("todoShowBilled").checked = state.showBilledCompletedTodos;
+      if ($("todoShowUnbilled")) $("todoShowUnbilled").checked = state.showUnbilledCompletedTodos;
+    }
+
+    function saveTodoBillingFilters() {
+      localStorage.setItem(todoBillingFilterStorageKey(), JSON.stringify({
+        billed: state.showBilledCompletedTodos,
+        unbilled: state.showUnbilledCompletedTodos
+      }));
     }
 
     function calendarCompletedFilterStorageKey() {
@@ -6200,6 +6297,36 @@
       const data = text ? JSON.parse(text) : null;
       if (!response.ok || !data?.url) throw new Error(data?.error || "Google prijave ni bilo mogoče zagnati.");
       return data;
+    }
+
+    function quickCreateModeFromLink() {
+      const mode = new URL(location.href).searchParams.get("quick");
+      return ["task", "hours"].includes(mode) ? mode : "";
+    }
+
+    function quickCreateHref(mode) {
+      const current = new URL(location.href);
+      current.search = "";
+      current.hash = "";
+      current.searchParams.set("quick", mode);
+      return current.href;
+    }
+
+    function clearQuickCreateLink() {
+      const current = new URL(location.href);
+      current.searchParams.delete("quick");
+      history.replaceState(history.state, "", current.pathname + current.search + current.hash);
+    }
+
+    async function openQuickCreateFromLink() {
+      const mode = quickCreateModeFromLink();
+      if (!mode || !state.user || state.offlineMode) return false;
+      clearQuickCreateLink();
+      setView("todos");
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      if (mode === "hours") await openStandaloneHoursDialog();
+      else await openTodoDialog({ _adminCreate: isAdminView() });
+      return true;
     }
 
     function clearTodoLink() {
@@ -7151,6 +7278,7 @@
         if (restoredSessionUi) showNotice("Obnovljen je prejšnji pogled.");
         await openTodoFromLink();
         await openWorkerDailyDigestFromLink();
+        await openQuickCreateFromLink();
         finishStartupInBackground();
       } catch (error) {
         const openedOffline = isNetworkError(error) ? await activateOfflineSnapshot().catch(() => false) : false;
@@ -7520,6 +7648,7 @@
       select.value = state.workContext;
       renderWorkContextOptions(contexts);
       loadTodoSortMode();
+      loadTodoBillingFilters();
       loadCalendarCompletedFilter();
       control.classList.toggle("hidden", contexts.length <= 1);
       if (contexts.length <= 1) closeWorkContextMenu();
@@ -7691,6 +7820,7 @@
       state.workContext = context;
       localStorage.setItem(workContextKey, context);
       loadTodoSortMode();
+      loadTodoBillingFilters();
       loadCalendarCompletedFilter();
       state.selectedClient = "";
       state.reportClient = "";
@@ -8626,6 +8756,11 @@
 
     function sortedTodosForMode(todos = contextTodos()) {
       let list = [...todos].filter((todo) => !todo.calendarOnly && (state.todoSortMode === "imported" ? isImportedTodo(todo) : !isImportedTodo(todo)));
+      if (state.todoSortMode === "completed") {
+        list = list.filter((todo) => todoHasConfirmedClientBill(todo)
+          ? state.showBilledCompletedTodos
+          : state.showUnbilledCompletedTodos);
+      }
       if (state.todoSortMode === "imported") return list.sort(todoDateSort);
       if (state.todoSortMode === "date") return list.filter((todo) => todo.date && !timeEntryStatusIds.has(todo.status)).sort(todoDateSort);
       if (state.todoSortMode === "order") return list.filter((todo) => todoNeedsOrdering(todo)).sort(todoOrderingSort);
@@ -10612,6 +10747,12 @@
       state.payrolls = data.payrolls || state.payrolls;
       await loadAll(); renderBillingView();
     }    function renderTodos() {
+      const billingFilters = $("todoBillingFilters");
+      if (billingFilters) {
+        billingFilters.classList.toggle("hidden", state.todoSortMode !== "completed");
+        $("todoShowBilled").checked = state.showBilledCompletedTodos;
+        $("todoShowUnbilled").checked = state.showUnbilledCompletedTodos;
+      }
       renderClientTodoList();
       renderTodoItems();
     }
@@ -15273,6 +15414,24 @@
       localStorage.setItem(calendarCompletedFilterStorageKey(), String(state.showCompletedCalendarTodos));
       renderMonth();
     });
+    $("todoShowBilled").addEventListener("change", (event) => {
+      state.showBilledCompletedTodos = Boolean(event.target.checked);
+      saveTodoBillingFilters();
+      renderTodos();
+    });
+    $("todoShowUnbilled").addEventListener("change", (event) => {
+      state.showUnbilledCompletedTodos = Boolean(event.target.checked);
+      saveTodoBillingFilters();
+      renderTodos();
+    });
+    document.querySelectorAll("[data-copy-quick-link]").forEach((button) => button.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(quickCreateHref(button.dataset.copyQuickLink));
+        showNotice("Povezava za namizno bližnjico je kopirana.");
+      } catch {
+        showNotice("Povezave ni bilo mogoče kopirati. Uporabi desni klik na Odpri in izberi Kopiraj povezavo.");
+      }
+    }));
     $("closeAccount").addEventListener("click", () => $("accountDialog").close());
     $("saveProfile").addEventListener("click", async () => {
       try {

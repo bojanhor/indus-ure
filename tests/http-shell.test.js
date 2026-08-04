@@ -565,6 +565,20 @@ test("initial application shell waits for one snapshot and renders only the acti
   assert.match(renderSource, /if \(state\.view === "billing"\) renderBillingView\(\);/);
 });
 
+test("hitre bližnjice odprejo pravo formo in filter zaključenih opravil ostane ločen po uporabniku", async () => {
+  const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  assert.match(html, /href="\?quick=task"/);
+  assert.match(html, /href="\?quick=hours"/);
+  assert.match(html, /function quickCreateHref\(mode\)/);
+  assert.match(html, /async function openQuickCreateFromLink\(\)/);
+  assert.match(html, /if \(mode === "hours"\) await openStandaloneHoursDialog\(\);/);
+  assert.match(html, /await openQuickCreateFromLink\(\);/);
+  assert.match(html, /const todoBillingFilterKey = "indus-ure-todo-billing-filter";/);
+  assert.match(html, /id="todoShowUnbilled"/);
+  assert.match(html, /id="todoShowBilled"/);
+  assert.match(html, /state\.todoSortMode === "completed"[\s\S]{0,360}todoHasConfirmedClientBill\(todo\)/);
+  assert.match(html, /localStorage\.setItem\(todoBillingFilterStorageKey\(\), JSON\.stringify/);
+});
 test("boss can create a task for workers directly from admin view", async () => {
   const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
   assert.match(html, /\$\("newTodoButton"\)\.classList\.remove\("hidden"\);/);
