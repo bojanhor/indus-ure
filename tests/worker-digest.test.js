@@ -165,8 +165,12 @@ test("late time-entry mail is sent only for a worker-view hours increase", () =>
   assert.equal(workerDb.lateTimeEntryReports.length, 1);
 
   const bossDb = { users: database.users, lateTimeEntryReports: [] };
+  const selfNotifyingBoss = { ...database.users.bojan, email: "bojan@indus.si" };
   assert.equal(queueLateTimeEntryReport(bossDb, {
-    before, after: later, user: database.users.bojan, editorWorkContext: "admin", now
+    before, after: later, user: selfNotifyingBoss, editorWorkContext: "admin", now
+  }), null);
+  assert.equal(queueLateTimeEntryReport(bossDb, {
+    before, after: later, user: selfNotifyingBoss, editorWorkContext: "worker:ibro", now
   }), null);
   assert.equal(queueLateTimeEntryReport(bossDb, {
     before, after: sameDuration, user: database.users.ibro, editorWorkContext: "worker:ibro", now

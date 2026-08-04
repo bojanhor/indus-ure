@@ -1281,6 +1281,9 @@ function isWorkerEditingContext(user, editorWorkContext) {
 // time entry; rate, text, mileage, shortening and boss-side corrections stay
 // safely recorded in history without generating mail.
 function shouldQueueLateTimeEntryReport({ before, after, user, editorWorkContext, now = new Date() } = {}) {
+  const actorEmail = String(user?.email || "").trim().toLowerCase();
+  // Do not send Bojan a notification about a correction he made himself.
+  if (actorEmail && actorEmail === GOOGLE_DRIVE_OWNER_EMAIL) return false;
   if (!before || !after || !isWorkerEditingContext(user, editorWorkContext)) return false;
   const beforeSnapshot = lateTimeEntryReportSnapshot(before);
   const afterSnapshot = lateTimeEntryReportSnapshot(after);
