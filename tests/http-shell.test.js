@@ -174,7 +174,8 @@ test("client billing filter, back navigation confirmation and scoped late mail a
     fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8"),
     fs.readFile(path.join(__dirname, "..", "outputs", "server.js"), "utf8")
   ]);
-  assert.match(html, /id="reportBillingState"/);
+  assert.match(html, /id="reportShowPending"/);
+  assert.match(html, /id="reportShowBilled"/);
   assert.match(html, /clientBillingFilterStorageKey/);
   assert.match(html, /function reportTodoMatchesClientBillingFilter\(todo\)/);
   assert.match(html, /function clearClientReportSelection\(\) \{[\s\S]*?setView\("report"\)/);
@@ -735,15 +736,17 @@ test("PDF poročilo uporabi seji vezan neposredni prenos, tudi na mobilnem Firef
   assert.match(nginx, /location = \/api\/client-report\/pdf-download \{[\s\S]*?access_log off;/);
 });
 
-test("skupni obračun strank loči status in izvozi samo podatke za račune", async () => {
+test("skupni obračun strank uporablja shranjeni kljukici brez Excel izvozov", async () => {
   const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
   assert.match(html, /id="reportBillingFilterControl"/);
-  assert.match(html, /function reportInvoiceTodos\(\)/);
-  assert.match(html, /\.filter\(\(todo\) => !reportClientBill\(todo\)\)/);
-  assert.match(html, /id="exportInvoicesExcel"/);
-  assert.match(html, /function exportInvoiceDataExcel\(\)/);
-  assert.match(html, /exportInvoicesExcel"\)\.addEventListener\("click", exportInvoiceDataExcel\)/);
-  assert.match(html, /Samo neobra\\u010dunane zaklju\\u010dene storitve/);
+  assert.match(html, /id="reportShowPending"/);
+  assert.match(html, /id="reportShowBilled"/);
+  assert.match(html, /JSON\.stringify\(\{[\s\S]*?pending: state\.showClientPending,[\s\S]*?billed: state\.showClientBilled/);
+  assert.match(html, /reportClientBill\(todo\) \? state\.showClientBilled : state\.showClientPending/);
+  assert.doesNotMatch(html, /id="exportReportExcel"/);
+  assert.doesNotMatch(html, /id="exportInvoicesExcel"/);
+  assert.doesNotMatch(html, /function exportReportExcel\(/);
+  assert.doesNotMatch(html, /function exportInvoiceDataExcel\(/);
 });
 test("prijavljen uporabnik dobi neblokirajoč zagonski okvir in PostgreSQL indekse", async () => {
   const [html, store] = await Promise.all([
