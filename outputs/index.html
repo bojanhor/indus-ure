@@ -5229,6 +5229,7 @@
               <select id="reportExportTime"><option value="hidden">Skrij</option><option value="shown">Prikaži</option></select>
             </label>
             <button class="secondary" id="exportReportExcel" type="button">Izvozi Excel</button>
+<button class="secondary" id="exportInvoicesExcel" type="button">Podatki za račune</button>
           </div>
         </div>
         <div class="report-controls client-billing-controls admin-only">
@@ -5241,11 +5242,11 @@
           <label class="client-billing-client">I&#353;&#269;i stranko
             <input id="reportClient" list="clientList" placeholder="Vse stranke">
           </label>
-          <label class="client-billing-sort-control">Obra&#269;un
+          <label class="client-billing-sort-control" id="reportBillingFilterControl">Pokaži
             <select id="reportBillingState">
-              <option value="all">Vsi vpisi</option>
-              <option value="pending">Za obra&#269;un</option>
-              <option value="billed">&#381;e obra&#269;unano</option>
+              <option value="all">Vse zaključene storitve</option>
+              <option value="pending">Samo za obračun</option>
+              <option value="billed">Samo že obračunane</option>
             </select>
           </label>
           <label class="client-billing-sort-control" id="reportClientSortControl">Razvrsti stranke
@@ -13656,6 +13657,17 @@
         .sort(reportTodoSort);
     }
 
+    function reportInvoiceTodos() {
+      const from = $("reportFrom").value;
+      const to = $("reportTo").value;
+      return uniqueTodosByEventId(state.todos)
+        .filter((todo) => !isImportedTodo(todo))
+        .filter(reportTodoIsCompleted)
+        .filter((todo) => Boolean(todo.clientId || todo.client))
+        .filter((todo) => !reportClientBill(todo))
+        .filter((todo) => (!from && !to) ? true : inDateRange(todo.date, from, to))
+        .sort(reportTodoSort);
+    }
     function todoMatchesReportClient(todo, selection) {
       if (!selection.id && !selection.name) return true;
       if (selection.id && String(todo.clientId || "") === selection.id) return true;
@@ -13856,10 +13868,12 @@
     function renderReport() {
       const selection = reportClientSelection();
       const detail = Boolean(selection.id || selection.name);
+      $("reportBillingFilterControl").classList.toggle("hidden", detail);
       $("reportClientSortControl").classList.toggle("hidden", detail);
       $("reportClientSort").value = reportClientSortMode();
       const summaries = detail ? [] : reportClientSummaries();
       const lines = detail ? reportTodos().map(reportTodoLine) : reportOverviewLines();
+      const invoiceLineCount = detail ? 0 : reportInvoiceTodos().length;
       const pendingClientBillLines = detail ? lines.filter((line) => !line.clientBill) : [];
       const selectedClientBillLines = detail ? syncClientBillSelection(lines, selection) : [];
       if (detail) syncReportAttachmentSelection(selectedClientBillLines, selection);
@@ -13889,6 +13903,12 @@
       $("createReportGmailDraft").title = !selectedClientBillLines.length ? "Označi vsaj en vpis za poročilo." : (hasClientEmail ? "Ustvari Gmail osnutek brez pošiljanja." : "Za stranko v bazi ni e-poštnega naslova.");
       $("clearReportClient").textContent = detail ? "Počisti izbor" : "Počisti iskanje";
       $("exportReportExcel").textContent = detail ? "Izvozi poročilo" : "Izvozi evidenco";
+      $("exportInvoicesExcel").classList.toggle("hidden", detail);
+      $("exportInvoicesExcel").disabled = detail || !invoiceLineCount;
+      $("exportInvoicesExcel").textContent = invoiceLineCount ? `Podatki za ra\u010dune (${invoiceLineCount})` : "Podatki za ra\u010dune";
+      $("exportInvoicesExcel").title = invoiceLineCount
+        ? "Izvozi samo neobra\u010dunane zaklju\u010dene storitve, zdru\u017eene po strankah."
+        : "Za izbrano obdobje ni neobra\u010dunanih zaklju\u010denih storitev.";
       const summaryRows = detail ? [
         ["Zaklju\u010dene storitve", `${totals.count}`],
         ["Opravljene ure", `${reportNumber(totals.hours)} h`],
@@ -14015,6 +14035,39 @@
       const html = `<html><head><meta charset="utf-8"></head><body><table>${rows.map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`).join("")}</table></body></html>`;
       const slug = (selection.name || "vse-stranke").replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase() || "stranka";
       downloadText(html, `indus-poročilo-${slug}.xls`, "application/vnd.ms-excel;charset=utf-8");
+    }
+    function exportInvoiceDataExcel() {
+      const lines = reportInvoiceTodos().map(reportTodoLine);
+      if (!lines.length) {
+        showNotice("Za izbrano obdobje ni neobra\u010dunanih zaklju\u010denih storitev.");
+        return;
+      }
+      const groups = new Map();
+      lines.forEach((line) => {
+        const descriptor = reportClientDescriptor(line.todo);
+        if (!groups.has(descriptor.key)) {
+          const client = findClient(descriptor.id) || findClient(descriptor.name) || {};
+          groups.set(descriptor.key, { descriptor, client, lines: [] });
+        }
+        groups.get(descriptor.key).lines.push(line);
+      });
+      const rows = [
+        ["INDUS URE \u2013 podatki za izdajo ra\u010dunov"],
+        ["Obdobje", reportRangeLabel()],
+        ["Vsebina", "Samo neobra\u010dunane zaklju\u010dene storitve"],
+        [],
+        ["Stranka", "Dav\u010dna \u0161tevilka", "E-po\u0161ta", "Telefon", "Naslov", "Dogodki", "Ure", "Km osebni avto", "Km kombi"]
+      ];
+      [...groups.values()]
+        .sort((left, right) => left.descriptor.name.localeCompare(right.descriptor.name, "sl"))
+        .forEach((group) => {
+          const totals = reportTotals(group.lines);
+          const client = group.client || {};
+          const address = [client.address, [client.postal, client.city].filter(Boolean).join(" ")].filter(Boolean).join(", ");
+          rows.push([group.descriptor.name, client.taxId || "", client.email || "", client.phone || "", address, String(totals.count), totals.hours.toFixed(2), totals.personalKm.toFixed(1), totals.vanKm.toFixed(1)]);
+        });
+      const html = `<html><head><meta charset="utf-8"></head><body><table>${rows.map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`).join("")}</table></body></html>`;
+      downloadText(html, `indus-podatki-za-racune-${dateKey(new Date())}.xls`, "application/vnd.ms-excel;charset=utf-8");
     }
     async function requestClientReportPdfDownload(payload, retried = false) {
       let response;
@@ -15946,6 +15999,7 @@
     $("reportBackToClients").addEventListener("click", clearClientReportSelection);
     $("confirmClientBill").addEventListener("click", () => confirmClientBillFromReport().catch((error) => showNotice(error.message)));
     $("exportReportExcel").addEventListener("click", exportReportExcel);
+    $("exportInvoicesExcel").addEventListener("click", exportInvoiceDataExcel);
     $("exportReportPdf").addEventListener("click", () => downloadClientReportPdf().catch((error) => showNotice(error.message)));
     $("createReportGmailDraft").addEventListener("click", () => createClientReportGmailDraft().catch((error) => showNotice(error.message)));
     $("addClientBtn").addEventListener("click", () => addClientFromForm().catch((error) => showNotice(error.message)));

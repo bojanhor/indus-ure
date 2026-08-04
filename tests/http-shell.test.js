@@ -734,3 +734,14 @@ test("PDF poročilo uporabi seji vezan neposredni prenos, tudi na mobilnem Firef
   assert.match(server, /sameSession/);
   assert.match(nginx, /location = \/api\/client-report\/pdf-download \{[\s\S]*?access_log off;/);
 });
+
+test("skupni obračun strank loči status in izvozi samo podatke za račune", async () => {
+  const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  assert.match(html, /id="reportBillingFilterControl"/);
+  assert.match(html, /function reportInvoiceTodos\(\)/);
+  assert.match(html, /\.filter\(\(todo\) => !reportClientBill\(todo\)\)/);
+  assert.match(html, /id="exportInvoicesExcel"/);
+  assert.match(html, /function exportInvoiceDataExcel\(\)/);
+  assert.match(html, /exportInvoicesExcel"\)\.addEventListener\("click", exportInvoiceDataExcel\)/);
+  assert.match(html, /Samo neobra\\u010dunane zaklju\\u010dene storitve/);
+});
