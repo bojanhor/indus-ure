@@ -169,6 +169,19 @@ test("poročilo stranke odpre isti vpis s klikom na naslov ali zeleni povzetek",
   assert.match(html, /closest\("\.open-report-todo"\)[\s\S]*?openTodoDialog\(todo\)/);
   assert.doesNotMatch(html, />Odpri vpis</);
 });
+test("client billing filter, back navigation confirmation and scoped late mail are present", async () => {
+  const [html, server] = await Promise.all([
+    fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8"),
+    fs.readFile(path.join(__dirname, "..", "outputs", "server.js"), "utf8")
+  ]);
+  assert.match(html, /id="reportBillingState"/);
+  assert.match(html, /clientBillingFilterStorageKey/);
+  assert.match(html, /function reportTodoMatchesClientBillingFilter\(todo\)/);
+  assert.match(html, /function clearClientReportSelection\(\) \{[\s\S]*?setView\("report"\)/);
+  assert.match(html, /function confirmLoggedInHistoryExit\(\)/);
+  assert.match(server, /function shouldQueueLateTimeEntryReport\(/);
+  assert.match(server, /editorWorkContext/);
+});
 test("dnevni pregled varno vleče enodnevno opravilo brez ure v 15-minutno časovnico", async () => {
   const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
   assert.match(html, /function beginDayAllDayPointerDrag\(event, todo\)/);

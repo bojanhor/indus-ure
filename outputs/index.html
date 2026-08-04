@@ -5241,6 +5241,13 @@
           <label class="client-billing-client">I&#353;&#269;i stranko
             <input id="reportClient" list="clientList" placeholder="Vse stranke">
           </label>
+          <label class="client-billing-sort-control">Obra&#269;un
+            <select id="reportBillingState">
+              <option value="all">Vsi vpisi</option>
+              <option value="pending">Za obra&#269;un</option>
+              <option value="billed">&#381;e obra&#269;unano</option>
+            </select>
+          </label>
           <label class="client-billing-sort-control" id="reportClientSortControl">Razvrsti stranke
             <select id="reportClientSort">
               <option value="recent">Najnovej&#353;a opravila</option>
@@ -5898,6 +5905,7 @@
     const todoSectionCollapseKey = "indus-ure-todo-section-collapse";
     const todoSortModeKey = "indus-ure-todo-sort-mode";
     const todoBillingFilterKey = "indus-ure-todo-billing-filter";
+    const clientBillingFilterKey = "indus-ure-client-billing-filter";
     const calendarCompletedFilterKey = "indus-ure-calendar-show-completed";
     const billingWorkerKey = "indus-ure-billing-worker";
     const todoSortModes = ["manual", "client", "date", "order", "completed", "open", "in_progress", "imported"];
@@ -6082,6 +6090,7 @@
       photoEditor: null,
       reportClient: "",
       reportClientSort: "recent",
+      clientBillingFilter: "all",
       clientBillSelectionKey: "",
       clientBillSelectedEventIds: new Set(),
       reportAttachmentSelectionKey: "",
@@ -6187,6 +6196,22 @@
         billed: state.showBilledCompletedTodos,
         unbilled: state.showUnbilledCompletedTodos
       }));
+    }
+
+    function clientBillingFilterStorageKey() {
+      const userId = state.user?.id || "anonymous";
+      const context = state.workContext || `worker:${userId}`;
+      return `${clientBillingFilterKey}:${userId}:${context}`;
+    }
+
+    function loadClientBillingFilter() {
+      const value = localStorage.getItem(clientBillingFilterStorageKey());
+      state.clientBillingFilter = ["all", "pending", "billed"].includes(value) ? value : "all";
+      if ($("reportBillingState")) $("reportBillingState").value = state.clientBillingFilter;
+    }
+
+    function saveClientBillingFilter() {
+      localStorage.setItem(clientBillingFilterStorageKey(), state.clientBillingFilter);
     }
 
     function calendarCompletedFilterStorageKey() {
@@ -7339,6 +7364,8 @@
     let modalHistorySequence = 0;
     let modalHistoryClosingFromBack = false;
     let modalHistoryIgnoreNextPopstate = false;
+    let loggedInHistoryExitInProgress = false;
+    let loggedInHistoryExitPromptOpen = false;
     let modalScrollLockY = 0;
     const modalHistoryTokens = new WeakMap();
 
@@ -7396,6 +7423,27 @@
       dialog.close();
       modalHistoryClosingFromBack = false;
       return true;
+    }
+
+    function rearmLoggedInHistory() {
+      if (!state.token || !state.user || history.state?.[loggedInHistoryStateKey] === "active") return;
+      history.pushState(loggedInHistoryState("active"), "", location.href);
+    }
+
+    async function confirmLoggedInHistoryExit() {
+      if (loggedInHistoryExitPromptOpen || loggedInHistoryExitInProgress || !state.token || !state.user) return;
+      loggedInHistoryExitPromptOpen = true;
+      rearmLoggedInHistory();
+      const leave = await showAppConfirm("Želiš zapustiti INDUS URE? Ne-shranjeni vnosi ostanejo odprti v obrazcu.", {
+        title: "Zapusti aplikacijo",
+        confirmLabel: "Zapusti"
+      });
+      loggedInHistoryExitPromptOpen = false;
+      if (!leave) return;
+      // Closing the confirmation removes its own history marker first.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      loggedInHistoryExitInProgress = true;
+      history.go(-2);
     }
 
     function initializeModalBackNavigation() {
@@ -7649,6 +7697,7 @@
       renderWorkContextOptions(contexts);
       loadTodoSortMode();
       loadTodoBillingFilters();
+      loadClientBillingFilter();
       loadCalendarCompletedFilter();
       control.classList.toggle("hidden", contexts.length <= 1);
       if (contexts.length <= 1) closeWorkContextMenu();
@@ -7821,6 +7870,7 @@
       localStorage.setItem(workContextKey, context);
       loadTodoSortMode();
       loadTodoBillingFilters();
+      loadClientBillingFilter();
       loadCalendarCompletedFilter();
       state.selectedClient = "";
       state.reportClient = "";
@@ -8252,7 +8302,7 @@
       const todoRevision = beginTodoMutation();
       const creating = !todo.id || String(todo.id).startsWith("offline-");
       const clientMutationId = creating ? String(todo.clientMutationId || createLocalUuid()) : "";
-      const requestTodo = creating ? { ...todo, clientMutationId } : todo;
+      const requestTodo = { ...(creating ? { ...todo, clientMutationId } : todo), editorWorkContext: state.workContext || "" };
       const editLockToken = !creating && requestTodo.id && state.todoEditLock?.todoId === requestTodo.id
         ? state.todoEditLock.token
         : "";
@@ -8297,7 +8347,7 @@
         await pauseTodoLockHeartbeat();
         const data = await api(`/api/todos/${encodeURIComponent(todo.id)}/time`, {
           method: "POST",
-          body: JSON.stringify({ start, end, date, editLockToken })
+          body: JSON.stringify({ start, end, date, editLockToken, editorWorkContext: state.workContext || "" })
         });
         if (isCurrentTodoRevision(todoRevision)) {
           state.todos = data.todos;
@@ -9337,7 +9387,7 @@
       try {
         const data = await api("/api/todos/time-batch", {
           method: "POST",
-          body: JSON.stringify({ items, editLockTokens })
+          body: JSON.stringify({ items, editLockTokens, editorWorkContext: state.workContext || "" })
         });
         state.todos = data.todos || state.todos;
         state.todoRevision += 1;
@@ -13489,7 +13539,7 @@
     }
 
     function reportClientBillSelectionKey(selection) {
-      return [selection?.id || normalizeText(selection?.name || ""), $("reportFrom").value, $("reportTo").value].join("|");
+      return [selection?.id || normalizeText(selection?.name || ""), $("reportFrom").value, $("reportTo").value, state.clientBillingFilter].join("|");
     }
 
     function syncClientBillSelection(lines, selection) {
@@ -13580,6 +13630,13 @@
       const confirmedDate = (/^\d{4}-\d{2}-\d{2}/.exec(source) || [""])[0];
       return !confirmedDate || confirmedDate >= reportClientBillHistoryCutoff();
     }
+    function reportTodoMatchesClientBillingFilter(todo) {
+      const filter = ["pending", "billed"].includes(state.clientBillingFilter) ? state.clientBillingFilter : "all";
+      if (filter === "all") return true;
+      const billed = Boolean(reportClientBill(todo));
+      return filter === "billed" ? billed : !billed;
+    }
+
     function reportTodoSort(left, right) {
       const leftKey = left.date ? `${left.date} ${left.start || "99:99"}` : "9999-99-99 99:99";
       const rightKey = right.date ? `${right.date} ${right.start || "99:99"}` : "9999-99-99 99:99";
@@ -13594,6 +13651,7 @@
         .filter(reportTodoIsCompleted)
         .filter((todo) => Boolean(todo.clientId || todo.client))
         .filter(reportTodoVisibleInClientBilling)
+        .filter(reportTodoMatchesClientBillingFilter)
         .filter((todo) => (!from && !to) ? true : inDateRange(todo.date, from, to))
         .sort(reportTodoSort);
     }
@@ -13889,7 +13947,9 @@
       state.reportAttachmentSelectionKey = "";
       state.reportIncludedAttachmentIds = new Set();
       $("reportClient").value = "";
+      setView("report");
       renderReport();
+      requestAnimationFrame(() => $("clientDetailList")?.scrollIntoView({ block: "start", behavior: "smooth" }));
     }
 
     async function confirmClientBillFromReport() {
@@ -15620,6 +15680,13 @@
     $("reportFrom").addEventListener("change", renderReport);
     $("reportTo").addEventListener("change", renderReport);
     $("reportClientSort").addEventListener("change", () => { state.reportClientSort = $("reportClientSort").value; renderReport(); });
+    $("reportBillingState").addEventListener("change", () => {
+      state.clientBillingFilter = $("reportBillingState").value;
+      saveClientBillingFilter();
+      state.clientBillSelectionKey = "";
+      state.clientBillSelectedEventIds = new Set();
+      renderReport();
+    });
 
     $("closeTodoDialog").addEventListener("click", () => $("todoDialog").close());
     $("closeOfflineConflicts").addEventListener("click", () => $("offlineConflictsDialog").close());
@@ -16561,9 +16628,9 @@
     initializeModalBackNavigation();
     window.addEventListener("popstate", (event) => {
       if (closeOpenModalFromBack(event)) return;
-      if (!state.token || !state.user) return;
+      if (!state.token || !state.user || loggedInHistoryExitInProgress) return;
       if (event.state?.[loggedInHistoryStateKey] !== "base") return;
-      history.pushState(loggedInHistoryState("active"), "", location.href);
+      confirmLoggedInHistoryExit().catch(() => rearmLoggedInHistory());
     });
 
     setInterval(autoRefreshSharedData, 60_000);

@@ -1254,12 +1254,48 @@ function normalizeLateTimeEntryReports(input, users = {}, now = Date.now()) {
     .slice(0, MAX_LATE_TIME_ENTRY_REPORTS);
 }
 
-function queueLateTimeEntryReport(db, { before, after, user, kind = "spremenjeno", now = new Date() } = {}) {
+function lateTimeEntryMinutes(todo) {
+  const parse = (value) => {
+    const match = /^(\d{2}):(\d{2})$/.exec(String(value || ""));
+    if (!match) return null;
+    const hours = Number(match[1]);
+    const minutes = Number(match[2]);
+    if (hours > 23 || minutes > 59) return null;
+    return hours * 60 + minutes;
+  };
+  const start = parse(todo?.start);
+  const end = parse(todo?.end);
+  return start === null || end === null || end <= start ? 0 : end - start;
+}
+
+function isWorkerEditingContext(user, editorWorkContext) {
+  const context = String(editorWorkContext || "").trim();
+  if (!/^worker:[a-z0-9_-]+$/i.test(context)) return false;
+  // A worker only has their own worker view. The boss may intentionally use
+  // any worker view, which is the explicit exception requested for this mail.
+  return String(user?.role || "") === "boss" || context === `worker:${cleanUserId(user?.id)}`;
+}
+
+// Late-entry e-mails are a safety net for a manager, not an audit stream for
+// ordinary edits. A report is meaningful only when a worker increases a past
+// time entry; rate, text, mileage, shortening and boss-side corrections stay
+// safely recorded in history without generating mail.
+function shouldQueueLateTimeEntryReport({ before, after, user, editorWorkContext, now = new Date() } = {}) {
+  if (!before || !after || !isWorkerEditingContext(user, editorWorkContext)) return false;
+  const beforeSnapshot = lateTimeEntryReportSnapshot(before);
+  const afterSnapshot = lateTimeEntryReportSnapshot(after);
+  if (!beforeSnapshot || !afterSnapshot || !isDateKey(afterSnapshot.date)) return false;
+  const referenceNow = now instanceof Date ? now : new Date(now);
+  if (afterSnapshot.date >= serverDateKey(referenceNow)) return false;
+  return lateTimeEntryMinutes(after) > lateTimeEntryMinutes(before);
+}
+
+function queueLateTimeEntryReport(db, { before, after, user, kind = "spremenjeno", editorWorkContext = "", now = new Date() } = {}) {
   const beforeSnapshot = lateTimeEntryReportSnapshot(before, db?.users);
   const afterSnapshot = lateTimeEntryReportSnapshot(after, db?.users);
   const relevant = afterSnapshot || beforeSnapshot;
   const referenceNow = now instanceof Date ? now : new Date(now);
-  if (!relevant || !isDateKey(relevant.date) || relevant.date >= serverDateKey(referenceNow)) return null;
+  if (!relevant || !shouldQueueLateTimeEntryReport({ before, after, user, editorWorkContext, now: referenceNow })) return null;
   if (JSON.stringify(beforeSnapshot) === JSON.stringify(afterSnapshot)) return null;
   const report = {
     id: crypto.randomUUID(),
@@ -8414,6 +8450,7 @@ async function handleApi(req, res) {
       const user = await requireUser(req, res);
       if (!user) return;
       const body = await readBody(req);
+      const editorWorkContext = String(body.editorWorkContext || "");
       const requestedItems = Array.isArray(body.items) ? body.items : [];
       const requestedLockTokens = body.editLockTokens && typeof body.editLockTokens === "object" && !Array.isArray(body.editLockTokens)
         ? body.editLockTokens
@@ -8516,6 +8553,7 @@ async function handleApi(req, res) {
           before: operation.previousTodo,
           after: db.todos.find((item) => item.id === operation.previousTodo.id),
           user,
+          editorWorkContext,
           kind: operation.previousTodo.date === operation.date ? "spremenjen pozni vpis ur" : "prestavljen pozni vpis ur"
         }))
         .filter(Boolean);
@@ -8531,6 +8569,7 @@ async function handleApi(req, res) {
       if (!user) return;
       const id = decodeURIComponent(todoTimeMatch[1]);
       const body = await readBody(req);
+      const editorWorkContext = String(body.editorWorkContext || "");
       const editLockToken = String(body.editLockToken || "");
       const db = await readDbAsync();
       const previousTodo = db.todos.find((item) => item.id === id);
@@ -8585,6 +8624,7 @@ async function handleApi(req, res) {
         before: previousTodo,
         after: db.todos.find((item) => item.id === previousTodo.id),
         user,
+        editorWorkContext,
         kind: previousTodo.date === date ? "spremenjen pozni vpis ur" : "prestavljen pozni vpis ur"
       });
       await writeDbAsync(db);
@@ -8654,6 +8694,7 @@ async function handleApi(req, res) {
       if (!user) return;
       const id = decodeURIComponent(todoMatch[1]);
       const body = await readBody(req);
+      const editorWorkContext = String(body.editorWorkContext || "");
       const editLockToken = String(body.editLockToken || "");
       let todo = cleanTodo(body);
       const validation = validateTodo(todo);
@@ -8850,6 +8891,7 @@ releaseTodoAssignmentEditLock(db, previousTodo, user, editLockToken);
         before: previousTodo,
         after: updatedOpenedTodo,
         user,
+        editorWorkContext,
         kind: "spremenjen pozni vpis ur"
       });
       pruneUnusedTodoAttachments(db);
@@ -9108,6 +9150,7 @@ module.exports = {
   gmailLateTimeEntryReportRaw,
   lateTimeEntryReportText,
   lateTimeEntryReportSnapshot,
+  shouldQueueLateTimeEntryReport,
   normalizeLateTimeEntryReports,
   queueLateTimeEntryReport,
   workerDigestRunKey,

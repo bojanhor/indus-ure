@@ -128,6 +128,7 @@ test("pozni vpis ur se trajno zabeleĹľi s stanjem prej in potem", () => {
     before,
     after,
     user: db.users.ibro,
+    editorWorkContext: "worker:ibro",
     kind: "spremenjen pozni vpis ur",
     now: new Date("2026-07-31T00:10:00+02:00")
   });
@@ -151,6 +152,29 @@ test("pozni vpis ur se trajno zabeleĹľi s stanjem prej in potem", () => {
   assert.ok(raw.includes(Buffer.from(text, "utf8").toString("base64").slice(0, 32)));
 });
 
+test("late time-entry mail is sent only for a worker-view hours increase", () => {
+  const before = { ...database.todos[0], date: "2026-07-20", start: "08:00", end: "09:00" };
+  const later = { ...before, end: "10:00" };
+  const sameDuration = { ...before, start: "09:00", end: "10:00" };
+  const now = new Date("2026-07-31T00:10:00+02:00");
+
+  const workerDb = { users: database.users, lateTimeEntryReports: [] };
+  assert.ok(queueLateTimeEntryReport(workerDb, {
+    before, after: later, user: database.users.ibro, editorWorkContext: "worker:ibro", now
+  }));
+  assert.equal(workerDb.lateTimeEntryReports.length, 1);
+
+  const bossDb = { users: database.users, lateTimeEntryReports: [] };
+  assert.equal(queueLateTimeEntryReport(bossDb, {
+    before, after: later, user: database.users.bojan, editorWorkContext: "admin", now
+  }), null);
+  assert.equal(queueLateTimeEntryReport(bossDb, {
+    before, after: sameDuration, user: database.users.ibro, editorWorkContext: "worker:ibro", now
+  }), null);
+  assert.equal(queueLateTimeEntryReport(bossDb, {
+    before, after: later, user: database.users.ibro, editorWorkContext: "admin", now
+  }), null);
+});
 test("pozni vpis obdrĹľi samo stare vnose in ponovi prekinjeno poĹˇiljanje", () => {
   const report = {
     id: "late-one",
