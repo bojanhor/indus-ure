@@ -5517,7 +5517,7 @@
           <legend>Obračun stranki</legend>
           <label class="todo-form-option"><input id="todoFormDirectClientSettled" type="checkbox"><span>Poračunano s stranko</span></label>
           <div class="todo-direct-client-settlement-details hidden" id="todoFormDirectClientSettlementDetails">
-            <label>Prejeti znesek (EUR)<input id="todoFormDirectClientAmount" type="number" min="0.01" max="1000000" step="0.01" inputmode="decimal"></label>
+            <label>Prejeti znesek (EUR)<input id="todoFormDirectClientAmount" type="number" min="0" max="1000000" step="0.01" inputmode="decimal"></label>
             <label class="todo-form-option"><input id="todoFormDirectClientCreditWorker" type="checkbox"><span>Plačilo v dobro delavca</span><small>Doda se med prejeta sredstva njegovega obračuna; ne spreminja plačila ur za ta dogodek.</small></label>
           </div>
           <p class="todo-meta hidden" id="todoFormDirectClientSettlementState"></p>
@@ -13504,9 +13504,13 @@
         && !existing?.clientSettlement?.confirmed
         && $("todoFormDirectClientSettled").checked);
       if (requestDirectClientSettlement) {
-        const directAmount = Number(String($("todoFormDirectClientAmount").value || "").replace(",", "."));
-        if (!Number.isFinite(directAmount) || directAmount <= 0) {
-          return invalidTodoForm("Za poračun s stranko vpiši prejeti znesek.", "todoFormDirectClientAmount");
+        const rawDirectAmount = String($("todoFormDirectClientAmount").value || "").trim();
+        const directAmount = Number(rawDirectAmount.replace(",", "."));
+        if (!rawDirectAmount || !Number.isFinite(directAmount) || directAmount < 0) {
+          return invalidTodoForm("Za pora\u010dun s stranko vpi\u0161i prejeti znesek.", "todoFormDirectClientAmount");
+        }
+        if (directAmount === 0 && !await showAppConfirm("Prejeti znesek je 0 EUR. Dogodek bo vseeno ozna\u010den kot pora\u010dunan s stranko. Nadaljujem?")) {
+          return;
         }
         todo.directClientSettlement = {
           confirmed: true,
@@ -16044,7 +16048,15 @@
       updateTodoFormStatus();
       $("todoFormStatusField").open = false;
     });
-    $("todoFormDirectClientSettled").addEventListener("change", syncTodoFormDirectClientSettlement);
+    $("todoFormDirectClientSettled").addEventListener("change", () => {
+      syncTodoFormDirectClientSettlement();
+      if (!$("todoFormDirectClientSettled").checked || state.todoDialogClientSettlement?.confirmed) return;
+      requestAnimationFrame(() => {
+        const amount = $("todoFormDirectClientAmount");
+        amount.value = "";
+        amount.focus();
+      });
+    });
     ["todoFormNotes", "todoFormMaterial"].forEach((id) => $(id).addEventListener("input", autosizeTodoNarrativeFields));
     $("todoFormHourlyRate").addEventListener("input", () => {
       $("todoFormHourlyRate").dataset.autoRate = "false";

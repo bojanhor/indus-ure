@@ -4497,7 +4497,7 @@ function directClientSettlementRequest(value) {
 function directClientSettlementForTodo(db, todo, input, actor) {
   const request = directClientSettlementRequest(input);
   if (!request) return { clientBill: null, clientReceipt: null };
-  if (request.amount === null || request.amount <= 0) {
+  if (request.amount === null || request.amount < 0) {
     return { error: "Za poraÄŤunano storitev vpiĹˇi prejeti znesek." };
   }
   if (!todoRequiresClientBilling(todo)) {
@@ -4510,24 +4510,25 @@ function directClientSettlementForTodo(db, todo, input, actor) {
     return { error: "Ta dogodek je Ĺľe v potrjenem obraÄŤunu stranki." };
   }
   const workerId = payrollWorkerForTodo(todo);
-  if (request.creditWorker && !db.users?.[workerId]) {
+  const creditWorker = request.creditWorker && request.amount > 0;
+  if (creditWorker && !db.users?.[workerId]) {
     return { error: "Delavca za plaÄŤilo v dobro ni bilo mogoÄŤe prepoznati." };
   }
-  const clientReceiptId = request.creditWorker ? crypto.randomUUID() : "";
+  const clientReceiptId = creditWorker ? crypto.randomUUID() : "";
   const clientBill = buildClientBillSnapshot(db, {
     clientId: todo.clientId,
     clientName: todo.client,
     eventIds: [eventId],
     directSettlement: true,
     receivedAmount: request.amount,
-    creditedWorkerId: request.creditWorker ? workerId : "",
-    creditedWorkerName: request.creditWorker ? (db.users[workerId]?.name || workerId) : "",
+    creditedWorkerId: creditWorker ? workerId : "",
+    creditedWorkerName: creditWorker ? (db.users[workerId]?.name || workerId) : "",
     clientReceiptId
   }, actor);
   if (!clientBill) return { error: "Dogodka ni bilo mogoÄŤe pripraviti za obraÄŤun stranki." };
   db.clientBills.push(clientBill);
   let clientReceipt = null;
-  if (request.creditWorker) {
+  if (creditWorker) {
     // We never rewrite a confirmed payroll. A late client payment becomes a
     // new credit in today's open settlement, while sourceDate still points to
     // the original work entry.
@@ -4557,7 +4558,7 @@ function directClientSettlementForTodo(db, todo, input, actor) {
   }
   for (const item of db.todos || []) {
     if (todoBillingEventId(item) !== eventId) continue;
-    item.history = [...(item.history || []), audit(actor || { id: "system", name: "Sistem" }, request.creditWorker
+    item.history = [...(item.history || []), audit(actor || { id: "system", name: "Sistem" }, creditWorker
       ? `neposredno poraÄŤunano s stranko; ${request.amount.toFixed(2)} EUR v dobro delavca`
       : `neposredno poraÄŤunano s stranko; ${request.amount.toFixed(2)} EUR`)];
   }

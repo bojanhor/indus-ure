@@ -560,6 +560,12 @@ test("direct client settlement creates an auditable worker credit", () => {
       title: "Monta\u017ea", clientId: "jerin", client: "Jerin", billingHourlyRate: 15
     }]
   };
+  const zeroDatabase = structuredClone(database);
+  const zeroSettled = directClientSettlementForTodo(zeroDatabase, zeroDatabase.todos[0], { confirmed: true, amount: 0, creditWorker: true }, worker);
+  assert.ok(zeroSettled.clientBill);
+  assert.equal(zeroSettled.clientBill.receivedAmount, 0);
+  assert.equal(zeroSettled.clientBill.creditedWorkerId, "");
+  assert.equal(zeroDatabase.debts.length, 0);
   const settled = directClientSettlementForTodo(database, database.todos[0], { confirmed: true, amount: 80, creditWorker: true }, worker);
   assert.ok(settled.clientBill);
   assert.equal(settled.clientBill.directSettlement, true);
