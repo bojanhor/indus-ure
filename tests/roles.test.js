@@ -19,6 +19,7 @@ const {
   preserveTimeEntrySourceProject,
   createSession,
   buildPayrollSnapshot,
+  upsertSettlementCorrections,
   buildClientBillSnapshot,
   clientReportSelection,
   clientReportAttachmentSelection,
@@ -1078,4 +1079,71 @@ test("edited imported event is promoted to normal on save", () => {
   assert.equal(importedTodoWasEdited(previous, { ...previous }, { assignmentsChanged: true }), true);
   const promoted = todoForUserRole(boss, { users: { bojan: { id: "bojan", billing: { hourlyRate: 15 } } }, settings: {} }, previous, { ...previous, title: "Edited calendar", promoteImported: true });
   assert.equal(promoted.imported, false);
+});
+
+test("prenos izvajalca po potrjenem obračunu naredi negativno razliko staremu izvajalcu", () => {
+  const accountingDb = {
+    users: {
+      bojan: { id: "bojan", name: "Bojan", billing: { hourlyRate: 25 } },
+      ibro: { id: "ibro", name: "Ibro", billing: { hourlyRate: 15 } }
+    },
+    settings: { billing: { workerOwnVehicleKmRate: 0.22 } },
+    todos: [{
+      id: "moved-time-entry",
+      assignmentGroupId: "event-moved",
+      syncUser: "ibro",
+      status: "execution",
+      date: "2026-07-07",
+      start: "08:00",
+      end: "09:30",
+      title: "Preneseno delo",
+      client: "Studi",
+      billingHourlyRate: 15,
+      billingKm: 0
+    }],
+    settlementCorrections: [],
+    payrolls: [{
+      id: "bojan-july",
+      workerId: "bojan",
+      status: "confirmed",
+      from: "2026-07-01",
+      to: "2026-07-31",
+      lines: [{
+        todoId: "moved-time-entry",
+        assignmentGroupId: "event-moved",
+        workerId: "bojan",
+        date: "2026-07-07",
+        start: "08:00",
+        end: "09:30",
+        title: "Preneseno delo",
+        client: "Studi",
+        status: "execution",
+        minutes: 90,
+        hours: 1.5,
+        hourlyRate: 25,
+        workerKm: 0,
+        commuteKm: 0,
+        km: 0,
+        kmRate: 0.22,
+        workAmount: 37.5,
+        kmAmount: 0,
+        totalAmount: 37.5
+      }]
+    }]
+  };
+  const moved = accountingDb.todos[0];
+  const result = upsertSettlementCorrections(accountingDb, [moved], [moved], boss, "2026-08-05T09:00:00.000Z");
+  assert.equal(result.error, "");
+  assert.equal(result.corrections.length, 1);
+  assert.equal(result.corrections[0].workerId, "bojan");
+  assert.equal(result.corrections[0].delta.hours, -1.5);
+  assert.equal(result.corrections[0].delta.workAmount, -37.5);
+
+  const ibroJuly = buildPayrollSnapshot(accountingDb, "ibro", { from: "2026-07-01", to: "2026-07-31" }, { id: "ibro-july", status: "draft" });
+  assert.equal(ibroJuly.lines.filter((line) => line.todoId === "moved-time-entry").length, 1);
+  assert.equal(ibroJuly.workAmount, 22.5);
+
+  const bojanAugust = buildPayrollSnapshot(accountingDb, "bojan", { from: "2026-08-01", to: "2026-08-31" }, { id: "bojan-august", status: "draft" });
+  assert.equal(bojanAugust.lines.filter((line) => line.correctionId).length, 1);
+  assert.equal(bojanAugust.workAmount, -37.5);
 });

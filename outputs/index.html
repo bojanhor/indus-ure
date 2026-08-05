@@ -947,8 +947,14 @@
 
     .legacy-report-button { display: none !important; }
     .billing-screen { display: grid; gap: 14px; padding: 12px; }
-    .billing-title-row, .billing-controls, .billing-actions { display: flex; align-items: end; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+    .billing-title-row, .billing-controls, .billing-actions, .billing-settlement-actions { display: flex; align-items: end; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
     .billing-entry-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .billing-settlement-actions { justify-content: flex-start; padding-top: 12px; border-top: 1px solid var(--line); }
+    .billing-action-progress { display: inline-flex; align-items: center; gap: 8px; min-height: 38px; color: var(--accent-dark); font-size: 13px; font-weight: 800; }
+    .billing-action-progress[hidden] { display: none; }
+    .billing-action-progress progress { width: 112px; height: 8px; accent-color: var(--accent); }
+    .billing-screen.is-all-workers .billing-controls { align-items: end; }
+    .billing-screen.is-all-workers .billing-explorer { margin-top: 0; padding-top: 0; border-top: 0; }
     .billing-title-row strong { display: block; font-size: 19px; }
     .billing-title-row .todo-meta { display: block; margin-top: 3px; }
     .billing-state { border-radius: 999px; padding: 6px 10px; font-size: 12px; font-weight: 900; background: #edf1ee; color: var(--muted); }
@@ -3488,6 +3494,9 @@
     .app-notice[hidden] { display: none; }
     .app-notice-message { flex: 1; line-height: 1.4; }
     .app-notice-close { min-width: 34px; min-height: 34px; padding: 0; color: #173e4a; background: #f4fbf7; }
+    .modal-global-notice { position: sticky; top: 0; z-index: 40; display: flex; align-items: flex-start; gap: 9px; margin: 0; padding: 10px 14px; border-bottom: 1px solid #b9d1c8; background: #173e4a; color: #fff; box-shadow: 0 5px 14px rgba(14, 30, 36, 0.18); font-weight: 800; line-height: 1.35; }
+    .modal-global-notice[hidden] { display: none; }
+    .modal-global-notice button { min-width: 32px; min-height: 32px; padding: 0; color: #173e4a; background: #f4fbf7; }
     #appConfirmDialog, #appPromptDialog, #quickClientDialog { width: min(460px, calc(100vw - 26px)); }
     .app-dialog-message { margin: 0; color: var(--ink); line-height: 1.5; white-space: pre-line; }    .client-autocomplete {
       position: relative;
@@ -3631,16 +3640,17 @@
     .completion-request-status { margin: 0; padding: 9px 10px; border: 1px solid #d3b1b1; border-radius: 8px; background: #fff5f5; color: #8d2c2c; font-weight: 700; }
     .completion-request-status.pending { border-color: #a8c8d8; background: #f2f9fc; color: #185a78; }
     .completion-request-status.success { border-color: #a8cfb2; background: #f1faf3; color: #1c6a35; }
-    .todo-form-footer-actions {
+    .todo-form-footer-actions,
+    .modal-action-mirrors {
       display: flex;
       align-items: center;
       gap: 8px;
       flex-wrap: wrap;
-      margin-top: 4px;
       padding-top: 14px;
       border-top: 1px solid var(--line);
     }
-    .todo-form-footer-actions button { min-height: 42px; }
+    .todo-form-footer-actions button,
+    .modal-action-mirrors button { min-height: 42px; }
 
     #todoDialog .modal-head-actions { gap: 6px; }
 
@@ -5122,7 +5132,7 @@
             <input id="billingMonth" type="hidden">
             <button class="secondary billing-month-step" id="billingNextMonth" type="button" aria-label="Naslednje obdobje">&rsaquo;</button>
           </div>
-          <div class="billing-quick-ranges" aria-label="Hitri izbor obračunskega obdobja">
+          <div class="billing-quick-ranges" id="billingQuickRanges" aria-label="Hitri izbor obračunskega obdobja">
             <span>Hitro</span>
             <button class="secondary" type="button" data-billing-range-preset="current-month">Ta mesec</button>
             <button class="secondary" type="button" data-billing-range-preset="previous-month">Pretekli mesec</button>
@@ -5140,13 +5150,18 @@
           <p class="todo-meta hidden" id="billingNoteRead"></p>
         </div>
         <div class="billing-actions" id="billingActions">
-          <div class="billing-entry-actions"><button class="secondary" id="billingAddAdvance" type="button">Založil denar</button><button class="secondary" id="billingAddPurchase" type="button">Osebni nakup</button></div>
-          <button class="secondary hidden" id="billingAddPayment" type="button">Delno izplačilo</button>
-<button class="primary hidden" id="billingConfirm" type="button">Potrdi obra&#269;un</button>
-          <button class="primary hidden" id="billingMarkPaid" type="button">Ozna&#269;i pla&#269;ano</button>
+          <div class="billing-entry-actions"><button class="secondary" id="billingAddAdvance" type="button">Zalo&#382;il denar</button><button class="secondary" id="billingAddPurchase" type="button">Osebni nakup</button></div>
+          <button class="primary hidden" id="billingConfirm" type="button">Potrdi obra&#269;un</button>
         </div>
         <p class="billing-period-hint hidden" id="billingPeriodHint"></p>
         <div class="billing-day-list" id="billingDayList"></div>
+        <div class="billing-settlement-actions" id="billingSettlementActions">
+          <button class="primary hidden" id="billingMarkPaid" type="button">Ozna&#269;i vse kot pla&#269;ano</button>
+          <button class="secondary hidden" id="billingAddPayment" type="button">Izpla&#269;ilo zneska</button>
+          <div class="billing-action-progress" id="billingActionProgress" role="status" aria-live="polite" hidden>
+            <progress id="billingActionProgressBar"></progress><span id="billingActionProgressText"></span>
+          </div>
+        </div>
         <div class="billing-explorer admin-only" id="billingExplorer"></div>
       </section>
       <section class="panel report-view clients-screen view-hidden">
@@ -5349,6 +5364,10 @@
           <div class="day-timeline-events" id="dayTimelineEvents"></div>
         </div>
       </div>
+      <div class="modal-action-mirrors" id="dayTimelineFooterActions" aria-label="Dejanja dnevnega pogleda">
+        <button class="secondary" id="dayTimelineFooterCancel" type="button">Prekli&#269;i spremembe</button>
+        <button class="primary" id="dayTimelineFooterSave" type="button">Shrani spremembe</button>
+      </div>
     </form>
   </dialog>
   <dialog id="deletedTodosDialog">
@@ -5536,8 +5555,13 @@
         <div class="audit-box hidden" id="todoFormSourceProject">
           <span>Izvorno opravilo: </span><button class="secondary" id="openTodoSourceProject" type="button">Odpri in uredi</button>
         </div>
-        <div class="todo-form-footer-actions hidden" id="todoFormFooterActions" aria-label="Dejanja opravila">
+        <div class="todo-form-footer-actions" id="todoFormFooterActions" aria-label="Dejanja opravila">
+          <button class="danger hidden" id="todoFooterDelete" type="button">Izbri&#353;i opravilo</button>
+          <button class="secondary hidden" id="todoFooterDuplicate" type="button">Podvoji opravilo</button>
+          <button class="secondary hidden" id="todoFooterWriteHours" type="button">Vpis ur</button>
           <button class="secondary hidden" id="requestTodoCompletion" type="button">Zahtevaj dopolnitev</button>
+          <button class="secondary" id="todoFooterClose" type="button">Zapri brez shranjevanja</button>
+          <button class="primary" id="todoFooterSave" type="submit">Shrani</button>
         </div>
 
       </div>
@@ -5786,6 +5810,10 @@
       </div>
       <div class="photo-editor-canvas-shell">
         <canvas id="photoEditorCanvas"></canvas>
+      </div>
+      <div class="modal-action-mirrors" id="photoEditorFooterActions" aria-label="Dejanja urejanja slike">
+        <button class="secondary" id="photoEditorFooterClose" type="button">Zapri brez shranjevanja</button>
+        <button class="primary" id="photoEditorFooterSave" type="button">Shrani sliko</button>
       </div>
     </form>
   </dialog>
@@ -7524,17 +7552,56 @@
     }
 
     let appNoticeTimer = 0;
+
+    function topmostOpenDialog() {
+      const dialogs = [...document.querySelectorAll("dialog[open]")];
+      return dialogs.length ? dialogs[dialogs.length - 1] : null;
+    }
+
+    function closeModalNotices() {
+      document.querySelectorAll(".modal-global-notice").forEach((notice) => {
+        notice.hidden = true;
+        notice.replaceChildren();
+      });
+    }
+
     function closeAppNotice() {
       clearTimeout(appNoticeTimer);
       $("appNotice").hidden = true;
+      closeModalNotices();
     }
 
     function showNotice(message) {
       const text = String(message || "").trim();
       if (!text) return;
-      $("appNoticeMessage").textContent = text;
-      $("appNotice").hidden = false;
       clearTimeout(appNoticeTimer);
+      const dialog = topmostOpenDialog();
+      if (dialog) {
+        let notice = dialog.querySelector(".modal-global-notice");
+        if (!notice) {
+          notice = document.createElement("div");
+          notice.className = "modal-global-notice";
+          notice.hidden = true;
+          notice.setAttribute("role", "status");
+          notice.setAttribute("aria-live", "polite");
+          const head = dialog.querySelector(".modal-head");
+          if (head) head.insertAdjacentElement("afterend", notice);
+          else dialog.prepend(notice);
+        }
+        const label = document.createElement("span");
+        label.textContent = text;
+        const close = document.createElement("button");
+        close.type = "button";
+        close.setAttribute("aria-label", "Zapri obvestilo");
+        close.textContent = "x";
+        close.addEventListener("click", closeAppNotice);
+        notice.replaceChildren(label, close);
+        notice.hidden = false;
+        $("appNotice").hidden = true;
+      } else {
+        $("appNoticeMessage").textContent = text;
+        $("appNotice").hidden = false;
+      }
       appNoticeTimer = window.setTimeout(closeAppNotice, 8_000);
     }
 
@@ -7852,8 +7919,10 @@
 
     function todoHasConfirmedWorkerPayroll(todo) {
       const todoId = String(todo?.id || "");
-      if (!todoId) return false;
+      const workerId = String(todo?.syncUser || todo?.createdBy || "");
+      if (!todoId || !workerId) return false;
       return (state.payrolls || []).some((payroll) => ["confirmed", "paid"].includes(String(payroll?.status || ""))
+        && String(payroll?.workerId || "") === workerId
         && (payroll.lines || []).some((line) => String(line?.todoId || "") === todoId));
     }
 
@@ -10583,10 +10652,12 @@
       const to = formatDate(range.to);
       return range.from === range.to ? from : `${from} – ${to}`;
     }
+    const allBillingWorkersId = "__all__";
     function billingWorkerId() {
       if (!isAdminView()) return activeWorkerId();
       const workers = state.workerBilling.length ? state.workerBilling : state.users;
       const valid = new Set(workers.map((worker) => worker.id));
+      valid.add(allBillingWorkersId);
       if (!valid.has(state.billingWorkerId)) {
         const stored = localStorage.getItem(billingWorkerKey) || "";
         state.billingWorkerId = valid.has(stored) ? stored : (workers[0]?.id || state.user?.id || "");
@@ -10690,7 +10761,7 @@
       const workers = (state.workerBilling.length ? state.workerBilling : state.users)
         .slice()
         .sort((a, b) => String(a.name || a.id).localeCompare(String(b.name || b.id), "sl"));
-      select.innerHTML = workers.map((worker) => `<option value="${escapeHtml(worker.id)}">${escapeHtml(worker.name || worker.id)}${worker.role === "boss" ? " (šef)" : ""}</option>`).join("");
+      select.innerHTML = '<option value="' + allBillingWorkersId + '">Vsi delavci</option>' + workers.map((worker) => '<option value="' + escapeHtml(worker.id) + '">' + escapeHtml(worker.name || worker.id) + (worker.role === "boss" ? " (šef)" : "") + '</option>').join("");
       select.value = workerId;
     }
 
@@ -10711,14 +10782,21 @@
     }
     function renderBillingExplorer() {
       const box = $("billingExplorer");
-      if (!isAdminView()) { box.replaceChildren(); return; }
+      const showAllWorkers = isAdminView() && billingWorkerId() === allBillingWorkersId;
+      box.classList.toggle("hidden", !showAllWorkers);
+      if (!showAllWorkers) { box.replaceChildren(); return; }
       const oldestVisible = new Date();
       oldestVisible.setFullYear(oldestVisible.getFullYear() - 1);
       const oldestVisibleKey = dateKey(oldestVisible);
       const rows = state.payrolls
-        .filter((payroll) => String(payroll.to || `${payroll.month || ""}-31`) >= oldestVisibleKey)
+        .filter((payroll) => String(payroll.to || (payroll.month || "") + "-31") >= oldestVisibleKey)
         .sort((a, b) => String(b.to || b.month || "").localeCompare(String(a.to || a.month || "")) || String(a.updatedAt || "").localeCompare(String(b.updatedAt || "")));
-      box.innerHTML = `<div class="todo-head"><strong>Vsi obračuni</strong><span class="todo-meta">${rows.length}</span></div>${rows.length ? rows.map((payroll) => `<button class="billing-explorer-row" type="button" data-worker-id="${escapeHtml(payroll.workerId)}" data-from="${escapeHtml(payroll.from || `${payroll.month}-01`)}" data-to="${escapeHtml(payroll.to || `${payroll.month}-31`)}"><strong>${escapeHtml(userDisplayName(payroll.workerId))}</strong><span>${escapeHtml(billingRangeLabel(payroll))}</span><span>${money(payroll.payoutAmount ?? payroll.totalAmount)} EUR · ${escapeHtml(payrollStateLabel(payroll, true))}</span></button>`).join("") : `<p class="todo-meta">Še ni shranjenih obračunov.</p>`}`;
+      const rowMarkup = rows.map((payroll) => {
+        const from = payroll.from || String(payroll.month || "") + "-01";
+        const to = payroll.to || String(payroll.month || "") + "-31";
+        return '<button class="billing-explorer-row" type="button" data-worker-id="' + escapeHtml(payroll.workerId) + '" data-from="' + escapeHtml(from) + '" data-to="' + escapeHtml(to) + '"><strong>' + escapeHtml(userDisplayName(payroll.workerId)) + '</strong><span>' + escapeHtml(billingRangeLabel(payroll)) + '</span><span>' + money(payroll.payoutAmount ?? payroll.totalAmount) + ' EUR · ' + escapeHtml(payrollStateLabel(payroll, true)) + '</span></button>';
+      }).join("");
+      box.innerHTML = '<div class="todo-head"><strong>Vsi obračuni</strong><span class="todo-meta">' + rows.length + '</span></div>' + (rowMarkup || '<p class="todo-meta">Še ni shranjenih obračunov v zadnjem letu.</p>');
       box.querySelectorAll(".billing-explorer-row").forEach((button) => button.addEventListener("click", () => {
         state.billingWorkerId = button.dataset.workerId;
         $("billingFrom").value = button.dataset.from;
@@ -10746,11 +10824,29 @@
     }
 
     function renderBillingView() {
-      const range = billingRange();
       const admin = isAdminView();
       const workerId = billingWorkerId();
-      const worker = billingWorker();
+      const allWorkers = admin && workerId === allBillingWorkersId;
+      const screen = document.querySelector(".billing-screen");
+      screen.classList.toggle("is-all-workers", allWorkers);
       renderBillingWorkerSelect(workerId);
+      const period = document.querySelector(".billing-period");
+      const quickRanges = $("billingQuickRanges");
+      [period, quickRanges].forEach((element) => element?.classList.toggle("hidden", allWorkers));
+      if (allWorkers) {
+        $("billingViewTitle").textContent = "Vsi obračuni";
+        $("billingSubtitle").textContent = "Pregled zadnjega leta";
+        $("billingState").textContent = "";
+        $("billingState").className = "billing-state hidden";
+        ["billingStaleDraftNotice", "billingSummary", "billingPayments", "billingNotePanel", "billingActions", "billingSettlementActions", "billingPeriodHint", "billingDayList"].forEach((id) => $(id).classList.add("hidden"));
+        $("billingActionProgress").hidden = true;
+        renderBillingExplorer();
+        return;
+      }
+      ["billingSummary", "billingPayments", "billingNotePanel", "billingActions", "billingSettlementActions", "billingDayList"].forEach((id) => $(id).classList.remove("hidden"));
+      $("billingState").classList.remove("hidden");
+      const range = billingRange();
+      const worker = billingWorker();
       const payroll = payrollForBilling(workerId, range);
       const staleDraft = staleOpenBillingPayroll(workerId);
       const staleNotice = $("billingStaleDraftNotice");
@@ -10805,6 +10901,7 @@
       confirmButton.classList.toggle("hidden", !showConfirmation); confirmButton.disabled = showConfirmation && !periodEnded; confirmButton.textContent = payroll?.status === "archiving" ? "Nadaljuj arhiviranje" : "Potrdi obračun"; confirmButton.title = showConfirmation && !periodEnded ? payrollConfirmationHint(range) : "";
       const periodHint = $("billingPeriodHint"); periodHint.textContent = showConfirmation && !periodEnded ? payrollConfirmationHint(range) : ""; periodHint.classList.toggle("hidden", !(showConfirmation && !periodEnded));
       $("billingMarkPaid").classList.toggle("hidden", !admin || payroll?.status !== "confirmed");
+      $("billingMarkPaid").disabled = billingPaidActionInFlight;
       $("billingAddPayment").classList.toggle("hidden", !admin || !payroll || !["confirmed", "paid"].includes(payroll.status) || remainingAmount <= 0.005);
       $("billingAddAdvance").classList.toggle("hidden", Boolean(payroll && ["confirmed", "paid"].includes(payroll.status)));
       $("billingAddPurchase").classList.toggle("hidden", Boolean(payroll && ["confirmed", "paid"].includes(payroll.status)));
@@ -10872,15 +10969,38 @@
       await loadAll(); renderBillingView();
     }
 
+    let billingPaidActionInFlight = false;
+    function setBillingPaidActionProgress(active, message = "") {
+      billingPaidActionInFlight = Boolean(active);
+      const progress = $("billingActionProgress");
+      const button = $("billingMarkPaid");
+      progress.hidden = !active;
+      $("billingActionProgressText").textContent = active ? (message || "Označujem obračun kot plačan …") : "";
+      button.disabled = Boolean(active);
+      button.setAttribute("aria-busy", String(Boolean(active)));
+    }
+
     async function changePayroll(action, skipConfirmation = false, note = undefined) {
       const payroll = payrollForBilling(billingWorkerId(), billingRange());
       if (!payroll) return;
       const messages = { confirm: "Potrdim obračun delavca? Ure in postavke se zaklenejo. Projektni vnosi se premaknejo v arhiv šele, ko je potrjen tudi obračun stranki.", paid: "Označim obračun kot plačan?", reopen: "Ponovno odprem obračun? Ure bo mogoče znova popravljati.", delete: "Izbrišem osnutek obračuna? Opravljenih ur ne bom izbrisal." };
       if (!skipConfirmation && messages[action] && !await showAppConfirm(messages[action])) return;
-      const data = action === "delete" ? await api(`/api/payrolls/${encodeURIComponent(payroll.id)}`, { method: "DELETE" }) : await api(`/api/payrolls/${encodeURIComponent(payroll.id)}`, { method: "PUT", body: JSON.stringify({ action, ...(note === undefined ? {} : { note }) }) });
-      state.payrolls = data.payrolls || state.payrolls;
-      await loadAll(); renderBillingView();
-    }    function renderTodos() {
+      const paid = action === "paid";
+      if (paid && billingPaidActionInFlight) return;
+      if (paid) setBillingPaidActionProgress(true);
+      try {
+        const data = action === "delete"
+          ? await api("/api/payrolls/" + encodeURIComponent(payroll.id), { method: "DELETE" })
+          : await api("/api/payrolls/" + encodeURIComponent(payroll.id), { method: "PUT", body: JSON.stringify({ action, ...(note === undefined ? {} : { note }) }) });
+        state.payrolls = data.payrolls || state.payrolls;
+        await loadAll();
+        renderBillingView();
+      } finally {
+        if (paid) setBillingPaidActionProgress(false);
+      }
+    }
+
+    function renderTodos() {
       const billingFilters = $("todoBillingFilters");
       if (billingFilters) {
         billingFilters.classList.toggle("hidden", state.todoSortMode !== "completed");
@@ -12105,6 +12225,7 @@
       const shell = $("photoEditorCanvas").closest(".photo-editor-canvas-shell");
       $("photoEditorNormalTools").hidden = pending;
       $("photoEditorHeaderActions").hidden = pending;
+      $("photoEditorFooterActions").hidden = pending;
       $("photoEditorPendingActions").hidden = !pending;
       if (pending) {
         const crop = editor.mode === "crop";
@@ -13112,6 +13233,23 @@
       };
     }
 
+    function syncTodoFormFooterActions() {
+      const pairs = [
+        ["deleteTodoFromDialog", "todoFooterDelete"],
+        ["duplicateTodoFromDialog", "todoFooterDuplicate"],
+        ["writeHoursFromTodo", "todoFooterWriteHours"],
+        ["saveTodoDialog", "todoFooterSave"],
+        ["closeTodoDialog", "todoFooterClose"]
+      ];
+      $("todoFormFooterActions").classList.remove("hidden");
+      pairs.forEach(([sourceId, mirrorId]) => {
+        const source = $(sourceId);
+        const mirror = $(mirrorId);
+        mirror.classList.toggle("hidden", source.classList.contains("hidden"));
+        mirror.disabled = source.disabled;
+      });
+    }
+
     async function openTodoDialog(todo = {}) {
       setTodoDialogSaving(false);
       const editing = Boolean(todo.id);
@@ -13202,7 +13340,7 @@
       $("requestTodoCompletion").textContent = isExistingTimeEntry ? "Zahtevaj dopolnitev vnosa ur" : "Zahtevaj dopolnitev";
       $("requestTodoCompletion").setAttribute("aria-label", isExistingTimeEntry ? "Zahtevaj dopolnitev vnosa ur" : "Zahtevaj dopolnitev opravila");
       $("requestTodoCompletion").classList.toggle("hidden", !showCompletionRequest);
-      $("todoFormFooterActions").classList.toggle("hidden", !showCompletionRequest);
+      syncTodoFormFooterActions();
       renderTodoFormAudit(todo);
       renderTodoFormSourceProject(todo);
       $("todoFormAttachmentInput").value = "";
@@ -13353,6 +13491,7 @@
       save.title = saving ? "Shranjujem opravilo" : "Shrani";
       save.setAttribute("aria-label", saving ? "Shranjujem opravilo" : "Shrani");
       status.textContent = saving ? "Shranjujem opravilo." : "";
+      syncTodoFormFooterActions();
     }
     async function submitTodoDialog() {
       if (todoDialogSaveInFlight) return;
@@ -13758,6 +13897,7 @@
     }
 
     function reportClientBill(todo) {
+      if (todo?.settlement?.client?.length) return null;
       const billId = String(todo?.clientBillId || "");
       const direct = (state.clientBills || []).find((bill) => bill.id === billId);
       if (direct && String(direct.status || "") === "confirmed") return direct;
@@ -13768,9 +13908,10 @@
     }
     function reportTodoLine(todo) {
       const warranty = Boolean(todo.warranty);
-      const hours = warranty ? 0 : Number(duration(todo).toFixed(2));
-      const clientKm = warranty ? 0 : Math.max(0, Number(todo.clientKm || 0));
-      return { todo, warranty, hours, clientKm, vehicle: reportVehicleId(todo), clientBill: reportClientBill(todo) };
+      const correction = todo?.settlement?.client?.[0] || null;
+      const hours = warranty ? 0 : correction ? Number(correction.delta?.hours || 0) : Number(duration(todo).toFixed(2));
+      const clientKm = warranty ? 0 : correction ? Number(correction.delta?.clientKm || 0) : Math.max(0, Number(todo.clientKm || 0));
+      return { todo, warranty, hours, clientKm, correction, vehicle: reportVehicleId(todo), clientBill: reportClientBill(todo) };
     }
 
     function reportTotals(lines) {
@@ -15734,6 +15875,22 @@
       });
     });
 
+    const modalActionMirrors = [
+      ["todoFooterDelete", "deleteTodoFromDialog"],
+      ["todoFooterDuplicate", "duplicateTodoFromDialog"],
+      ["todoFooterWriteHours", "writeHoursFromTodo"],
+      ["todoFooterClose", "closeTodoDialog"],
+      ["dayTimelineFooterCancel", "closeDayTimeline"],
+      ["dayTimelineFooterSave", "saveDayTimeline"],
+      ["photoEditorFooterClose", "photoEditorClose"],
+      ["photoEditorFooterSave", "photoEditorSave"]
+    ];
+    modalActionMirrors.forEach(([mirrorId, sourceId]) => {
+      $(mirrorId).addEventListener("click", () => {
+        const source = $(sourceId);
+        if (!source.disabled && !source.classList.contains("hidden")) source.click();
+      });
+    });
     $("closeTodoDialog").addEventListener("click", () => $("todoDialog").close());
     $("closeOfflineConflicts").addEventListener("click", () => $("offlineConflictsDialog").close());
     $("offlineConflictsList").addEventListener("click", (event) => {

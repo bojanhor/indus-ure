@@ -1601,6 +1601,11 @@ function normalizeDb(db = {}) {
     db.clientBills = [];
     changed = true;
   }
+  // Immutable corrections preserve confirmed accounts and record only a delta.
+  if (!Array.isArray(db.settlementCorrections)) {
+    db.settlementCorrections = [];
+    changed = true;
+  }
 
   if (Object.prototype.hasOwnProperty.call(db, "appIssues")) {
     delete db.appIssues;
@@ -2323,6 +2328,7 @@ function initialDatabaseState() {
     billingLocks: [],
     payrolls: [],
     clientBills: [],
+    settlementCorrections: [],
     todoCreateReceipts: {},
     workerDigestRuns: [],
     lateTimeEntryReports: [],
@@ -2752,7 +2758,15 @@ function visibleTodosForUser(db, user) {
       assigneeIds: todoAssignmentAssigneeIds(db, todo)
     });
     const { completionRequests, ...publicTodo } = hydrated;
-    return publicTodo;
+    const corrections = pendingCorrectionsForTodo(db, todo);
+    return {
+      ...publicTodo,
+      settlement: corrections.length ? {
+        pending: true,
+        worker: corrections.filter((item) => item.type === "worker").map((item) => ({ id: item.id, delta: item.delta, effectiveDate: item.effectiveDate })),
+        client: corrections.filter((item) => item.type === "client").map((item) => ({ id: item.id, delta: item.delta, effectiveDate: item.effectiveDate }))
+      } : { pending: false, worker: [], client: [] }
+    };
   });
 }
 
@@ -2768,7 +2782,8 @@ function visibleTodoForUser(db, user, id) {
     assigneeIds: todoAssignmentAssigneeIds(db, todo)
   });
   const { completionRequests, ...publicTodo } = hydrated;
-  return publicTodo;
+  const corrections = pendingCorrectionsForTodo(db, todo);
+  return { ...publicTodo, settlement: corrections.length ? { pending: true, worker: corrections.filter((item) => item.type === "worker").map((item) => ({ id: item.id, delta: item.delta, effectiveDate: item.effectiveDate })), client: corrections.filter((item) => item.type === "client").map((item) => ({ id: item.id, delta: item.delta, effectiveDate: item.effectiveDate })) } : { pending: false, worker: [], client: [] } };
 }
 
 function hydrateDebtAttachments(db, debt) {
@@ -3216,23 +3231,31 @@ function payrollPersonalPurchases(db, workerId, range) {
   return (db.debts || []).filter((item) => item.type === "personal_purchase" && item.person === workerId && item.date >= range.from && item.date <= range.to);
 }
 
+function payrollWorkerForTodo(todo) {
+  return String(todo?.syncUser || todo?.createdBy || "").trim();
+}
+
 function normalizePayroll(input, db) {
   const workerId = cleanUserId(input?.workerId);
   const range = payrollRange(input);
   if (!workerId || !db.users?.[workerId] || !range) return null;
   const lines = (Array.isArray(input?.lines) ? input.lines : []).map((line) => {
+    const correction = Boolean(line?.correction || line?.correctionId);
     const minutes = Math.round(Number(line?.minutes || 0));
     const hourlyRate = nonnegativeNumber(line?.hourlyRate, null, 10_000);
-    const commuteKm = nonnegativeNumber(line?.commuteKm, 0, 1_000_000);
-    const workerKm = nonnegativeNumber(line?.workerKm, Math.max(0, nonnegativeNumber(line?.km, 0, 1_000_000) - commuteKm), 1_000_000);
-    const km = Number((workerKm + commuteKm).toFixed(2));
+    const commuteKm = correction ? signedNumber(line?.commuteKm) : nonnegativeNumber(line?.commuteKm, 0, 1_000_000);
+    const workerKm = correction ? signedNumber(line?.workerKm) : nonnegativeNumber(line?.workerKm, Math.max(0, nonnegativeNumber(line?.km, 0, 1_000_000) - commuteKm), 1_000_000);
+    const km = correction ? signedNumber(line?.km, workerKm + commuteKm) : Number((workerKm + commuteKm).toFixed(2));
     const kmRate = nonnegativeNumber(line?.kmRate, 0, 1_000);
-    if (!String(line?.todoId || "") || minutes <= 0 || hourlyRate === null) return null;
-    const hours = minutes / 60;
-    const workAmount = Number((hours * hourlyRate).toFixed(2));
-    const kmAmount = Number((km * kmRate).toFixed(2));
+    if (!String(line?.todoId || "") || (!correction && minutes <= 0) || (correction && !Number.isFinite(minutes)) || hourlyRate === null) return null;
+    const hours = correction ? signedNumber(line?.hours, minutes / 60) : minutes / 60;
+    const workAmount = correction ? signedNumber(line?.workAmount, hours * hourlyRate) : Number((hours * hourlyRate).toFixed(2));
+    const kmAmount = correction ? signedNumber(line?.kmAmount, km * kmRate) : Number((km * kmRate).toFixed(2));
     return {
       todoId: String(line.todoId),
+      sourceTodoId: correction ? String(line?.sourceTodoId || "") : "",
+      correctionId: correction ? String(line?.correctionId || "") : "",
+      correction,
       assignmentGroupId: String(line.assignmentGroupId || line.todoId),
       workerId,
       date: String(line.date || ""),
@@ -3240,6 +3263,7 @@ function normalizePayroll(input, db) {
       end: String(line.end || ""),
       title: String(line.title || "").slice(0, 300),
       client: String(line.client || "").slice(0, 240),
+      status: String(line.status || ""),
       minutes,
       hours,
       hourlyRate,
@@ -3248,9 +3272,9 @@ function normalizePayroll(input, db) {
       commuteKm,
       km,
       kmRate,
-      workAmount,
-      kmAmount,
-      totalAmount: Number((workAmount + kmAmount).toFixed(2))
+      workAmount: Number(workAmount.toFixed(2)),
+      kmAmount: Number(kmAmount.toFixed(2)),
+      totalAmount: Number((correction ? signedNumber(line?.totalAmount, workAmount + kmAmount) : workAmount + kmAmount).toFixed(2))
     };
   }).filter(Boolean);
   const totals = payrollTotals(lines);
@@ -3278,7 +3302,7 @@ function normalizePayroll(input, db) {
     advanceAmount,
     personalPurchaseIds,
     personalPurchaseAmount,
-    payoutAmount: Math.max(0, Number((totals.totalAmount + advanceAmount - personalPurchaseAmount).toFixed(2))),
+    payoutAmount: Number((totals.totalAmount + advanceAmount - personalPurchaseAmount).toFixed(2)),
     payments,
     paidAmount: Number((status === "paid" && payments.length === 0 ? Math.max(0, totals.totalAmount + advanceAmount - personalPurchaseAmount) : payments.reduce((sum, payment) => sum + payment.amount, 0)).toFixed(2)),
     remainingAmount: 0,
@@ -3299,13 +3323,21 @@ function normalizePayroll(input, db) {
 }
 
 function finalizePayrollAmounts(payroll) {
+  payroll.payoutAmount = Number(Number(payroll.payoutAmount || 0).toFixed(2));
+  if (payroll.payoutAmount <= 0) {
+    payroll.paidAmount = 0;
+    payroll.remainingAmount = payroll.payoutAmount;
+    return payroll;
+  }
   payroll.paidAmount = Math.min(payroll.payoutAmount, Math.max(0, Number(payroll.paidAmount || 0)));
   payroll.remainingAmount = Number((payroll.payoutAmount - payroll.paidAmount).toFixed(2));
   return payroll;
 }
-function lockedPayrollLineTodoIds(db, excludeId = "") {
+function lockedPayrollLineTodoIds(db, excludeId = "", workerId = "") {
   return new Set((db.payrolls || [])
-    .filter((payroll) => payroll.id !== excludeId && ["archiving", "confirmed", "paid"].includes(payroll.status))
+    .filter((payroll) => payroll.id !== excludeId
+      && ["archiving", "confirmed", "paid"].includes(payroll.status)
+      && (!workerId || String(payroll.workerId || "") === String(workerId)))
     .flatMap((payroll) => payroll.lines || [])
     .map((line) => String(line.todoId || ""))
     .filter(Boolean));
@@ -3321,15 +3353,23 @@ function lockedPayrollFinancialIds(db, field, excludeId = "") {
 function buildPayrollSnapshot(db, workerId, rangeInput, previous = {}, note = undefined) {
   const range = payrollRange(rangeInput);
   if (!range) return null;
-  const lockedElsewhere = lockedPayrollLineTodoIds(db, previous.id);
+  // A task transferred after a confirmed account remains available to its new
+  // worker. The former worker is balanced by a separate correction row.
+  const lockedElsewhere = lockedPayrollLineTodoIds(db, previous.id, workerId);
   const lockedAdvanceIds = lockedPayrollFinancialIds(db, "advanceIds", previous.id);
   const lockedPersonalPurchaseIds = lockedPayrollFinancialIds(db, "personalPurchaseIds", previous.id);
-  const lines = withDailyCommuteInPayroll(db, workerId, (db.todos || [])
+  const taskLines = withDailyCommuteInPayroll(db, workerId, (db.todos || [])
     .filter((todo) => !todo.imported && !isTrashedTodo(todo) && (todo.syncUser || todo.createdBy) === workerId && !todo.archivedAt && String(todo.date || "") >= range.from && String(todo.date || "") <= range.to)
     .filter((todo) => !lockedElsewhere.has(String(todo.id || "")))
     .map((todo) => payrollLineForTodo(db, todo, workerId))
-    .filter(Boolean)
-    .sort((a, b) => a.date.localeCompare(b.date) || a.start.localeCompare(b.start) || a.title.localeCompare(b.title)));
+    .filter(Boolean));
+  const correctionLines = (db.settlementCorrections || [])
+    .filter((correction) => correction.type === "worker" && correction.status === "pending" && String(correction.workerId || "") === workerId)
+    .filter((correction) => String(correction.effectiveDate || "") >= range.from && String(correction.effectiveDate || "") <= range.to)
+    .map(correctionPayrollLine)
+    .filter((line) => !lockedElsewhere.has(String(line.todoId || "")));
+  const lines = [...taskLines, ...correctionLines]
+    .sort((a, b) => a.date.localeCompare(b.date) || a.start.localeCompare(b.start) || a.title.localeCompare(b.title));
   const advances = payrollAdvances(db, workerId, range)
     .filter((item) => !lockedAdvanceIds.has(String(item.id || "")));
   const personalPurchases = payrollPersonalPurchases(db, workerId, range)
@@ -3343,10 +3383,152 @@ function payrollForUser(db, user) {
 }
 
 function payrollLockForTodos(db, todos = []) {
-  const ids = new Set(todos.map((todo) => String(todo?.id || "")).filter(Boolean));
-  if (!ids.size) return null;
+  const todoWorkerById = new Map(todos
+    .filter(Boolean)
+    .map((todo) => [String(todo.id || ""), payrollWorkerForTodo(todo)])
+    .filter(([id, workerId]) => id && workerId));
+  if (!todoWorkerById.size) return null;
   return (db.payrolls || []).find((payroll) => ["archiving", "confirmed", "paid"].includes(payroll.status)
-    && (payroll.lines || []).some((line) => ids.has(String(line.todoId || "")))) || null;
+    && (payroll.lines || []).some((line) => String(payroll.workerId || "") === todoWorkerById.get(String(line.todoId || "")))) || null;
+}
+
+// Confirmed payrolls/client bills are immutable.  A later edit produces a
+// correction row; the following account contains just that difference.
+function signedNumber(value, fallback = 0, maximum = 1_000_000) {
+  const number = Number(value);
+  return Number.isFinite(number) && Math.abs(number) <= maximum ? number : fallback;
+}
+function correctionDateKey(now = new Date()) {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Ljubljana", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(now).filter((part) => part.type !== "literal").map((part) => [part.type, part.value]));
+  return parts.year + "-" + parts.month + "-" + parts.day;
+}
+function confirmedPayrollLineForTodo(db, todoId) {
+  const matches = [];
+  for (const payroll of db.payrolls || []) {
+    if (!["confirmed", "paid"].includes(String(payroll?.status || ""))) continue;
+    for (const line of payroll.lines || []) if (String(line?.todoId || "") === String(todoId || "")) matches.push({ payroll, line });
+  }
+  return matches.sort((left, right) => String(right.payroll.confirmedAt || "").localeCompare(String(left.payroll.confirmedAt || "")))[0] || null;
+}
+function latestCorrection(db, predicate) {
+  return (db.settlementCorrections || []).filter(predicate).sort((left, right) => String(right.updatedAt || right.createdAt || "").localeCompare(String(left.updatedAt || left.createdAt || "")))[0] || null;
+}
+function workerCorrectionSnapshot(db, todo, fallback = {}) {
+  const raw = payrollLineForTodo(db, todo, todo?.syncUser || todo?.createdBy || "");
+  const hourlyRate = nonnegativeNumber(todo?.billingHourlyRate, nonnegativeNumber(fallback.hourlyRate, 0, 10_000), 10_000);
+  const kmRate = nonnegativeNumber(fallback.kmRate, nonnegativeNumber(db.settings?.billing?.workerOwnVehicleKmRate, 0, 1_000), 1_000);
+  const minutes = Number(raw?.minutes || 0);
+  const workerKm = nonnegativeNumber(todo?.billingKm, 0, 1_000_000);
+  const commuteKm = nonnegativeNumber(fallback.commuteKm, 0, 1_000_000);
+  const km = Number((workerKm + commuteKm).toFixed(2));
+  const workAmount = Number((minutes / 60 * hourlyRate).toFixed(2));
+  const kmAmount = Number((km * kmRate).toFixed(2));
+  return { todoId: String(todo?.id || fallback.todoId || ""), assignmentGroupId: String(todo?.assignmentGroupId || fallback.assignmentGroupId || ""), workerId: String(todo?.syncUser || todo?.createdBy || fallback.workerId || ""), date: isDateKey(todo?.date) ? String(todo.date) : String(fallback.date || ""), start: String(todo?.start || ""), end: String(todo?.end || ""), title: String(todo?.title || fallback.title || "").slice(0, 300), client: String(todo?.client || fallback.client || "").slice(0, 240), status: String(todo?.status || fallback.status || ""), minutes, hours: Number((minutes / 60).toFixed(4)), hourlyRate, workerKm, workFromHome: Boolean(todo?.workFromHome), commuteKm, km, kmRate, workAmount, kmAmount, totalAmount: Number((workAmount + kmAmount).toFixed(2)) };
+}
+function workerCorrectionDelta(before = {}, after = {}) {
+  const result = {};
+  for (const key of ["minutes", "hours", "workerKm", "commuteKm", "km", "workAmount", "kmAmount", "totalAmount"]) result[key] = Number((signedNumber(after[key]) - signedNumber(before[key])).toFixed(key === "minutes" ? 0 : 2));
+  return result;
+}
+
+function zeroWorkerCorrectionSnapshot(baseline = {}) {
+  return {
+    ...baseline,
+    date: "",
+    start: "",
+    end: "",
+    status: "corrected",
+    minutes: 0,
+    hours: 0,
+    workerKm: 0,
+    commuteKm: 0,
+    km: 0,
+    workAmount: 0,
+    kmAmount: 0,
+    totalAmount: 0
+  };
+}
+function clientCorrectionSnapshot(todos = []) {
+  const list = (todos || []).filter(Boolean).slice().sort((left, right) => String(left.date || "").localeCompare(String(right.date || "")) || String(left.start || "").localeCompare(String(right.start || "")));
+  const first = list[0] || {};
+  const warranty = Boolean(first.warranty);
+  return { eventId: todoBillingEventId(first), clientId: String(first.clientId || ""), client: String(first.client || ""), date: String(first.date || ""), start: String(first.start || ""), end: String(first.end || ""), title: String(first.title || "").slice(0, 300), notes: String(first.notes || "").slice(0, 10_000), material: String(first.material || "").slice(0, 10_000), warranty, clientKm: warranty ? 0 : nonnegativeNumber(first.clientKm, 0, 1_000_000), clientVehicle: todoVehicle(first.clientVehicle), hours: warranty ? 0 : Number(list.reduce((sum, todo) => sum + todoDurationHours(todo), 0).toFixed(2)), todoIds: list.map((todo) => String(todo.id || "")).filter(Boolean) };
+}
+function sameValue(left, right) { return JSON.stringify(left || {}) === JSON.stringify(right || {}); }
+function pendingCorrectionsForTodo(db, todo) {
+  const todoId = String(todo?.id || ""), eventId = todoBillingEventId(todo);
+  return (db.settlementCorrections || []).filter((item) => item?.status === "pending" && ((item.type === "worker" && String(item.todoId || "") === todoId) || (item.type === "client" && String(item.eventId || "") === eventId)));
+}
+function upsertSettlementCorrections(db, beforeTodos, afterTodos, actor, now = new Date().toISOString()) {
+  const preliminaryBeforeClient = clientCorrectionSnapshot(beforeTodos);
+  const preliminaryAfterClient = clientCorrectionSnapshot(afterTodos);
+  const preliminaryEventId = String(preliminaryBeforeClient.eventId || preliminaryAfterClient.eventId || "");
+  if (confirmedClientBillByEvent(db).get(preliminaryEventId)
+    && preliminaryBeforeClient.clientId && preliminaryAfterClient.clientId
+    && preliminaryBeforeClient.clientId !== preliminaryAfterClient.clientId) {
+    return { corrections: [], error: "Pri ?e obra?unani storitvi stranke ni mogo?e zamenjati neposredno. Najprej naredi lo?en dobropis." };
+  }
+  const beforeById = new Map((beforeTodos || []).map((todo) => [String(todo.id || ""), todo]));
+  const afterById = new Map((afterTodos || []).map((todo) => [String(todo.id || ""), todo]));
+  const result = [];
+  for (const [todoId, before] of beforeById) {
+    const prior = confirmedPayrollLineForTodo(db, todoId);
+    const current = workerCorrectionSnapshot(db, afterById.get(todoId) || { ...before, date: "", start: "", end: "", status: "deleted", billingKm: 0 }, prior?.line || {});
+    const priorWorkerId = String(prior?.line?.workerId || "");
+    const reassigned = Boolean(priorWorkerId && current.workerId && priorWorkerId !== current.workerId);
+    const correctionWorkerId = reassigned ? priorWorkerId : String(current.workerId || priorWorkerId || "");
+    const pending = latestCorrection(db, (item) => item?.type === "worker" && item?.status === "pending"
+      && String(item.todoId || "") === todoId && String(item.workerId || "") === correctionWorkerId);
+    const settled = latestCorrection(db, (item) => item?.type === "worker" && item?.status === "settled"
+      && String(item.todoId || "") === todoId && String(item.workerId || "") === correctionWorkerId);
+    if (!prior && !pending && !settled) continue;
+    const baseline = pending?.before || settled?.after || prior?.line;
+    const after = reassigned ? zeroWorkerCorrectionSnapshot(baseline) : current;
+    if (sameValue(baseline, after)) {
+      if (pending) db.settlementCorrections = db.settlementCorrections.filter((item) => item.id !== pending.id);
+      continue;
+    }
+    // A reassignment after a confirmed payroll is two separate facts: the
+    // former worker gets a negative delta in the next account, while the new
+    // worker receives the normal live entry in their still-open account.
+    const correction = { id: pending?.id || crypto.randomUUID(), type: "worker", status: "pending", todoId, eventId: todoBillingEventId(before), workerId: correctionWorkerId, sourcePayrollId: String(prior?.payroll?.id || pending?.sourcePayrollId || settled?.sourcePayrollId || ""), before: baseline, after, delta: workerCorrectionDelta(baseline, after), effectiveDate: correctionDateKey(), createdAt: pending?.createdAt || now, createdBy: pending?.createdBy || actor?.id || "system", createdByName: pending?.createdByName || actor?.name || "", updatedAt: now, updatedBy: actor?.id || "system", updatedByName: actor?.name || "" };
+    if (pending) Object.assign(pending, correction); else db.settlementCorrections.push(correction);
+    result.push(correction);
+  }
+  const beforeClient = clientCorrectionSnapshot(beforeTodos), afterClient = clientCorrectionSnapshot(afterTodos);
+  const eventId = String(beforeClient.eventId || afterClient.eventId || "");
+  const clientBill = confirmedClientBillByEvent(db).get(eventId);
+  const pendingClient = latestCorrection(db, (item) => item?.type === "client" && item?.status === "pending" && String(item.eventId || "") === eventId);
+  const settledClient = latestCorrection(db, (item) => item?.type === "client" && item?.status === "settled" && String(item.eventId || "") === eventId);
+  if (clientBill || pendingClient || settledClient) {
+    const baseline = pendingClient?.before || settledClient?.after || beforeClient;
+    if (baseline.clientId && afterClient.clientId && baseline.clientId !== afterClient.clientId) return { corrections: result, error: "Pri ?e obra?unani storitvi stranke ni mogo?e zamenjati neposredno. Najprej naredi lo?en dobropis." };
+    if (sameValue(baseline, afterClient)) {
+      if (pendingClient) db.settlementCorrections = db.settlementCorrections.filter((item) => item.id !== pendingClient.id);
+    } else {
+      const delta = { hours: Number((signedNumber(afterClient.hours) - signedNumber(baseline.hours)).toFixed(2)), clientKm: Number((signedNumber(afterClient.clientKm) - signedNumber(baseline.clientKm)).toFixed(2)) };
+      const correction = { id: pendingClient?.id || crypto.randomUUID(), type: "client", status: "pending", eventId, clientId: String(afterClient.clientId || baseline.clientId || ""), clientName: String(afterClient.client || baseline.client || ""), sourceClientBillId: String(clientBill?.id || pendingClient?.sourceClientBillId || settledClient?.sourceClientBillId || ""), before: baseline, after: afterClient, delta, effectiveDate: correctionDateKey(), createdAt: pendingClient?.createdAt || now, createdBy: pendingClient?.createdBy || actor?.id || "system", createdByName: pendingClient?.createdByName || actor?.name || "", updatedAt: now, updatedBy: actor?.id || "system", updatedByName: actor?.name || "" };
+      if (pendingClient) Object.assign(pendingClient, correction); else db.settlementCorrections.push(correction);
+      result.push(correction);
+    }
+  }
+  return { corrections: result, error: "" };
+}
+function correctionPayrollLine(correction) {
+  const after = correction.after || {}, delta = correction.delta || {};
+  return { todoId: "correction:" + correction.id, sourceTodoId: String(correction.todoId || ""), correctionId: String(correction.id || ""), correction: true, assignmentGroupId: String(after.assignmentGroupId || correction.eventId || correction.todoId || ""), workerId: String(correction.workerId || after.workerId || ""), date: String(correction.effectiveDate || correctionDateKey()), start: "", end: "", title: "Popravek: " + String(after.title || "vpis ur").slice(0, 270), client: String(after.client || ""), status: "correction", minutes: Math.round(signedNumber(delta.minutes)), hours: signedNumber(delta.hours), hourlyRate: nonnegativeNumber(after.hourlyRate, 0, 10_000), workerKm: signedNumber(delta.workerKm), workFromHome: Boolean(after.workFromHome), commuteKm: signedNumber(delta.commuteKm), km: signedNumber(delta.km), kmRate: nonnegativeNumber(after.kmRate, 0, 1_000), workAmount: Number(signedNumber(delta.workAmount).toFixed(2)), kmAmount: Number(signedNumber(delta.kmAmount).toFixed(2)), totalAmount: Number(signedNumber(delta.totalAmount).toFixed(2)) };
+}
+function settleCorrectionsForPayroll(db, payroll, actor) {
+  const ids = new Set((payroll.lines || []).map((line) => String(line.correctionId || "")).filter(Boolean));
+  let changed = 0;
+  for (const correction of db.settlementCorrections || []) if (correction.type === "worker" && correction.status === "pending" && ids.has(correction.id)) { correction.status = "settled"; correction.workerPayrollId = payroll.id; correction.settledAt = new Date().toISOString(); correction.settledBy = actor?.id || "system"; changed += 1; }
+  return changed;
+}
+function settleCorrectionsForClientBill(db, bill, actor) {
+  const ids = new Set((bill.correctionIds || []).map(String).filter(Boolean));
+  let changed = 0;
+  for (const correction of db.settlementCorrections || []) if (correction.type === "client" && correction.status === "pending" && ids.has(correction.id)) { correction.status = "settled"; correction.clientBillId = bill.id; correction.settledAt = new Date().toISOString(); correction.settledBy = actor?.id || "system"; changed += 1; }
+  return changed;
 }
 
 function todoBillingEventId(todo) {
@@ -3443,7 +3625,8 @@ function confirmedClientBillByEvent(db) {
   for (const bill of db.clientBills || []) {
     if (!clientBillIsConfirmed(bill)) continue;
     for (const eventId of clientBillEventIds(bill)) {
-      if (!byEvent.has(eventId)) byEvent.set(eventId, bill);
+      const current = byEvent.get(eventId);
+      if (!current || String(current.confirmedAt || "") <= String(bill.confirmedAt || "")) byEvent.set(eventId, bill);
     }
   }
   return byEvent;
@@ -3469,7 +3652,8 @@ function clientBillCandidates(db, input = {}) {
     if (String(todo.clientId || "") !== String(client.clientId || "") && String(todo.client || "").trim().toLowerCase() !== String(client.name || "").trim().toLowerCase()) continue;
     if ((from && String(todo.date || "") < from) || (to && String(todo.date || "") > to)) continue;
     const eventId = todoBillingEventId(todo);
-    if (!eventId || billed.has(eventId)) continue;
+    const hasPendingCorrection = (db.settlementCorrections || []).some((correction) => correction.type === "client" && correction.status === "pending" && String(correction.eventId || "") === eventId);
+    if (!eventId || (billed.has(eventId) && !hasPendingCorrection)) continue;
     if (requestedEventIds && !requestedEventIds.has(eventId)) continue;
     if (!groups.has(eventId)) groups.set(eventId, []);
     groups.get(eventId).push(todo);
@@ -3478,6 +3662,7 @@ function clientBillCandidates(db, input = {}) {
 }
 
 function todoDurationHours(todo = {}) {
+  if (Number.isFinite(Number(todo.reportHours))) return Number(todo.reportHours);
   const start = /^(\d{2}):(\d{2})$/.exec(String(todo.start || ""));
   const end = /^(\d{2}):(\d{2})$/.exec(String(todo.end || ""));
   if (!start || !end) return 0;
@@ -3489,12 +3674,15 @@ function clientReportSelection(db, input = {}) {
   const selection = clientBillCandidates(db, input);
   if (!selection.client || !selection.groups.length) return null;
   if (selection.requestedEventIds && selection.groups.length !== selection.requestedEventIds.size) return null;
-  const groups = selection.groups.map((group) => ({
-    eventId: group.eventId,
-    todos: [...group.todos].sort((left, right) => String(left.date || "").localeCompare(String(right.date || ""))
+  const groups = selection.groups.map((group) => {
+    const todos = [...group.todos].sort((left, right) => String(left.date || "").localeCompare(String(right.date || ""))
       || String(left.start || "").localeCompare(String(right.start || ""))
-      || String(left.id || "").localeCompare(String(right.id || "")))
-  })).sort((left, right) => {
+      || String(left.id || "").localeCompare(String(right.id || "")));
+    const correction = latestCorrection(db, (item) => item?.type === "client" && item?.status === "pending" && String(item.eventId || "") === String(group.eventId));
+    if (!correction || !todos.length) return { eventId: group.eventId, todos };
+    const representative = todos[0];
+    return { eventId: group.eventId, todos: [{ ...representative, title: "Popravek obra?una: " + String(correction.after?.title || representative.title || "storitev"), start: "", end: "", reportHours: signedNumber(correction.delta?.hours), clientKm: signedNumber(correction.delta?.clientKm), clientVehicle: correction.after?.clientVehicle || representative.clientVehicle, notes: "Popravek ?e potrjene storitve. Poro?ilo vsebuje samo razliko glede na prvotni obra?un.", material: correction.after?.material || "" }] };
+  }).sort((left, right) => {
     const leftTodo = left.todos[0] || {};
     const rightTodo = right.todos[0] || {};
     return String(leftTodo.date || "").localeCompare(String(rightTodo.date || ""))
@@ -4227,6 +4415,9 @@ function buildClientBillSnapshot(db, input, actor) {
     to: isDateKey(input?.to) ? String(input.to) : "",
     status: "confirmed",
     eventIds: selection.groups.map((group) => group.eventId),
+    correctionIds: selection.groups.flatMap((group) => (db.settlementCorrections || [])
+      .filter((correction) => correction.type === "client" && correction.status === "pending" && String(correction.eventId || "") === String(group.eventId))
+      .map((correction) => correction.id)),
     lines: selection.groups.map((group) => {
       const representative = group.todos.slice().sort((left, right) => String(left.date || "").localeCompare(String(right.date || "")) || String(left.start || "").localeCompare(String(right.start || "")))[0];
       return {
@@ -4253,11 +4444,17 @@ function buildClientBillSnapshot(db, input, actor) {
 
 function confirmedPayrollByTodo(db) {
   const byTodo = new Map();
+  const todosById = new Map((db.todos || []).map((todo) => [String(todo.id || ""), todo]));
   for (const payroll of db.payrolls || []) {
     if (!["confirmed", "paid"].includes(payroll.status)) continue;
     for (const line of payroll.lines || []) {
       const todoId = String(line?.todoId || "");
-      if (todoId && !byTodo.has(todoId)) byTodo.set(todoId, payroll);
+      const todo = todosById.get(todoId);
+      // A historic line belonging to a former worker is not a settlement for
+      // the current worker, nor may it cause the live task to be archived.
+      if (todoId && todo && payrollWorkerForTodo(todo) === String(payroll.workerId || "") && !byTodo.has(todoId)) {
+        byTodo.set(todoId, payroll);
+      }
     }
   }
   return byTodo;
@@ -4274,10 +4471,11 @@ function reconcileTodoArchives(db, actor = null) {
   for (const todo of db.todos || []) {
     if (isTrashedTodo(todo)) continue;
     const payroll = payrolls.get(String(todo.id || ""));
+    const hasPendingCorrection = pendingCorrectionsForTodo(db, todo).length > 0;
     const needsClientBill = todoRequiresClientBilling(todo);
     const bill = needsClientBill ? bills.get(todoBillingEventId(todo)) : null;
     const desiredClientBillId = bill?.id || "";
-    const readyForArchive = Boolean(payroll && (!needsClientBill || bill));
+    const readyForArchive = Boolean(!hasPendingCorrection && payroll && (!needsClientBill || bill));
     if (todo.clientBillId !== desiredClientBillId || todo.clientBilledAt !== (bill?.confirmedAt || "")) {
       todo.clientBillId = desiredClientBillId;
       todo.clientBilledAt = bill?.confirmedAt || "";
@@ -5672,7 +5870,8 @@ function entrySummary(entry) {
 }
 function payrollTodosForArchive(db, payroll) {
   const todoIds = new Set((payroll.lines || []).map((line) => String(line.todoId || "")).filter(Boolean));
-  return (db.todos || []).filter((todo) => todoIds.has(String(todo.id || "")));
+  return (db.todos || []).filter((todo) => todoIds.has(String(todo.id || ""))
+    && payrollWorkerForTodo(todo) === String(payroll.workerId || ""));
 }
 
 async function archivePayrollTodos(db, payroll, actor) {
@@ -6949,9 +7148,10 @@ async function handleApi(req, res) {
         return;
       }
       db.clientBills.push(clientBill);
+      const settledCorrections = settleCorrectionsForClientBill(db, clientBill, user);
       const archive = reconcileTodoArchives(db, user);
       await writeDbAsync(db);
-      sendJson(res, 201, { clientBill, clientBills: db.clientBills, archive, todos: visibleTodosForUser(db, user) });
+      sendJson(res, 201, { clientBill, clientBills: db.clientBills, archive, settledCorrections, todos: visibleTodosForUser(db, user) });
       return;
     }
 
@@ -7051,9 +7251,10 @@ async function handleApi(req, res) {
       const finalIndex = db.payrolls.findIndex((item) => item.id === payroll.id);
       if (finalIndex >= 0) db.payrolls[finalIndex] = payroll;
       else db.payrolls.push(payroll);
+      const settledCorrections = settleCorrectionsForPayroll(db, payroll, user);
       const archive = await archivePayrollTodos(db, payroll, user);
       await writeDbAsync(db);
-      sendJson(res, 200, { payrolls: payrollForUser(db, user), payroll, archive });
+      sendJson(res, 200, { payrolls: payrollForUser(db, user), payroll, archive, settledCorrections });
       return;
     }
     const payrollPaymentMatch = url.pathname.match(/^\/api\/payrolls\/([^/]+)\/payments$/);
@@ -7258,9 +7459,10 @@ async function handleApi(req, res) {
         return;
       }
       db.payrolls[index] = payroll;
+      const settledCorrections = action === "confirm" ? settleCorrectionsForPayroll(db, payroll, user) : 0;
       const archive = ["confirm", "reopen"].includes(action) ? await archivePayrollTodos(db, payroll, user) : null;
       await writeDbAsync(db);
-      sendJson(res, 200, { payrolls: payrollForUser(db, user), payroll, archive });
+      sendJson(res, 200, { payrolls: payrollForUser(db, user), payroll, archive, settledCorrections });
       return;
     }
 
@@ -8551,6 +8753,13 @@ async function handleApi(req, res) {
           history: [...(item.history || []), audit(user, action)]
         };
       });
+      const settlementChanges = operations.map((operation) => upsertSettlementCorrections(
+        db,
+        todoAssignmentItems(db, operation.previousTodo).map((item) => ({ ...item, start: operation.previousTodo.start, end: operation.previousTodo.end, date: operation.previousTodo.date, endDate: operation.previousTodo.endDate })),
+        todoAssignmentItems(db, operation.previousTodo),
+        user,
+        now
+      ));
       const lateTimeEntryReports = operations
         .map((operation) => queueLateTimeEntryReport(db, {
           before: operation.previousTodo,
@@ -8599,16 +8808,6 @@ async function handleApi(req, res) {
         return;
       }
       const assignmentItems = todoAssignmentItems(db, previousTodo);
-      const payrollLock = payrollLockForTodos(db, assignmentItems);
-      if (payrollLock) {
-        sendJson(res, 403, { error: `Opravilo je del potrjenega obračuna za ${db.users?.[payrollLock.workerId]?.name || payrollLock.workerId} (${payrollLock.month}). Šef ga mora najprej ponovno odpreti.` });
-        return;
-      }
-      const clientBillLock = clientBillLockForTodos(db, assignmentItems);
-      if (clientBillLock) {
-        sendJson(res, 403, { error: `Opravilo je že v potrjenem obračunu stranki ${clientBillLock.clientName} in ga ni več mogoče spreminjati.` });
-        return;
-      }
       const now = new Date().toISOString();
       const assignmentIds = new Set(assignmentItems.map((item) => item.id));
       db.todos = db.todos.map((item) => assignmentIds.has(item.id) ? {
@@ -8623,6 +8822,13 @@ async function handleApi(req, res) {
         updatedAt: now,
         history: [...(item.history || []), audit(user, date === previousTodo.date ? "prestavljen v časovnici" : `prestavljen na ${date} v časovnici`)]
       } : item);
+      const settlementChange = upsertSettlementCorrections(
+        db,
+        assignmentItems.map((item) => ({ ...item })),
+        todoAssignmentItems(db, previousTodo),
+        user,
+        now
+      );
       const lateTimeEntryReport = queueLateTimeEntryReport(db, {
         before: previousTodo,
         after: db.todos.find((item) => item.id === previousTodo.id),
@@ -8771,16 +8977,6 @@ async function handleApi(req, res) {
         ...todo,
         completionRequests: todoCompletionRequestsForAssignment(db, previousTodo)
       };
-      const payrollLock = payrollLockForTodos(db, assignmentItems);
-      if (payrollLock) {
-        sendJson(res, 403, { error: `Opravilo je del potrjenega obračuna za ${db.users?.[payrollLock.workerId]?.name || payrollLock.workerId} (${payrollLock.month}). Šef ga mora najprej ponovno odpreti.` });
-        return;
-      }
-      const clientBillLock = clientBillLockForTodos(db, assignmentItems);
-      if (clientBillLock) {
-        sendJson(res, 403, { error: `Opravilo je že v potrjenem obračunu stranki ${clientBillLock.clientName} in ga ni več mogoče spreminjati.` });
-        return;
-      }
       const currentAssigneeIds = todoAssignmentAssigneeIds(db, previousTodo);
       let assigneeIds;
       if (Array.isArray(body.assigneeIds)) {
@@ -8890,6 +9086,11 @@ releaseTodoAssignmentEditLock(db, previousTodo, user, editLockToken);
         || updatedGroup.find((item) => item.syncUser === previousTodo.syncUser)
         || updatedGroup[0]
         || null;
+      const settlementChange = upsertSettlementCorrections(db, assignmentItems, updatedGroup, user, now);
+      if (settlementChange.error) {
+        sendJson(res, 409, { error: settlementChange.error });
+        return;
+      }
       const lateTimeEntryReport = queueLateTimeEntryReport(db, {
         before: previousTodo,
         after: updatedOpenedTodo,
@@ -8934,16 +9135,6 @@ releaseTodoAssignmentEditLock(db, previousTodo, user, editLockToken);
         return;
       }
       const assignmentItems = todoAssignmentItems(db, todo);
-      const payrollLock = payrollLockForTodos(db, assignmentItems);
-      if (payrollLock) {
-        sendJson(res, 403, { error: `Opravilo je del potrjenega obračuna za ${db.users?.[payrollLock.workerId]?.name || payrollLock.workerId} (${payrollLock.month}). Šef ga mora najprej ponovno odpreti.` });
-        return;
-      }
-      const clientBillLock = clientBillLockForTodos(db, assignmentItems);
-      if (clientBillLock) {
-        sendJson(res, 403, { error: `Opravilo je že v potrjenem obračunu stranki ${clientBillLock.clientName} in ga ni več mogoče izbrisati.` });
-        return;
-      }
       releaseTodoAssignmentEditLock(db, todo, user, editLockToken);
       const lateTimeEntryReport = queueLateTimeEntryReport(db, {
         before: todo,
@@ -9133,6 +9324,11 @@ module.exports = {
   entryEditLockConflict,
   buildCalendarIcs,
   buildPayrollSnapshot,
+  upsertSettlementCorrections,
+  correctionPayrollLine,
+  settleCorrectionsForPayroll,
+  settleCorrectionsForClientBill,
+  pendingCorrectionsForTodo,
   buildClientBillSnapshot,
   clientReportSelection,
   clientReportAttachmentSelection,
