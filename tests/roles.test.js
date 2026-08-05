@@ -33,6 +33,8 @@ const {
   findActiveTodoCompletionRequest,
   cleanTodo,
   cancelClientBill,
+  directClientSettlementForTodo,
+  clientSettlementForTodo,
   clientBillLockForTodos,
   reconcileTodoArchives,
   archiveRetentionCandidates,
@@ -541,6 +543,42 @@ test("priloge sprejmejo pravi PDF in zavrnejo preimenovano datoteko", () => {
   assert.equal(validTodoAttachmentDataUrl(html), false);
 });
 
+test("direct client settlement creates an auditable worker credit", () => {
+  const database = {
+    users: {
+      bojan: { id: "bojan", name: "Bojan", role: "boss", billing: { hourlyRate: 15 } },
+      ibro: { id: "ibro", name: "Ibro", role: "worker", billing: { hourlyRate: 15 } }
+    },
+    clients: [{ clientId: "jerin", name: "Jerin", search: "jerin" }],
+    settings: { billing: { workerOwnVehicleKmRate: 0.22, mealPaidMinutes: 45 } },
+    debts: [],
+    payrolls: [],
+    clientBills: [],
+    todos: [{
+      id: "entry-1", assignmentGroupId: "event-1", syncUser: "ibro", createdBy: "ibro",
+      status: "execution", date: "2026-07-15", start: "08:00", end: "10:00",
+      title: "Monta\u017ea", clientId: "jerin", client: "Jerin", billingHourlyRate: 15
+    }]
+  };
+  const settled = directClientSettlementForTodo(database, database.todos[0], { confirmed: true, amount: 80, creditWorker: true }, worker);
+  assert.ok(settled.clientBill);
+  assert.equal(settled.clientBill.directSettlement, true);
+  assert.equal(settled.clientBill.receivedAmount, 80);
+  assert.equal(database.debts.length, 1);
+  assert.deepEqual(database.debts[0] && { type: database.debts[0].type, person: database.debts[0].person, amount: database.debts[0].amount }, { type: "client_receipt", person: "ibro", amount: 80 });
+  assert.equal(clientSettlementForTodo(database, database.todos[0]).confirmed, true);
+  assert.equal(reconcileTodoArchives(database, boss).archived, 0);
+
+  const payroll = buildPayrollSnapshot(database, "ibro", { from: "2026-07-01", to: "2026-07-31" }, { id: "payroll-1", status: "draft" });
+  assert.deepEqual(payroll.clientReceiptIds, [database.debts[0].id]);
+  assert.equal(payroll.clientReceiptAmount, 80);
+  assert.equal(payroll.payoutAmount, 110);
+  database.payrolls.push({ ...payroll, status: "confirmed" });
+  assert.equal(reconcileTodoArchives(database, boss).archived, 1);
+
+  const denied = cancelClientBill(database, settled.clientBill.id, boss);
+  assert.match(denied.error, /obra\u010dun delavca/);
+});
 test("obračun naredi nespremenljiv posnetek ur posameznega delavca", () => {
   const db = {
     users: {

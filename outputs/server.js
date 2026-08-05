@@ -2064,17 +2064,22 @@ function normalizeDb(db = {}) {
   if (pruneUnusedTodoAttachments(db)) changed = true;
 
   db.debts = db.debts.map((debt) => {
-    const type = ["advance", "personal_purchase"].includes(debt.type) ? debt.type : "debt";
-    const person = cleanUserId(debt.person) || (["advance", "personal_purchase"].includes(type) ? "" : (["ibro", "bojan"].includes(debt.person) ? debt.person : "ibro"));
+    const type = ["advance", "personal_purchase", "client_receipt"].includes(debt.type) ? debt.type : "debt";
+    const person = cleanUserId(debt.person) || (["advance", "personal_purchase", "client_receipt"].includes(type) ? "" : (["ibro", "bojan"].includes(debt.person) ? debt.person : "ibro"));
     const next = {
       id: debt.id || crypto.randomUUID(),
       type,
       month: /^\d{4}-\d{2}$/.test(String(debt.month || "")) ? String(debt.month) : new Date().toISOString().slice(0, 7),
       date: isDateKey(debt.date) ? String(debt.date) : "",
+      // sourceDate retains when the worker collected the money, while date is
+      // the period where it is financially credited. For old confirmed
+      // payrolls those dates can intentionally differ.
+      sourceDate: isDateKey(debt.sourceDate) ? String(debt.sourceDate) : "",
       person,
       amount: Number(debt.amount || 0),
       reason: String(debt.reason || "").trim(),
       projectTodoId: String(debt.projectTodoId || ""),
+      clientBillId: String(debt.clientBillId || ""),
       photos: Array.isArray(debt.photos) ? debt.photos : [],
       createdBy: debt.createdBy || "system",
       createdByName: debt.createdByName || "",
@@ -2761,6 +2766,7 @@ function visibleTodosForUser(db, user) {
     const corrections = pendingCorrectionsForTodo(db, todo);
     return {
       ...publicTodo,
+      clientSettlement: clientSettlementForTodo(db, todo),
       settlement: corrections.length ? {
         pending: true,
         worker: corrections.filter((item) => item.type === "worker").map((item) => ({ id: item.id, delta: item.delta, effectiveDate: item.effectiveDate })),
@@ -2783,7 +2789,7 @@ function visibleTodoForUser(db, user, id) {
   });
   const { completionRequests, ...publicTodo } = hydrated;
   const corrections = pendingCorrectionsForTodo(db, todo);
-  return { ...publicTodo, settlement: corrections.length ? { pending: true, worker: corrections.filter((item) => item.type === "worker").map((item) => ({ id: item.id, delta: item.delta, effectiveDate: item.effectiveDate })), client: corrections.filter((item) => item.type === "client").map((item) => ({ id: item.id, delta: item.delta, effectiveDate: item.effectiveDate })) } : { pending: false, worker: [], client: [] } };
+  return { ...publicTodo, clientSettlement: clientSettlementForTodo(db, todo), settlement: corrections.length ? { pending: true, worker: corrections.filter((item) => item.type === "worker").map((item) => ({ id: item.id, delta: item.delta, effectiveDate: item.effectiveDate })), client: corrections.filter((item) => item.type === "client").map((item) => ({ id: item.id, delta: item.delta, effectiveDate: item.effectiveDate })) } : { pending: false, worker: [], client: [] } };
 }
 
 function hydrateDebtAttachments(db, debt) {
@@ -2802,6 +2808,13 @@ function visibleAdvancesForUser(db, user) {
 
 function visiblePersonalPurchasesForUser(db, user) {
   return visibleDebtsForUser(db, user).filter((debt) => debt.type === "personal_purchase");
+}
+
+// A worker can occasionally receive a payment from the client while doing the
+// work. This is not an advance and it is not payment for hours: it is a
+// separate, auditable credit on that worker's settlement.
+function visibleClientReceiptsForUser(db, user) {
+  return visibleDebtsForUser(db, user).filter((debt) => debt.type === "client_receipt");
 }
 
 function canManageEntry(user, entry) {
@@ -3231,6 +3244,10 @@ function payrollPersonalPurchases(db, workerId, range) {
   return (db.debts || []).filter((item) => item.type === "personal_purchase" && item.person === workerId && item.date >= range.from && item.date <= range.to);
 }
 
+function payrollClientReceipts(db, workerId, range) {
+  return (db.debts || []).filter((item) => item.type === "client_receipt" && item.person === workerId && item.date >= range.from && item.date <= range.to);
+}
+
 function payrollWorkerForTodo(todo) {
   return String(todo?.syncUser || todo?.createdBy || "").trim();
 }
@@ -3280,6 +3297,8 @@ function normalizePayroll(input, db) {
   const totals = payrollTotals(lines);
   const advanceIds = [...new Set((Array.isArray(input?.advanceIds) ? input.advanceIds : []).map(String).filter(Boolean))];
   const advanceAmount = Number((Number(input?.advanceAmount || 0)).toFixed(2));
+  const clientReceiptIds = [...new Set((Array.isArray(input?.clientReceiptIds) ? input.clientReceiptIds : []).map(String).filter(Boolean))];
+  const clientReceiptAmount = Number((Number(input?.clientReceiptAmount || 0)).toFixed(2));
   const personalPurchaseIds = [...new Set((Array.isArray(input?.personalPurchaseIds) ? input.personalPurchaseIds : []).map(String).filter(Boolean))];
   const personalPurchaseAmount = Number((Number(input?.personalPurchaseAmount || 0)).toFixed(2));
   const status = PAYROLL_STATUSES.has(input?.status) ? input.status : "draft";
@@ -3300,11 +3319,13 @@ function normalizePayroll(input, db) {
     lines,
     advanceIds,
     advanceAmount,
+    clientReceiptIds,
+    clientReceiptAmount,
     personalPurchaseIds,
     personalPurchaseAmount,
-    payoutAmount: Number((totals.totalAmount + advanceAmount - personalPurchaseAmount).toFixed(2)),
+    payoutAmount: Number((totals.totalAmount + advanceAmount + clientReceiptAmount - personalPurchaseAmount).toFixed(2)),
     payments,
-    paidAmount: Number((status === "paid" && payments.length === 0 ? Math.max(0, totals.totalAmount + advanceAmount - personalPurchaseAmount) : payments.reduce((sum, payment) => sum + payment.amount, 0)).toFixed(2)),
+    paidAmount: Number((status === "paid" && payments.length === 0 ? Math.max(0, totals.totalAmount + advanceAmount + clientReceiptAmount - personalPurchaseAmount) : payments.reduce((sum, payment) => sum + payment.amount, 0)).toFixed(2)),
     remainingAmount: 0,
     ...totals,
     createdBy: String(input?.createdBy || "system"),
@@ -3357,6 +3378,7 @@ function buildPayrollSnapshot(db, workerId, rangeInput, previous = {}, note = un
   // worker. The former worker is balanced by a separate correction row.
   const lockedElsewhere = lockedPayrollLineTodoIds(db, previous.id, workerId);
   const lockedAdvanceIds = lockedPayrollFinancialIds(db, "advanceIds", previous.id);
+  const lockedClientReceiptIds = lockedPayrollFinancialIds(db, "clientReceiptIds", previous.id);
   const lockedPersonalPurchaseIds = lockedPayrollFinancialIds(db, "personalPurchaseIds", previous.id);
   const taskLines = withDailyCommuteInPayroll(db, workerId, (db.todos || [])
     .filter((todo) => !todo.imported && !isTrashedTodo(todo) && (todo.syncUser || todo.createdBy) === workerId && !todo.archivedAt && String(todo.date || "") >= range.from && String(todo.date || "") <= range.to)
@@ -3372,9 +3394,11 @@ function buildPayrollSnapshot(db, workerId, rangeInput, previous = {}, note = un
     .sort((a, b) => a.date.localeCompare(b.date) || a.start.localeCompare(b.start) || a.title.localeCompare(b.title));
   const advances = payrollAdvances(db, workerId, range)
     .filter((item) => !lockedAdvanceIds.has(String(item.id || "")));
+  const clientReceipts = payrollClientReceipts(db, workerId, range)
+    .filter((item) => !lockedClientReceiptIds.has(String(item.id || "")));
   const personalPurchases = payrollPersonalPurchases(db, workerId, range)
     .filter((item) => !lockedPersonalPurchaseIds.has(String(item.id || "")));
-  return normalizePayroll({ ...previous, workerId, ...range, lines, advanceIds: advances.map((item) => item.id), advanceAmount: advances.reduce((total, item) => total + Number(item.amount || 0), 0), personalPurchaseIds: personalPurchases.map((item) => item.id), personalPurchaseAmount: personalPurchases.reduce((total, item) => total + Number(item.amount || 0), 0), note: note === undefined ? previous.note : note }, db);
+  return normalizePayroll({ ...previous, workerId, ...range, lines, advanceIds: advances.map((item) => item.id), advanceAmount: advances.reduce((total, item) => total + Number(item.amount || 0), 0), clientReceiptIds: clientReceipts.map((item) => item.id), clientReceiptAmount: clientReceipts.reduce((total, item) => total + Number(item.amount || 0), 0), personalPurchaseIds: personalPurchases.map((item) => item.id), personalPurchaseAmount: personalPurchases.reduce((total, item) => total + Number(item.amount || 0), 0), note: note === undefined ? previous.note : note }, db);
 }
 
 function payrollForUser(db, user) {
@@ -3599,6 +3623,13 @@ function normalizeClientBill(input, db) {
     cancelledAt: status === "cancelled" ? String(input?.cancelledAt || createdAt) : "",
     cancelledBy: status === "cancelled" ? String(input?.cancelledBy || "system") : "",
     cancelledByName: status === "cancelled" ? String(input?.cancelledByName || "") : "",
+    // A direct settlement records the actual amount paid by the client. The
+    // normal client report intentionally does not calculate a client price.
+    directSettlement: Boolean(input?.directSettlement),
+    receivedAmount: nonnegativeNumber(input?.receivedAmount, 0, 1_000_000),
+    creditedWorkerId: cleanUserId(input?.creditedWorkerId),
+    creditedWorkerName: String(input?.creditedWorkerName || "").trim().slice(0, 120),
+    clientReceiptId: String(input?.clientReceiptId || "").trim().slice(0, 100),
     note: String(input?.note || "").trim().slice(0, 2_000)
   };
 }
@@ -3606,6 +3637,14 @@ function normalizeClientBill(input, db) {
 function cancelClientBill(db, billId, actor = null) {
   const bill = (db.clientBills || []).find((item) => String(item?.id || "") === String(billId || ""));
   if (!bill || !clientBillIsConfirmed(bill)) return null;
+  const linkedReceiptId = String(bill.clientReceiptId || "");
+  if (linkedReceiptId) {
+    const referencedPayroll = (db.payrolls || []).find((payroll) => (payroll.clientReceiptIds || []).map(String).includes(linkedReceiptId));
+    if (referencedPayroll) {
+      return { error: "Neposrednega poračuna ni mogoče preklicati, ker je plačilo že vključeno v obračun delavca. Najprej odpri ali popravi ta obračun." };
+    }
+    db.debts = (db.debts || []).filter((item) => String(item?.id || "") !== linkedReceiptId);
+  }
   const auditActor = actor || { id: "system", name: "Sistem" };
   const now = new Date().toISOString();
   const eventIds = new Set(clientBillEventIds(bill));
@@ -4438,8 +4477,107 @@ function buildClientBillSnapshot(db, input, actor) {
     createdAt,
     confirmedAt: createdAt,
     confirmedBy: actor?.id || "system",
-    confirmedByName: actor?.name || ""
+    confirmedByName: actor?.name || "",
+    directSettlement: Boolean(input?.directSettlement),
+    receivedAmount: nonnegativeNumber(input?.receivedAmount, 0, 1_000_000),
+    creditedWorkerId: cleanUserId(input?.creditedWorkerId),
+    creditedWorkerName: String(input?.creditedWorkerName || "").trim().slice(0, 120),
+    clientReceiptId: String(input?.clientReceiptId || "").trim().slice(0, 100)
   }, db);
+}
+
+function directClientSettlementRequest(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value) || !value.confirmed) return null;
+  return {
+    amount: nonnegativeNumber(value.amount, null, 1_000_000),
+    creditWorker: Boolean(value.creditWorker)
+  };
+}
+
+function directClientSettlementForTodo(db, todo, input, actor) {
+  const request = directClientSettlementRequest(input);
+  if (!request) return { clientBill: null, clientReceipt: null };
+  if (request.amount === null || request.amount <= 0) {
+    return { error: "Za poraÄŤunano storitev vpiĹˇi prejeti znesek." };
+  }
+  if (!todoRequiresClientBilling(todo)) {
+    return { error: "S stranko lahko neposredno poraÄŤunaĹˇ samo zakljuÄŤen vpis ur z izbrano stranko." };
+  }
+  const eventId = todoBillingEventId(todo);
+  const current = confirmedClientBillByEvent(db).get(eventId);
+  if (current) {
+    if (current.directSettlement) return { clientBill: current, clientReceipt: current.clientReceiptId ? (db.debts || []).find((item) => item.id === current.clientReceiptId) || null : null };
+    return { error: "Ta dogodek je Ĺľe v potrjenem obraÄŤunu stranki." };
+  }
+  const workerId = payrollWorkerForTodo(todo);
+  if (request.creditWorker && !db.users?.[workerId]) {
+    return { error: "Delavca za plaÄŤilo v dobro ni bilo mogoÄŤe prepoznati." };
+  }
+  const clientReceiptId = request.creditWorker ? crypto.randomUUID() : "";
+  const clientBill = buildClientBillSnapshot(db, {
+    clientId: todo.clientId,
+    clientName: todo.client,
+    eventIds: [eventId],
+    directSettlement: true,
+    receivedAmount: request.amount,
+    creditedWorkerId: request.creditWorker ? workerId : "",
+    creditedWorkerName: request.creditWorker ? (db.users[workerId]?.name || workerId) : "",
+    clientReceiptId
+  }, actor);
+  if (!clientBill) return { error: "Dogodka ni bilo mogoÄŤe pripraviti za obraÄŤun stranki." };
+  db.clientBills.push(clientBill);
+  let clientReceipt = null;
+  if (request.creditWorker) {
+    // We never rewrite a confirmed payroll. A late client payment becomes a
+    // new credit in today's open settlement, while sourceDate still points to
+    // the original work entry.
+    const sourcePayroll = confirmedPayrollLineForTodo(db, todo.id);
+    const accountingDate = sourcePayroll ? serverDateKey() : String(todo.date || serverDateKey());
+    const now = new Date().toISOString();
+    clientReceipt = {
+      id: clientReceiptId,
+      type: "client_receipt",
+      person: workerId,
+      month: accountingDate.slice(0, 7),
+      date: accountingDate,
+      sourceDate: String(todo.date || ""),
+      amount: Number(request.amount.toFixed(2)),
+      reason: `PlaÄŤilo stranke ${todo.client}: ${todo.title || "storitev"}`.slice(0, 2_000),
+      projectTodoId: String(todo.id || ""),
+      clientBillId: clientBill.id,
+      photos: [],
+      createdBy: actor?.id || "system",
+      createdByName: actor?.name || "",
+      createdAt: now,
+      updatedBy: actor?.id || "system",
+      updatedByName: actor?.name || "",
+      updatedAt: now
+    };
+    db.debts.push(clientReceipt);
+  }
+  for (const item of db.todos || []) {
+    if (todoBillingEventId(item) !== eventId) continue;
+    item.history = [...(item.history || []), audit(actor || { id: "system", name: "Sistem" }, request.creditWorker
+      ? `neposredno poraÄŤunano s stranko; ${request.amount.toFixed(2)} EUR v dobro delavca`
+      : `neposredno poraÄŤunano s stranko; ${request.amount.toFixed(2)} EUR`)];
+  }
+  const settledCorrections = settleCorrectionsForClientBill(db, clientBill, actor);
+  const archive = reconcileTodoArchives(db, actor);
+  return { clientBill, clientReceipt, settledCorrections, archive };
+}
+
+function clientSettlementForTodo(db, todo) {
+  const bill = confirmedClientBillByEvent(db).get(todoBillingEventId(todo));
+  if (!bill) return { confirmed: false };
+  return {
+    confirmed: true,
+    direct: Boolean(bill.directSettlement),
+    amount: nonnegativeNumber(bill.receivedAmount, 0, 1_000_000),
+    creditedWorkerId: String(bill.creditedWorkerId || ""),
+    creditedWorkerName: String(bill.creditedWorkerName || ""),
+    confirmedAt: String(bill.confirmedAt || ""),
+    clientBillId: String(bill.id || "")
+  };
 }
 
 function confirmedPayrollByTodo(db) {
@@ -7169,6 +7307,10 @@ async function handleApi(req, res) {
         sendJson(res, 404, { error: "Potrjenega obračuna stranki ni bilo mogoče najti." });
         return;
       }
+      if (result.error) {
+        sendJson(res, 409, { error: result.error });
+        return;
+      }
       await writeDbAsync(db);
       sendJson(res, 200, { clientBill: result.clientBill, clientBills: db.clientBills || [], archive: result.archive, todos: visibleTodosForUser(db, user) });
       return;
@@ -8912,12 +9054,17 @@ async function handleApi(req, res) {
         return;
       }
       const db = await readDbAsync();
+      const directClientSettlement = directClientSettlementRequest(body.directClientSettlement);
       const index = db.todos.findIndex((item) => item.id === id);
       if (index < 0) {
         sendJson(res, 404, { error: "Opravilo ne obstaja." });
         return;
       }
       const previousTodo = db.todos[index];
+      if (directClientSettlement && confirmedClientBillByEvent(db).has(todoBillingEventId(previousTodo))) {
+        sendJson(res, 409, { error: "Ta dogodek je Ĺľe poraÄŤunan s stranko in ga je treba najprej kontrolirano preklicati v obraÄŤunu strank." });
+        return;
+      }
       if (isTrashedTodo(previousTodo)) {
         sendJson(res, 409, { error: "Opravilo je v Izbrisano. Najprej ga obnovi." });
         return;
@@ -9091,6 +9238,13 @@ releaseTodoAssignmentEditLock(db, previousTodo, user, editLockToken);
         sendJson(res, 409, { error: settlementChange.error });
         return;
       }
+      const directSettlement = directClientSettlement
+        ? directClientSettlementForTodo(db, updatedOpenedTodo, body.directClientSettlement, user)
+        : null;
+      if (directSettlement?.error) {
+        sendJson(res, 400, { error: directSettlement.error });
+        return;
+      }
       const lateTimeEntryReport = queueLateTimeEntryReport(db, {
         before: previousTodo,
         after: updatedOpenedTodo,
@@ -9103,7 +9257,7 @@ releaseTodoAssignmentEditLock(db, previousTodo, user, editLockToken);
       await writeDbAsync(db);
       releaseTodoAssignmentEditLock(db, previousTodo, user, editLockToken);
       if (lateTimeEntryReport) scheduleLateTimeEntryReportDelivery();
-      sendJson(res, 200, { todos: visibleTodosForUser(db, user), lateTimeEntryReportsQueued: lateTimeEntryReport ? 1 : 0 });
+      sendJson(res, 200, { todos: visibleTodosForUser(db, user), debts: visibleDebtsForUser(db, user), lateTimeEntryReportsQueued: lateTimeEntryReport ? 1 : 0 });
       return;
     }
 
@@ -9363,6 +9517,8 @@ module.exports = {
   cleanTodo,
   archivePayrollTodos,
   cancelClientBill,
+  directClientSettlementForTodo,
+  clientSettlementForTodo,
   clientBillLockForTodos,
   reconcileTodoArchives,
   archiveRetentionMonthsForDb,
