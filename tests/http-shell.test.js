@@ -66,6 +66,8 @@ test("front-end naročila in foto urejevalnik ohranita dogovorjeni mobilni prika
   assert.match(html, /todoSortModes = \["manual", "client", "date", "order", "completed", "open", "in_progress", "imported"\]/);
   assert.match(html, /function isImportedTodo\(todo\)/);
   assert.match(html, /state\.todoSortMode === "imported" \? isImportedTodo\(todo\) : !isImportedTodo\(todo\)/);
+  assert.match(html, /id="todoImportedOption" value="imported" hidden disabled/);
+  assert.match(html, /function syncImportedTodoFilter\(\) \{[\s\S]*?state\.todos\.some\(\(todo\) => isImportedTodo\(todo\)\)/);
   assert.match(html, /!isImportedTodo\(todo\) && \(includeArchived \|\| !todo\.archivedAt\)/);
   assert.match(html, /@media \(min-width: 1600px\)[\s\S]*?width: min\(100%, 1540px\)/);
   assert.match(html, /function closeWorkContextMenu\(\)/);
@@ -686,6 +688,19 @@ test("nova forma opravila ohrani osnutek med vrstama vnosa in ne podeduje strank
   assert.match(html, /const todoInternalCompanyStatusIds = new Set\(\["internal", \.\.\.todoOrderStatusIds\]\);/);
   assert.match(html, /function applyTodoFormInternalCompanyClient\(\)/);
   assert.match(html, /todoStatusUsesInternalCompanyClient\(button\.dataset\.status\)/);
+});
+
+test("todo polish persists client report sorting and closes the daily view after explicit save", async () => {
+  const [html, server] = await Promise.all([
+    fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8"),
+    fs.readFile(path.join(__dirname, "..", "outputs", "server.js"), "utf8")
+  ]);
+  assert.match(html, /const reportClientSortModes = \["recent", "hours_desc", "oldest", "count_desc", "name_asc", "name_desc"\]/);
+  assert.match(html, /sort: state\.reportClientSort/);
+  assert.match(html, /saveDayTimelineDrafts\(\{ closeAfterSave: true \}\)/);
+  assert.match(html, /if \(closeAfterSave && \$\("dayTimelineDialog"\)\.open[\s\S]*?\$\("dayTimelineDialog"\)\.close\(\);/);
+  assert.match(html, /function capitalizeTodoText\(value\)/);
+  assert.match(server, /function capitalizeTodoText\(value\)/);
 });
 
 test("iskanje omogo\u010da skok do opravila z za\u010dasno poudaritvijo", async () => {

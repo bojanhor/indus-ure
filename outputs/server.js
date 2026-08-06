@@ -5194,6 +5194,11 @@ function normalizeTodoCreateReceipts(input, users, now = Date.now()) {
   return Object.fromEntries(receipts.slice(0, MAX_TODO_CREATE_RECEIPTS).map((receipt) => [todoCreateReceiptKey(receipt.userId, receipt.mutationId), receipt]));
 }
 
+function capitalizeTodoText(value) {
+  const text = String(value || "").trim();
+  return text.replace(/^(\s*)(\p{L})/u, (_, leading, letter) => `${leading}${letter.toLocaleUpperCase("sl-SI")}`);
+}
+
 function cleanTodo(input) {
   const status = input.status === "billing" ? "execution" : TODO_STATUSES.has(input.status) ? input.status : "open";
   const isMeal = status === "meal";
@@ -5203,7 +5208,7 @@ function cleanTodo(input) {
   const sourceProjectTitle = sourceProjectTodoId ? String(input.sourceProjectTitle || "").trim().slice(0, 300) : "";
   const photos = Array.isArray(input.photos) ? input.photos : [];
   return {
-    title: isMeal ? "Malica" : String(input.title || "").trim(),
+    title: isMeal ? "Malica" : capitalizeTodoText(input.title),
     date: String(input.date || ""),
     endDate: String(input.endDate || input.date || ""),
     calendarOnly: Boolean(!isTimeEntry && !isMaterial && input.calendarOnly && input.date),
@@ -5215,8 +5220,8 @@ function cleanTodo(input) {
     // These are only a display snapshot; the API re-derives them from the
     // selected contact IDs and the resolved client before persistence.
     clientContacts: isMeal ? [] : cleanTodoClientContactSnapshots(input.clientContacts),
-    notes: isMeal ? "" : String(input.notes || "").trim(),
-    material: isMeal ? "" : String(input.material || "").trim(),
+    notes: isMeal ? "" : capitalizeTodoText(input.notes),
+    material: isMeal ? "" : capitalizeTodoText(input.material),
     status,
     order: Number.isFinite(Number(input.order)) ? Number(input.order) : 0,
     // Older tasks without this field are intentionally shown as sorted.

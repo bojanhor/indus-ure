@@ -101,6 +101,15 @@ test("zunanje povezave dovolijo samo Google Dokumente in Preglednice", () => {
   assert.equal(files[0].kind, "document");
   assert.equal(files[1].kind, "spreadsheet");
 });
+test("vpis opravila normalizira prvo zaÄŤetnico naslova, opisa in materiala", () => {
+  const todo = cleanTodo({ title: "servis omare", notes: "pregled varovalk", material: "rele in kabel" });
+  assert.deepEqual({ title: todo.title, notes: todo.notes, material: todo.material }, {
+    title: "Servis omare",
+    notes: "Pregled varovalk",
+    material: "Rele in kabel"
+  });
+});
+
 test("video sprejme tudi datoteko brez MIME vrste", () => {
   assert.equal(videoMimeType("", "teren.MP4"), "video/mp4");
   assert.equal(videoMimeType("application/octet-stream", "teren.mov"), "video/quicktime");

@@ -1205,7 +1205,7 @@
 
     .todo-actions-bar {
       display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(min(100%, 210px), 1fr));
       gap: 8px;
       align-items: stretch;
     }
@@ -1525,11 +1525,12 @@
 
     .todo-status-direct-field {
       display: grid;
-      gap: 10px;
-      padding: 11px 12px;
+      gap: 0;
+      padding: 0;
       border: 1px solid var(--line);
       border-radius: 10px;
       background: #f8faf8;
+      overflow: hidden;
     }
 
     /* The status determines the remaining fields, so it belongs first in the
@@ -1539,12 +1540,22 @@
     .todo-status-direct-field > summary {
       display: flex;
       align-items: center;
-      justify-content: space-between;
-      gap: 10px;
+      min-height: 50px;
+      padding: 8px 11px;
+      gap: 8px;
+      background: #fff;
       color: var(--ink);
       font-weight: 800;
       cursor: pointer;
       list-style: none;
+    }
+
+    .todo-status-direct-field > summary > :first-child {
+      margin-right: auto;
+      color: var(--muted);
+      font-size: 12px;
+      letter-spacing: .03em;
+      text-transform: uppercase;
     }
 
     .todo-status-direct-field > summary::-webkit-details-marker { display: none; }
@@ -1561,11 +1572,11 @@
     .todo-status-summary {
       display: inline-flex;
       align-items: center;
-      min-height: 32px;
+      min-height: 30px;
       max-width: min(62vw, 260px);
-      padding: 5px 10px;
+      padding: 4px 9px;
       border-radius: 7px;
-      font-size: 15px;
+      font-size: 14px;
       font-weight: 900;
       overflow: hidden;
       text-overflow: ellipsis;
@@ -1575,6 +1586,8 @@
     .todo-status-direct-content {
       display: grid;
       gap: 7px;
+      padding: 10px 11px 11px;
+      border-top: 1px solid var(--line);
     }
 
     .todo-status-open { --todo-bg: #e1e1e1; --todo-fg: #202124; --todo-border: #9aa0a6; }
@@ -5445,7 +5458,7 @@
                   <option value="completed">ZAKLJU&#268;ENO</option>
                   <option value="open">&#268;AKA</option>
                   <option value="in_progress">V TEKU</option>
-                  <option value="imported">UVOŽENO</option>
+                  <option id="todoImportedOption" value="imported" hidden disabled>UVOŽENO</option>
                 </select>
               </label>
             </div>
@@ -6212,6 +6225,7 @@
     const calendarCompletedFilterKey = "indus-ure-calendar-show-completed";
     const billingWorkerKey = "indus-ure-billing-worker";
     const todoSortModes = ["manual", "client", "date", "order", "completed", "open", "in_progress", "imported"];
+    const reportClientSortModes = ["recent", "hours_desc", "oldest", "count_desc", "name_asc", "name_desc"];
     const timeEntryStatusIds = new Set(["execution", "meal", "drive", "purchase"]);
     const monthlyHiddenTodoStatusIds = new Set(["meal", "drive"]);
     const payrollPaidTodoStatuses = new Set(timeEntryStatusIds);
@@ -6485,6 +6499,20 @@
       if ($("todoSortMode")) $("todoSortMode").value = state.todoSortMode;
     }
 
+    function syncImportedTodoFilter() {
+      const option = $("todoImportedOption");
+      const hasImported = state.todos.some((todo) => isImportedTodo(todo));
+      if (option) {
+        option.hidden = !hasImported;
+        option.disabled = !hasImported;
+      }
+      if (!hasImported && state.todoSortMode === "imported") {
+        state.todoSortMode = "manual";
+        localStorage.setItem(todoSortStorageKey(), state.todoSortMode);
+        if ($("todoSortMode")) $("todoSortMode").value = state.todoSortMode;
+      }
+    }
+
     function todoBillingFilterStorageKey() {
       const userId = state.user?.id || "anonymous";
       const context = state.workContext || `worker:${userId}`;
@@ -6523,19 +6551,23 @@
         const saved = JSON.parse(raw || "{}");
         state.showClientPending = saved?.pending !== false;
         state.showClientBilled = saved?.billed === true;
+        state.reportClientSort = reportClientSortModes.includes(String(saved?.sort || "")) ? saved.sort : "recent";
       } catch {
         // Migrate the earlier single selector without losing a user's previous choice.
         state.showClientPending = raw !== "billed";
         state.showClientBilled = raw === "all" || raw === "billed";
+        state.reportClientSort = "recent";
       }
       if ($("reportShowPending")) $("reportShowPending").checked = state.showClientPending;
       if ($("reportShowBilled")) $("reportShowBilled").checked = state.showClientBilled;
+      if ($("reportClientSort")) $("reportClientSort").value = state.reportClientSort;
     }
 
     function saveClientBillingFilter() {
       localStorage.setItem(clientBillingFilterStorageKey(), JSON.stringify({
         pending: state.showClientPending,
-        billed: state.showClientBilled
+        billed: state.showClientBilled,
+        sort: state.reportClientSort
       }));
     }
 
@@ -6886,7 +6918,7 @@
       state.selectedClient = String(snapshot.selectedClient || "");
       state.reportClient = String(snapshot.reportClient || "");
       state.reportClientId = String(snapshot.reportClientId || "");
-      state.reportClientSort = ["recent", "hours_desc", "oldest", "count_desc", "name_asc", "name_desc"].includes(snapshot.reportClientSort)
+      state.reportClientSort = reportClientSortModes.includes(snapshot.reportClientSort)
         ? snapshot.reportClientSort
         : "recent";
       const workerIds = new Set(state.users.map((user) => String(user.id)));
@@ -8514,6 +8546,11 @@
       return Number.isFinite(number) && number >= 0 && number <= maximum ? number : null;
     }
 
+    function capitalizeTodoText(value) {
+      const text = String(value || "").trim();
+      return text.replace(/^(\s*)(\p{L})/u, (_, leading, letter) => `${leading}${letter.toLocaleUpperCase("sl-SI")}`);
+    }
+
     function renderWorkerBillingTable() {
       const body = $("workerBillingRows");
       if (!body) return;
@@ -9892,7 +9929,7 @@
       if (changed) resolveDayTimelineHoursWarning(todo);
     }
 
-    async function saveDayTimelineDrafts({ announce = true } = {}) {
+    async function saveDayTimelineDrafts({ announce = true, closeAfterSave = false } = {}) {
       if (!state.dayTimelineDrafts.size || state.dayTimelineSaving) return;
       const button = $("saveDayTimeline");
       const closeButton = $("closeDayTimeline");
@@ -9928,6 +9965,9 @@
         if ($("dayTimelineDialog").open && state.dayTimelineDate === day) renderDayTimeline();
         announceQueuedLateTimeEntryReport(data);
         if (announce) showNotice("Spremembe dnevnega pogleda so shranjene.");
+        if (closeAfterSave && $("dayTimelineDialog").open && state.dayTimelineDate === day && state.dayTimelineDrafts.size === 0) {
+          $("dayTimelineDialog").close();
+        }
       } finally {
         state.dayTimelineSaving = false;
         if ($("dayTimelineDialog").open) {
@@ -11391,6 +11431,7 @@
     }
 
     function renderTodos() {
+      syncImportedTodoFilter();
       const billingFilters = $("todoBillingFilters");
       if (billingFilters) {
         billingFilters.classList.toggle("hidden", state.todoSortMode !== "completed");
@@ -13878,6 +13919,12 @@
       const clientVehicle = $("todoFormClientVehicle").value === "van" ? "van" : "personal";
       const materialAmount = materialEntry ? Number(existing?.materialAmount || 0) : 0;
       const selectedStatus = $("todoFormStatus").value;
+      const title = meal ? "Malica" : capitalizeTodoText($("todoFormTask").value);
+      const notes = meal ? "" : capitalizeTodoText($("todoFormNotes").value);
+      const material = meal ? "" : capitalizeTodoText($("todoFormMaterial").value);
+      $("todoFormTask").value = title;
+      $("todoFormNotes").value = notes;
+      $("todoFormMaterial").value = material;
       const sourceProjectTodoId = String(existing?.sourceProjectTodoId || state.todoHoursSourceId || state.todoDraftSourceProjectTodoId || "");
       const sourceProjectTitle = sourceProjectTodoId
         ? String(existing?.sourceProjectTitle || state.todoDraftSourceProjectTitle || "").trim().slice(0, 300)
@@ -13891,9 +13938,9 @@
         endDate: $("todoFormEndDate").value,
         client: meal ? "" : client?.name || normalizeClientName($("todoFormClient").value),
         clientId: meal ? "" : client?.clientId || client?.id || "",
-        title: meal ? "Malica" : $("todoFormTask").value.trim(),
-        notes: meal ? "" : $("todoFormNotes").value.trim(),
-        material: meal ? "" : $("todoFormMaterial").value.trim(),
+        title,
+        notes,
+        material,
         status: selectedStatus,
         order: existing?.order || nextTodoOrder(),
         assigneeIds,
@@ -14494,9 +14541,8 @@
     }
 
     function reportClientSortMode() {
-      const valid = new Set(["recent", "hours_desc", "oldest", "count_desc", "name_asc", "name_desc"]);
       const value = String(state.reportClientSort || "recent");
-      return valid.has(value) ? value : "recent";
+      return reportClientSortModes.includes(value) ? value : "recent";
     }
 
     function reportClientSortLabel() {
@@ -16533,7 +16579,11 @@
     $("reportViewBtn").addEventListener("click", () => setView("report"));
     $("reportFrom").addEventListener("change", renderReport);
     $("reportTo").addEventListener("change", renderReport);
-    $("reportClientSort").addEventListener("change", () => { state.reportClientSort = $("reportClientSort").value; renderReport(); });
+    $("reportClientSort").addEventListener("change", () => {
+      state.reportClientSort = reportClientSortMode();
+      saveClientBillingFilter();
+      renderReport();
+    });
     ["reportShowPending", "reportShowBilled"].forEach((id) => {
       $(id).addEventListener("change", () => {
         state.showClientPending = $("reportShowPending").checked;
@@ -17027,7 +17077,7 @@
     $("dayTimelineZoomIn").addEventListener("click", () => setDayTimelineZoom(state.dayTimelineMinuteHeight * 1.25));
     $("dayTimelineFit").addEventListener("click", fitDayTimeline);
     $("saveDayTimeline").addEventListener("click", () => {
-      saveDayTimelineDrafts().catch((error) => showNotice(error.message));
+      saveDayTimelineDrafts({ closeAfterSave: true }).catch((error) => showNotice(error.message));
     });
     $("prevDayTimeline").addEventListener("click", () => navigateDayTimeline(-1));
     $("nextDayTimeline").addEventListener("click", () => navigateDayTimeline(1));

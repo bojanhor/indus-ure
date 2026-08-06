@@ -543,7 +543,7 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
       expect(times.start).toMatch(/^\d{2}:(00|15|30|45)$/);
       expect(times.end).toMatch(/^\d{2}:(00|15|30|45)$/);
       await page.locator("#saveDayTimeline").click();
-      await expect(page.locator("#saveDayTimeline")).toBeDisabled();
+      await expect(page.locator("#dayTimelineDialog")).toBeHidden();
     } finally {
       await context.close();
     }
@@ -686,7 +686,7 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
       await expect(moved).toHaveAttribute("data-start", "09:00");
       await expect(moved).toHaveAttribute("data-end", "11:00");
       await page.locator("#saveDayTimeline").click();
-      await expect(page.locator("#saveDayTimeline")).toBeDisabled();
+      await expect(page.locator("#dayTimelineDialog")).toBeHidden();
       const savedDate = await page.evaluate(async (taskTitle) => {
         const response = await fetch("/api/todos");
         const data = await response.json();
