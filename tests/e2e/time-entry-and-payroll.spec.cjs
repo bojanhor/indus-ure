@@ -16,6 +16,14 @@ async function localLogin(page, userId) {
   await expect(page.locator("#app")).toBeVisible();
 }
 
+async function chooseQuickTime(page, selector) {
+  const choice = page.locator(selector);
+  await choice.evaluate((element) => {
+    element.scrollIntoView({ block: "center", inline: "nearest" });
+    element.click();
+  });
+}
+
 test.describe.serial("isolated worker time entry and boss payroll", () => {
   test.beforeAll(async () => {
     app = await startIsolatedTestApp();
@@ -156,12 +164,12 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
       await expect(page.locator("#todoFormHourlyRateField")).toBeHidden();
       await expect(page.locator("#todoFormDateTimeSection")).toHaveAttribute("open", "");
       await expect(page.locator("#todoFormQuickTimePicker")).toBeVisible();
-      await page.locator('[data-time-picker-target="start"]').click();
-      await page.locator('[data-time-picker-hour="8"]').click();
-      await page.locator('[data-time-picker-minute="0"]').click();
-      await page.locator('[data-time-picker-target="end"]').click();
-      await page.locator('[data-time-picker-hour="10"]').click();
-      await page.locator('[data-time-picker-minute="0"]').click();
+      await chooseQuickTime(page, '[data-time-picker-target="start"]');
+      await chooseQuickTime(page, '[data-time-picker-hour="8"]');
+      await chooseQuickTime(page, '[data-time-picker-minute="0"]');
+      await chooseQuickTime(page, '[data-time-picker-target="end"]');
+      await chooseQuickTime(page, '[data-time-picker-hour="10"]');
+      await chooseQuickTime(page, '[data-time-picker-minute="0"]');
       await expect(page.locator("#todoFormStart")).toHaveValue("08:00");
       await expect(page.locator("#todoFormEnd")).toHaveValue("10:00");
 

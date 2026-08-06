@@ -3457,15 +3457,16 @@
     .todo-form-date-time-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
     .todo-time-picker {
       display: grid;
-      gap: 9px;
-      padding: 10px;
+      gap: 10px;
+      padding: 12px;
       border: 1px solid #cfe0da;
-      border-radius: 10px;
+      border-radius: 14px;
       background: #fff;
     }
     .todo-time-picker-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
     .todo-time-picker-head strong { font-size: 13px; }
-    .todo-time-picker-targets { display: inline-flex; gap: 5px; padding: 3px; border-radius: 8px; background: #edf3ef; }
+    .todo-time-picker-targets,
+    .todo-time-picker-mode { display: inline-flex; gap: 4px; padding: 3px; border-radius: 9px; background: #edf3ef; }
     .todo-time-picker-target {
       min-height: 32px;
       padding: 5px 9px;
@@ -3476,23 +3477,104 @@
       font-size: 13px;
       font-weight: 800;
     }
-    .todo-time-picker-target.active { color: #fff; border-color: var(--accent-dark); background: var(--accent); }
-    .todo-time-picker-hours { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 5px; }
-    .todo-time-picker-minutes { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 5px; }
-    .todo-time-picker-choice {
-      min-width: 0;
-      min-height: 34px;
-      padding: 4px;
-      border: 1px solid #d3ded8;
+    .todo-time-picker-target.active,
+    .todo-time-picker-mode-button.active { color: #fff; border-color: var(--accent-dark); background: var(--accent); }
+    .todo-time-picker-mode-button {
+      min-height: 30px;
+      padding: 4px 8px;
+      border: 1px solid transparent;
       border-radius: 7px;
-      color: #233136;
-      background: #f8faf8;
-      font-size: 14px;
+      color: var(--ink);
+      background: transparent;
+      font-size: 12px;
       font-weight: 800;
     }
-    .todo-time-picker-choice.active { color: #fff; border-color: var(--accent-dark); background: var(--accent); }
+    .todo-time-picker-dial {
+      position: relative;
+      width: min(100%, 318px);
+      aspect-ratio: 1;
+      margin: 0 auto;
+      border: 1px solid #cdded8;
+      border-radius: 50%;
+      background: radial-gradient(circle at center, #fff 0 23%, #e8f1ed 24% 100%);
+      box-shadow: inset 0 0 0 10px rgba(255, 255, 255, .32);
+    }
+    .todo-time-picker-dial::before {
+      content: "";
+      position: absolute;
+      inset: 10%;
+      border: 1px solid rgba(38, 91, 78, .14);
+      border-radius: 50%;
+      pointer-events: none;
+    }
+    .todo-time-picker-center {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      z-index: 2;
+      display: grid;
+      place-items: center;
+      width: 76px;
+      height: 76px;
+      transform: translate(-50%, -50%);
+      border: 1px solid #b5ccc3;
+      border-radius: 50%;
+      color: #fff;
+      background: var(--accent);
+      box-shadow: 0 3px 10px rgba(19, 83, 104, .2);
+      text-align: center;
+    }
+    .todo-time-picker-center time { display: block; font-size: 18px; font-weight: 900; letter-spacing: .02em; }
+    .todo-time-picker-center small { display: block; margin-top: 1px; font-size: 10px; font-weight: 800; }
+    .todo-time-picker-choice {
+      position: absolute;
+      z-index: 3;
+      min-width: 38px;
+      min-height: 38px;
+      padding: 4px;
+      transform: translate(-50%, -50%);
+      border: 1px solid transparent;
+      border-radius: 50%;
+      color: #233136;
+      background: transparent;
+      font-size: 14px;
+      font-weight: 900;
+      line-height: 1;
+    }
+    .todo-time-picker-choice.minute { min-width: 52px; min-height: 52px; font-size: 17px; }
+    .todo-time-picker-choice.outer-0 { left: 50%; top: 9%; }
+    .todo-time-picker-choice.outer-1 { left: 70.5%; top: 14.5%; }
+    .todo-time-picker-choice.outer-2 { left: 85.5%; top: 29.5%; }
+    .todo-time-picker-choice.outer-3 { left: 91%; top: 50%; }
+    .todo-time-picker-choice.outer-4 { left: 85.5%; top: 70.5%; }
+    .todo-time-picker-choice.outer-5 { left: 70.5%; top: 85.5%; }
+    .todo-time-picker-choice.outer-6 { left: 50%; top: 91%; }
+    .todo-time-picker-choice.outer-7 { left: 29.5%; top: 85.5%; }
+    .todo-time-picker-choice.outer-8 { left: 14.5%; top: 70.5%; }
+    .todo-time-picker-choice.outer-9 { left: 9%; top: 50%; }
+    .todo-time-picker-choice.outer-10 { left: 14.5%; top: 29.5%; }
+    .todo-time-picker-choice.outer-11 { left: 29.5%; top: 14.5%; }
+    .todo-time-picker-choice.inner-0 { left: 50%; top: 25%; }
+    .todo-time-picker-choice.inner-1 { left: 62.5%; top: 28.35%; }
+    .todo-time-picker-choice.inner-2 { left: 71.65%; top: 37.5%; }
+    .todo-time-picker-choice.inner-3 { left: 75%; top: 50%; }
+    .todo-time-picker-choice.inner-4 { left: 71.65%; top: 62.5%; }
+    .todo-time-picker-choice.inner-5 { left: 62.5%; top: 71.65%; }
+    .todo-time-picker-choice.inner-6 { left: 50%; top: 75%; }
+    .todo-time-picker-choice.inner-7 { left: 37.5%; top: 71.65%; }
+    .todo-time-picker-choice.inner-8 { left: 28.35%; top: 62.5%; }
+    .todo-time-picker-choice.inner-9 { left: 25%; top: 50%; }
+    .todo-time-picker-choice.inner-10 { left: 28.35%; top: 37.5%; }
+    .todo-time-picker-choice.inner-11 { left: 37.5%; top: 28.35%; }
+    .todo-time-picker-choice.minute-0 { left: 50%; top: 11%; }
+    .todo-time-picker-choice.minute-15 { left: 89%; top: 50%; }
+    .todo-time-picker-choice.minute-30 { left: 50%; top: 89%; }
+    .todo-time-picker-choice.minute-45 { left: 11%; top: 50%; }
+    .todo-time-picker-choice.active { color: #fff; border-color: var(--accent-dark); background: var(--accent); box-shadow: 0 2px 7px rgba(19, 83, 104, .28); }
+    #todoDialog .todo-time-picker-choice:not(:disabled):active { transform: translate(-50%, -50%) scale(.94); }
     .todo-time-picker-choice:focus-visible,
-    .todo-time-picker-target:focus-visible { outline: 3px solid rgba(31, 111, 139, .3); outline-offset: 1px; }
+    .todo-time-picker-target:focus-visible,
+    .todo-time-picker-mode-button:focus-visible { outline: 3px solid rgba(31, 111, 139, .3); outline-offset: 1px; }
 
     .todo-client-input-row {
       display: flex;
@@ -4915,8 +4997,11 @@
         grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 8px;
       }
-      .todo-time-picker-hours { grid-template-columns: repeat(6, minmax(0, 1fr)); }
-      .todo-time-picker-choice { min-height: 38px; }
+      .todo-time-picker { padding: 10px; }
+      .todo-time-picker-dial { width: min(100%, 292px); }
+      .todo-time-picker-choice { min-width: 36px; min-height: 36px; font-size: 13px; }
+      .todo-time-picker-choice.minute { min-width: 48px; min-height: 48px; font-size: 16px; }
+      .todo-time-picker-center { width: 70px; height: 70px; }
       .client-row {
         grid-template-columns: 1fr;
       }
@@ -5632,16 +5717,22 @@
                 <input id="todoFormEnd" type="time" step="900">
               </label>
             </div>
-            <section class="todo-time-picker" id="todoFormQuickTimePicker" aria-label="Hitra izbira ure">
+            <section class="todo-time-picker" id="todoFormQuickTimePicker" aria-label="Krožni izbirnik ure">
               <div class="todo-time-picker-head">
-                <strong>Hitra izbira ure</strong>
+                <strong>Izberi čas</strong>
                 <div class="todo-time-picker-targets" role="group" aria-label="Izberi uro od ali do">
                   <button class="todo-time-picker-target active" id="todoFormQuickTimeStart" type="button" data-time-picker-target="start">Od</button>
                   <button class="todo-time-picker-target" id="todoFormQuickTimeEnd" type="button" data-time-picker-target="end">Do</button>
                 </div>
               </div>
-              <div class="todo-time-picker-hours" id="todoFormQuickTimeHours" aria-label="Ura od 0 do 23"></div>
-              <div class="todo-time-picker-minutes" id="todoFormQuickTimeMinutes" aria-label="Minute"></div>
+              <div class="todo-time-picker-head">
+                <span id="todoFormQuickTimeHint">Izberi uro</span>
+                <div class="todo-time-picker-mode" role="group" aria-label="Izberi uro ali minute">
+                  <button class="todo-time-picker-mode-button active" id="todoFormQuickTimeHourMode" type="button" data-time-picker-mode="hour">Ura</button>
+                  <button class="todo-time-picker-mode-button" id="todoFormQuickTimeMinuteMode" type="button" data-time-picker-mode="minute">Minute</button>
+                </div>
+              </div>
+              <div class="todo-time-picker-dial" id="todoFormQuickTimeDial" aria-live="polite"></div>
             </section>
           </div>
         </details>
@@ -6303,6 +6394,7 @@
       attachmentPreview: null,
       reportClientId: "",
       todoTimePickerTarget: "start",
+      todoTimePickerMode: "hour",
       reportTodoNavigationIds: [],
       reportTodoNavigationIndex: -1,
       settings: { billing: { hourlyRate: 15, kmRate: 0.22, workerOwnVehicleKmRate: 0.22, commuteKmPerDay: 28, mealPaidMinutes: 45 } },
@@ -9616,24 +9708,37 @@
       picker.classList.toggle("hidden", unavailable);
       if (unavailable) return;
       const target = state.todoTimePickerTarget === "end" ? "end" : "start";
+      const mode = state.todoTimePickerMode === "minute" ? "minute" : "hour";
       const input = $(target === "end" ? "todoFormEnd" : "todoFormStart");
-      const parts = todoTimePickerParts(input.value);
-      const currentHour = parts?.hour;
-      const currentMinute = parts?.minute;
+      const parts = todoTimePickerParts(input.value, todoTimePickerDefault(target));
+      const currentHour = parts.hour;
+      const currentMinute = parts.minute;
+      const targetLabel = target === "end" ? "konca" : "začetka";
       $("todoFormQuickTimeStart").classList.toggle("active", target === "start");
       $("todoFormQuickTimeEnd").classList.toggle("active", target === "end");
       $("todoFormQuickTimeStart").setAttribute("aria-pressed", String(target === "start"));
       $("todoFormQuickTimeEnd").setAttribute("aria-pressed", String(target === "end"));
       $("todoFormQuickTimeStart").textContent = `Od${$("todoFormStart").value ? ` ${$("todoFormStart").value}` : ""}`;
       $("todoFormQuickTimeEnd").textContent = `Do${$("todoFormEnd").value ? ` ${$("todoFormEnd").value}` : ""}`;
-      $("todoFormQuickTimeHours").innerHTML = Array.from({ length: 24 }, (_, hour) => {
-        const value = String(hour).padStart(2, "0");
-        return `<button class="todo-time-picker-choice ${currentHour === hour ? "active" : ""}" type="button" data-time-picker-hour="${hour}" aria-pressed="${currentHour === hour}">${value}</button>`;
-      }).join("");
-      $("todoFormQuickTimeMinutes").innerHTML = [0, 15, 30, 45].map((minute) => {
-        const value = String(minute).padStart(2, "0");
-        return `<button class="todo-time-picker-choice ${currentMinute === minute ? "active" : ""}" type="button" data-time-picker-minute="${minute}" aria-pressed="${currentMinute === minute}">${value}</button>`;
-      }).join("");
+      $("todoFormQuickTimeHourMode").classList.toggle("active", mode === "hour");
+      $("todoFormQuickTimeMinuteMode").classList.toggle("active", mode === "minute");
+      $("todoFormQuickTimeHourMode").setAttribute("aria-pressed", String(mode === "hour"));
+      $("todoFormQuickTimeMinuteMode").setAttribute("aria-pressed", String(mode === "minute"));
+      $("todoFormQuickTimeHint").textContent = mode === "hour"
+        ? `Ura ${targetLabel} · zunaj 00–11, znotraj 12–23`
+        : `Minute ${targetLabel} · na 15 minut`;
+      const center = `<div class="todo-time-picker-center"><span><time>${String(currentHour).padStart(2, "0")}:${String(currentMinute).padStart(2, "0")}</time><small>${mode === "hour" ? "ura" : "minute"}</small></span></div>`;
+      const choices = mode === "hour"
+        ? Array.from({ length: 24 }, (_, hour) => {
+            const value = String(hour).padStart(2, "0");
+            const ring = hour >= 12 ? "inner" : "outer";
+            return `<button class="todo-time-picker-choice ${ring}-${hour % 12} ${currentHour === hour ? "active" : ""}" type="button" data-time-picker-hour="${hour}" aria-label="${value} ur" aria-pressed="${currentHour === hour}">${value}</button>`;
+          }).join("")
+        : [0, 15, 30, 45].map((minute) => {
+            const value = String(minute).padStart(2, "0");
+            return `<button class="todo-time-picker-choice minute minute-${minute} ${currentMinute === minute ? "active" : ""}" type="button" data-time-picker-minute="${minute}" aria-label="${value} minut" aria-pressed="${currentMinute === minute}">${value}</button>`;
+          }).join("");
+      $("todoFormQuickTimeDial").innerHTML = `${center}${choices}`;
     }
 
     function setTodoFormQuickTime(target, { hour = null, minute = null } = {}) {
@@ -13603,6 +13708,7 @@
       setTodoDialogSaving(false);
       const editing = Boolean(todo.id);
       state.todoTimePickerTarget = "start";
+      state.todoTimePickerMode = "hour";
       syncReportTodoDialogNavigation(todo.id, reportNavigationIds);
       const requestedStatus = todoStatus(todo.status || "open").id;
       const requestedTaskStatus = todoStatus(todo._taskStatus || (timeEntryStatusIds.has(requestedStatus) ? "open" : requestedStatus)).id;
@@ -16460,6 +16566,7 @@
     ["todoFormStart", "todoFormEnd"].forEach((id) => {
       $(id).addEventListener("focus", () => {
         state.todoTimePickerTarget = id === "todoFormEnd" ? "end" : "start";
+        state.todoTimePickerMode = "hour";
         renderTodoFormQuickTimePicker();
       });
       $(id).addEventListener("change", (event) => {
@@ -16473,11 +16580,19 @@
       const targetButton = event.target.closest("[data-time-picker-target]");
       if (targetButton) {
         state.todoTimePickerTarget = targetButton.dataset.timePickerTarget === "end" ? "end" : "start";
+        state.todoTimePickerMode = "hour";
+        renderTodoFormQuickTimePicker();
+        return;
+      }
+      const modeButton = event.target.closest("[data-time-picker-mode]");
+      if (modeButton) {
+        state.todoTimePickerMode = modeButton.dataset.timePickerMode === "minute" ? "minute" : "hour";
         renderTodoFormQuickTimePicker();
         return;
       }
       const hourButton = event.target.closest("[data-time-picker-hour]");
       if (hourButton) {
+        state.todoTimePickerMode = "minute";
         setTodoFormQuickTime(state.todoTimePickerTarget, { hour: Number(hourButton.dataset.timePickerHour) });
         return;
       }
