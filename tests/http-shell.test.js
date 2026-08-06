@@ -166,7 +166,7 @@ test("poročilo stranke odpre isti vpis s klikom na naslov ali zeleni povzetek",
   assert.match(html, /client-billing-title-trigger/);
   assert.match(html, /client-billing-charges-trigger/);
   assert.match(html, /open-report-todo/);
-  assert.match(html, /closest\("\.open-report-todo"\)[\s\S]*?openTodoDialog\(todo\)/);
+  assert.match(html, /closest\("\.open-report-todo"\)[\s\S]*?reportTodos\(\)\.map\(\(item\) => item\.id\)[\s\S]*?openTodoDialog\(todo, \{ reportNavigationIds: navigationIds \}\)/);
   assert.doesNotMatch(html, />Odpri vpis</);
 });
 test("client billing filter, back navigation confirmation and scoped late mail are present", async () => {
@@ -178,8 +178,14 @@ test("client billing filter, back navigation confirmation and scoped late mail a
   assert.match(html, /id="reportShowBilled"/);
   assert.match(html, /clientBillingFilterStorageKey/);
   assert.match(html, /function reportTodoMatchesClientBillingFilter\(todo\)/);
-  assert.match(html, /function clearClientReportSelection\(\) \{[\s\S]*?setView\("report"\)/);
+  assert.match(html, /function clearClientReportSelection\([\s\S]*?setView\("report"\)/);
   assert.match(html, /function confirmLoggedInHistoryExit\(\)/);
+  assert.match(html, /reportHistoryStateKey/);
+  assert.match(html, /function openClientReport\(client, clientId = "", \{ fromHistory = false \} = \{\}\)/);
+  assert.match(html, /id="reportNewEntry"/);
+  assert.match(html, /Potrjeni vnosi bodo odstranjeni s seznama/);
+  assert.match(html, /id="previousReportTodo"/);
+  assert.match(html, /function navigateReportTodo\(offset\)/);
   assert.match(server, /function shouldQueueLateTimeEntryReport\(/);
   assert.match(server, /editorWorkContext/);
 });
@@ -691,7 +697,7 @@ test("calendar-only task controls are date-bound, unavailable for time entries, 
   assert.match(html, /<details class="todo-status-direct-field" id="todoFormStatusField">/);
   assert.match(html, /id="todoFormStatusSummary"/);
   assert.match(html, /function closeOtherTodoFormFoldouts\(opened\)/);
-  assert.match(html, /\$\("todoFormStatusField"\)\.open = false;\s*\$\("todoFormDateTimeSection"\)\.open = false;/);
+  assert.match(html, /\$\("todoFormStatusField"\)\.open = false;\s*\$\("todoFormDateTimeSection"\)\.open = Boolean\(state\.todoHoursSourceId \|\| state\.todoStandaloneHours \|\| timeEntryStatusIds\.has\(requestedStatus\)\);/);
   assert.match(html, /#todoDialog \.todo-form-date-time-grid \{\s*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);/);
   assert.match(html, /id="todoFormWarrantyField"/);
   assert.match(html, /class="todo-form-option todo-form-warranty" id="todoFormWarrantyField"/);

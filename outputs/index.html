@@ -1675,7 +1675,7 @@
     .todo-status-internal { --todo-bg: #fbd75b; --todo-fg: #202124; --todo-border: #d6ad2f; }
     .todo-status-drive { --todo-bg: #46d6db; --todo-fg: #202124; --todo-border: #249ca2; }
     .todo-status-purchase { --todo-bg: #ffb878; --todo-fg: #202124; --todo-border: #d8883f; }
-    .todo-status-material { --todo-bg: #637d8a; --todo-fg: #fff; --todo-border: #415a66; }
+    .todo-status-material { --todo-bg: #4eb54b; --todo-fg: #fff; --todo-border: #2f8b31; }
 
 
     .day-todo.todo-status-color {
@@ -5314,6 +5314,7 @@
           </div>
           <div class="client-billing-intro-actions">
             <button class="secondary hidden" id="reportBackToClients" type="button">&larr; Vse stranke</button>
+            <button class="secondary hidden" id="reportNewEntry" type="button">Nov vpis</button>
             <button class="primary hidden" id="confirmClientBill" type="button">Potrdi obračun stranki</button>
             <button class="secondary hidden" id="exportReportPdf" type="button">Prenesi PDF</button>
             <button class="secondary hidden" id="createReportGmailDraft" type="button">Gmail osnutek</button>
@@ -5440,6 +5441,8 @@
         <h3 id="todoFormTitle">Opravilo</h3>
         <span class="sr-only" id="todoFormActionStatus" role="status" aria-live="polite"></span>
         <div class="modal-head-actions" aria-label="Dejanja opravila">
+          <button class="todo-modal-action secondary hidden" id="previousReportTodo" type="button" title="Prej&#353;nji vpis v poro&#269;ilu" aria-label="Prej&#353;nji vpis v poro&#269;ilu">&lsaquo;</button>
+          <button class="todo-modal-action secondary hidden" id="nextReportTodo" type="button" title="Naslednji vpis v poro&#269;ilu" aria-label="Naslednji vpis v poro&#269;ilu">&rsaquo;</button>
           <button class="todo-modal-action danger hidden" id="deleteTodoFromDialog" type="button" title="Izbriši opravilo" aria-label="Izbriši opravilo">&#128465;</button>
           <button class="todo-modal-action secondary hidden" id="duplicateTodoFromDialog" type="button" title="Podvoji opravilo" aria-label="Podvoji opravilo">&#10697;</button>
           <button class="todo-modal-action secondary hidden" id="writeHoursFromTodo" type="button" title="Piši ure na ta projekt" aria-label="Piši ure na ta projekt">&#9201;</button>
@@ -6046,6 +6049,7 @@
     const sessionRecoveryUiStateTtlMs = 15 * 60_000;
     const loggedInHistoryStateKey = "indusUreLoggedIn";
     const modalHistoryStateKey = "indusUreModal";
+    const reportHistoryStateKey = "indusUreReport";
     const workContextKey = "indus-ure-work-context";
     const todoSectionCollapseKey = "indus-ure-todo-section-collapse";
     const todoSortModeKey = "indus-ure-todo-sort-mode";
@@ -6247,6 +6251,8 @@
       offlineTodoSyncing: false,
       attachmentPreview: null,
       reportClientId: "",
+      reportTodoNavigationIds: [],
+      reportTodoNavigationIndex: -1,
       settings: { billing: { hourlyRate: 15, kmRate: 0.22, workerOwnVehicleKmRate: 0.22, commuteKmPerDay: 28, mealPaidMinutes: 45 } },
       billingLocks: [],
       payrolls: [],
@@ -7535,6 +7541,11 @@
     function loggedInHistoryState(value) {
       const current = history.state && typeof history.state === "object" ? history.state : {};
       return { ...current, [loggedInHistoryStateKey]: value };
+    }
+
+    function reportClientHistoryState(client, clientId) {
+      const current = history.state && typeof history.state === "object" ? history.state : {};
+      return { ...current, [reportHistoryStateKey]: { client: String(client || ""), clientId: String(clientId || "") } };
     }
 
     function protectLoggedInHistory() {
@@ -9972,8 +9983,9 @@
         event.tabIndex = 0;
         event.setAttribute("role", "button");
         event.setAttribute("aria-label", todo.title + ", " + dayTimelineTime(startMinute) + " do " + dayTimelineTime(endMinute));
-        event.style.top = Math.round(startMinute * minuteHeight) + "px";
-        event.style.height = Math.max(18, Math.round((endMinute - startMinute) * minuteHeight)) + "px";
+        // Small vertical gap keeps touching events visually separate and easier to grab.
+        event.style.top = (Math.round(startMinute * minuteHeight) + 1) + "px";
+        event.style.height = Math.max(18, Math.round((endMinute - startMinute) * minuteHeight) - 2) + "px";
         event.style.left = "calc(" + (lane * 100 / laneCount) + "% + 2px)";
         event.style.width = "calc(" + (100 / laneCount) + "% - 4px)";
 
@@ -9995,9 +10007,12 @@
         }
         const meta = document.createElement("span");
         meta.className = "day-timeline-event-meta";
+        const assigneeLabel = timeEntryStatusIds.has(todo.status)
+          ? todoAssigneeNames(todo)
+          : "Za: " + todoAssigneeNames(todo);
         meta.textContent = dayTimelineTime(startMinute) + "-" + dayTimelineTime(endMinute)
           + (client ? " | " + client : "")
-          + " | Za: " + todoAssigneeNames(todo);
+          + " | " + assigneeLabel;
         const endHandle = document.createElement("span");
         endHandle.className = "day-resize-handle end";
         endHandle.dataset.mode = "resize-end";
@@ -12808,13 +12823,13 @@
       const permitted = state.user?.role === "boss"
         ? new Set(state.users.map((user) => user.id))
         : new Set(state.user?.timeEntryForIds || [state.user?.id]);
-      return state.users.filter((user) => permitted.has(user.id));
+      return state.users.filter((user) => permitted.has(user.id)).sort((left, right) => String(left.name || left.id).localeCompare(String(right.name || right.id), "sl"));
     }
 
     function renderTodoFormAssignees(selectedIds = [], onlyIds = null, { disabled = false, single = false } = {}) {
       const selected = new Set(selectedIds);
       const allowed = onlyIds ? new Set(onlyIds) : null;
-      const users = state.users.filter((user) => !allowed || allowed.has(user.id));
+      const users = state.users.filter((user) => !allowed || allowed.has(user.id)).slice().sort((left, right) => String(left.name || left.id).localeCompare(String(right.name || right.id), "sl"));
       $("todoFormAssignees").innerHTML = users.map((user) => `
         <label>
           <input type="${single ? "radio" : "checkbox"}" ${single ? 'name="todo-time-entry-assignee"' : ""} value="${escapeHtml(user.id)}" ${selected.has(user.id) ? "checked" : ""} ${disabled ? "disabled" : ""}>
@@ -13427,9 +13442,32 @@
       });
     }
 
-    async function openTodoDialog(todo = {}) {
+    function suggestedTimeRange(todo = {}) {
+      const date = String(todo.date || dateKey(new Date()));
+      const assignee = String(todo.syncUser || todo._hoursAssigneeIds?.[0] || activeWorkerId() || "");
+      const recent = state.todos.filter((item) => item.date === date && item.start && (!assignee || todoAssigneeIds(item).includes(assignee)))
+        .sort((left, right) => String(right.start).localeCompare(String(left.start)))[0];
+      const startMinutes = dayTimelineMinutes(recent?.start) ?? (8 * 60);
+      return { start: dayTimelineTime(startMinutes), end: dayTimelineTime(Math.min(23 * 60 + 45, startMinutes + 60)) };
+    }
+
+    function syncReportTodoDialogNavigation(todoId, navigationIds = null) {
+      if (Array.isArray(navigationIds)) state.reportTodoNavigationIds = [...new Set(navigationIds.map((id) => String(id || "")).filter(Boolean))];
+      else state.reportTodoNavigationIds = [];
+      state.reportTodoNavigationIndex = state.reportTodoNavigationIds.indexOf(String(todoId || ""));
+      const active = state.reportTodoNavigationIndex >= 0 && state.reportTodoNavigationIds.length > 1;
+      const previous = $("previousReportTodo");
+      const next = $("nextReportTodo");
+      previous.classList.toggle("hidden", !active);
+      next.classList.toggle("hidden", !active);
+      previous.disabled = !active || state.reportTodoNavigationIndex === 0;
+      next.disabled = !active || state.reportTodoNavigationIndex >= state.reportTodoNavigationIds.length - 1;
+    }
+
+    async function openTodoDialog(todo = {}, { reportNavigationIds = null } = {}) {
       setTodoDialogSaving(false);
       const editing = Boolean(todo.id);
+      syncReportTodoDialogNavigation(todo.id, reportNavigationIds);
       const requestedStatus = todoStatus(todo.status || "open").id;
       const requestedTaskStatus = todoStatus(todo._taskStatus || (timeEntryStatusIds.has(requestedStatus) ? "open" : requestedStatus)).id;
       state.todoHoursSourceId = String(todo._hoursSourceId || "");
@@ -13459,10 +13497,12 @@
         button.setAttribute("aria-selected", String(active));
       });
       const client = findClient(todo.clientId || todo.client);
+      const needsTimeSuggestion = !editing && (state.todoHoursSourceId || state.todoStandaloneHours || timeEntryStatusIds.has(requestedStatus)) && !todo.start && !todo.end;
+      const suggestedTimes = needsTimeSuggestion ? suggestedTimeRange(todo) : null;
       $("todoFormId").value = todo.id || "";
-      $("todoFormStart").value = todo.start || "";
-      $("todoFormEnd").value = todo.end || "";
-      $("todoFormDate").value = todo.date || "";
+      $("todoFormStart").value = todo.start || suggestedTimes?.start || "";
+      $("todoFormEnd").value = todo.end || suggestedTimes?.end || "";
+      $("todoFormDate").value = todo.date || (needsTimeSuggestion ? dateKey(new Date()) : "");
       $("todoFormEndDate").value = todo.date ? todoEndDate(todo) : "";
       $("todoFormEndDate").dataset.auto = String(!todo.date || todoEndDate(todo) === todo.date);
       $("todoFormClient").value = client?.search || todo.client || "";
@@ -13490,7 +13530,7 @@
       // opens the relevant one automatically if a required date or time is
       // missing, so a short form never hides the reason it cannot save.
       $("todoFormStatusField").open = false;
-      $("todoFormDateTimeSection").open = false;
+      $("todoFormDateTimeSection").open = Boolean(state.todoHoursSourceId || state.todoStandaloneHours || timeEntryStatusIds.has(requestedStatus));
       updateTodoFormStatus();
       syncTodoFormClientContacts({ preserve: true });
        autosizeTodoNarrativeFields();
@@ -13549,6 +13589,17 @@
       requestAnimationFrame(() => $("todoDialog").focus({ preventScroll: true }));
       fillMissingPdfThumbnailsForDialog(state.todoDialogPhotos).catch((error) => console.warn(error));
       return true;
+    }
+
+    async function navigateReportTodo(offset) {
+      const currentIndex = state.reportTodoNavigationIndex;
+      const targetId = state.reportTodoNavigationIds[currentIndex + offset];
+      const target = state.todos.find((todo) => todo.id === targetId);
+      if (!target) return;
+      await releaseTodoEditLockForDialog();
+      if ($("todoDialog").open) $("todoDialog").close();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      await openTodoDialog(target, { reportNavigationIds: state.reportTodoNavigationIds });
     }
 
     async function saveTodoFromDialog() {
@@ -13912,8 +13963,10 @@
         status: source.status,
         urgent: source.status === "execution" ? false : Boolean(source.urgent),
         warranty: Boolean(source.warranty),
-        sourceProjectTodoId: source.sourceProjectTodoId || "",
-        sourceProjectTitle: source.sourceProjectTitle || "",
+        // Klon vnosa ur nima izvora: povezava s starim projektom bi lahko bila že zaprta.
+        sourceProjectTodoId: "",
+        sourceProjectTitle: "",
+        _standaloneHours: timeEntryStatusIds.has(source.status),
         billingHourlyRate: source.billingHourlyRate ?? null,
         billingKm: 0,
         clientKm: 0,
@@ -14341,6 +14394,7 @@
       $("reportBillingNotice").textContent = reportNotice;
       $("reportBillingNotice").classList.toggle("hidden", !reportNotice);
       $("reportBackToClients").classList.toggle("hidden", !detail);
+      $("reportNewEntry").classList.toggle("hidden", !detail);
       $("confirmClientBill").classList.toggle("hidden", !detail || !pendingClientBillLines.length);
       $("confirmClientBill").disabled = !detail || !selectedClientBillLines.length;
       $("confirmClientBill").title = selectedClientBillLines.length ? "" : "Označi vsaj en vpis za obračun stranki.";
@@ -14385,12 +14439,13 @@
       }
     }
 
-    function openClientReport(client, clientId = "") {
+    function openClientReport(client, clientId = "", { fromHistory = false } = {}) {
       state.reportClient = client;
       state.reportClientId = clientId;
       $("reportClient").value = client;
       setView("report");
       renderReport();
+      if (!fromHistory && state.token && state.user) history.pushState(reportClientHistoryState(client, clientId), "", location.href);
     }
 
     async function cancelClientBillFromReport(billId) {
@@ -14407,7 +14462,8 @@
       await loadAll();
       renderReport();
     }
-    function clearClientReportSelection() {
+    function clearClientReportSelection({ fromHistory = false } = {}) {
+      const hadDetail = Boolean(state.reportClient || state.reportClientId);
       state.reportClient = "";
       state.reportClientId = "";
       state.clientBillSelectionKey = "";
@@ -14418,6 +14474,7 @@
       setView("report");
       renderReport();
       requestAnimationFrame(() => $("clientDetailList")?.scrollIntoView({ block: "start", behavior: "smooth" }));
+      if (!fromHistory && hadDetail && history.state?.[reportHistoryStateKey]) history.back();
     }
 
     async function confirmClientBillFromReport() {
@@ -14432,7 +14489,7 @@
       }
       const range = reportRangeLabel();
       const label = `${eventIds.length} ${eventIds.length === 1 ? "izbran vpis" : "izbranih vpisov"}`;
-      if (!await showAppConfirm(`Potrdim obračun stranki ${selection.name} za ${label} (${range})?`)) return;
+      if (!await showAppConfirm(`Potrdim obračun stranki ${selection.name} za ${label} (${range})?\n\nPotrjeni vnosi bodo odstranjeni s seznama »Za obračun«. Ostanejo dosegljivi prek izbire »Prikaži obračunano« in jih lahko tam tudi prekličeš.`)) return;
       await api("/api/client-bills", {
         method: "POST",
         body: JSON.stringify({ clientId: selection.id, clientName: selection.name, from: $("reportFrom").value, to: $("reportTo").value, eventIds })
@@ -16264,7 +16321,10 @@
       task.catch((error) => showNotice(error.message));
     });
 
-    ["todoFormStart", "todoFormEnd"].forEach((id) => $(id).addEventListener("change", normalizeTodoFormTimes));
+    ["todoFormStart", "todoFormEnd"].forEach((id) => $(id).addEventListener("change", () => {
+      normalizeTodoFormTimes();
+      if (id === "todoFormStart" && $("todoFormStart").value) $("todoFormEnd").focus();
+    }));
     $("todoFormDate").addEventListener("change", () => {
       syncTodoFormEndDate();
       updateTodoFormLateTimeEntryNotice();
@@ -16516,6 +16576,11 @@
     });
     $("clearReportClient").addEventListener("click", clearClientReportSelection);
     $("reportBackToClients").addEventListener("click", clearClientReportSelection);
+    $("reportNewEntry").addEventListener("click", () => {
+      const client = reportClientSelection();
+      if (!client.id && !client.name) { showNotice("Najprej izberi stranko."); return; }
+      openTodoDialog({ _standaloneHours: true, status: "execution", date: dateKey(new Date()), client: client.name, clientId: client.id, _hoursAssigneeIds: [activeWorkerId()] }).catch((error) => showNotice(error.message));
+    });
     $("confirmClientBill").addEventListener("click", () => confirmClientBillFromReport().catch((error) => showNotice(error.message)));
     $("exportReportPdf").addEventListener("click", () => downloadClientReportPdf().catch((error) => showNotice(error.message)));
     $("createReportGmailDraft").addEventListener("click", () => createClientReportGmailDraft().catch((error) => showNotice(error.message)));
@@ -16567,6 +16632,9 @@
       }
     });
 
+    $("previousReportTodo").addEventListener("click", () => navigateReportTodo(-1).catch((error) => showNotice(error.message)));
+    $("nextReportTodo").addEventListener("click", () => navigateReportTodo(1).catch((error) => showNotice(error.message)));
+
     $("clientDetailList").addEventListener("click", (event) => {
       const cancelBill = event.target.closest("[data-cancel-client-bill-id]");
       if (cancelBill) {
@@ -16592,7 +16660,8 @@
         event.preventDefault();
         const todo = state.todos.find((item) => item.id === todoButton.dataset.todoId);
         if (!todo) return;
-        openTodoDialog(todo).catch((error) => showNotice(error.message));
+        const navigationIds = reportTodos().map((item) => item.id).filter(Boolean);
+        openTodoDialog(todo, { reportNavigationIds: navigationIds }).catch((error) => showNotice(error.message));
       }
     });
     $("clientDetailList").addEventListener("change", (event) => {
@@ -17200,6 +17269,15 @@
     window.addEventListener("popstate", (event) => {
       if (closeOpenModalFromBack(event)) return;
       if (!state.token || !state.user || loggedInHistoryExitInProgress) return;
+      const reportState = event.state?.[reportHistoryStateKey];
+      if (reportState?.client || reportState?.clientId) {
+        openClientReport(reportState.client, reportState.clientId, { fromHistory: true });
+        return;
+      }
+      if (state.view === "report" && (state.reportClient || state.reportClientId)) {
+        clearClientReportSelection({ fromHistory: true });
+        return;
+      }
       if (event.state?.[loggedInHistoryStateKey] !== "base") return;
       confirmLoggedInHistoryExit().catch(() => rearmLoggedInHistory());
     });

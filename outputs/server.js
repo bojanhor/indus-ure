@@ -4109,7 +4109,6 @@ function buildClientReportPdf(db, report, attachments = [], exportOptions = {}) 
         const todo = group.todos?.[0] || {};
         const warranty = Boolean(todo.warranty);
         const materialEntry = todo.status === "material";
-        const materialAmount = materialEntry ? Math.max(0, Number(todo.materialAmount || 0)) : 0;
         const hours = warranty || materialEntry ? 0 : group.todos.reduce((sum, item) => sum + todoDurationHours(item), 0);
         const clientKm = warranty || materialEntry ? 0 : Math.max(0, Number(todo.clientKm || 0));
         const time = options.time === 'shown' && todo.start && todo.end ? `  ${todo.start}-${todo.end}` : '';
@@ -4119,7 +4118,6 @@ function buildClientReportPdf(db, report, attachments = [], exportOptions = {}) 
         if (options.worker === 'title' && !materialEntry) reportPdfLine(doc, 'Izvajalec', reportPdfAssignees(db, group.todos));
         if (materialEntry) reportPdfLine(doc, todo.externalDelivery ? 'Dostava' : 'Vrsta vpisa', todo.externalDelivery ? 'Material je neposredno dostavil zunanji dobavitelj.' : 'Material brez izvajalca.');
         if (warranty) reportPdfLine(doc, 'Garancija', 'Storitev se ne obra\u010dunava stranki.');
-        if (materialEntry) reportPdfLine(doc, 'Znesek materiala', `${materialAmount.toLocaleString('sl-SI', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR`);
         if (hours) reportPdfLine(doc, 'Izvedeno', `${hours.toLocaleString('sl-SI', { maximumFractionDigits: 2 })} h`);
         if (clientKm) reportPdfLine(doc, 'Stro\u0161ki prevoza (obe smeri)', `${reportPdfVehicleLabel(todo.clientVehicle)} - ${clientKm.toLocaleString('sl-SI', { maximumFractionDigits: 1 })} km`);
         if (todo.notes) reportPdfLine(doc, 'Opis del', todo.notes);
@@ -4137,13 +4135,9 @@ function buildClientReportPdf(db, report, attachments = [], exportOptions = {}) 
 
       const clientHoursByWorker = new Map();
       const travel = { personal: 0, van: 0 };
-      let totalMaterialAmount = 0;
       const totalClientHours = (report.groups || []).reduce((sum, group) => {
         const representative = group.todos?.[0] || {};
-        if (representative.status === 'material') {
-          totalMaterialAmount += Math.max(0, Number(representative.materialAmount || 0));
-          return sum;
-        }
+        if (representative.status === 'material') return sum;
         if (representative.warranty) return sum;
         const vehicle = representative.clientVehicle === 'van' ? 'van' : 'personal';
         travel[vehicle] += Math.max(0, Number(representative.clientKm || 0));
@@ -4165,11 +4159,6 @@ function buildClientReportPdf(db, report, attachments = [], exportOptions = {}) 
         });
       }
       reportPdfLine(doc, 'Skupaj', `${totalClientHours.toLocaleString('sl-SI', { maximumFractionDigits: 2 })} h`);
-      if (totalMaterialAmount) {
-        doc.moveDown(0.35);
-        doc.font(reportPdfFontPath('bold')).fontSize(13).fillColor('#0d536b').text('Material');
-        reportPdfLine(doc, 'Skupaj', `${totalMaterialAmount.toLocaleString('sl-SI', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR`);
-      }
       if (travel.personal || travel.van) {
         doc.moveDown(0.35);
         doc.font(reportPdfFontPath('bold')).fontSize(13).fillColor('#0d536b').text('Skupaj prevoza');
