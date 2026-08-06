@@ -1191,3 +1191,33 @@ test("prenos izvajalca po potrjenem obračunu naredi negativno razliko staremu i
   assert.equal(bojanAugust.lines.filter((line) => line.correctionId).length, 1);
   assert.equal(bojanAugust.workAmount, -37.5);
 });
+test("material record is client-billed without worker payroll", () => {
+  const db = {
+    users: { bojan: { id: "bojan", name: "Bojan", role: "boss" } },
+    clients: [{ clientId: "jerin", name: "Jerin", search: "jerin" }],
+    payrolls: [],
+    clientBills: [],
+    todos: [{
+      id: "material-1", assignmentGroupId: "material-event-1", syncUser: "bojan", status: "material", done: true,
+      date: "2026-07-15", title: "Delivery of fuses", clientId: "jerin", client: "Jerin",
+      material: "3x C16", materialAmount: 42.5, externalDelivery: true
+    }]
+  };
+  const normalized = cleanTodo(db.todos[0]);
+  assert.equal(normalized.done, true);
+  assert.equal(normalized.materialAmount, 42.5);
+  assert.equal(normalized.clientKm, 0);
+  assert.equal(normalized.billingHourlyRate, null);
+
+  assert.equal(reconcileTodoArchives(db, boss).archived, 0);
+  const bill = buildClientBillSnapshot(db, { clientId: "jerin", eventIds: ["material-event-1"] }, boss);
+  assert.ok(bill);
+  assert.deepEqual(bill.eventIds, ["material-event-1"]);
+  assert.deepEqual(bill.lines[0] && { status: bill.lines[0].status, materialAmount: bill.lines[0].materialAmount, externalDelivery: bill.lines[0].externalDelivery }, { status: "material", materialAmount: 42.5, externalDelivery: true });
+  db.clientBills.push(bill);
+
+  assert.equal(reconcileTodoArchives(db, boss).archived, 1);
+  assert.ok(db.todos[0].archivedAt);
+  assert.equal(db.todos[0].archivedPayrollId, "");
+  assert.equal(db.todos[0].archivedClientBillId, bill.id);
+});

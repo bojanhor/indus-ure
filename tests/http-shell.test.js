@@ -204,8 +204,8 @@ test("večdnevno opravilo dobi povezani mesečni trak in varne kontrole vnosa", 
   assert.match(html, /is-span-continuation/);
   assert.match(html, /!multiDayLayout\.todoIds\.has\(todo\.id\)/);
   assert.match(html, /function syncTodoFormDateRangeControls\(\)/);
-  assert.match(html, /field\.disabled = multiDay;/);
-  assert.match(html, /endDate\.disabled = Boolean\(isTimeEntry && date\)/);
+  assert.match(html, /field\.disabled = multiDay \|\| isMaterialEntry;/);
+  assert.match(html, /endDate\.disabled = Boolean\(lockedToOneDay && date\)/);
   assert.match(html, /function todoPointerDragScrollBounds\(\)/);
   assert.match(html, /hasDropTarget: false/);
   assert.match(html, /if \(!active \|\| !hasDropTarget\) return;/);
@@ -656,9 +656,9 @@ test("calendar-only task controls are date-bound, unavailable for time entries, 
   assert.match(html, /class="inline-url"/);
   assert.match(html, /id="todoFormCalendarOnly"/);
   assert.match(html, /id="todoFormCalendarOnlyField"/);
-  assert.match(html, /const isTimeEntry = timeEntryStatusIds\.has\(\$\('todoFormStatus'\)\.value\);[\s\S]*?const canShowOnlyInCalendar = Boolean\(date && !isTimeEntry\);/);
+  assert.match(html, /const isTimeEntry = timeEntryStatusIds\.has\(\$\('todoFormStatus'\)\.value\);[\s\S]*?const isMaterialEntry = \$\('todoFormStatus'\)\.value === 'material';[\s\S]*?const lockedToOneDay = isTimeEntry \|\| isMaterialEntry;[\s\S]*?const canShowOnlyInCalendar = Boolean\(date && !lockedToOneDay\);/);
   assert.match(html, /if \(!canShowOnlyInCalendar\) calendarOnly\.checked = false;/);
-  assert.match(html, /calendarOnly: Boolean\(!timeEntryStatusIds\.has\(selectedStatus\) && \$\("todoFormDate"\)\.value && \$\("todoFormCalendarOnly"\)\.checked\)/);
+  assert.match(html, /calendarOnly: Boolean\(!timeEntryStatusIds\.has\(selectedStatus\) && !materialEntry && \$\("todoFormDate"\)\.value && \$\("todoFormCalendarOnly"\)\.checked\)/);
   assert.match(html, /!todo\.calendarOnly && \(state\.todoSortMode === "imported" \? isImportedTodo\(todo\) : !isImportedTodo\(todo\)\)/);
   assert.match(html, /function calendarTodos\(\{ includeArchived = false \} = \{\}\) \{[\s\S]*?!isImportedTodo\(todo\)/);
 });

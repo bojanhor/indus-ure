@@ -133,7 +133,8 @@ const TODO_STATUS_DEFINITIONS = Object.freeze({
   meal: { label: "Malica", googleColorId: "5" },
   internal: { label: "Razno/Interno", googleColorId: "5" },
   drive: { label: "Vožnja", googleColorId: "7" },
-  purchase: { label: "Nabava", googleColorId: "6" }
+  purchase: { label: "Nabava", googleColorId: "6" },
+  material: { label: "Material", googleColorId: "7" }
 });
 const TODO_STATUSES = new Set(Object.keys(TODO_STATUS_DEFINITIONS));
 const TIME_ENTRY_TODO_STATUSES = new Set(["execution", "meal", "drive", "purchase"]);
@@ -3476,7 +3477,8 @@ function clientCorrectionSnapshot(todos = []) {
   const list = (todos || []).filter(Boolean).slice().sort((left, right) => String(left.date || "").localeCompare(String(right.date || "")) || String(left.start || "").localeCompare(String(right.start || "")));
   const first = list[0] || {};
   const warranty = Boolean(first.warranty);
-  return { eventId: todoBillingEventId(first), clientId: String(first.clientId || ""), client: String(first.client || ""), date: String(first.date || ""), start: String(first.start || ""), end: String(first.end || ""), title: String(first.title || "").slice(0, 300), notes: String(first.notes || "").slice(0, 10_000), material: String(first.material || "").slice(0, 10_000), warranty, clientKm: warranty ? 0 : nonnegativeNumber(first.clientKm, 0, 1_000_000), clientVehicle: todoVehicle(first.clientVehicle), hours: warranty ? 0 : Number(list.reduce((sum, todo) => sum + todoDurationHours(todo), 0).toFixed(2)), todoIds: list.map((todo) => String(todo.id || "")).filter(Boolean) };
+  const isMaterial = first.status === "material";
+  return { eventId: todoBillingEventId(first), clientId: String(first.clientId || ""), client: String(first.client || ""), date: String(first.date || ""), start: String(first.start || ""), end: String(first.end || ""), title: String(first.title || "").slice(0, 300), notes: String(first.notes || "").slice(0, 10_000), material: String(first.material || "").slice(0, 10_000), status: String(first.status || ""), externalDelivery: Boolean(first.externalDelivery), materialAmount: isMaterial ? nonnegativeNumber(first.materialAmount, 0, 1_000_000) : 0, warranty, clientKm: warranty || isMaterial ? 0 : nonnegativeNumber(first.clientKm, 0, 1_000_000), clientVehicle: todoVehicle(first.clientVehicle), hours: warranty || isMaterial ? 0 : Number(list.reduce((sum, todo) => sum + todoDurationHours(todo), 0).toFixed(2)), todoIds: list.map((todo) => String(todo.id || "")).filter(Boolean) };
 }
 function sameValue(left, right) { return JSON.stringify(left || {}) === JSON.stringify(right || {}); }
 function pendingCorrectionsForTodo(db, todo) {
@@ -3530,7 +3532,7 @@ function upsertSettlementCorrections(db, beforeTodos, afterTodos, actor, now = n
     if (sameValue(baseline, afterClient)) {
       if (pendingClient) db.settlementCorrections = db.settlementCorrections.filter((item) => item.id !== pendingClient.id);
     } else {
-      const delta = { hours: Number((signedNumber(afterClient.hours) - signedNumber(baseline.hours)).toFixed(2)), clientKm: Number((signedNumber(afterClient.clientKm) - signedNumber(baseline.clientKm)).toFixed(2)) };
+      const delta = { hours: Number((signedNumber(afterClient.hours) - signedNumber(baseline.hours)).toFixed(2)), clientKm: Number((signedNumber(afterClient.clientKm) - signedNumber(baseline.clientKm)).toFixed(2)), materialAmount: Number((signedNumber(afterClient.materialAmount) - signedNumber(baseline.materialAmount)).toFixed(2)) };
       const correction = { id: pendingClient?.id || crypto.randomUUID(), type: "client", status: "pending", eventId, clientId: String(afterClient.clientId || baseline.clientId || ""), clientName: String(afterClient.client || baseline.client || ""), sourceClientBillId: String(clientBill?.id || pendingClient?.sourceClientBillId || settledClient?.sourceClientBillId || ""), before: baseline, after: afterClient, delta, effectiveDate: correctionDateKey(), createdAt: pendingClient?.createdAt || now, createdBy: pendingClient?.createdBy || actor?.id || "system", createdByName: pendingClient?.createdByName || actor?.name || "", updatedAt: now, updatedBy: actor?.id || "system", updatedByName: actor?.name || "" };
       if (pendingClient) Object.assign(pendingClient, correction); else db.settlementCorrections.push(correction);
       result.push(correction);
@@ -3560,7 +3562,7 @@ function todoBillingEventId(todo) {
 }
 
 function todoRequiresClientBilling(todo) {
-  return Boolean(todo && !todo.imported && todo.status === "execution" && String(todo.clientId || todo.client || "").trim());
+  return Boolean(todo && !todo.imported && ["execution", "material"].includes(String(todo.status || "")) && String(todo.clientId || todo.client || "").trim());
 }
 
 function clientBillIsConfirmed(bill) {
@@ -3600,6 +3602,9 @@ function normalizeClientBill(input, db) {
       clientKm: nonnegativeNumber(line?.clientKm, 0, 1_000_000),
       clientVehicle: todoVehicle(line?.clientVehicle),
       warranty: Boolean(line?.warranty),
+      status: String(line?.status || "").slice(0, 40),
+      materialAmount: nonnegativeNumber(line?.materialAmount, 0, 1_000_000),
+      externalDelivery: Boolean(line?.externalDelivery),
       clientKmRate: 0
     };
   }).filter(Boolean);
@@ -3720,7 +3725,7 @@ function clientReportSelection(db, input = {}) {
     const correction = latestCorrection(db, (item) => item?.type === "client" && item?.status === "pending" && String(item.eventId || "") === String(group.eventId));
     if (!correction || !todos.length) return { eventId: group.eventId, todos };
     const representative = todos[0];
-    return { eventId: group.eventId, todos: [{ ...representative, title: "Popravek obra?una: " + String(correction.after?.title || representative.title || "storitev"), start: "", end: "", reportHours: signedNumber(correction.delta?.hours), clientKm: signedNumber(correction.delta?.clientKm), clientVehicle: correction.after?.clientVehicle || representative.clientVehicle, notes: "Popravek ?e potrjene storitve. Poro?ilo vsebuje samo razliko glede na prvotni obra?un.", material: correction.after?.material || "" }] };
+    return { eventId: group.eventId, todos: [{ ...representative, title: "Popravek obračuna: " + String(correction.after?.title || representative.title || "storitev"), start: "", end: "", reportHours: signedNumber(correction.delta?.hours), clientKm: signedNumber(correction.delta?.clientKm), materialAmount: signedNumber(correction.delta?.materialAmount), externalDelivery: Boolean(correction.after?.externalDelivery), status: correction.after?.status || representative.status, clientVehicle: correction.after?.clientVehicle || representative.clientVehicle, notes: "Popravek že potrjene storitve. Poročilo vsebuje samo razliko glede na prvotni obračun.", material: correction.after?.material || "" }] };
   }).sort((left, right) => {
     const leftTodo = left.todos[0] || {};
     const rightTodo = right.todos[0] || {};
@@ -4021,14 +4026,18 @@ function buildClientReportPdf(db, report, attachments = [], exportOptions = {}) 
       for (const group of report.groups || []) {
         const todo = group.todos?.[0] || {};
         const warranty = Boolean(todo.warranty);
-        const hours = warranty ? 0 : group.todos.reduce((sum, item) => sum + todoDurationHours(item), 0);
-        const clientKm = warranty ? 0 : Math.max(0, Number(todo.clientKm || 0));
+        const materialEntry = todo.status === "material";
+        const materialAmount = materialEntry ? Math.max(0, Number(todo.materialAmount || 0)) : 0;
+        const hours = warranty || materialEntry ? 0 : group.todos.reduce((sum, item) => sum + todoDurationHours(item), 0);
+        const clientKm = warranty || materialEntry ? 0 : Math.max(0, Number(todo.clientKm || 0));
         const time = options.time === 'shown' && todo.start && todo.end ? `  ${todo.start}-${todo.end}` : '';
         doc.font(reportPdfFontPath('bold')).fontSize(13).fillColor('#143b34').text(`${reportPdfDate(todo.date)}${time}`);
         doc.font(reportPdfFontPath('bold')).fontSize(12).fillColor('#161f20').text(String(todo.title || 'Brez naziva'));
         doc.font(reportPdfFontPath()).fontSize(10).fillColor('#263634');
-        if (options.worker === 'title') reportPdfLine(doc, 'Izvajalec', reportPdfAssignees(db, group.todos));
+        if (options.worker === 'title' && !materialEntry) reportPdfLine(doc, 'Izvajalec', reportPdfAssignees(db, group.todos));
+        if (materialEntry) reportPdfLine(doc, todo.externalDelivery ? 'Dostava' : 'Vrsta vpisa', todo.externalDelivery ? 'Material je neposredno dostavil zunanji dobavitelj.' : 'Material brez izvajalca.');
         if (warranty) reportPdfLine(doc, 'Garancija', 'Storitev se ne obra\u010dunava stranki.');
+        if (materialEntry) reportPdfLine(doc, 'Znesek materiala', `${materialAmount.toLocaleString('sl-SI', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR`);
         if (hours) reportPdfLine(doc, 'Izvedeno', `${hours.toLocaleString('sl-SI', { maximumFractionDigits: 2 })} h`);
         if (clientKm) reportPdfLine(doc, 'Stro\u0161ki prevoza (obe smeri)', `${reportPdfVehicleLabel(todo.clientVehicle)} - ${clientKm.toLocaleString('sl-SI', { maximumFractionDigits: 1 })} km`);
         if (todo.notes) reportPdfLine(doc, 'Opis del', todo.notes);
@@ -4046,8 +4055,13 @@ function buildClientReportPdf(db, report, attachments = [], exportOptions = {}) 
 
       const clientHoursByWorker = new Map();
       const travel = { personal: 0, van: 0 };
+      let totalMaterialAmount = 0;
       const totalClientHours = (report.groups || []).reduce((sum, group) => {
         const representative = group.todos?.[0] || {};
+        if (representative.status === 'material') {
+          totalMaterialAmount += Math.max(0, Number(representative.materialAmount || 0));
+          return sum;
+        }
         if (representative.warranty) return sum;
         const vehicle = representative.clientVehicle === 'van' ? 'van' : 'personal';
         travel[vehicle] += Math.max(0, Number(representative.clientKm || 0));
@@ -4069,6 +4083,11 @@ function buildClientReportPdf(db, report, attachments = [], exportOptions = {}) 
         });
       }
       reportPdfLine(doc, 'Skupaj', `${totalClientHours.toLocaleString('sl-SI', { maximumFractionDigits: 2 })} h`);
+      if (totalMaterialAmount) {
+        doc.moveDown(0.35);
+        doc.font(reportPdfFontPath('bold')).fontSize(13).fillColor('#0d536b').text('Material');
+        reportPdfLine(doc, 'Skupaj', `${totalMaterialAmount.toLocaleString('sl-SI', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR`);
+      }
       if (travel.personal || travel.van) {
         doc.moveDown(0.35);
         doc.font(reportPdfFontPath('bold')).fontSize(13).fillColor('#0d536b').text('Skupaj prevoza');
@@ -4469,6 +4488,9 @@ function buildClientBillSnapshot(db, input, actor) {
         clientKm: representative.clientKm,
         clientVehicle: representative.clientVehicle,
         warranty: Boolean(representative.warranty),
+        status: String(representative.status || ""),
+        materialAmount: nonnegativeNumber(representative.materialAmount, 0, 1_000_000),
+        externalDelivery: Boolean(representative.externalDelivery),
         clientKmRate: 0
       };
     }),
@@ -4614,7 +4636,8 @@ function reconcileTodoArchives(db, actor = null) {
     const needsClientBill = todoRequiresClientBilling(todo);
     const bill = needsClientBill ? bills.get(todoBillingEventId(todo)) : null;
     const desiredClientBillId = bill?.id || "";
-    const readyForArchive = Boolean(!hasPendingCorrection && payroll && (!needsClientBill || bill));
+    const materialOnly = todo.status === "material";
+    const readyForArchive = Boolean(!hasPendingCorrection && (materialOnly ? bill : (payroll && (!needsClientBill || bill))));
     if (todo.clientBillId !== desiredClientBillId || todo.clientBilledAt !== (bill?.confirmedAt || "")) {
       todo.clientBillId = desiredClientBillId;
       todo.clientBilledAt = bill?.confirmedAt || "";
@@ -4624,14 +4647,16 @@ function reconcileTodoArchives(db, actor = null) {
       changed = true;
     }
     if (readyForArchive) {
-      if (!todo.archivedAt || todo.archivedPayrollId !== payroll.id || todo.archivedClientBillId !== desiredClientBillId) {
+      if (!todo.archivedAt || todo.archivedPayrollId !== (materialOnly ? "" : payroll.id) || todo.archivedClientBillId !== desiredClientBillId) {
         todo.archivedAt = todo.archivedAt || now;
-        todo.archivedPayrollId = payroll.id;
+        todo.archivedPayrollId = materialOnly ? "" : payroll.id;
         todo.archivedClientBillId = desiredClientBillId;
         todo.updatedAt = now;
         todo.updatedBy = auditActor.id;
         todo.updatedByName = auditActor.name || "";
-        todo.history = [...(todo.history || []), audit(auditActor, needsClientBill
+        todo.history = [...(todo.history || []), audit(auditActor, materialOnly
+          ? `arhivirano po potrjenem obračunu materiala za stranko ${bill.clientName}`
+          : needsClientBill
           ? `arhivirano po potrjenem obračunu delavca in stranke ${bill.clientName}`
           : `arhivirano po potrjenem obračunu delavca ${payroll.month}`)];
         archived += 1;
@@ -4646,7 +4671,9 @@ function reconcileTodoArchives(db, actor = null) {
       todo.updatedAt = now;
       todo.updatedBy = auditActor.id;
       todo.updatedByName = auditActor.name || "";
-      todo.history = [...(todo.history || []), audit(auditActor, needsClientBill
+      todo.history = [...(todo.history || []), audit(auditActor, materialOnly
+        ? "vrnjeno iz arhiva: manjka potrjeni obračun materiala za stranko"
+        : needsClientBill
         ? "vrnjeno iz arhiva: manjka potrjeni obračun stranki ali delavca"
         : "vrnjeno iz arhiva: manjka potrjeni obračun delavca")];
       restored += 1;
@@ -4715,6 +4742,7 @@ function todoEditableSnapshot(todo) {
   const status = String(todo?.status || "");
   const isTimeEntry = TIME_ENTRY_TODO_STATUSES.has(status);
   const isCompleted = status === "execution";
+  const isMaterial = status === "material";
   const files = (items) => (Array.isArray(items) ? items : []).map((item) => ({
     id: String(item?.id || ""),
     attachmentId: String(item?.attachmentId || ""),
@@ -4727,8 +4755,8 @@ function todoEditableSnapshot(todo) {
   }));
   return JSON.stringify({
     title: String(todo?.title || ""), date: String(todo?.date || ""), endDate: String(todo?.endDate || todo?.date || ""), calendarOnly: Boolean(!isTimeEntry && todo?.calendarOnly && todo?.date), start: String(todo?.start || ""), end: String(todo?.end || ""),
-    client: String(todo?.client || ""), clientId: String(todo?.clientId || ""), clientContactIds: cleanTodoClientContactIds(todo?.clientContactIds), clientContacts: cleanTodoClientContactSnapshots(todo?.clientContacts), notes: String(todo?.notes || ""), material: String(todo?.material || ""),
-    status, urgent: Boolean(todo?.urgent), ordered: Boolean(todo?.ordered), warranty: status !== "meal" && Boolean(todo?.warranty),
+    client: String(todo?.client || ""), clientId: String(todo?.clientId || ""), clientContactIds: cleanTodoClientContactIds(todo?.clientContactIds), clientContacts: cleanTodoClientContactSnapshots(todo?.clientContacts), notes: String(todo?.notes || ""), material: String(todo?.material || ""), materialAmount: isMaterial ? nonnegativeNumber(todo?.materialAmount, 0, 1_000_000) : 0, externalDelivery: isMaterial && Boolean(todo?.externalDelivery),
+    status, urgent: Boolean(todo?.urgent), ordered: Boolean(todo?.ordered), warranty: status !== "meal" && !isMaterial && Boolean(todo?.warranty),
     sourceProjectTodoId: String(todo?.sourceProjectTodoId || ""), sourceProjectTitle: String(todo?.sourceProjectTitle || ""), billingHourlyRate: isTimeEntry ? nonnegativeNumber(todo?.billingHourlyRate, null, 10_000) : null,
     billingKm: isTimeEntry ? nonnegativeNumber(todo?.billingKm, null, 1_000_000) : null, workFromHome: isTimeEntry && Boolean(todo?.workFromHome), clientKm: isCompleted ? nonnegativeNumber(todo?.clientKm, null, 1_000_000) : null,
     clientVehicle: isCompleted ? todoVehicle(todo?.clientVehicle) : "", driveFiles: files(todo?.driveFiles), photos: files(todo?.photos)
@@ -4746,6 +4774,7 @@ function todoForUserRole(user, db, previous, todo) {
   const requestedClientVehicle = todoVehicle(todo.clientVehicle);
   const isCompleted = todo.status === "execution";
   const isMeal = todo.status === "meal";
+  const isMaterial = todo.status === "material";
   const isPaidTime = TIME_ENTRY_TODO_STATUSES.has(todo.status);
   const canSetClientMileage = isCompleted;
   const defaultRate = defaultHourlyRateForUser(db, todo.syncUser || previous?.syncUser || user.id);
@@ -4753,25 +4782,25 @@ function todoForUserRole(user, db, previous, todo) {
   if (user.role !== "boss") {
     return {
       ...todo,
-      billingHourlyRate: isPaidTime ? previousRate ?? defaultRate : previousRate,
-      billingKm: isMeal ? 0 : isPaidTime ? nonnegativeNumber(todo.billingKm, previousKm, 1_000_000) : previousKm,
-      workFromHome: isPaidTime && Boolean(todo.workFromHome),
-      warranty: isMeal ? false : Boolean(todo.warranty),
+      billingHourlyRate: isMaterial ? null : (isPaidTime ? previousRate ?? defaultRate : previousRate),
+      billingKm: isMeal || isMaterial ? 0 : isPaidTime ? nonnegativeNumber(todo.billingKm, previousKm, 1_000_000) : previousKm,
+      workFromHome: isPaidTime && !isMaterial && Boolean(todo.workFromHome),
+      warranty: isMeal || isMaterial ? false : Boolean(todo.warranty),
       imported: preserveImported,
-      clientKm: isMeal ? 0 : canSetClientMileage ? nonnegativeNumber(todo.clientKm, previousClientKm, 1_000_000) : previousClientKm,
-      clientVehicle: isMeal ? "personal" : canSetClientMileage ? requestedClientVehicle : previousClientVehicle,
+      clientKm: isMeal || isMaterial ? 0 : canSetClientMileage ? nonnegativeNumber(todo.clientKm, previousClientKm, 1_000_000) : previousClientKm,
+      clientVehicle: isMeal || isMaterial ? "personal" : canSetClientMileage ? requestedClientVehicle : previousClientVehicle,
       clientKmRate: 0
     };
   }
   return {
     ...todo,
-    billingHourlyRate: isPaidTime ? nonnegativeNumber(todo.billingHourlyRate, previousRate ?? defaultRate, 10_000) : previousRate,
-    billingKm: isMeal ? 0 : isPaidTime ? nonnegativeNumber(todo.billingKm, previousKm, 1_000_000) : previousKm,
-    workFromHome: isPaidTime && Boolean(todo.workFromHome),
-    warranty: isMeal ? false : Boolean(todo.warranty),
+    billingHourlyRate: isMaterial ? null : (isPaidTime ? nonnegativeNumber(todo.billingHourlyRate, previousRate ?? defaultRate, 10_000) : previousRate),
+    billingKm: isMeal || isMaterial ? 0 : isPaidTime ? nonnegativeNumber(todo.billingKm, previousKm, 1_000_000) : previousKm,
+    workFromHome: isPaidTime && !isMaterial && Boolean(todo.workFromHome),
+    warranty: isMeal || isMaterial ? false : Boolean(todo.warranty),
     imported: !isPaidTime && preserveImported,
-    clientKm: isMeal ? 0 : canSetClientMileage ? nonnegativeNumber(todo.clientKm, previousClientKm, 1_000_000) : previousClientKm,
-    clientVehicle: isMeal ? "personal" : requestedClientVehicle,
+    clientKm: isMeal || isMaterial ? 0 : canSetClientMileage ? nonnegativeNumber(todo.clientKm, previousClientKm, 1_000_000) : previousClientKm,
+    clientVehicle: isMeal || isMaterial ? "personal" : requestedClientVehicle,
     clientKmRate: 0
   };
 }
@@ -5097,6 +5126,7 @@ function normalizeTodoCreateReceipts(input, users, now = Date.now()) {
 function cleanTodo(input) {
   const status = input.status === "billing" ? "execution" : TODO_STATUSES.has(input.status) ? input.status : "open";
   const isMeal = status === "meal";
+  const isMaterial = status === "material";
   const isTimeEntry = TIME_ENTRY_TODO_STATUSES.has(status);
   const sourceProjectTodoId = status === "execution" ? String(input.sourceProjectTodoId || "").trim().slice(0, 100) : "";
   const sourceProjectTitle = sourceProjectTodoId ? String(input.sourceProjectTitle || "").trim().slice(0, 300) : "";
@@ -5105,7 +5135,7 @@ function cleanTodo(input) {
     title: isMeal ? "Malica" : String(input.title || "").trim(),
     date: String(input.date || ""),
     endDate: String(input.endDate || input.date || ""),
-    calendarOnly: Boolean(!isTimeEntry && input.calendarOnly && input.date),
+    calendarOnly: Boolean(!isTimeEntry && !isMaterial && input.calendarOnly && input.date),
     start: roundTimeToQuarterHour(input.start),
     end: roundTimeToQuarterHour(input.end),
     client: isMeal ? "" : String(input.client || "").trim(),
@@ -5121,20 +5151,22 @@ function cleanTodo(input) {
     // Older tasks without this field are intentionally shown as sorted.
     userOrderBuckets: cleanTodoUserOrderBuckets(input.userOrderBuckets),
     completionRequests: cleanTodoCompletionRequests(input.completionRequests),
-    urgent: isMeal || isTimeEntry || input.status === "billing" ? false : Boolean(input.urgent),
+    urgent: isMeal || isTimeEntry || isMaterial || input.status === "billing" ? false : Boolean(input.urgent),
     imported: !isTimeEntry && Boolean(input.imported),
     ordered: ORDER_TODO_STATUSES.has(status) && Boolean(input.ordered),
-    warranty: !isMeal && Boolean(input.warranty),
+    warranty: !isMeal && !isMaterial && Boolean(input.warranty),
     syncUser: cleanUserId(input.syncUser),
     sourceProjectTodoId,
     sourceProjectTitle,
-    done: input.status === "execution",
+    done: status === "execution" || status === "material",
     hoursNeedsReview: isTimeEntry && Boolean(input.hoursNeedsReview),
     workFromHome: isTimeEntry && Boolean(input.workFromHome),
-    billingHourlyRate: nonnegativeNumber(input.billingHourlyRate, null, 10_000),
-    billingKm: isMeal ? 0 : nonnegativeNumber(input.billingKm, null, 1_000_000),
-    clientKm: isMeal ? 0 : nonnegativeNumber(input.clientKm, null, 1_000_000),
-    clientVehicle: isMeal ? "personal" : todoVehicle(input.clientVehicle),
+    billingHourlyRate: isMaterial ? null : nonnegativeNumber(input.billingHourlyRate, null, 10_000),
+    billingKm: isMeal || isMaterial ? 0 : nonnegativeNumber(input.billingKm, null, 1_000_000),
+    clientKm: isMeal || isMaterial ? 0 : nonnegativeNumber(input.clientKm, null, 1_000_000),
+    clientVehicle: isMeal || isMaterial ? "personal" : todoVehicle(input.clientVehicle),
+    materialAmount: isMaterial ? nonnegativeNumber(input.materialAmount, 0, 1_000_000) : 0,
+    externalDelivery: isMaterial && Boolean(input.externalDelivery),
     clientKmRate: 0,
     driveFiles: isMeal ? [] : cleanTodoDriveFiles(input.driveFiles),
     photos: isMeal ? [] : limitTodoAttachmentsData(photos
@@ -5358,6 +5390,7 @@ function validateDebt(debt) {
 function validateTodo(todo, { requireClientId = false } = {}) {
   if (!todo.title) return "Manjka opis opravila.";
   if (requireClientId && todo.client && !todo.clientId) return "Stranke ni bilo mogoče identificirati.";
+  if (todo.status === "material" && !todo.clientId) return "Za vpis materiala izberi stranko.";
   if (todo.date && !/^\d{4}-\d{2}-\d{2}$/.test(todo.date)) return "Datum opravila ni pravilen.";
   if (todo.endDate && !/^\d{4}-\d{2}-\d{2}$/.test(todo.endDate)) return "Datum do opravila ni pravilen.";
   if (todo.endDate && !todo.date) return "Za datum do vnesi tudi datum od.";
@@ -5365,6 +5398,7 @@ function validateTodo(todo, { requireClientId = false } = {}) {
   if (Boolean(todo.start) !== Boolean(todo.end)) return "Vnesi obe uri: od in do.";
   if ((todo.start || todo.end) && !todo.date) return "Za opravilo z uro vnesi tudi datum.";
   if (todo.start && (!/^\d{2}:\d{2}$/.test(todo.start) || !/^\d{2}:\d{2}$/.test(todo.end))) return "Čas opravila ni pravilen.";
+  if (todo.status === "material" && !todo.date) return "Za vpis materiala vnesi datum.";
   if (TIME_ENTRY_TODO_STATUSES.has(todo.status) && (!todo.date || !todo.start || !todo.end)) {
     const label = todo.status === "meal" ? "malico" : todo.status === "drive" ? "vo\u017enjo" : todo.status === "purchase" ? "nabavo" : "zaklju\u010deno opravilo";
     return `Za ${label} vnesi datum ter uro od in do.`;
@@ -8241,14 +8275,14 @@ async function handleApi(req, res) {
         sendJson(res, 403, { error: "Delavec lahko ure vpiše samo sebi." });
         return;
       }
-      if (hasExplicitAssignees && !requestedAssigneeIds.length && todo.status !== "meal") {
+      if (hasExplicitAssignees && !requestedAssigneeIds.length && !["meal", "material"].includes(todo.status)) {
         sendJson(res, 400, { error: "Izberi vsaj enega izvajalca." });
         return;
       }
       let assigneeIds = requestedAssigneeIds.length
         ? requestedAssigneeIds
         : todoAssigneesForRequest(user, todo.syncUser, db.users);
-      if (todo.status === "meal") assigneeIds = [syncUserForRequest(user, todo.syncUser || assigneeIds[0] || user.id, "", db.users)];
+      if (["meal", "material"].includes(todo.status)) assigneeIds = [syncUserForRequest(user, todo.syncUser || assigneeIds[0] || user.id, "", db.users)];
       if (TIME_ENTRY_TODO_STATUSES.has(todo.status) && assigneeIds.length !== 1) {
         sendJson(res, 400, { error: "Vnos ur se vpisuje posebej za enega delavca." });
         return;
@@ -9131,7 +9165,7 @@ async function handleApi(req, res) {
         assigneeIds = [...new Set(body.assigneeIds
           .map(cleanUserId)
           .filter((assigneeId) => Boolean(db.users?.[assigneeId])))];
-        if (!assigneeIds.length) {
+        if (!assigneeIds.length && todo.status !== "material") {
           sendJson(res, 400, { error: "Izberi vsaj enega delavca." });
           return;
         }
@@ -9145,7 +9179,7 @@ async function handleApi(req, res) {
         sendJson(res, 403, { error: "Delavec lahko ure vpiše samo sebi." });
         return;
       }
-      if (todo.status === "meal") assigneeIds = [syncUserForRequest(user, todo.syncUser || assigneeIds[0] || previousTodo.syncUser || user.id, previousTodo.syncUser, db.users)];
+      if (["meal", "material"].includes(todo.status)) assigneeIds = [syncUserForRequest(user, todo.syncUser || assigneeIds[0] || previousTodo.syncUser || user.id, previousTodo.syncUser, db.users)];
       if (TIME_ENTRY_TODO_STATUSES.has(todo.status) && assigneeIds.length !== 1) {
         sendJson(res, 400, { error: "Vnos ur se vpisuje posebej za enega delavca." });
         return;
