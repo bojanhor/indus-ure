@@ -3464,18 +3464,30 @@
       background: #fff;
     }
     .todo-time-picker-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
-    .todo-time-picker-head strong { font-size: 13px; }
+    .todo-time-picker-select-head { justify-content: stretch; }
     .todo-time-picker-targets,
     .todo-time-picker-mode { display: inline-flex; gap: 4px; padding: 3px; border-radius: 9px; background: #edf3ef; }
+    .todo-time-picker-targets { width: 100%; padding: 4px; border-radius: 12px; }
     .todo-time-picker-target {
-      min-height: 32px;
-      padding: 5px 9px;
+      flex: 1 1 0;
+      min-height: 42px;
+      padding: 7px 12px;
       border: 1px solid transparent;
-      border-radius: 6px;
+      border-radius: 8px;
       color: var(--ink);
       background: transparent;
-      font-size: 13px;
+      font-size: 16px;
       font-weight: 800;
+    }
+    .todo-form-native-time-inputs {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      margin: -1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+      opacity: 0;
+      pointer-events: none;
     }
     .todo-time-picker-target.active,
     .todo-time-picker-mode-button.active { color: #fff; border-color: var(--accent-dark); background: var(--accent); }
@@ -5709,7 +5721,7 @@
               <input id="todoFormCalendarOnly" type="checkbox">
               <span>Prika&#382;i samo v koledarju (ne prika&#382;i med opravili)</span>
             </label>
-            <div class="todo-form-date-time-grid" id="todoFormTimeFields">
+            <div class="todo-form-date-time-grid todo-form-native-time-inputs" id="todoFormTimeFields" aria-hidden="true">
               <label>Ura od
                 <input id="todoFormStart" type="time" step="900">
               </label>
@@ -5718,8 +5730,7 @@
               </label>
             </div>
             <section class="todo-time-picker" id="todoFormQuickTimePicker" aria-label="Krožni izbirnik ure">
-              <div class="todo-time-picker-head">
-                <strong>Izberi čas</strong>
+              <div class="todo-time-picker-head todo-time-picker-select-head">
                 <div class="todo-time-picker-targets" role="group" aria-label="Izberi uro od ali do">
                   <button class="todo-time-picker-target active" id="todoFormQuickTimeStart" type="button" data-time-picker-target="start">Od</button>
                   <button class="todo-time-picker-target" id="todoFormQuickTimeEnd" type="button" data-time-picker-target="end">Do</button>
