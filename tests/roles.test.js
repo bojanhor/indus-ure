@@ -1221,3 +1221,11 @@ test("material record is client-billed without worker payroll", () => {
   assert.equal(db.todos[0].archivedPayrollId, "");
   assert.equal(db.todos[0].archivedClientBillId, bill.id);
 });
+test("normalization preserves a material record", () => {
+  const database = {
+    users: {}, entries: [], debts: [], clients: [], payrolls: [], clientBills: [],
+    todos: [{ id: "material-normalize", assignmentGroupId: "material-normalize", syncUser: "bojan", status: "material", done: true, date: "2026-08-06", title: "Material delivery", materialAmount: 18 }]
+  };
+  normalizeDb(database);
+  assert.deepEqual(database.todos[0] && { status: database.todos[0].status, done: database.todos[0].done, materialAmount: database.todos[0].materialAmount }, { status: "material", done: true, materialAmount: 18 });
+});

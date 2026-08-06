@@ -1858,11 +1858,13 @@ function normalizeDb(db = {}) {
       next.imported = imported;
       changed = true;
     }
-    if (next.done && next.status !== "execution") {
+    // Material is a completed client-billing record without worker hours.
+    // It must remain material after any normalisation/read-save cycle.
+    if (next.done && !["execution", "material"].includes(next.status)) {
       next.status = "execution";
       changed = true;
     }
-    const completed = next.status === "execution";
+    const completed = ["execution", "material"].includes(next.status);
     const hoursNeedsReview = TIME_ENTRY_TODO_STATUSES.has(next.status) && Boolean(next.hoursNeedsReview);
     if (next.hoursNeedsReview !== hoursNeedsReview) {
       next.hoursNeedsReview = hoursNeedsReview;
