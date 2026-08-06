@@ -16597,7 +16597,15 @@
         return;
       }
       const minuteButton = event.target.closest("[data-time-picker-minute]");
-      if (minuteButton) setTodoFormQuickTime(state.todoTimePickerTarget, { minute: Number(minuteButton.dataset.timePickerMinute) });
+      if (minuteButton) {
+        const target = state.todoTimePickerTarget;
+        setTodoFormQuickTime(target, { minute: Number(minuteButton.dataset.timePickerMinute) });
+        if (target === "start") {
+          state.todoTimePickerTarget = "end";
+          state.todoTimePickerMode = "hour";
+          renderTodoFormQuickTimePicker();
+        }
+      }
     });
     $("todoFormDate").addEventListener("change", () => {
       syncTodoFormEndDate();
