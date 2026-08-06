@@ -329,13 +329,17 @@ class PostgresStore {
                 'email', coalesce(u.data ->> 'email', ''),
                 'name', coalesce(u.data ->> 'name', ''),
                 'role', coalesce(u.data ->> 'role', ''),
-                'avatar', coalesce(u.data ->> 'avatar', '')
+                'avatar', coalesce(u.data ->> 'avatar', ''),
+                'active', coalesce(u.data -> 'active', 'true'::jsonb),
+                'employmentType', coalesce(u.data ->> 'employmentType', 'contractor'),
+                'timeEntryForIds', coalesce(u.data -> 'timeEntryForIds', '[]'::jsonb)
               ) as user,
               coalesce(m.data ->> 'syncRevision', '0') as revision
        from indus_sessions s
        join indus_users u on u.id = s.user_id
        left join indus_meta m on m.key = 'application'
-       where s.token_hash = $1 and s.expires_at > now()`,
+       where s.token_hash = $1 and s.expires_at > now()
+         and coalesce(u.data ->> 'active', 'true') <> 'false'`,
       [tokenHash]
     );
     if (!result.rowCount) return null;
@@ -358,6 +362,7 @@ class PostgresStore {
               data ->> 'role' as role,
               coalesce(data #>> '{billing,exportTitle}', '') as export_title
        from indus_users
+       where coalesce(data ->> 'active', 'true') <> 'false'
        order by lower(coalesce(data ->> 'name', '')), id`
     );
     return result.rows.map((row) => {

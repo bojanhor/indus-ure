@@ -659,7 +659,10 @@ const defaultUsers = {
     name: "Bojan",
     role: "boss",
     passwordHash: hashPassword(initialBojanPassword),
-    avatar: ""
+    avatar: "",
+    active: true,
+    employmentType: "contractor",
+    timeEntryForIds: ["bojan"]
   },
   ibro: {
     id: "ibro",
@@ -667,7 +670,10 @@ const defaultUsers = {
     name: "Ibro",
     role: "worker",
     passwordHash: hashPassword(initialIbroPassword),
-    avatar: ""
+    avatar: "",
+    active: true,
+    employmentType: "contractor",
+    timeEntryForIds: ["ibro"]
   }
 };
 
@@ -680,7 +686,7 @@ const TODO_EDIT_LOCK_TTL_MS = 90_000;
 const todoEditLocks = new Map();
 
 function allowedGoogleUsers(db) {
-  return Object.values(db.users || {}).filter((user) => user.email);
+  return Object.values(db.users || {}).filter((user) => user.email && user.active !== false);
 }
 
 function userByEmail(db, email) {
@@ -1491,6 +1497,7 @@ function normalizeDb(db = {}) {
       db.users[id].avatar = "";
       changed = true;
     }
+    if (normalizeWorkerProfile(id, db.users[id], db.users)) changed = true;
     if (resetUserPasswords) {
       const configuredPassword = id === "bojan" ? configuredBojanPassword : configuredIbroPassword;
       if (configuredPassword) {
@@ -1527,6 +1534,7 @@ function normalizeDb(db = {}) {
       user.avatar = "";
       changed = true;
     }
+    if (normalizeWorkerProfile(id, user, db.users)) changed = true;
   }
 
   if (!db.sessions || typeof db.sessions !== "object" || Array.isArray(db.sessions)) {
@@ -2451,15 +2459,17 @@ function publicUser(user) {
     email: user.email || "",
     name: user.name,
     role: user.role,
-    avatar: user.avatar || ""
+    avatar: user.avatar || "",
+    employmentType: user.employmentType || "contractor",
+    timeEntryForIds: [...new Set([user.id, ...(Array.isArray(user.timeEntryForIds) ? user.timeEntryForIds : [])].map(cleanUserId).filter(Boolean))]
   };
 }
-
 function publicDirectoryUser(user) {
   return {
     id: user.id,
     name: user.name,
     role: user.role,
+    employmentType: user.employmentType || "contractor",
     exportTitle: String(user.billing?.exportTitle || "")
   };
 }
@@ -3035,6 +3045,76 @@ function sourceTodoForNewEntry(db, user, entry) {
 function cleanUserId(value) {
   const id = String(value || "").trim();
   return /^[a-z0-9][a-z0-9_-]{0,63}$/i.test(id) ? id : "";
+}
+
+const EMPLOYMENT_TYPES = new Set(["contractor", "employee"]);
+
+function timeEntryTargetIds(db, user) {
+  if (!user || typeof user !== "object") return [];
+  const users = db?.users && typeof db.users === "object" ? db.users : {};
+  const requested = Array.isArray(user.timeEntryForIds) ? user.timeEntryForIds : [];
+  const ids = [...new Set([user.id, ...requested].map(cleanUserId).filter(Boolean))];
+  return ids.filter((id) => !Object.keys(users).length || (users[id] && users[id].active !== false));
+}
+
+function canRecordHoursFor(db, user, workerId) {
+  const targetId = cleanUserId(workerId);
+  if (!user || !targetId || !db?.users?.[targetId] || db.users[targetId].active === false) return false;
+  if (user.role === "boss") return true;
+  return timeEntryTargetIds(db, user).includes(targetId);
+}
+
+function normalizeWorkerProfile(id, user, users = {}) {
+  if (!user || typeof user !== "object") return false;
+  let changed = false;
+  const active = user.role === "boss" ? true : user.active !== false;
+  if (user.active !== active) {
+    user.active = active;
+    changed = true;
+  }
+  const employmentType = EMPLOYMENT_TYPES.has(String(user.employmentType || ""))
+    ? String(user.employmentType)
+    : "contractor";
+  if (user.employmentType !== employmentType) {
+    user.employmentType = employmentType;
+    changed = true;
+  }
+  const ids = [...new Set([id, ...(Array.isArray(user.timeEntryForIds) ? user.timeEntryForIds : [])]
+    .map(cleanUserId)
+    .filter((targetId) => Boolean(users[targetId]) && users[targetId].active !== false))];
+  if (JSON.stringify(user.timeEntryForIds || []) !== JSON.stringify(ids)) {
+    user.timeEntryForIds = ids;
+    changed = true;
+  }
+  return changed;
+}
+
+function workerHasBusinessData(db, userId) {
+  const targetId = cleanUserId(userId);
+  if (!targetId) return false;
+  const refersToUser = (value) => {
+    if (!value || typeof value !== "object") return false;
+    for (const [key, candidate] of Object.entries(value)) {
+      if (["syncUser", "createdBy", "updatedBy", "trashedBy", "workerId", "person", "creditedWorkerId", "archivedBy", "userId", "assigneeId"].includes(key) && String(candidate || "") === targetId) return true;
+      if (["assigneeIds", "recipientUserIds", "userIds", "workerIds"].includes(key) && Array.isArray(candidate) && candidate.map(String).includes(targetId)) return true;
+      if (candidate && typeof candidate === "object" && refersToUser(candidate)) return true;
+    }
+    return false;
+  };
+  return [db.entries, db.todos, db.debts, db.advances, db.personalPurchases, db.payrolls, db.clientBills, db.billingLocks, db.auditLog]
+    .some((collection) => Array.isArray(collection) && collection.some(refersToUser));
+}
+
+function publicWorkerManagementUser(db, user) {
+  return {
+    id: user.id,
+    name: user.name || user.id,
+    email: user.email || "",
+    role: user.role || "worker",
+    active: user.active !== false,
+    employmentType: user.employmentType || "contractor",
+    timeEntryForIds: timeEntryTargetIds(db, user)
+  };
 }
 function nonnegativeNumber(value, fallback = null, maximum = Number.MAX_SAFE_INTEGER) {
   if (value === "" || value === null || value === undefined) return fallback;
@@ -4807,7 +4887,7 @@ function todoForUserRole(user, db, previous, todo) {
   };
 }
 function syncUserForRequest(user, requested, fallback = "", users = defaultUsers) {
-  const allowed = new Set(Object.keys(users || {}));
+  const allowed = new Set(Object.entries(users || {}).filter(([, candidate]) => candidate?.active !== false).map(([id]) => id));
   const wanted = cleanUserId(requested);
   const previous = cleanUserId(fallback);
   if (user.role === "boss") {
@@ -4819,7 +4899,7 @@ function syncUserForRequest(user, requested, fallback = "", users = defaultUsers
 }
 
 function todoAssigneeForUpdate(user, requested, fallback = "", users = defaultUsers) {
-  const allowed = new Set(Object.keys(users || {}));
+  const allowed = new Set(Object.entries(users || {}).filter(([, candidate]) => candidate?.active !== false).map(([id]) => id));
   const wanted = cleanUserId(requested);
   const previous = cleanUserId(fallback);
   if (allowed.has(wanted)) return wanted;
@@ -4828,7 +4908,7 @@ function todoAssigneeForUpdate(user, requested, fallback = "", users = defaultUs
 }
 
 function todoAssigneesForRequest(user, requested, users = defaultUsers) {
-  const allowed = new Set(Object.keys(users || {}));
+  const allowed = new Set(Object.entries(users || {}).filter(([, candidate]) => candidate?.active !== false).map(([id]) => id));
   const values = Array.isArray(requested) ? requested : [requested];
   const assignees = [...new Set(values
     .map(cleanUserId)
@@ -4898,7 +4978,7 @@ async function getSessionUser(req) {
   req.indusDb = db;
   req.indusSession = session || null;
   req.indusSessionToken = token;
-  req.indusSessionUser = session ? (db.users[session.userId] || null) : null;
+  req.indusSessionUser = session && db.users[session.userId]?.active !== false ? (db.users[session.userId] || null) : null;
   return req.indusSessionUser;
 }
 
@@ -5611,7 +5691,7 @@ async function runDailyWorkerDigest({ date = "", dryRun = false } = {}) {
   const reportDate = isDateKey(date) ? String(date) : workerDigestPreviousDate();
   const db = await readDbAsync();
   const workers = Object.values(db.users || {})
-    .filter((user) => ["boss", "worker"].includes(user?.role))
+    .filter((user) => ["boss", "worker"].includes(user?.role) && user.active !== false)
     .sort((left, right) => String(left.name || left.id).localeCompare(String(right.name || right.id), "sl"));
   const reports = workers.map((worker) => workerDailyDigestSnapshot(db, worker.id, reportDate)).filter(Boolean);
   if (dryRun) {
@@ -7053,7 +7133,8 @@ async function handleApi(req, res) {
       if (!user) return;
       const db = await readDbAsync();
       req.indusDb = db;
-      const workers = Object.values(db.users || {})
+      const activeUsers = Object.values(db.users || {}).filter((worker) => worker.active !== false);
+      const workers = activeUsers
         .filter((worker) => user.role === "boss" || worker.id === user.id)
         .map((worker) => ({
           id: worker.id,
@@ -7068,7 +7149,7 @@ async function handleApi(req, res) {
         csrfToken: req.indusSession?.csrfToken || "",
         sessionExpiresAt: req.indusSession?.expiresAt || 0,
         syncRevision: Number(db.syncRevision || 0),
-        users: Object.values(db.users || {}).map(publicDirectoryUser),
+        users: activeUsers.map(publicDirectoryUser),
         entries: visibleEntriesForUser(db, user),
         todos: visibleTodosForUser(db, user),
         debts: visibleDebtsForUser(db, user),
@@ -7103,10 +7184,184 @@ async function handleApi(req, res) {
       if (!user) return;
       const users = DATABASE_URL
         ? await getPgStore().publicUserDirectory()
-        : Object.values((req.indusDb || await readDbAsync()).users || {}).map(publicDirectoryUser);
+        : Object.values((req.indusDb || await readDbAsync()).users || {}).filter((entry) => entry.active !== false).map(publicDirectoryUser);
       sendJson(res, 200, { users });
       return;
     }
+
+    if (url.pathname === "/api/workers" && req.method === "GET") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      if (user.role !== "boss") {
+        sendJson(res, 403, { error: "Delavce lahko upravlja samo šef." });
+        return;
+      }
+      const db = await readDbAsync();
+      const workers = Object.values(db.users || {})
+        .map((worker) => publicWorkerManagementUser(db, worker))
+        .sort((left, right) => Number(right.active) - Number(left.active)
+          || String(left.name || left.id).localeCompare(String(right.name || right.id), "sl"));
+      sendJson(res, 200, { workers });
+      return;
+    }
+
+    if (url.pathname === "/api/workers" && req.method === "POST") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      if (user.role !== "boss") {
+        sendJson(res, 403, { error: "Delavce lahko upravlja samo šef." });
+        return;
+      }
+      const body = await readBody(req);
+      const name = String(body.name || "").trim().replace(/\s+/g, " ").slice(0, 120);
+      const email = String(body.email || "").trim().toLowerCase();
+      if (!name) {
+        sendJson(res, 400, { error: "Vpiši ime delavca." });
+        return;
+      }
+      if (email && !validEmailAddress(email)) {
+        sendJson(res, 400, { error: "Google e-pošta ni pravilna." });
+        return;
+      }
+      const db = await readDbAsync();
+      if (email && Object.values(db.users || {}).some((worker) => String(worker.email || "").toLowerCase() === email)) {
+        sendJson(res, 409, { error: "Ta Google e-pošta je že dodeljena drugemu delavcu." });
+        return;
+      }
+      const id = crypto.randomUUID();
+      db.users[id] = {
+        id,
+        name,
+        email,
+        role: "worker",
+        avatar: "",
+        active: true,
+        employmentType: "contractor",
+        timeEntryForIds: [id],
+        billing: {}
+      };
+      recordAuditLog(db, {
+        actor: user,
+        action: "dodan delavec",
+        targetType: "worker",
+        targetId: id,
+        context: { userId: id, name, hasGoogleLogin: Boolean(email), employmentType: "contractor" }
+      });
+      await writeDbAsync(db);
+      sendJson(res, 201, {
+        worker: publicWorkerManagementUser(db, db.users[id]),
+        workers: Object.values(db.users).map((worker) => publicWorkerManagementUser(db, worker))
+      });
+      return;
+    }
+
+    const workerMatch = url.pathname === "/api/workers/billing" ? null : /^\/api\/workers\/([^/]+)$/.exec(url.pathname);
+    if (workerMatch && req.method === "PUT") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      if (user.role !== "boss") {
+        sendJson(res, 403, { error: "Delavce lahko upravlja samo šef." });
+        return;
+      }
+      const id = cleanUserId(decodeURIComponent(workerMatch[1]));
+      const body = await readBody(req);
+      const db = await readDbAsync();
+      const worker = db.users?.[id];
+      if (!worker) {
+        sendJson(res, 404, { error: "Delavec ne obstaja." });
+        return;
+      }
+      const name = String(body.name || "").trim().replace(/\s+/g, " ").slice(0, 120);
+      const email = String(body.email || "").trim().toLowerCase();
+      if (!name) {
+        sendJson(res, 400, { error: "Vpiši ime delavca." });
+        return;
+      }
+      if (email && !validEmailAddress(email)) {
+        sendJson(res, 400, { error: "Google e-pošta ni pravilna." });
+        return;
+      }
+      if (email && Object.values(db.users || {}).some((candidate) => candidate.id !== id && String(candidate.email || "").toLowerCase() === email)) {
+        sendJson(res, 409, { error: "Ta Google e-pošta je že dodeljena drugemu delavcu." });
+        return;
+      }
+      const active = worker.role === "boss" ? true : body.active !== false;
+      const requestedTargets = Array.isArray(body.timeEntryForIds) ? body.timeEntryForIds : [];
+      const timeEntryForIds = [...new Set([id, ...requestedTargets]
+        .map(cleanUserId)
+        .filter((targetId) => Boolean(db.users?.[targetId]) && db.users[targetId].active !== false))];
+      worker.name = name;
+      worker.email = email;
+      worker.active = active;
+      worker.employmentType = "contractor";
+      worker.timeEntryForIds = active ? timeEntryForIds : [];
+      for (const candidate of Object.values(db.users || {})) {
+        if (!candidate || candidate.id === id) continue;
+        if (Array.isArray(candidate.timeEntryForIds)) candidate.timeEntryForIds = candidate.timeEntryForIds.filter((targetId) => targetId !== id);
+      }
+      normalizeWorkerProfile(id, worker, db.users);
+      recordAuditLog(db, {
+        actor: user,
+        action: "spremenjen delavec",
+        targetType: "worker",
+        targetId: id,
+        context: { userId: id, name, hasGoogleLogin: Boolean(email), active: worker.active, employmentType: worker.employmentType, timeEntryForIds: worker.timeEntryForIds }
+      });
+      await writeDbAsync(db);
+      sendJson(res, 200, {
+        worker: publicWorkerManagementUser(db, worker),
+        workers: Object.values(db.users).map((candidate) => publicWorkerManagementUser(db, candidate))
+      });
+      return;
+    }
+
+    if (workerMatch && req.method === "DELETE") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      if (user.role !== "boss") {
+        sendJson(res, 403, { error: "Delavce lahko upravlja samo šef." });
+        return;
+      }
+      const id = cleanUserId(decodeURIComponent(workerMatch[1]));
+      await readBody(req);
+      const db = await readDbAsync();
+      const worker = db.users?.[id];
+      if (!worker) {
+        sendJson(res, 404, { error: "Delavec ne obstaja." });
+        return;
+      }
+      if (worker.role === "boss") {
+        sendJson(res, 400, { error: "Šefa ni mogoče odstraniti med delavci." });
+        return;
+      }
+      const hasHistory = workerHasBusinessData(db, id);
+      if (hasHistory) {
+        worker.active = false;
+        worker.timeEntryForIds = [];
+        for (const candidate of Object.values(db.users || {})) {
+          if (Array.isArray(candidate?.timeEntryForIds)) candidate.timeEntryForIds = candidate.timeEntryForIds.filter((targetId) => targetId !== id);
+        }
+      } else {
+        delete db.users[id];
+      }
+      for (const [tokenHash, session] of Object.entries(db.sessions || {})) {
+        if (session?.userId === id) delete db.sessions[tokenHash];
+      }
+      recordAuditLog(db, {
+        actor: user,
+        action: hasHistory ? "deaktiviran delavec" : "odstranjen delavec",
+        targetType: "worker",
+        targetId: id,
+        context: { userId: id, name: worker.name || id, preservedHistory: hasHistory }
+      });
+      await writeDbAsync(db);
+      sendJson(res, 200, {
+        action: hasHistory ? "deactivated" : "deleted",
+        workers: Object.values(db.users || {}).map((candidate) => publicWorkerManagementUser(db, candidate))
+      });
+      return;
+    }
+
     if (url.pathname === "/api/worker-daily-report" && req.method === "GET") {
       const user = await requireUser(req, res);
       if (!user) return;
@@ -7677,7 +7932,8 @@ async function handleApi(req, res) {
       const user = await requireUser(req, res);
       if (!user) return;
       const db = await readDbAsync();
-      const workers = Object.values(db.users || {})
+      const activeUsers = Object.values(db.users || {}).filter((worker) => worker.active !== false);
+      const workers = activeUsers
         .filter((worker) => user.role === "boss" || worker.id === user.id)
         .map((worker) => ({
         id: worker.id,
@@ -8271,10 +8527,10 @@ async function handleApi(req, res) {
       const requestedAssigneeIds = hasExplicitAssignees
         ? [...new Set(body.assigneeIds
           .map(cleanUserId)
-          .filter((assigneeId) => Boolean(db.users?.[assigneeId])))]
+          .filter((assigneeId) => Boolean(db.users?.[assigneeId]) && db.users[assigneeId].active !== false))]
         : [];
-      if (user.role !== "boss" && TIME_ENTRY_TODO_STATUSES.has(todo.status) && requestedAssigneeIds.some((assigneeId) => assigneeId !== user.id)) {
-        sendJson(res, 403, { error: "Delavec lahko ure vpiše samo sebi." });
+      if (user.role !== "boss" && TIME_ENTRY_TODO_STATUSES.has(todo.status) && requestedAssigneeIds.some((assigneeId) => !canRecordHoursFor(db, user, assigneeId))) {
+        sendJson(res, 403, { error: "Delavec lahko ure vpiše samo sebi ali za delavce, ki jih je določil šef." });
         return;
       }
       if (hasExplicitAssignees && !requestedAssigneeIds.length && !["meal", "material"].includes(todo.status)) {
@@ -9166,7 +9422,7 @@ async function handleApi(req, res) {
       if (Array.isArray(body.assigneeIds)) {
         assigneeIds = [...new Set(body.assigneeIds
           .map(cleanUserId)
-          .filter((assigneeId) => Boolean(db.users?.[assigneeId])))];
+          .filter((assigneeId) => Boolean(db.users?.[assigneeId]) && db.users[assigneeId].active !== false))];
         if (!assigneeIds.length && todo.status !== "material") {
           sendJson(res, 400, { error: "Izberi vsaj enega delavca." });
           return;
@@ -9177,8 +9433,8 @@ async function handleApi(req, res) {
         if (!assigneeIds.includes(nextAssignee)) assigneeIds.push(nextAssignee);
       }
 
-      if (user.role !== "boss" && TIME_ENTRY_TODO_STATUSES.has(todo.status) && assigneeIds.some((assigneeId) => assigneeId !== user.id)) {
-        sendJson(res, 403, { error: "Delavec lahko ure vpiše samo sebi." });
+      if (TIME_ENTRY_TODO_STATUSES.has(todo.status) && assigneeIds.some((assigneeId) => !canRecordHoursFor(db, user, assigneeId))) {
+        sendJson(res, 403, { error: "Delavec lahko ure vpiše samo sebi ali za delavce, ki jih je določil šef." });
         return;
       }
       if (["meal", "material"].includes(todo.status)) assigneeIds = [syncUserForRequest(user, todo.syncUser || assigneeIds[0] || previousTodo.syncUser || user.id, previousTodo.syncUser, db.users)];
@@ -9498,6 +9754,10 @@ module.exports = {
   INDUS_GOOGLE_APP_ID,
   TODO_STATUS_DEFINITIONS,
   SESSION_TTL_MS,
+  canRecordHoursFor,
+  timeEntryTargetIds,
+  normalizeWorkerProfile,
+  workerHasBusinessData,
   acquireEntryEditLock,
   acquireTodoEditLock,
   acquireTodoAssignmentEditLock,

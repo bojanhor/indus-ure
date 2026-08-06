@@ -375,6 +375,31 @@ test("lokalna testna instanca omogoča ločeno prijavo samo v testnem načinu", 
       Cookie: cookie,
       "X-CSRF-Token": JSON.parse(login.body).csrfToken
     };
+    const workersBefore = await request(port, "/api/workers", { headers: bossTodoHeaders });
+    assert.equal(workersBefore.status, 200, workersBefore.body);
+    const createdWorkerResponse = await request(port, "/api/workers", {
+      method: "POST",
+      headers: bossTodoHeaders,
+      body: JSON.stringify({ name: "Maja brez Google prijave", email: "", employmentType: "contractor" })
+    });
+    assert.equal(createdWorkerResponse.status, 201, createdWorkerResponse.body);
+    const createdWorker = JSON.parse(createdWorkerResponse.body).worker;
+    assert.ok(createdWorker?.id);
+    assert.equal(createdWorker.email, "");
+    assert.equal(createdWorker.employmentType, "contractor");
+    assert.deepEqual(createdWorker.timeEntryForIds, [createdWorker.id]);
+    const permissionUpdate = await request(port, `/api/workers/${encodeURIComponent("ibro")}`, {
+      method: "PUT",
+      headers: bossTodoHeaders,
+      body: JSON.stringify({
+        name: "Ibro",
+        email: "ibrahim.etemaj04@gmail.com",
+        active: true,
+        employmentType: "contractor",
+        timeEntryForIds: ["ibro", createdWorker.id]
+      })
+    });
+    assert.equal(permissionUpdate.status, 200, permissionUpdate.body);
     const assigned = await request(port, "/api/todos", {
       method: "POST",
       headers: bossTodoHeaders,
@@ -435,6 +460,20 @@ test("lokalna testna instanca omogoča ločeno prijavo samo v testnem načinu", 
       Cookie: ibroCookie,
       "X-CSRF-Token": JSON.parse(ibroLogin.body).csrfToken
     };
+    const delegatedHours = await request(port, "/api/todos", {
+      method: "POST",
+      headers: ibroTodoHeaders,
+      body: JSON.stringify({
+        date: "2026-07-27",
+        start: "08:00",
+        end: "09:00",
+        client: "Test client",
+        title: "Ibro may enter delegated worker hours",
+        status: "execution",
+        assigneeIds: [createdWorker.id]
+      })
+    });
+    assert.equal(delegatedHours.status, 200, delegatedHours.body);
     const crossAssigned = await request(port, "/api/todos", {
       method: "POST",
       headers: ibroTodoHeaders,
@@ -481,6 +520,15 @@ test("lokalna testna instanca omogoča ločeno prijavo samo v testnem načinu", 
     assert.equal(foreignHoursUpdate.status, 403, foreignHoursUpdate.body);
     assert.equal(JSON.parse(foreignHoursUpdate.body).error, JSON.parse(foreignHours.body).error);
     assert.match(JSON.parse(foreignHours.body).error, /ure vpiše samo sebi/);
+    const removedWorker = await request(port, `/api/workers/${encodeURIComponent(createdWorker.id)}`, {
+      method: "DELETE",
+      headers: bossTodoHeaders
+    });
+    assert.equal(removedWorker.status, 200, removedWorker.body);
+    assert.equal(JSON.parse(removedWorker.body).action, "deactivated");
+    const activeDirectoryAfterRemoval = await request(port, "/api/users", { headers: { Cookie: cookie } });
+    assert.equal(activeDirectoryAfterRemoval.status, 200, activeDirectoryAfterRemoval.body);
+    assert.equal(JSON.parse(activeDirectoryAfterRemoval.body).users.some((candidate) => candidate.id === createdWorker.id), false);
     const ibroTodos = await request(port, "/api/todos", { headers: { Cookie: ibroCookie } });
     assert.equal(ibroTodos.status, 200, ibroTodos.body);
     assert.ok(JSON.parse(ibroTodos.body).todos.some((todo) => todo.title === "Boss assigned task"));

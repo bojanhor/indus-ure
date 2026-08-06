@@ -14,6 +14,10 @@ const {
   canManageEntry,
   canManageFinancialEntry,
   canManageTodo,
+  canRecordHoursFor,
+  timeEntryTargetIds,
+  normalizeWorkerProfile,
+  workerHasBusinessData,
   applySharedManualTodoOrder,
   sharedManualTodoGroups,
   preserveTimeEntrySourceProject,
@@ -1228,4 +1232,42 @@ test("normalization preserves a material record", () => {
   };
   normalizeDb(database);
   assert.deepEqual(database.todos[0] && { status: database.todos[0].status, done: database.todos[0].done, materialAmount: database.todos[0].materialAmount }, { status: "material", done: true, materialAmount: 18 });
+});
+test("delavec lahko vpisuje ure zase in za delavce, ki jih določi šef", () => {
+  const workerDb = {
+    users: {
+      bojan: { id: "bojan", role: "boss", active: true, timeEntryForIds: ["bojan"] },
+      ibro: { id: "ibro", role: "worker", active: true, timeEntryForIds: ["ibro", "maja"] },
+      maja: { id: "maja", role: "worker", active: true, timeEntryForIds: ["maja"] },
+      marko: { id: "marko", role: "worker", active: false, timeEntryForIds: [] }
+    }
+  };
+  assert.deepEqual(timeEntryTargetIds(workerDb, workerDb.users.ibro), ["ibro", "maja"]);
+  assert.equal(canRecordHoursFor(workerDb, workerDb.users.ibro, "ibro"), true);
+  assert.equal(canRecordHoursFor(workerDb, workerDb.users.ibro, "maja"), true);
+  assert.equal(canRecordHoursFor(workerDb, workerDb.users.ibro, "bojan"), false);
+  assert.equal(canRecordHoursFor(workerDb, workerDb.users.ibro, "marko"), false);
+  assert.equal(canRecordHoursFor(workerDb, workerDb.users.bojan, "maja"), true);
+});
+
+test("normalizacija delavca ohrani neobvezno Google prijavo in odstrani neaktivna pooblastila", () => {
+  const users = {
+    maja: { id: "maja", name: "Maja", role: "worker", active: true },
+    marko: { id: "marko", name: "Marko", role: "worker", active: false }
+  };
+  assert.equal(normalizeWorkerProfile("maja", users.maja, users), true);
+  assert.equal(users.maja.employmentType, "contractor");
+  assert.deepEqual(users.maja.timeEntryForIds, ["maja"]);
+  users.maja.timeEntryForIds = ["maja", "marko"];
+  normalizeWorkerProfile("maja", users.maja, users);
+  assert.deepEqual(users.maja.timeEntryForIds, ["maja"]);
+});
+
+test("delavec z zgodovino se varno prepozna za deaktivacijo namesto izbrisa", () => {
+  const workerDb = {
+    entries: [], debts: [], advances: [], personalPurchases: [], payrolls: [], clientBills: [], billingLocks: [], auditLog: [],
+    todos: [{ id: "historic", syncUser: "maja", createdBy: "bojan" }]
+  };
+  assert.equal(workerHasBusinessData(workerDb, "maja"), true);
+  assert.equal(workerHasBusinessData(workerDb, "marko"), false);
 });

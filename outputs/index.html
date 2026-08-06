@@ -5007,7 +5007,32 @@
       .app-settings-section { display: grid; gap: 9px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: #f8faf7; }
       .app-settings-section h4 { margin: 0; }
     }
-  </style>
+    .workers-dialog { width: min(920px, calc(100vw - 24px)); }
+    .workers-dialog .modal-head { align-items: flex-start; }
+    .workers-dialog .modal-head h3 { margin: 0 0 3px; }
+    .worker-create-panel { padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: #f5faf8; }
+    .worker-create-panel h4 { margin: 0 0 10px; }
+    .worker-create-grid { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(220px, 1fr) minmax(150px, .7fr); gap: 10px; }
+    .worker-management-list { display: grid; gap: 12px; margin-top: 16px; }
+    .worker-management-card { border: 1px solid var(--line); border-radius: 12px; padding: 14px; background: #fff; }
+    .worker-management-card.inactive { opacity: .68; background: #f7f8f8; }
+    .worker-management-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+    .worker-management-head h4 { margin: 0; }
+    .worker-management-status { color: var(--muted); font-size: 13px; font-weight: 750; }
+    .worker-management-grid { display: grid; grid-template-columns: minmax(170px, 1fr) minmax(220px, 1.2fr) minmax(150px, .75fr); gap: 10px; }
+    .worker-permissions { margin: 13px 0 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 9px; }
+    .worker-permissions legend { padding: 0 4px; font-weight: 800; }
+    .worker-permissions-list { display: flex; flex-wrap: wrap; gap: 7px 14px; }
+    .worker-permissions-list label { display: inline-flex; align-items: center; gap: 6px; margin: 0; }
+    .worker-management-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 13px; }
+    .worker-management-actions .danger { color: #a82d35; border-color: #e1b8bc; background: #fff7f7; }
+    .worker-active-field { display: inline-flex; align-items: center; gap: 7px; margin: 0; }
+    @media (max-width: 620px) {
+      .worker-create-grid, .worker-management-grid { grid-template-columns: 1fr; }
+      .worker-management-head { align-items: flex-start; flex-direction: column; }
+      .worker-management-actions { justify-content: stretch; flex-wrap: wrap; }
+      .worker-management-actions button { flex: 1 1 130px; }
+    }  </style>
 </head>
 <body class="booting">
   <section id="bootScreen" aria-live="polite" aria-label="Odpiram INDUS URE">Odpiram INDUS URE</section>
@@ -5078,6 +5103,7 @@
 
               <span class="tools-menu-label">Uporabnik</span>
               <button class="menu-action" id="accountBtn" type="button">Ra&#269;un in profil</button>
+              <button class="menu-action boss-only" id="workersMenuBtn" type="button">Delavci</button>
               <span class="tools-menu-label">Delo</span>
               <button class="menu-action view-menu-action" id="billingMenuBtn" type="button">Obra&#269;uni</button>
               <button class="menu-action view-menu-action admin-only" id="clientBillingMenuBtn" type="button">Obra&#269;un strank</button>
@@ -5901,6 +5927,27 @@
     </form>
   </dialog>
 
+  <dialog id="workersDialog" class="workers-dialog">
+    <form method="dialog" id="workersForm">
+      <div class="modal-head">
+        <div><h3>Delavci</h3><p class="todo-meta">Google e-pošta je neobvezna: brez nje je delavec v evidenci, prijaviti pa se še ne more.</p></div>
+        <button class="icon-btn" id="closeWorkers" type="button" title="Zapri">&times;</button>
+      </div>
+      <div class="modal-body">
+        <section class="worker-create-panel">
+          <h4>Dodaj delavca</h4>
+          <div class="worker-create-grid">
+            <label>Ime in priimek<input id="workerCreateName" type="text" maxlength="120" autocomplete="name" placeholder="npr. Janez Novak" required></label>
+            <label>Google e-pošta <span class="todo-meta">(neobvezno)</span><input id="workerCreateEmail" type="email" maxlength="240" autocomplete="email" placeholder="ime@podjetje.si"></label>
+            <label>Način obračunavanja<select id="workerCreateEmploymentType"><option value="contractor">Kooperant</option></select></label>
+          </div>
+          <div class="actions"><button class="primary" id="createWorker" type="submit">Dodaj delavca</button></div>
+        </section>
+        <div class="worker-management-list" id="workerManagementList" aria-live="polite"></div>
+        <div class="actions"><button class="secondary" id="cancelWorkers" type="button">Zapri</button></div>
+      </div>
+    </form>
+  </dialog>
   <dialog id="notificationsDialog">
     <form method="dialog">
       <div class="modal-head">
@@ -6213,6 +6260,7 @@
       user: null,
       localTestMode: false,
       users: [],
+      workerManagement: [],
       workerBilling: [],
       workContext: "",
       todoSortMode: "manual",
@@ -8053,6 +8101,7 @@
       document.body.classList.toggle("admin-view", admin);
       $("userRole").textContent = admin ? "Šef - administracija" : `${worker?.name || "Delavec"} - delavec`;
       document.querySelectorAll(".admin-only").forEach((element) => element.classList.toggle("hidden", !admin));
+      document.querySelectorAll(".boss-only").forEach((element) => element.classList.toggle("hidden", state.user?.role !== "boss"));
       document.querySelectorAll(".worker-only").forEach((element) => element.classList.toggle("hidden", admin));
       $("newTodoButton").classList.remove("hidden");
       $("newTodoButton").textContent = "Dodaj opravilo";
@@ -12755,22 +12804,29 @@
         </article>`;
       }).join("")}</div>`;
     }
-    function renderTodoFormAssignees(selectedIds = [], onlyIds = null) {
+    function timeEntryTargetUsers() {
+      const permitted = state.user?.role === "boss"
+        ? new Set(state.users.map((user) => user.id))
+        : new Set(state.user?.timeEntryForIds || [state.user?.id]);
+      return state.users.filter((user) => permitted.has(user.id));
+    }
+
+    function renderTodoFormAssignees(selectedIds = [], onlyIds = null, { disabled = false, single = false } = {}) {
       const selected = new Set(selectedIds);
       const allowed = onlyIds ? new Set(onlyIds) : null;
-      $("todoFormAssignees").innerHTML = state.users.filter((user) => !allowed || allowed.has(user.id)).map((user) => `
+      const users = state.users.filter((user) => !allowed || allowed.has(user.id));
+      $("todoFormAssignees").innerHTML = users.map((user) => `
         <label>
-          <input type="checkbox" value="${escapeHtml(user.id)}" ${selected.has(user.id) ? "checked" : ""} ${allowed ? "disabled" : ""}>
+          <input type="${single ? "radio" : "checkbox"}" ${single ? 'name="todo-time-entry-assignee"' : ""} value="${escapeHtml(user.id)}" ${selected.has(user.id) ? "checked" : ""} ${disabled ? "disabled" : ""}>
           ${escapeHtml(user.name || user.id)}
         </label>
       `).join("");
     }
 
     function selectedTodoFormAssignees() {
-      return [...$("todoFormAssignees").querySelectorAll('input[type="checkbox"]:checked')]
+      return [...$("todoFormAssignees").querySelectorAll('input:checked')]
         .map((input) => input.value);
     }
-
     function todoWorkspaceFileInfo(value) {
       try {
         const url = new URL(String(value || "").trim());
@@ -13386,7 +13442,9 @@
       $("todoFormDirectClientAmount").disabled = false;
       $("todoFormDirectClientCreditWorker").checked = false;
       $("todoFormDirectClientCreditWorker").disabled = false;
-      $("todoFormAssigneeLabel").textContent = isAdminView() ? "Dodeli delavcem" : "Delo opravil";
+      $("todoFormAssigneeLabel").textContent = (state.todoHoursSourceId || state.todoStandaloneHours || timeEntryStatusIds.has(requestedStatus))
+        ? "Vpis ur za delavca"
+        : isAdminView() ? "Dodeli delavcem" : "Delo opravil";
       state.todoMealEntry = Boolean(todo._mealEntry);
       state.todoCreationTaskStatus = !editing && !timeEntryStatusIds.has(requestedTaskStatus) && requestedStatus !== "material" ? requestedTaskStatus : "open";
       state.todoDraftSourceProjectTodoId = String(todo.sourceProjectTodoId || "");
@@ -13447,7 +13505,9 @@
         ? todo._hoursAssigneeIds
         : (todo._duplicateAssigneeIds?.length ? todo._duplicateAssigneeIds : [activeWorkerId()]);
       const selectedAssignees = editing ? todoAssigneeIds(todo) : draftAssignees;
-      renderTodoFormAssignees(selectedAssignees, state.todoHoursSourceId || state.todoMealEntry || state.todoMaterialEntry ? selectedAssignees : null);
+      const isTimeEntryForm = Boolean(state.todoHoursSourceId || state.todoStandaloneHours || timeEntryStatusIds.has(requestedStatus));
+      const permittedAssigneeIds = isTimeEntryForm ? timeEntryTargetUsers().map((worker) => worker.id) : null;
+      renderTodoFormAssignees(selectedAssignees, permittedAssigneeIds, { disabled: state.todoMealEntry || state.todoMaterialEntry, single: isTimeEntryForm });
       state.todoDialogPhotos = (todo.photos || []).map((photo) => ({ ...photo }));
       state.todoDialogDriveFiles = (todo.driveFiles || []).map((file) => ({ ...file }));
       renderTodoFormPhotos();
@@ -15682,6 +15742,103 @@
       renderDeletedTodos();
       showNotice("Opravilo je obnovljeno iz Izbrisano.");
     }
+    function workerManagementLabel(worker) {
+      if (worker.role === "boss") return "Šef";
+      return worker.active ? "Aktiven delavec" : "Neaktiven delavec";
+    }
+
+    function renderWorkerManagement() {
+      const list = $("workerManagementList");
+      if (!list) return;
+      const workers = Array.isArray(state.workerManagement) ? state.workerManagement : [];
+      if (!workers.length) {
+        list.innerHTML = '<p class="todo-meta">Delavcev še ni.</p>';
+        return;
+      }
+      const activeTargets = workers.filter((worker) => worker.active);
+      list.innerHTML = workers.map((worker) => {
+        const locked = worker.role === "boss";
+        const disabled = worker.active ? "" : "disabled";
+        const targets = activeTargets.map((target) => {
+          const own = target.id === worker.id;
+          const checked = own || (worker.timeEntryForIds || []).includes(target.id);
+          return `<label><input type="checkbox" data-worker-target value="${escapeHtml(target.id)}" ${checked ? "checked" : ""} ${own || !worker.active ? "disabled" : ""}>${escapeHtml(target.name || target.id)}${own ? " (sam)" : ""}</label>`;
+        }).join("");
+        return `<article class="worker-management-card ${worker.active ? "" : "inactive"}" data-worker-id="${escapeHtml(worker.id)}">
+          <div class="worker-management-head"><div><h4>${escapeHtml(worker.name || worker.id)}</h4><span class="worker-management-status">${escapeHtml(workerManagementLabel(worker))}</span></div><label class="worker-active-field"><input type="checkbox" data-worker-active ${worker.active ? "checked" : ""} ${locked ? "disabled" : ""}>Aktiven</label></div>
+          <div class="worker-management-grid">
+            <label>Ime in priimek<input data-worker-name type="text" maxlength="120" value="${escapeHtml(worker.name || "")}" ${disabled}></label>
+            <label>Google e-pošta <span class="todo-meta">(neobvezno)</span><input data-worker-email type="email" maxlength="240" value="${escapeHtml(worker.email || "")}" placeholder="Brez prijave z Googlom" ${disabled}></label>
+            <label>Način obračunavanja<select data-worker-employment-type ${disabled}><option value="contractor" selected>Kooperant</option></select></label>
+          </div>
+          <fieldset class="worker-permissions" ${disabled}><legend>Lahko vpisuje ure za</legend><div class="worker-permissions-list">${targets || '<span class="todo-meta">Ni aktivnih delavcev.</span>'}</div></fieldset>
+          <p class="todo-meta">${worker.email ? "Google prijava je omogočena za navedeni naslov." : "Brez Google e-pošte je delavec pripravljen v evidenci, dostop pa se vključi pozneje z vpisom e-pošte."}</p>
+          <div class="worker-management-actions">
+            <button class="secondary" type="button" data-save-worker ${worker.active ? "" : "disabled"}>Shrani</button>
+            ${locked ? "" : worker.active ? '<button class="secondary danger" type="button" data-remove-worker>Odstrani</button>' : '<button class="secondary" type="button" data-reactivate-worker>Ponovno aktiviraj</button>'}
+          </div>
+        </article>`;
+      }).join("");
+    }
+
+    async function refreshAfterWorkerManagement(data = null) {
+      if (data?.workers) state.workerManagement = data.workers;
+      const snapshot = await api("/api/bootstrap");
+      applyBootstrapSnapshot(snapshot);
+      initializeWorkContext();
+      render();
+      renderWorkerManagement();
+    }
+
+    async function openWorkersDialog() {
+      if (state.user?.role !== "boss") throw new Error("Delavce lahko upravlja samo šef.");
+      const data = await api("/api/workers");
+      state.workerManagement = data.workers || [];
+      renderWorkerManagement();
+      $("workersDialog").showModal();
+    }
+
+    async function createWorkerFromForm() {
+      const data = await api("/api/workers", {
+        method: "POST",
+        body: JSON.stringify({
+          name: $("workerCreateName").value,
+          email: $("workerCreateEmail").value,
+          employmentType: $("workerCreateEmploymentType").value
+        })
+      });
+      $("workerCreateName").value = "";
+      $("workerCreateEmail").value = "";
+      await refreshAfterWorkerManagement(data);
+      showNotice("Delavec je dodan. Google prijavo lahko dodaš zdaj ali pozneje.");
+    }
+
+    async function saveManagedWorker(card, { activate = false } = {}) {
+      const id = card?.dataset.workerId || "";
+      if (!id) return;
+      const targets = [...card.querySelectorAll("[data-worker-target]:checked")].map((input) => input.value);
+      const data = await api(`/api/workers/${encodeURIComponent(id)}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          name: card.querySelector("[data-worker-name]")?.value || "",
+          email: card.querySelector("[data-worker-email]")?.value || "",
+          employmentType: "contractor",
+          active: activate || Boolean(card.querySelector("[data-worker-active]")?.checked),
+          timeEntryForIds: targets
+        })
+      });
+      await refreshAfterWorkerManagement(data);
+      showNotice(activate ? "Delavec je ponovno aktiven." : "Podatki delavca so shranjeni.");
+    }
+
+    async function removeManagedWorker(card) {
+      const id = card?.dataset.workerId || "";
+      const name = card?.querySelector("[data-worker-name]")?.value || "tega delavca";
+      if (!id || !await showAppConfirm(`Odstranim ${name}? Če ima že zgodovino vpisov, se varno deaktivira namesto fizičnega izbrisa.`)) return;
+      const data = await api(`/api/workers/${encodeURIComponent(id)}`, { method: "DELETE" });
+      await refreshAfterWorkerManagement(data);
+      showNotice(data.action === "deactivated" ? "Delavec je deaktiviran; zgodovina je ohranjena." : "Delavec je odstranjen.");
+    }
     function openAccountDialog() {
       $("accountName").value = state.user.name || "";
       $("accountImage").value = "";
@@ -15755,6 +15912,17 @@
       if (!button || !card) return;
       restoreDeletedTodo(card.dataset.deletedTodoId).catch((error) => showNotice(error.message));
     });    $("accountBtn").addEventListener("click", openAccountDialog);
+    $("workersMenuBtn").addEventListener("click", () => openWorkersDialog().catch((error) => showNotice(error.message)));
+    $("closeWorkers").addEventListener("click", () => $("workersDialog").close());
+    $("cancelWorkers").addEventListener("click", () => $("workersDialog").close());
+    $("workersForm").addEventListener("submit", (event) => { event.preventDefault(); createWorkerFromForm().catch((error) => showNotice(error.message)); });
+    $("workerManagementList").addEventListener("click", (event) => {
+      const card = event.target.closest("[data-worker-id]");
+      if (!card) return;
+      if (event.target.closest("[data-save-worker]")) saveManagedWorker(card).catch((error) => showNotice(error.message));
+      if (event.target.closest("[data-reactivate-worker]")) saveManagedWorker(card, { activate: true }).catch((error) => showNotice(error.message));
+      if (event.target.closest("[data-remove-worker]")) removeManagedWorker(card).catch((error) => showNotice(error.message));
+    });
     $("notificationsBtn").addEventListener("click", () => openNotifications().catch((error) => showNotice(error.message)));
     $("closeNotifications").addEventListener("click", () => $("notificationsDialog").close());
     $("serverStatusBtn").addEventListener("click", () => openServerStatus().catch((error) => showNotice(error.message)));
