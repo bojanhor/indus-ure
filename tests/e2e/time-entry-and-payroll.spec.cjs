@@ -164,13 +164,16 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
       await expect(page.locator("#todoFormHourlyRateField")).toBeHidden();
       await expect(page.locator("#todoFormDateTimeSection")).toHaveAttribute("open", "");
       await expect(page.locator("#todoFormQuickTimePicker")).toBeVisible();
+      await expect(page.locator("#todoFormQuickTimeDial")).toBeHidden();
       await chooseQuickTime(page, '[data-time-picker-target="start"]');
+      await expect(page.locator("#todoFormQuickTimeDial")).toBeVisible();
       await chooseQuickTime(page, '[data-time-picker-hour="8"]');
       await chooseQuickTime(page, '[data-time-picker-minute="0"]');
       await expect(page.locator('[data-time-picker-target="end"]')).toHaveClass(/active/);
       await expect(page.locator('[data-time-picker-target="end"]')).toHaveText('Do 09:00');
       await chooseQuickTime(page, '[data-time-picker-hour="10"]');
       await chooseQuickTime(page, '[data-time-picker-minute="0"]');
+      await expect(page.locator("#todoFormQuickTimeDial")).toBeHidden();
       await expect(page.locator("#todoFormStart")).toHaveValue("08:00");
       await expect(page.locator("#todoFormEnd")).toHaveValue("10:00");
 

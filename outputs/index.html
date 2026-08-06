@@ -3501,6 +3501,7 @@
       font-size: 12px;
       font-weight: 800;
     }
+    .todo-time-picker.is-closed .todo-time-picker-detail { display: none; }
     .todo-time-picker-dial {
       position: relative;
       width: min(100%, 318px);
@@ -5736,14 +5737,14 @@
                   <button class="todo-time-picker-target" id="todoFormQuickTimeEnd" type="button" data-time-picker-target="end">Do</button>
                 </div>
               </div>
-              <div class="todo-time-picker-head">
+              <div class="todo-time-picker-head todo-time-picker-detail">
                 <span class="sr-only" id="todoFormQuickTimeHint" role="status" aria-live="polite">Izberi uro</span>
                 <div class="todo-time-picker-mode" role="group" aria-label="Izberi uro ali minute">
                   <button class="todo-time-picker-mode-button active" id="todoFormQuickTimeHourMode" type="button" data-time-picker-mode="hour">Ura</button>
                   <button class="todo-time-picker-mode-button" id="todoFormQuickTimeMinuteMode" type="button" data-time-picker-mode="minute">Minute</button>
                 </div>
               </div>
-              <div class="todo-time-picker-dial" id="todoFormQuickTimeDial" aria-live="polite"></div>
+              <div class="todo-time-picker-dial todo-time-picker-detail" id="todoFormQuickTimeDial" aria-live="polite"></div>
             </section>
           </div>
         </details>
@@ -6406,6 +6407,7 @@
       reportClientId: "",
       todoTimePickerTarget: "start",
       todoTimePickerMode: "hour",
+      todoTimePickerOpen: false,
       reportTodoNavigationIds: [],
       reportTodoNavigationIndex: -1,
       settings: { billing: { hourlyRate: 15, kmRate: 0.22, workerOwnVehicleKmRate: 0.22, commuteKmPerDay: 28, mealPaidMinutes: 45 } },
@@ -9718,6 +9720,8 @@
       const unavailable = timeFields.classList.contains("hidden") || $("todoFormStart").disabled || $("todoFormEnd").disabled;
       picker.classList.toggle("hidden", unavailable);
       if (unavailable) return;
+      const isOpen = state.todoTimePickerOpen === true;
+      picker.classList.toggle("is-closed", !isOpen);
       const target = state.todoTimePickerTarget === "end" ? "end" : "start";
       const mode = state.todoTimePickerMode === "minute" ? "minute" : "hour";
       const input = $(target === "end" ? "todoFormEnd" : "todoFormStart");
@@ -9728,10 +9732,10 @@
       const startMinutes = dayTimelineMinutes(startValue);
       const endFallback = dayTimelineTime(Math.min(23 * 60 + 45, (startMinutes === null ? 8 * 60 : startMinutes) + 60));
       const endValue = roundTimeToQuarter($("todoFormEnd").value || endFallback) || endFallback;
-      $("todoFormQuickTimeStart").classList.toggle("active", target === "start");
-      $("todoFormQuickTimeEnd").classList.toggle("active", target === "end");
-      $("todoFormQuickTimeStart").setAttribute("aria-pressed", String(target === "start"));
-      $("todoFormQuickTimeEnd").setAttribute("aria-pressed", String(target === "end"));
+      $("todoFormQuickTimeStart").classList.toggle("active", isOpen && target === "start");
+      $("todoFormQuickTimeEnd").classList.toggle("active", isOpen && target === "end");
+      $("todoFormQuickTimeStart").setAttribute("aria-pressed", String(isOpen && target === "start"));
+      $("todoFormQuickTimeEnd").setAttribute("aria-pressed", String(isOpen && target === "end"));
       $("todoFormQuickTimeStart").textContent = `Od ${startValue}`;
       $("todoFormQuickTimeEnd").textContent = `Do ${endValue}`;
       $("todoFormQuickTimeHourMode").classList.toggle("active", mode === "hour");
@@ -13723,6 +13727,7 @@
       const editing = Boolean(todo.id);
       state.todoTimePickerTarget = "start";
       state.todoTimePickerMode = "hour";
+      state.todoTimePickerOpen = false;
       syncReportTodoDialogNavigation(todo.id, reportNavigationIds);
       const requestedStatus = todoStatus(todo.status || "open").id;
       const requestedTaskStatus = todoStatus(todo._taskStatus || (timeEntryStatusIds.has(requestedStatus) ? "open" : requestedStatus)).id;
@@ -16581,6 +16586,7 @@
       $(id).addEventListener("focus", () => {
         state.todoTimePickerTarget = id === "todoFormEnd" ? "end" : "start";
         state.todoTimePickerMode = "hour";
+        state.todoTimePickerOpen = true;
         renderTodoFormQuickTimePicker();
       });
       $(id).addEventListener("change", (event) => {
@@ -16595,6 +16601,7 @@
       if (targetButton) {
         state.todoTimePickerTarget = targetButton.dataset.timePickerTarget === "end" ? "end" : "start";
         state.todoTimePickerMode = "hour";
+        state.todoTimePickerOpen = true;
         renderTodoFormQuickTimePicker();
         return;
       }
@@ -16617,8 +16624,11 @@
         if (target === "start") {
           state.todoTimePickerTarget = "end";
           state.todoTimePickerMode = "hour";
-          renderTodoFormQuickTimePicker();
+          state.todoTimePickerOpen = true;
+        } else {
+          state.todoTimePickerOpen = false;
         }
+        renderTodoFormQuickTimePicker();
       }
     });
     $("todoFormDate").addEventListener("change", () => {
