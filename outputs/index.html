@@ -13945,9 +13945,10 @@
         if (!rawDirectAmount || !Number.isFinite(directAmount) || directAmount < 0) {
           return invalidTodoForm("Za pora\u010dun s stranko vpi\u0161i prejeti znesek.", "todoFormDirectClientAmount");
         }
-        if (directAmount === 0 && !await showAppConfirm("Prejeti znesek je 0 EUR. Dogodek bo vseeno ozna\u010den kot pora\u010dunan s stranko. Nadaljujem?")) {
-          return;
-        }
+        const settlementNotice = directAmount === 0
+          ? "Prejeti znesek je 0 EUR. Dogodek bo ozna\u010den kot pora\u010dunan s stranko in skrit iz seznama \u00bbZa obra\u010dun\u00ab. Nadaljujem?"
+          : "Dogodek bo ozna\u010den kot pora\u010dunan s stranko in skrit iz seznama \u00bbZa obra\u010dun\u00ab. Prika\u017ee se le, \u010de v obra\u010dunu strank vklju\u010di\u0161 \u00bbPrika\u017ei obra\u010dunano\u00ab. Nadaljujem?";
+        if (!await showAppConfirm(settlementNotice)) return;
         todo.directClientSettlement = {
           confirmed: true,
           amount: directAmount,

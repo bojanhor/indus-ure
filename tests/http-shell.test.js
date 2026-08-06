@@ -183,6 +183,9 @@ test("client billing filter, back navigation confirmation and scoped late mail a
   assert.match(html, /reportHistoryStateKey/);
   assert.match(html, /function openClientReport\(client, clientId = "", \{ fromHistory = false \} = \{\}\)/);
   assert.match(html, /id="reportNewEntry"/);
+  assert.match(html, /const settlementNotice = directAmount === 0/);
+  assert.match(html, /skrit iz seznama/);
+  assert.match(html, /if \(!await showAppConfirm\(settlementNotice\)\) return;/);
   assert.match(html, /Potrjeni vnosi bodo odstranjeni s seznama/);
   assert.match(html, /id="previousReportTodo"/);
   assert.match(html, /function navigateReportTodo\(offset\)/);
