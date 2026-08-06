@@ -5737,7 +5737,7 @@
                 </div>
               </div>
               <div class="todo-time-picker-head">
-                <span id="todoFormQuickTimeHint">Izberi uro</span>
+                <span class="sr-only" id="todoFormQuickTimeHint" role="status" aria-live="polite">Izberi uro</span>
                 <div class="todo-time-picker-mode" role="group" aria-label="Izberi uro ali minute">
                   <button class="todo-time-picker-mode-button active" id="todoFormQuickTimeHourMode" type="button" data-time-picker-mode="hour">Ura</button>
                   <button class="todo-time-picker-mode-button" id="todoFormQuickTimeMinuteMode" type="button" data-time-picker-mode="minute">Minute</button>
@@ -9724,20 +9724,23 @@
       const parts = todoTimePickerParts(input.value, todoTimePickerDefault(target));
       const currentHour = parts.hour;
       const currentMinute = parts.minute;
-      const targetLabel = target === "end" ? "konca" : "začetka";
+      const startValue = roundTimeToQuarter($("todoFormStart").value || todoTimePickerDefault("start")) || "08:00";
+      const startMinutes = dayTimelineMinutes(startValue);
+      const endFallback = dayTimelineTime(Math.min(23 * 60 + 45, (startMinutes === null ? 8 * 60 : startMinutes) + 60));
+      const endValue = roundTimeToQuarter($("todoFormEnd").value || endFallback) || endFallback;
       $("todoFormQuickTimeStart").classList.toggle("active", target === "start");
       $("todoFormQuickTimeEnd").classList.toggle("active", target === "end");
       $("todoFormQuickTimeStart").setAttribute("aria-pressed", String(target === "start"));
       $("todoFormQuickTimeEnd").setAttribute("aria-pressed", String(target === "end"));
-      $("todoFormQuickTimeStart").textContent = `Od${$("todoFormStart").value ? ` ${$("todoFormStart").value}` : ""}`;
-      $("todoFormQuickTimeEnd").textContent = `Do${$("todoFormEnd").value ? ` ${$("todoFormEnd").value}` : ""}`;
+      $("todoFormQuickTimeStart").textContent = `Od ${startValue}`;
+      $("todoFormQuickTimeEnd").textContent = `Do ${endValue}`;
       $("todoFormQuickTimeHourMode").classList.toggle("active", mode === "hour");
       $("todoFormQuickTimeMinuteMode").classList.toggle("active", mode === "minute");
       $("todoFormQuickTimeHourMode").setAttribute("aria-pressed", String(mode === "hour"));
       $("todoFormQuickTimeMinuteMode").setAttribute("aria-pressed", String(mode === "minute"));
       $("todoFormQuickTimeHint").textContent = mode === "hour"
-        ? `Ura ${targetLabel} · zunaj 00–11, znotraj 12–23`
-        : `Minute ${targetLabel} · na 15 minut`;
+        ? `Izbira ure ${target === "end" ? "konca" : "začetka"}.`
+        : `Izbira minut ${target === "end" ? "konca" : "začetka"}.`;
       const center = `<div class="todo-time-picker-center"><span><time>${String(currentHour).padStart(2, "0")}:${String(currentMinute).padStart(2, "0")}</time><small>${mode === "hour" ? "ura" : "minute"}</small></span></div>`;
       const choices = mode === "hour"
         ? Array.from({ length: 24 }, (_, hour) => {

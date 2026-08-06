@@ -168,7 +168,7 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
       await chooseQuickTime(page, '[data-time-picker-hour="8"]');
       await chooseQuickTime(page, '[data-time-picker-minute="0"]');
       await expect(page.locator('[data-time-picker-target="end"]')).toHaveClass(/active/);
-      await expect(page.locator('#todoFormQuickTimeHint')).toContainText('Ura konca');
+      await expect(page.locator('[data-time-picker-target="end"]')).toHaveText('Do 09:00');
       await chooseQuickTime(page, '[data-time-picker-hour="10"]');
       await chooseQuickTime(page, '[data-time-picker-minute="0"]');
       await expect(page.locator("#todoFormStart")).toHaveValue("08:00");
