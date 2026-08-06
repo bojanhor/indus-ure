@@ -3467,7 +3467,18 @@
     .todo-time-picker-select-head { justify-content: stretch; }
     .todo-time-picker-targets,
     .todo-time-picker-mode { display: inline-flex; gap: 4px; padding: 3px; border-radius: 9px; background: #edf3ef; }
-    .todo-time-picker-targets { width: 100%; padding: 4px; border-radius: 12px; }
+    .todo-time-picker-targets { position: relative; width: 100%; padding: 4px; border-radius: 12px; }
+    .todo-time-picker-targets::after {
+      content: "";
+      position: absolute;
+      z-index: 2;
+      top: 9px;
+      bottom: 9px;
+      left: 50%;
+      width: 1px;
+      background: #b7cec5;
+      pointer-events: none;
+    }
     .todo-time-picker-target {
       flex: 1 1 0;
       min-height: 42px;
