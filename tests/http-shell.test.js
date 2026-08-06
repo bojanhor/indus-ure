@@ -257,6 +257,13 @@ test("mese\u010dni in dnevni pogled ohranita berljivost nujnih in zaklju\u010den
   assert.match(html, /function dayTimelineResizeModeAtPointer\(/);
   assert.match(html, /const preferredZone = event\.pointerType === "touch" \? 42 : 28/);
   assert.doesNotMatch(html, /Zgoraj\/dol spremeni uro/);
+  assert.match(html, /\.todo-status-material \{ --todo-bg: #4eb54b;/);
+  assert.match(html, /function syncClientBillSelection\(lines, selection\) \{[\s\S]*?const pending = lines\.filter\(\(line\) => !line\.clientBill\);[\s\S]*?state\.clientBillSelectedEventIds = new Set\(availableEventIds\);/);
+  assert.doesNotMatch(html, /id="todoFormMaterialAmount"/);
+  assert.doesNotMatch(html, /id="todoFormExternalDelivery"/);
+  assert.match(html, /id="todoFormEndDateField"[\s\S]*?endDateField\.classList\.toggle\('hidden', isMaterialEntry\)/);
+  assert.match(html, /day-todo-topline[\s\S]*?day-todo-settlements[\s\S]*?width: 15px;/);
+  assert.doesNotMatch(html, /\.day-todo\.has-settlements \{ padding-bottom:/);
 });
 
 function request(port, pathname, { method = "GET", headers = {}, body = "" } = {}) {

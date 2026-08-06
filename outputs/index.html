@@ -2717,33 +2717,35 @@
       font-weight: 800;
     }
 
-    .day-todo.has-settlements { padding-bottom: 31px; }
+    .day-todo-topline {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: start;
+      gap: 4px;
+      min-width: 0;
+    }
 
     .day-todo-settlements {
-      position: absolute;
-      right: 7px;
-      bottom: 6px;
-      display: flex;
+      display: inline-flex;
       align-items: center;
-      gap: 5px;
-      min-height: 20px;
+      justify-content: flex-end;
+      gap: 3px;
+      min-height: 14px;
+      color: #073f55;
     }
 
     .day-todo-settlement {
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      width: 20px;
-      height: 20px;
+      width: 15px;
+      height: 15px;
       padding: 0;
-      border: 1px solid #073f55;
-      border-radius: 999px;
-      color: #073f55;
-      background: #f9fffd;
-      box-shadow: 0 1px 2px rgb(7 63 85 / 28%);
+      color: inherit;
     }
 
-    .day-todo-settlement svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 2.25; stroke-linecap: round; stroke-linejoin: round; }
+    .day-todo-settlement svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+
     .calendar-shell {
       overflow: hidden;
       min-height: 620px;
@@ -5388,7 +5390,7 @@
             <input id="newClientSearch" placeholder="Kako jo i&#353;&#269;e&#353;">
           </label>
           <label>Dav&#269;na &#353;tevilka (lahko pozneje)
-            <input id="newClientTax" placeholder="npr. SI12345678">
+            <input id="newClientTax" placeholder="Npr. SI12345678">
           </label>
           <label>E-po&#353;ta
             <input id="newClientEmail" type="email" placeholder="računi@stranka.si">
@@ -5564,10 +5566,6 @@
           <div class="day-timeline-events" id="dayTimelineEvents"></div>
         </div>
       </div>
-      <div class="modal-action-mirrors" id="dayTimelineFooterActions" aria-label="Dejanja dnevnega pogleda">
-        <button class="secondary" id="dayTimelineFooterCancel" type="button">Prekli&#269;i spremembe</button>
-        <button class="primary" id="dayTimelineFooterSave" type="button">Shrani spremembe</button>
-      </div>
     </form>
   </dialog>
   <dialog id="deletedTodosDialog">
@@ -5653,15 +5651,6 @@
         <label id="todoFormMaterialField"><span>Material</span>
           <textarea id="todoFormMaterial" placeholder="Vpi&#353;i predvideni material"></textarea>
         </label>
-        <label class="hidden" id="todoFormMaterialAmountField">Znesek materiala (EUR)
-          <input id="todoFormMaterialAmount" type="number" min="0" max="1000000" step="0.01" inputmode="decimal" placeholder="0,00">
-          <small>Prodajna vrednost materiala za obračun stranki.</small>
-        </label>
-        <label class="todo-form-option hidden" id="todoFormExternalDeliveryField">
-          <input id="todoFormExternalDelivery" type="checkbox">
-          <span>Dostava tretjega</span>
-          <small>Material je neposredno stranki dostavil zunanji dobavitelj.</small>
-        </label>
         <label class="todo-form-option todo-form-urgent" id="todoFormUrgentField">
           <input id="todoFormUrgent" type="checkbox">
           <span>NUJNO</span>
@@ -5724,7 +5713,7 @@
                   <button class="date-clear-button" id="clearTodoFormDate" type="button" title="Odstrani datum" aria-label="Odstrani datum">&times;</button>
                 </span>
               </label>
-              <label>Datum do
+              <label id="todoFormEndDateField">Datum do
                 <input id="todoFormEndDate" type="date">
                 <small class="sr-only" id="todoFormEndDateHint">Privzeto isti dan. Spremeni samo za večdnevno opravilo.</small>
               </label>
@@ -5898,7 +5887,7 @@
             <input id="clientEditSearch">
           </label>
           <label>Dav&#269;na &#353;tevilka
-            <input id="clientEditTax" placeholder="npr. SI12345678">
+            <input id="clientEditTax" placeholder="Npr. SI12345678">
           </label>
           <label>E-po&#353;ta
             <input id="clientEditEmail" type="email">
@@ -6105,7 +6094,7 @@
         <section class="worker-create-panel">
           <h4>Dodaj delavca</h4>
           <div class="worker-create-grid">
-            <label>Ime in priimek<input id="workerCreateName" type="text" maxlength="120" autocomplete="name" placeholder="npr. Janez Novak" required></label>
+            <label>Ime in priimek<input id="workerCreateName" type="text" maxlength="120" autocomplete="name" placeholder="Npr. Janez Novak" required></label>
             <label>Google e-pošta <span class="todo-meta">(neobvezno)</span><input id="workerCreateEmail" type="email" maxlength="240" autocomplete="email" placeholder="ime@podjetje.si"></label>
             <label>Način obračunavanja<select id="workerCreateEmploymentType"><option value="contractor">Kooperant</option></select></label>
           </div>
@@ -6170,7 +6159,7 @@
   <dialog id="quickClientDialog">
     <form method="dialog" id="quickClientForm">
       <div class="modal-head"><h3>Hitra nova stranka</h3><button class="icon-btn" id="closeQuickClientDialog" type="button" title="Zapri">&times;</button></div>
-      <div class="modal-body"><label>Vzdevek / naziv stranke<input id="quickClientName" type="text" maxlength="240" placeholder="npr. Jerin" required></label><p class="todo-meta">Doda se samo vzdevek; podatke lahko pozneje dopolniš v bazi strank.</p><div class="actions"><button class="secondary" id="cancelQuickClientDialog" type="button">Prekliči</button><button class="primary" type="submit">Dodaj stranko</button></div></div>
+      <div class="modal-body"><label>Vzdevek / naziv stranke<input id="quickClientName" type="text" maxlength="240" placeholder="Npr. Jerin" required></label><p class="todo-meta">Doda se samo vzdevek; podatke lahko pozneje dopolniš v bazi strank.</p><div class="actions"><button class="secondary" id="cancelQuickClientDialog" type="button">Prekliči</button><button class="primary" type="submit">Dodaj stranko</button></div></div>
     </form>
   </dialog>  <dialog id="debtDialog">
     <form method="dialog" id="debtForm">
@@ -6195,7 +6184,7 @@
           </label>
         </div>
         <label>Zakaj je nastal dolg
-          <textarea id="debtReason" placeholder="npr. material, gotovina, poravnava"></textarea>
+          <textarea id="debtReason" placeholder="Npr. material, gotovina, poravnava"></textarea>
         </label>
         <div class="actions">
           <button class="danger" id="deleteDebt" type="button">Izbri&#353;i dolg</button>
@@ -8540,7 +8529,7 @@
             <td>${worker.role === "boss" ? "Šef in delavec" : "Delavec"}</td>
             <td><input class="worker-rate-input" type="number" min="0" max="10000" step="0.01" value="${Number(worker.hourlyRate || 0)}" aria-label="Urna postavka za ${escapeHtml(worker.name || worker.id)}"> EUR/h</td>
             <td><input class="worker-commute-input" type="number" min="0" max="1000000" step="0.1" value="${Number(worker.commuteKmOneWay || 0)}" aria-label="Pot v službo v eno smer za ${escapeHtml(worker.name || worker.id)}"> km</td>
-            <td><input class="worker-export-title-input" type="text" maxlength="120" value="${escapeHtml(worker.exportTitle || "")}" placeholder="npr. monter" aria-label="Naziv izvajalca v izvozu za ${escapeHtml(worker.name || worker.id)}"></td>
+            <td><input class="worker-export-title-input" type="text" maxlength="120" value="${escapeHtml(worker.exportTitle || "")}" placeholder="Npr. monter" aria-label="Naziv izvajalca v izvozu za ${escapeHtml(worker.name || worker.id)}"></td>
             <td><button class="secondary save-worker-rate" type="button">Shrani</button></td>
           `;
           row.querySelector(".save-worker-rate").addEventListener("click", async (event) => {
@@ -9102,9 +9091,6 @@
       if (materialEntry && !todo.date) {
         return invalidTodoForm("Za vpis materiala vnesi datum.", "todoFormDate");
       }
-      if (materialEntry && (!Number.isFinite(Number(todo.materialAmount)) || Number(todo.materialAmount) < 0)) {
-        return invalidTodoForm("Vpiši znesek materiala (0 EUR je dovoljen).", "todoFormMaterialAmount");
-      }
       if (!todo.title) {
         return invalidTodoForm("Vpiši ime opravila.", "todoFormTask");
       }
@@ -9648,7 +9634,7 @@
             const time = todo.start && todo.end ? `${escapeHtml(todo.start)}&ndash;${escapeHtml(todo.end)}` : 'Brez ure';
             const client = todoClientCalendarName(todo, 'Brez stranke');
             const title = `${todo.urgent ? `NUJNO ${String.fromCharCode(183)} ` : ''}${todo.title || 'Brez naslova'}`;
-            item.innerHTML = `<span class="day-todo-time">${time}</span><span class="day-todo-client">${escapeHtml(client)}</span><span class="day-todo-title">${escapeHtml(title)}</span>${settlementIndicators}`;
+            item.innerHTML = `<span class="day-todo-topline"><span class="day-todo-time">${time}</span>${settlementIndicators}</span><span class="day-todo-client">${escapeHtml(client)}</span><span class="day-todo-title">${escapeHtml(title)}</span>`;
             item.addEventListener('pointerdown', (event) => beginMonthTodoPointerDrag(event, item, todo, key));
             item.addEventListener('lostpointercapture', cancelMonthTodoPointerDrag);
             item.addEventListener('click', (event) => {
@@ -13483,13 +13469,13 @@
         if (multiDay || isMaterialEntry) field.value = '';
       });
       $('todoFormTimeFields').classList.toggle('hidden', isMaterialEntry);
+      const endDateField = $('todoFormEndDateField');
       endDate.disabled = Boolean(lockedToOneDay && date);
-      endDate.closest('label').classList.toggle('date-range-locked', Boolean(lockedToOneDay && date));
-      $('todoFormEndDateHint').textContent = isMaterialEntry
-        ? 'Vpis materiala je vezan na en datum.'
-        : isTimeEntry
-          ? 'Vpis ur je vedno isti dan.'
-          : 'Privzeto isti dan. Spremeni samo za večdnevno opravilo.';
+      endDateField.classList.toggle('hidden', isMaterialEntry);
+      endDateField.classList.toggle('date-range-locked', Boolean(lockedToOneDay && date));
+      $('todoFormEndDateHint').textContent = isTimeEntry
+        ? 'Vpis ur je vedno isti dan.'
+        : 'Privzeto isti dan. Spremeni samo za ve\u010ddnevno opravilo.';
       renderTodoFormQuickTimePicker();
     }
 
@@ -13601,8 +13587,6 @@
       ["todoFormTask", "todoFormNotes"].forEach((id) => $(id).closest("label").classList.toggle("hidden", meal));
       $("todoFormTaskField").firstChild.textContent = materialEntry ? "Naziv materiala ali dobave" : "Ime opravila";
       $("todoFormMaterialField").classList.toggle("hidden", meal || logisticsStatus);
-      $("todoFormMaterialAmountField").classList.toggle("hidden", !materialEntry);
-      $("todoFormExternalDeliveryField").classList.toggle("hidden", !materialEntry);
       const supportsOrderConfirmation = todoOrderStatusIds.has(selectedStatus);
       $("todoFormOrderedField").classList.toggle("hidden", !supportsOrderConfirmation);
       if (!supportsOrderConfirmation) $("todoFormOrdered").checked = false;
@@ -13687,8 +13671,8 @@
         billingKm: optionalNumber("todoFormBillingKm"),
         clientKm: optionalNumber("todoFormClientKm"),
         clientVehicle: $("todoFormClientVehicle").value,
-        materialAmount: optionalNumber("todoFormMaterialAmount"),
-        externalDelivery: $("todoFormExternalDelivery").checked,
+        materialAmount: 0,
+        externalDelivery: true,
         photos: state.todoDialogPhotos.map((photo) => ({ ...photo })),
         driveFiles: state.todoDialogDriveFiles.map((file) => ({ ...file }))
       };
@@ -13788,8 +13772,6 @@
       renderTodoTaskSuggestions();
       $("todoFormNotes").value = state.todoHoursSourceId ? "" : todo.notes || "";
       $("todoFormMaterial").value = state.todoHoursSourceId ? "" : todo.material || "";
-      $("todoFormMaterialAmount").value = Number(todo.materialAmount || 0);
-      $("todoFormExternalDelivery").checked = Boolean(todo.externalDelivery);
       $("todoFormStatus").value = requestedStatus;
       renderTodoStatusChoices(todo.status || "open");
       $("todoFormUrgent").checked = Boolean(todo.urgent);
@@ -13894,7 +13876,7 @@
       const billingKm = parseBillingNumber($("todoFormBillingKm").value, 1_000_000);
       const clientKm = parseBillingNumber($("todoFormClientKm").value, 1_000_000);
       const clientVehicle = $("todoFormClientVehicle").value === "van" ? "van" : "personal";
-      const materialAmount = parseBillingNumber($("todoFormMaterialAmount").value, 1_000_000);
+      const materialAmount = materialEntry ? Number(existing?.materialAmount || 0) : 0;
       const selectedStatus = $("todoFormStatus").value;
       const sourceProjectTodoId = String(existing?.sourceProjectTodoId || state.todoHoursSourceId || state.todoDraftSourceProjectTodoId || "");
       const sourceProjectTitle = sourceProjectTodoId
@@ -13930,7 +13912,7 @@
         clientKm: meal || materialEntry ? 0 : clientKm,
         clientVehicle: meal || materialEntry ? "personal" : clientVehicle,
         materialAmount: materialEntry ? materialAmount : 0,
-        externalDelivery: materialEntry && Boolean($("todoFormExternalDelivery").checked),
+        externalDelivery: materialEntry,
         calendarOnly: Boolean(!timeEntryStatusIds.has(selectedStatus) && !materialEntry && $("todoFormDate").value && $("todoFormCalendarOnly").checked),
         driveFiles: state.todoDialogDriveFiles,
         photos: state.todoDialogPhotos
@@ -14618,7 +14600,7 @@
       const charges = warranty
         ? `<span class="client-billing-warranty">Garancija – storitev se ne obračuna stranki.</span>`
         : materialEntry
-          ? `<span>Material: ${money(materialAmount)} EUR</span>`
+          ? `<span>Material brez obračuna zneska</span>`
           : [
             hours ? `<span>Izvedeno: ${reportNumber(hours)} h</span>` : "<span>Ura ni vpisana</span>",
             clientKm ? `<span>Stroški prevoza (obe smeri): ${reportVehicleLabel(vehicle)} · ${reportNumber(clientKm, 1)} km</span>` : ""
@@ -14627,7 +14609,7 @@
         <div class="client-billing-when"><strong>${todo.date ? formatDate(todo.date) : "Brez datuma"}</strong><span>${escapeHtml(time)}</span></div>
         <div class="client-billing-main">
           <div class="client-billing-title-row"><h3><button class="client-billing-title-trigger open-report-todo" type="button" data-todo-id="${escapeHtml(todo.id)}" aria-label="Odpri vpis: ${escapeHtml(todo.title || "Brez naziva")}">${escapeHtml(todo.title || "Brez naziva")}</button></h3>${billSelection}</div>
-          <div class="client-billing-meta">${materialEntry ? `<span>${todo.externalDelivery ? "Dostava tretjega" : "Material brez izvajalca"}</span>` : `<span>Izvajalec: ${escapeHtml(todoAssigneeNames(todo))}</span>`}${clientBill ? `<span>Obračun stranki potrjen ${escapeHtml(formatDateTime(clientBill.confirmedAt))}</span>` : ""}${clientBill?.directSettlement ? `<span>Prejeto: ${money(clientBill.receivedAmount || 0)} EUR${clientBill.creditedWorkerName ? ` · v dobro ${escapeHtml(clientBill.creditedWorkerName)}` : ""}</span>` : ""}</div>
+          <div class="client-billing-meta">${materialEntry ? `<span>Dostava materiala</span>` : `<span>Izvajalec: ${escapeHtml(todoAssigneeNames(todo))}</span>`}${clientBill ? `<span>Obračun stranki potrjen ${escapeHtml(formatDateTime(clientBill.confirmedAt))}</span>` : ""}${clientBill?.directSettlement ? `<span>Prejeto: ${money(clientBill.receivedAmount || 0)} EUR${clientBill.creditedWorkerName ? ` · v dobro ${escapeHtml(clientBill.creditedWorkerName)}` : ""}</span>` : ""}</div>
           <button class="client-billing-charges client-billing-charges-trigger open-report-todo" type="button" data-todo-id="${escapeHtml(todo.id)}" aria-label="Odpri vpis: ${escapeHtml(todo.title || "Brez naziva")}">${charges}</button>
           ${details}
         </div>
@@ -14640,7 +14622,7 @@
       return `<button class="client-billing-client-card open-client-report" type="button" data-client-id="${escapeHtml(id)}" data-client-name="${escapeHtml(name)}">
         <span class="client-billing-client-card-head"><strong>${escapeHtml(name)}</strong><span>${lastDate ? `Nazadnje: ${escapeHtml(formatDate(lastDate))}` : ""}</span></span>
         <span class="client-billing-client-card-meta"><span>${totals.count} ${totals.count === 1 ? "zaključena storitev" : "zaključenih storitev"}</span><span>${reportNumber(totals.hours)} h</span><span>${pending ? `${pending} za obračun` : "obračunano"}</span></span>
-        <span class="client-billing-client-travel"><span>Osebni avto: ${escapeHtml(reportTransportText(totals.personalKm))}</span><span>Kombi: ${escapeHtml(reportTransportText(totals.vanKm))}</span>${totals.materialAmount ? `<span>Material: ${money(totals.materialAmount)} EUR</span>` : ""}</span>
+        <span class="client-billing-client-travel"><span>Osebni avto: ${escapeHtml(reportTransportText(totals.personalKm))}</span><span>Kombi: ${escapeHtml(reportTransportText(totals.vanKm))}</span></span>
         <span class="client-billing-client-open">Odpri poročilo ›</span>
       </button>`;
     }
@@ -14688,13 +14670,11 @@
         ["Stro\u0161ki prevoza (obe smeri) \u2013 osebni avto", reportTransportText(totals.personalKm)],
         ["Stro\u0161ki prevoza (obe smeri) \u2013 kombi", reportTransportText(totals.vanKm)],
         ["Stro\u0161ki prevoza skupaj", `${reportNumber(totals.clientKm, 1)} km`],
-        ["Material skupaj", `${money(totals.materialAmount)} EUR`]
       ] : [
         ["Stranke", `${summaries.length}`],
         ["Zaklju\u010dene storitve", `${totals.count}`],
         ["Opravljene ure", `${reportNumber(totals.hours)} h`],
         ["Stro\u0161ki prevoza skupaj", `${reportNumber(totals.clientKm, 1)} km`],
-        ["Material skupaj", `${money(totals.materialAmount)} EUR`]
       ];
       $("reportSummary").innerHTML = `<dl class="client-billing-summary-list">${summaryRows.map(([label, value]) => `<div class="${label.endsWith("skupaj") ? "is-total" : ""}"><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join("")}</dl>`;
       $("clientDetailList").classList.toggle("client-billing-client-overview", !detail);
@@ -16570,8 +16550,6 @@
       ["todoFooterDuplicate", "duplicateTodoFromDialog"],
       ["todoFooterWriteHours", "writeHoursFromTodo"],
       ["todoFooterClose", "closeTodoDialog"],
-      ["dayTimelineFooterCancel", "closeDayTimeline"],
-      ["dayTimelineFooterSave", "saveDayTimeline"],
       ["photoEditorFooterClose", "photoEditorClose"],
       ["photoEditorFooterSave", "photoEditorSave"]
     ];
@@ -16599,12 +16577,12 @@
         state.todoTimePickerTarget = id === "todoFormEnd" ? "end" : "start";
         state.todoTimePickerMode = "hour";
         state.todoTimePickerOpen = true;
-        renderTodoFormQuickTimePicker();
+      renderTodoFormQuickTimePicker();
       });
       $(id).addEventListener("change", (event) => {
         normalizeTodoFormTimes();
         if (id === "todoFormStart") rememberTodoStartTime($("todoFormStart").value);
-        renderTodoFormQuickTimePicker();
+      renderTodoFormQuickTimePicker();
         if (id === "todoFormStart" && $("todoFormStart").value && event.isTrusted) $("todoFormEnd").focus();
       });
     });
@@ -16614,13 +16592,13 @@
         state.todoTimePickerTarget = targetButton.dataset.timePickerTarget === "end" ? "end" : "start";
         state.todoTimePickerMode = "hour";
         state.todoTimePickerOpen = true;
-        renderTodoFormQuickTimePicker();
+      renderTodoFormQuickTimePicker();
         return;
       }
       const modeButton = event.target.closest("[data-time-picker-mode]");
       if (modeButton) {
         state.todoTimePickerMode = modeButton.dataset.timePickerMode === "minute" ? "minute" : "hour";
-        renderTodoFormQuickTimePicker();
+      renderTodoFormQuickTimePicker();
         return;
       }
       const hourButton = event.target.closest("[data-time-picker-hour]");

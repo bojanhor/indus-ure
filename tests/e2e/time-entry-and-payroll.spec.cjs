@@ -208,6 +208,22 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
     }
   });
 
+  test("material entry stays a compact delivery form", async ({ browser }) => {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    try {
+      await localLogin(page, "ibro");
+      await page.locator("#materialEntryButton").click();
+      await expect(page.locator("#todoDialog")).toBeVisible();
+      await expect(page.locator("#todoFormTitle")).toHaveText("Vpis materiala");
+      await expect(page.locator("#todoFormTimeFields")).toBeHidden();
+      await expect(page.locator("#todoFormEndDateField")).toBeHidden();
+      await expect(page.locator("#todoFormMaterialAmount")).toHaveCount(0);
+      await expect(page.locator("#todoFormExternalDelivery")).toHaveCount(0);
+    } finally {
+      await context.close();
+    }
+  });
   test("boss downloads the selected customer report as a real PDF on a touch browser", async ({ browser }) => {
     const context = await browser.newContext({
       acceptDownloads: true,
