@@ -3455,6 +3455,44 @@
     .todo-form-date-time[open] > summary::after { transform: rotate(180deg); }
     .todo-form-date-time-fields { display: grid; gap: 12px; }
     .todo-form-date-time-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    .todo-time-picker {
+      display: grid;
+      gap: 9px;
+      padding: 10px;
+      border: 1px solid #cfe0da;
+      border-radius: 10px;
+      background: #fff;
+    }
+    .todo-time-picker-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+    .todo-time-picker-head strong { font-size: 13px; }
+    .todo-time-picker-targets { display: inline-flex; gap: 5px; padding: 3px; border-radius: 8px; background: #edf3ef; }
+    .todo-time-picker-target {
+      min-height: 32px;
+      padding: 5px 9px;
+      border: 1px solid transparent;
+      border-radius: 6px;
+      color: var(--ink);
+      background: transparent;
+      font-size: 13px;
+      font-weight: 800;
+    }
+    .todo-time-picker-target.active { color: #fff; border-color: var(--accent-dark); background: var(--accent); }
+    .todo-time-picker-hours { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 5px; }
+    .todo-time-picker-minutes { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 5px; }
+    .todo-time-picker-choice {
+      min-width: 0;
+      min-height: 34px;
+      padding: 4px;
+      border: 1px solid #d3ded8;
+      border-radius: 7px;
+      color: #233136;
+      background: #f8faf8;
+      font-size: 14px;
+      font-weight: 800;
+    }
+    .todo-time-picker-choice.active { color: #fff; border-color: var(--accent-dark); background: var(--accent); }
+    .todo-time-picker-choice:focus-visible,
+    .todo-time-picker-target:focus-visible { outline: 3px solid rgba(31, 111, 139, .3); outline-offset: 1px; }
 
     .todo-client-input-row {
       display: flex;
@@ -4877,6 +4915,8 @@
         grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 8px;
       }
+      .todo-time-picker-hours { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+      .todo-time-picker-choice { min-height: 38px; }
       .client-row {
         grid-template-columns: 1fr;
       }
@@ -5592,6 +5632,17 @@
                 <input id="todoFormEnd" type="time" step="900">
               </label>
             </div>
+            <section class="todo-time-picker" id="todoFormQuickTimePicker" aria-label="Hitra izbira ure">
+              <div class="todo-time-picker-head">
+                <strong>Hitra izbira ure</strong>
+                <div class="todo-time-picker-targets" role="group" aria-label="Izberi uro od ali do">
+                  <button class="todo-time-picker-target active" id="todoFormQuickTimeStart" type="button" data-time-picker-target="start">Od</button>
+                  <button class="todo-time-picker-target" id="todoFormQuickTimeEnd" type="button" data-time-picker-target="end">Do</button>
+                </div>
+              </div>
+              <div class="todo-time-picker-hours" id="todoFormQuickTimeHours" aria-label="Ura od 0 do 23"></div>
+              <div class="todo-time-picker-minutes" id="todoFormQuickTimeMinutes" aria-label="Minute"></div>
+            </section>
           </div>
         </details>
         <p class="todo-form-late-entry-notice hidden" id="todoFormLateTimeEntryNotice" role="status"></p>
@@ -6251,6 +6302,7 @@
       offlineTodoSyncing: false,
       attachmentPreview: null,
       reportClientId: "",
+      todoTimePickerTarget: "start",
       reportTodoNavigationIds: [],
       reportTodoNavigationIndex: -1,
       settings: { billing: { hourlyRate: 15, kmRate: 0.22, workerOwnVehicleKmRate: 0.22, commuteKmPerDay: 28, mealPaidMinutes: 45 } },
@@ -9521,6 +9573,87 @@
         const input = $(id);
         if (input.value) input.value = roundTimeToQuarter(input.value);
       });
+    }
+
+    function todoTimePickerStorageKey() {
+      return `indus-ure-last-time-${state.user?.id || "anonymous"}`;
+    }
+
+    function rememberedTodoStartTime() {
+      try {
+        const value = String(localStorage.getItem(todoTimePickerStorageKey()) || "");
+        return /^([01]\d|2[0-3]):[0-5]\d$/.test(value) ? roundTimeToQuarter(value) : "";
+      } catch {
+        return "";
+      }
+    }
+
+    function rememberTodoStartTime(value) {
+      const normalized = roundTimeToQuarter(value || "");
+      if (!normalized) return;
+      try { localStorage.setItem(todoTimePickerStorageKey(), normalized); } catch {}
+    }
+
+    function todoTimePickerParts(value, fallback = "") {
+      const normalized = roundTimeToQuarter(value || fallback || "");
+      const match = /^(\d{2}):(\d{2})$/.exec(normalized);
+      return match ? { hour: Number(match[1]), minute: Number(match[2]) } : null;
+    }
+
+    function todoTimePickerDefault(target) {
+      if (target === "end") {
+        const start = dayTimelineMinutes($("todoFormStart").value);
+        if (start !== null) return dayTimelineTime(Math.min(23 * 60 + 45, start + 60));
+      }
+      return rememberedTodoStartTime() || "08:00";
+    }
+
+    function renderTodoFormQuickTimePicker() {
+      const picker = $("todoFormQuickTimePicker");
+      const timeFields = $("todoFormTimeFields");
+      if (!picker || !timeFields) return;
+      const unavailable = timeFields.classList.contains("hidden") || $("todoFormStart").disabled || $("todoFormEnd").disabled;
+      picker.classList.toggle("hidden", unavailable);
+      if (unavailable) return;
+      const target = state.todoTimePickerTarget === "end" ? "end" : "start";
+      const input = $(target === "end" ? "todoFormEnd" : "todoFormStart");
+      const parts = todoTimePickerParts(input.value);
+      const currentHour = parts?.hour;
+      const currentMinute = parts?.minute;
+      $("todoFormQuickTimeStart").classList.toggle("active", target === "start");
+      $("todoFormQuickTimeEnd").classList.toggle("active", target === "end");
+      $("todoFormQuickTimeStart").setAttribute("aria-pressed", String(target === "start"));
+      $("todoFormQuickTimeEnd").setAttribute("aria-pressed", String(target === "end"));
+      $("todoFormQuickTimeStart").textContent = `Od${$("todoFormStart").value ? ` ${$("todoFormStart").value}` : ""}`;
+      $("todoFormQuickTimeEnd").textContent = `Do${$("todoFormEnd").value ? ` ${$("todoFormEnd").value}` : ""}`;
+      $("todoFormQuickTimeHours").innerHTML = Array.from({ length: 24 }, (_, hour) => {
+        const value = String(hour).padStart(2, "0");
+        return `<button class="todo-time-picker-choice ${currentHour === hour ? "active" : ""}" type="button" data-time-picker-hour="${hour}" aria-pressed="${currentHour === hour}">${value}</button>`;
+      }).join("");
+      $("todoFormQuickTimeMinutes").innerHTML = [0, 15, 30, 45].map((minute) => {
+        const value = String(minute).padStart(2, "0");
+        return `<button class="todo-time-picker-choice ${currentMinute === minute ? "active" : ""}" type="button" data-time-picker-minute="${minute}" aria-pressed="${currentMinute === minute}">${value}</button>`;
+      }).join("");
+    }
+
+    function setTodoFormQuickTime(target, { hour = null, minute = null } = {}) {
+      const id = target === "end" ? "todoFormEnd" : "todoFormStart";
+      const input = $(id);
+      if (input.disabled) return;
+      const fallback = todoTimePickerParts(input.value, todoTimePickerDefault(target));
+      const nextHour = hour === null ? fallback.hour : Math.max(0, Math.min(23, Number(hour)));
+      const nextMinute = minute === null ? fallback.minute : Math.max(0, Math.min(45, Number(minute)));
+      input.value = `${String(nextHour).padStart(2, "0")}:${String(Math.round(nextMinute / 15) * 15).padStart(2, "0")}`;
+      normalizeTodoFormTimes();
+      if (target === "start") {
+        rememberTodoStartTime(input.value);
+        if (!$("todoFormEnd").value) {
+          const start = dayTimelineMinutes(input.value);
+          $("todoFormEnd").value = dayTimelineTime(Math.min(23 * 60 + 45, start + 60));
+        }
+      }
+      updateTodoFormLateTimeEntryNotice();
+      renderTodoFormQuickTimePicker();
     }
 
     function workerVehiclePreferenceKey() {
@@ -13223,6 +13356,7 @@
         : isTimeEntry
           ? 'Vpis ur je vedno isti dan.'
           : 'Privzeto isti dan. Spremeni samo za večdnevno opravilo.';
+      renderTodoFormQuickTimePicker();
     }
 
     function syncTodoFormEndDate({ force = false } = {}) {
@@ -13258,6 +13392,7 @@
       renderTodoFormPhotos();
       renderTodoFormDriveFiles();
       renderTodoFormAssignees([activeWorkerId()], [activeWorkerId()]);
+      renderTodoFormQuickTimePicker();
     }
     function updateTodoFormLateTimeEntryNotice() {
       const notice = $("todoFormLateTimeEntryNotice");
@@ -13447,7 +13582,7 @@
       const assignee = String(todo.syncUser || todo._hoursAssigneeIds?.[0] || activeWorkerId() || "");
       const recent = state.todos.filter((item) => item.date === date && item.start && (!assignee || todoAssigneeIds(item).includes(assignee)))
         .sort((left, right) => String(right.start).localeCompare(String(left.start)))[0];
-      const startMinutes = dayTimelineMinutes(recent?.start) ?? (8 * 60);
+      const startMinutes = dayTimelineMinutes(rememberedTodoStartTime()) ?? dayTimelineMinutes(recent?.start) ?? (8 * 60);
       return { start: dayTimelineTime(startMinutes), end: dayTimelineTime(Math.min(23 * 60 + 45, startMinutes + 60)) };
     }
 
@@ -13467,6 +13602,7 @@
     async function openTodoDialog(todo = {}, { reportNavigationIds = null } = {}) {
       setTodoDialogSaving(false);
       const editing = Boolean(todo.id);
+      state.todoTimePickerTarget = "start";
       syncReportTodoDialogNavigation(todo.id, reportNavigationIds);
       const requestedStatus = todoStatus(todo.status || "open").id;
       const requestedTaskStatus = todoStatus(todo._taskStatus || (timeEntryStatusIds.has(requestedStatus) ? "open" : requestedStatus)).id;
@@ -16321,10 +16457,33 @@
       task.catch((error) => showNotice(error.message));
     });
 
-    ["todoFormStart", "todoFormEnd"].forEach((id) => $(id).addEventListener("change", () => {
-      normalizeTodoFormTimes();
-      if (id === "todoFormStart" && $("todoFormStart").value) $("todoFormEnd").focus();
-    }));
+    ["todoFormStart", "todoFormEnd"].forEach((id) => {
+      $(id).addEventListener("focus", () => {
+        state.todoTimePickerTarget = id === "todoFormEnd" ? "end" : "start";
+        renderTodoFormQuickTimePicker();
+      });
+      $(id).addEventListener("change", (event) => {
+        normalizeTodoFormTimes();
+        if (id === "todoFormStart") rememberTodoStartTime($("todoFormStart").value);
+        renderTodoFormQuickTimePicker();
+        if (id === "todoFormStart" && $("todoFormStart").value && event.isTrusted) $("todoFormEnd").focus();
+      });
+    });
+    $("todoFormQuickTimePicker").addEventListener("click", (event) => {
+      const targetButton = event.target.closest("[data-time-picker-target]");
+      if (targetButton) {
+        state.todoTimePickerTarget = targetButton.dataset.timePickerTarget === "end" ? "end" : "start";
+        renderTodoFormQuickTimePicker();
+        return;
+      }
+      const hourButton = event.target.closest("[data-time-picker-hour]");
+      if (hourButton) {
+        setTodoFormQuickTime(state.todoTimePickerTarget, { hour: Number(hourButton.dataset.timePickerHour) });
+        return;
+      }
+      const minuteButton = event.target.closest("[data-time-picker-minute]");
+      if (minuteButton) setTodoFormQuickTime(state.todoTimePickerTarget, { minute: Number(minuteButton.dataset.timePickerMinute) });
+    });
     $("todoFormDate").addEventListener("change", () => {
       syncTodoFormEndDate();
       updateTodoFormLateTimeEntryNotice();

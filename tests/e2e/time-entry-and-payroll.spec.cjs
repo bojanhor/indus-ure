@@ -155,6 +155,15 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
       await expect(page.locator("#todoFormStatus")).toHaveValue("execution");
       await expect(page.locator("#todoFormHourlyRateField")).toBeHidden();
       await expect(page.locator("#todoFormDateTimeSection")).toHaveAttribute("open", "");
+      await expect(page.locator("#todoFormQuickTimePicker")).toBeVisible();
+      await page.locator('[data-time-picker-target="start"]').click();
+      await page.locator('[data-time-picker-hour="8"]').click();
+      await page.locator('[data-time-picker-minute="0"]').click();
+      await page.locator('[data-time-picker-target="end"]').click();
+      await page.locator('[data-time-picker-hour="10"]').click();
+      await page.locator('[data-time-picker-minute="0"]').click();
+      await expect(page.locator("#todoFormStart")).toHaveValue("08:00");
+      await expect(page.locator("#todoFormEnd")).toHaveValue("10:00");
 
       await page.locator("#todoFormNotes").fill("Podroben opis opravljenega dela. ".repeat(28));
       const notesMetrics = await page.locator("#todoFormNotes").evaluate((field) => ({
@@ -173,8 +182,6 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
 
       await page.locator("#todoFormTask").fill(ENTRY_TITLE);
       await page.locator("#todoFormDate").fill(ENTRY_DATE);
-      await page.locator("#todoFormStart").fill("08:00");
-      await page.locator("#todoFormEnd").fill("10:00");
       await page.locator("#todoFormBillingKm").fill("10");
       await page.locator("#todoFormClientKm").fill("5");
       await page.locator("#saveTodoDialog").click();
