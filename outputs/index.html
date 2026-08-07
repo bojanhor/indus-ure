@@ -8031,7 +8031,7 @@
     function clearFormValidationError(formOrField, field = null) {
       const form = validationFormFor(formOrField);
       if (!form) return;
-      const target = field || (formOrField instanceof HTMLElement ? formOrField : null);
+      const target = field || (formOrField instanceof HTMLElement && !formOrField.matches("form") ? formOrField : null);
       // Editing an unrelated field must not make the reason for a blocked
       // save disappear.  Clear the alert only once its marked field changes.
       const clearsActiveError = !target || target.classList.contains("is-invalid");
@@ -9976,6 +9976,7 @@
       const nextHour = hour === null ? fallback.hour : Math.max(0, Math.min(23, Number(hour)));
       const nextMinute = minute === null ? fallback.minute : Math.max(0, Math.min(45, Number(minute)));
       input.value = `${String(nextHour).padStart(2, "0")}:${String(Math.round(nextMinute / 15) * 15).padStart(2, "0")}`;
+      clearFormValidationError($("todoForm"), input);
       normalizeTodoFormTimes();
       if (target === "start") {
         rememberTodoStartTime(input.value);
@@ -13940,6 +13941,7 @@
     }
 
     async function openTodoDialog(todo = {}, { reportNavigationIds = null } = {}) {
+      clearFormValidationError($("todoForm"));
       setTodoDialogSaving(false);
       const editing = Boolean(todo.id);
       state.todoTimePickerTarget = "start";

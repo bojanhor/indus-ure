@@ -875,4 +875,41 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
       await context.close();
     }
   });
+  test("time validation does not leak into the next hours form", async ({ browser }) => {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    try {
+      await localLogin(page, "ibro");
+      await page.locator("#writeHoursButton").click();
+      await page.locator("#todoFormTask").fill("PW invalid time");
+      await page.locator("#todoFormDate").fill(ENTRY_DATE);
+      await page.locator("#todoFormStart").evaluate((input) => {
+        input.value = "10:00";
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+      await page.locator("#todoFormEnd").evaluate((input) => {
+        input.value = "08:00";
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+      await page.locator("#saveTodoDialog").click();
+      await expect(page.locator(".form-validation-error")).toContainText("Ura do mora biti kasneje kot ura od.");
+
+      await page.locator("#closeTodoDialog").click();
+      await expect(page.locator("#todoDialog")).toBeHidden();
+      await page.locator("#writeHoursButton").click();
+      await expect(page.locator(".form-validation-error")).toBeHidden();
+
+      await chooseQuickTime(page, '[data-time-picker-target="start"]');
+      await chooseQuickTime(page, '[data-time-picker-hour="8"]');
+      await chooseQuickTime(page, '[data-time-picker-minute="0"]');
+      await chooseQuickTime(page, '[data-time-picker-hour="17"]');
+      await chooseQuickTime(page, '[data-time-picker-minute="0"]');
+      await expect(page.locator("#todoFormStart")).toHaveValue("08:00");
+      await expect(page.locator("#todoFormEnd")).toHaveValue("17:00");
+      await expect(page.locator("#todoFormQuickTimeDuration")).toHaveText("Skupaj 9 h");
+      await expect(page.locator(".form-validation-error")).toBeHidden();
+    } finally {
+      await context.close();
+    }
+  });
 });
