@@ -4282,6 +4282,15 @@
       flex: 0 0 auto;
     }
 
+    .todo-form-client-billable-reset {
+      display: flex;
+      align-items: end;
+      padding-top: 24px;
+    }
+    .todo-form-client-billable-reset button {
+      min-height: 42px;
+      width: 100%;
+    }
     .todo-form-billing {
       padding: 10px;
       border: 1px solid #91c991;
@@ -5675,7 +5684,14 @@
         </label>
         <div class="todo-form-billing" id="todoFormClientBilling">
           <div class="modal-grid">
-            <label>Kilometrina, ki se zaračuna stranki (obe smeri vožnje)
+            <label id="todoFormClientBillableHoursField">Ure za obra&#269;un stranki
+              <input id="todoFormClientBillableHours" type="number" min="0" max="10000" step="0.25" inputmode="decimal">
+              <small class="todo-meta" id="todoFormClientBillableHoursNote">Samodejno sledi uram delavca.</small>
+            </label>
+            <div class="todo-form-client-billable-reset" id="todoFormClientBillableHoursResetField">
+              <button type="button" id="todoFormClientBillableHoursReset">Samodejno</button>
+            </div>
+            <label>Kilometrina, ki se zara&#269;una stranki (obe smeri vo&#382;nje)
               <input id="todoFormClientKm" type="number" min="0" max="1000000" step="0.1">
             </label>
             <label>Vozilo za stranko
@@ -8242,9 +8258,12 @@
     }
     function uniqueTodosByEventId(todos = []) {
       const groups = new Map();
+      const sourceTodos = new Map();
       todos.forEach((todo) => {
         const eventId = todoEventId(todo);
         if (!eventId) return;
+        if (!sourceTodos.has(eventId)) sourceTodos.set(eventId, []);
+        sourceTodos.get(eventId).push(todo);
         const existing = groups.get(eventId);
         if (!existing) {
           groups.set(eventId, {
@@ -8263,9 +8282,18 @@
         }
         existing.assigneeIds = assigneeIds;
       });
-      return [...groups.values()];
+      return [...groups.entries()].map(([eventId, todo]) => {
+        const eventTodos = sourceTodos.get(eventId) || [todo];
+        const manual = eventTodos.map((item) => manualClientBillableMinutes(item.clientBillableMinutes))
+          .find((minutes) => minutes !== null);
+        // A shared event has one customer amount. In automatic mode it keeps
+        // the former behaviour and adds the time of all assigned workers.
+        const eventClientBillableMinutes = manual === undefined
+          ? Math.round(eventTodos.reduce((sum, item) => sum + duration(item) * 60, 0))
+          : manual;
+        return { ...todo, eventClientBillableMinutes };
+      });
     }
-
     function contextTodos() {
       if (isAdminView()) return uniqueTodosByEventId(state.todos);
       const workerId = activeWorkerId();
@@ -8753,6 +8781,11 @@
       showNotice("Pozni vpis ur je shranjen. Šef prejme poročilo s primerjavo stanja prej in potem.");
     }
 
+    function announceClientBillableHoursWarning(warning) {
+      if (!warning) return;
+      showNotice(`Ure delavca so se spremenile iz ${formatClientBillableHours(Math.round(Number(warning.beforeWorkerHours || 0) * 60))} h na ${formatClientBillableHours(Math.round(Number(warning.afterWorkerHours || 0) * 60))} h. Ure za obra\u010dun stranki ostanejo ${formatClientBillableHours(Math.round(Number(warning.clientBillableHours || 0) * 60))} h.`);
+    }
+
     async function saveTodoToServer(todo) {
       const todoRevision = beginTodoMutation();
       const creating = !todo.id || String(todo.id).startsWith("offline-");
@@ -8774,6 +8807,7 @@
           render();
         }
         announceQueuedLateTimeEntryReport(data);
+        announceClientBillableHoursWarning(data.clientBillableHoursWarning);
         return data;
       } catch (error) {
         if (!isNetworkError(error)) {
@@ -8810,6 +8844,7 @@
           refreshClientList();
         }
         announceQueuedLateTimeEntryReport(data);
+        announceClientBillableHoursWarning(data.clientBillableHoursWarning);
         return data;
       } catch (error) {
         if (!isNetworkError(error)) {
@@ -8925,6 +8960,23 @@
     function duration(entry) {
       const diff = minutes(entry.end) - minutes(entry.start);
       return Math.max(0, diff) / 60;
+    }
+
+    function manualClientBillableMinutes(value) {
+      const number = Number(value);
+      return Number.isFinite(number) && number >= 0 && number <= 1000000 ? Math.round(number / 15) * 15 : null;
+    }
+
+    function todoClientBillableMinutes(todo = {}) {
+      if (Number.isFinite(Number(todo.reportHours))) return Math.round(Number(todo.reportHours) * 60);
+      const grouped = manualClientBillableMinutes(todo.eventClientBillableMinutes);
+      if (grouped !== null) return grouped;
+      const manual = manualClientBillableMinutes(todo.clientBillableMinutes);
+      return manual === null ? Math.round(duration(todo) * 60) : manual;
+    }
+
+    function todoClientBillableHours(todo = {}) {
+      return Number((todoClientBillableMinutes(todo) / 60).toFixed(2));
     }
 
     function mealPaidMinutes() {
@@ -9714,6 +9766,41 @@
       });
     }
 
+    function todoFormWorkerMinutes() {
+      const start = dayTimelineMinutes($("todoFormStart").value);
+      const end = dayTimelineMinutes($("todoFormEnd").value);
+      return start !== null && end !== null && end > start ? end - start : 0;
+    }
+
+    function formatClientBillableHours(minutes) {
+      return Number((Math.max(0, Number(minutes) || 0) / 60).toFixed(2)).toLocaleString("sl-SI", { maximumFractionDigits: 2 });
+    }
+
+    function todoFormClientBillableHoursIsManual() {
+      return $("todoFormClientBillableHours").dataset.manual === "true";
+    }
+
+    function syncTodoFormClientBillableHours({ reset = false } = {}) {
+      const field = $("todoFormClientBillableHoursField");
+      const resetField = $("todoFormClientBillableHoursResetField");
+      const input = $("todoFormClientBillableHours");
+      const note = $("todoFormClientBillableHoursNote");
+      const enabled = !field.classList.contains("hidden");
+      if (reset) input.dataset.manual = "false";
+      if (enabled && !todoFormClientBillableHoursIsManual()) input.value = formatClientBillableHours(todoFormWorkerMinutes());
+      const manual = enabled && todoFormClientBillableHoursIsManual();
+      resetField.classList.toggle("hidden", !enabled || !manual);
+      note.textContent = manual
+        ? "Ro\u010dno nastavljeno. Sprememba delav\u010devih ur te vrednosti ne bo spremenila."
+        : "Samodejno sledi uram delavca.";
+    }
+
+    function todoFormClientBillableMinutes() {
+      if (!todoFormClientBillableHoursIsManual()) return null;
+      const hours = parseBillingNumber($("todoFormClientBillableHours").value, 10_000);
+      return hours === null ? null : Math.round(hours * 60 / 15) * 15;
+    }
+
     function todoTimePickerStorageKey() {
       return `indus-ure-last-time-${state.user?.id || "anonymous"}`;
     }
@@ -9810,6 +9897,7 @@
         }
       }
       updateTodoFormLateTimeEntryNotice();
+      syncTodoFormClientBillableHours();
       renderTodoFormQuickTimePicker();
     }
 
@@ -9964,6 +10052,7 @@
         render();
         if ($("dayTimelineDialog").open && state.dayTimelineDate === day) renderDayTimeline();
         announceQueuedLateTimeEntryReport(data);
+        (data.clientBillableHoursWarnings || []).forEach(announceClientBillableHoursWarning);
         if (announce) showNotice("Spremembe dnevnega pogleda so shranjene.");
         if (closeAfterSave && $("dayTimelineDialog").open && state.dayTimelineDate === day && state.dayTimelineDrafts.size === 0) {
           $("dayTimelineDialog").close();
@@ -13637,8 +13726,12 @@
       const showWorkerMileage = timeEntry && !meal;
       const showHourlyRate = isAdminView() && timeEntry && !meal;
       const showClientMileage = completed && !meal;
+      const showClientBillableHours = showClientMileage && isAdminView();
       $("todoFormClientBilling").classList.toggle("hidden", !showClientMileage);
+      $("todoFormClientBillableHoursField").classList.toggle("hidden", !showClientBillableHours);
+      if (!showClientBillableHours) $("todoFormClientBillableHoursResetField").classList.add("hidden");
       $("todoFormBilling").classList.toggle("hidden", !showWorkerMileage);
+      syncTodoFormClientBillableHours();
       $("todoFormHourlyRateField").classList.toggle("hidden", !showHourlyRate);
       $("todoFormWorkFromHomeField").classList.toggle("hidden", !showWorkerMileage);
       if (!showWorkerMileage) $("todoFormWorkFromHome").checked = false;
@@ -13856,6 +13949,12 @@
       hourlyRateInput.dataset.autoRate = String(!editing && !Number.isFinite(requestedHourlyRate));
       $("todoFormBillingKm").value = Number(todo.billingKm || 0);
       $("todoFormClientKm").value = Number(todo.clientKm || 0);
+      const clientBillableHoursInput = $("todoFormClientBillableHours");
+      const manualClientBillableMinutes = Number(todo.clientBillableMinutes);
+      const hasManualClientBillableMinutes = editing && isAdminView() && Number.isFinite(manualClientBillableMinutes) && manualClientBillableMinutes >= 0;
+      clientBillableHoursInput.dataset.manual = String(hasManualClientBillableMinutes);
+      if (hasManualClientBillableMinutes) clientBillableHoursInput.value = formatClientBillableHours(manualClientBillableMinutes);
+      syncTodoFormClientBillableHours();
       $("todoFormClientVehicle").value = editing ? (todo.clientVehicle === "van" ? "van" : "personal") : (todo.clientVehicle === "van" ? "van" : preferredClientVehicle());
       $("deleteTodoFromDialog").classList.toggle("hidden", !editing);
       $("duplicateTodoFromDialog").classList.toggle("hidden", !editing || Boolean(state.todoHoursSourceId));
@@ -13919,6 +14018,9 @@
       const clientVehicle = $("todoFormClientVehicle").value === "van" ? "van" : "personal";
       const materialAmount = materialEntry ? Number(existing?.materialAmount || 0) : 0;
       const selectedStatus = $("todoFormStatus").value;
+      const clientBillableMinutes = selectedStatus === "execution"
+        ? (isAdminView() ? todoFormClientBillableMinutes() : (existing?.clientBillableMinutes ?? null))
+        : null;
       const title = meal ? "Malica" : capitalizeTodoText($("todoFormTask").value);
       const notes = meal ? "" : capitalizeTodoText($("todoFormNotes").value);
       const material = meal ? "" : capitalizeTodoText($("todoFormMaterial").value);
@@ -13953,6 +14055,7 @@
         sourceProjectTitle,
         done: selectedStatus === "execution" || materialEntry,
         billingHourlyRate: materialEntry ? null : hourlyRate,
+        clientBillableMinutes,
         billingKm: materialEntry ? 0 : billingKm,
         workFromHome: !materialEntry && Boolean($("todoFormWorkFromHome").checked),
         clientContactIds: meal ? [] : [...state.todoDialogClientContactIds],
@@ -13964,6 +14067,15 @@
         driveFiles: state.todoDialogDriveFiles,
         photos: state.todoDialogPhotos
       };
+      const previousClientBillableMinutes = Number(existing?.clientBillableMinutes);
+      const workerHoursChanged = Boolean(existing)
+        && Math.round(duration(existing) * 60) !== Math.round(duration(todo) * 60);
+      if (workerHoursChanged && Number.isFinite(previousClientBillableMinutes) && previousClientBillableMinutes >= 0 && clientBillableMinutes !== null) {
+        const accepted = await showAppConfirm(
+          `Ure delavca se spremenijo iz ${formatClientBillableHours(Math.round(duration(existing) * 60))} h na ${formatClientBillableHours(Math.round(duration(todo) * 60))} h.\n\nUre za obra\u010dun stranki ostanejo ro\u010dno nastavljene na ${formatClientBillableHours(previousClientBillableMinutes)} h. Nadaljujem?`
+        );
+        if (!accepted) return;
+      }
       const requestDirectClientSettlement = Boolean(existing
         && selectedStatus === "execution"
         && !existing?.clientSettlement?.confirmed
@@ -14503,7 +14615,7 @@
       const materialEntry = todo.status === "material";
       const warranty = Boolean(todo.warranty);
       const correction = todo?.settlement?.client?.[0] || null;
-      const hours = warranty || materialEntry ? 0 : correction ? Number(correction.delta?.hours || 0) : Number(duration(todo).toFixed(2));
+      const hours = warranty || materialEntry ? 0 : correction ? Number(correction.delta?.hours || 0) : todoClientBillableHours(todo);
       const clientKm = warranty || materialEntry ? 0 : correction ? Number(correction.delta?.clientKm || 0) : Math.max(0, Number(todo.clientKm || 0));
       const materialAmount = materialEntry ? (correction ? Number(correction.delta?.materialAmount || 0) : Math.max(0, Number(todo.materialAmount || 0))) : 0;
       return { todo, warranty, materialEntry, hours, clientKm, materialAmount, correction, vehicle: reportVehicleId(todo), clientBill: reportClientBill(todo) };
@@ -14648,7 +14760,7 @@
         : materialEntry
           ? `<span>Material brez obračuna zneska</span>`
           : [
-            hours ? `<span>Izvedeno: ${reportNumber(hours)} h</span>` : "<span>Ura ni vpisana</span>",
+            hours ? `<span>Za obra\u010dun: ${reportNumber(hours)} h</span>` : "<span>Ura ni vpisana</span>",
             clientKm ? `<span>Stroški prevoza (obe smeri): ${reportVehicleLabel(vehicle)} · ${reportNumber(clientKm, 1)} km</span>` : ""
           ].filter(Boolean).join("");
       return `<article class="client-billing-row">
@@ -14712,14 +14824,14 @@
       $("clearReportClient").textContent = detail ? "Počisti izbor" : "Počisti iskanje";
       const summaryRows = detail ? [
         ["Zaklju\u010dene storitve", `${totals.count}`],
-        ["Opravljene ure", `${reportNumber(totals.hours)} h`],
+        ["Ure za obra\u010dun", `${reportNumber(totals.hours)} h`],
         ["Stro\u0161ki prevoza (obe smeri) \u2013 osebni avto", reportTransportText(totals.personalKm)],
         ["Stro\u0161ki prevoza (obe smeri) \u2013 kombi", reportTransportText(totals.vanKm)],
         ["Stro\u0161ki prevoza skupaj", `${reportNumber(totals.clientKm, 1)} km`],
       ] : [
         ["Stranke", `${summaries.length}`],
         ["Zaklju\u010dene storitve", `${totals.count}`],
-        ["Opravljene ure", `${reportNumber(totals.hours)} h`],
+        ["Ure za obra\u010dun", `${reportNumber(totals.hours)} h`],
         ["Stro\u0161ki prevoza skupaj", `${reportNumber(totals.clientKm, 1)} km`],
       ];
       $("reportSummary").innerHTML = `<dl class="client-billing-summary-list">${summaryRows.map(([label, value]) => `<div class="${label.endsWith("skupaj") ? "is-total" : ""}"><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join("")}</dl>`;
@@ -16622,6 +16734,22 @@
       task.catch((error) => showNotice(error.message));
     });
 
+    $("todoFormClientBillableHours").addEventListener("input", () => {
+      const input = $("todoFormClientBillableHours");
+      if (String(input.value || "").trim()) input.dataset.manual = "true";
+      syncTodoFormClientBillableHours();
+    });
+    $("todoFormClientBillableHours").addEventListener("change", () => {
+      const input = $("todoFormClientBillableHours");
+      const hours = parseBillingNumber(input.value, 10_000);
+      if (hours === null && !String(input.value || "").trim()) input.dataset.manual = "false";
+      else if (hours !== null) input.value = formatClientBillableHours(Math.round(hours * 60 / 15) * 15);
+      syncTodoFormClientBillableHours();
+    });
+    $("todoFormClientBillableHoursReset").addEventListener("click", () => {
+      syncTodoFormClientBillableHours({ reset: true });
+    });
+
     ["todoFormStart", "todoFormEnd"].forEach((id) => {
       $(id).addEventListener("focus", () => {
         state.todoTimePickerTarget = id === "todoFormEnd" ? "end" : "start";
@@ -16631,6 +16759,7 @@
       });
       $(id).addEventListener("change", (event) => {
         normalizeTodoFormTimes();
+        syncTodoFormClientBillableHours();
         if (id === "todoFormStart") rememberTodoStartTime($("todoFormStart").value);
       renderTodoFormQuickTimePicker();
         if (id === "todoFormStart" && $("todoFormStart").value && event.isTrusted) $("todoFormEnd").focus();

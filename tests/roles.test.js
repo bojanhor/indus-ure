@@ -25,6 +25,8 @@ const {
   buildPayrollSnapshot,
   upsertSettlementCorrections,
   buildClientBillSnapshot,
+  clientBillableMinutesForTodos,
+  clientBillableHoursWarning,
   clientReportSelection,
   clientReportAttachmentSelection,
   attachmentContentDisposition,
@@ -1270,4 +1272,36 @@ test("delavec z zgodovino se varno prepozna za deaktivacijo namesto izbrisa", ()
   };
   assert.equal(workerHasBusinessData(workerDb, "maja"), true);
   assert.equal(workerHasBusinessData(workerDb, "marko"), false);
+});
+
+test("ročne ure za obračun stranki ostanejo ločene od ur delavcev", () => {
+  const customerDb = {
+    users: {
+      bojan: { id: "bojan", name: "Bojan", role: "boss" },
+      ibro: { id: "ibro", name: "Ibro", role: "worker" },
+      maja: { id: "maja", name: "Maja", role: "worker" }
+    },
+    clients: [{ clientId: "jerin", name: "Jerin", search: "jerin" }],
+    settlementCorrections: [],
+    clientBills: [],
+    todos: [
+      { id: "shared-ibro", assignmentGroupId: "shared-project", syncUser: "ibro", status: "execution", date: "2026-08-01", start: "08:00", end: "10:00", title: "Montaža", clientId: "jerin", client: "Jerin", clientBillableMinutes: 90 },
+      { id: "shared-maja", assignmentGroupId: "shared-project", syncUser: "maja", status: "execution", date: "2026-08-01", start: "08:00", end: "10:00", title: "Montaža", clientId: "jerin", client: "Jerin", clientBillableMinutes: 90 }
+    ]
+  };
+
+  assert.equal(clientBillableMinutesForTodos(customerDb.todos), 90, "ročni znesek skupnega dogodka se ne podvoji");
+  const bill = buildClientBillSnapshot(customerDb, { clientId: "jerin" }, boss);
+  assert.equal(bill.lines[0].clientBillableMinutes, 90);
+  const workerUpdate = todoForUserRole(worker, customerDb, customerDb.todos[0], {
+    ...customerDb.todos[0],
+    end: "11:00",
+    clientBillableMinutes: null
+  });
+  assert.equal(workerUpdate.clientBillableMinutes, 90, "delavec ne more prepisati ?efove ro?ne vrednosti");
+  const warning = clientBillableHoursWarning(customerDb.todos, [
+    { ...customerDb.todos[0], end: "11:00" },
+    customerDb.todos[1]
+  ]);
+  assert.deepEqual(warning, { clientBillableHours: 1.5, beforeWorkerHours: 4, afterWorkerHours: 5 });
 });

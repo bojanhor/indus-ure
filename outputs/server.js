@@ -1183,6 +1183,7 @@ function normalizeLateTimeEntryReportSnapshot(input, users = {}) {
     start: /^\d{2}:\d{2}$/.test(String(input.start || "")) ? String(input.start) : "",
     end: /^\d{2}:\d{2}$/.test(String(input.end || "")) ? String(input.end) : "",
     billingHourlyRate: nonnegativeNumber(input.billingHourlyRate, null, 10_000),
+    clientBillableMinutes: normalizedClientBillableMinutes(input.clientBillableMinutes),
     billingKm: nonnegativeNumber(input.billingKm, 0, 1_000_000),
     clientKm: nonnegativeNumber(input.clientKm, 0, 1_000_000),
     clientVehicle: todoVehicle(input.clientVehicle),
@@ -1211,6 +1212,7 @@ function lateTimeEntryReportSnapshot(todo, users = {}) {
     start: todo.start,
     end: todo.end,
     billingHourlyRate: todo.billingHourlyRate,
+    clientBillableMinutes: todo.clientBillableMinutes,
     billingKm: todo.billingKm,
     clientKm: todo.clientKm,
     clientVehicle: todo.clientVehicle,
@@ -1983,6 +1985,11 @@ function normalizeDb(db = {}) {
     const billingHourlyRate = nonnegativeNumber(next.billingHourlyRate, null, 10_000);
     if (next.billingHourlyRate !== billingHourlyRate) {
       next.billingHourlyRate = billingHourlyRate;
+      changed = true;
+    }
+    const clientBillableMinutes = next.status === "execution" ? normalizedClientBillableMinutes(next.clientBillableMinutes) : null;
+    if (next.clientBillableMinutes !== clientBillableMinutes) {
+      next.clientBillableMinutes = clientBillableMinutes;
       changed = true;
     }
     const billingKm = nonnegativeNumber(next.billingKm, 0, 1_000_000);
@@ -3560,7 +3567,7 @@ function clientCorrectionSnapshot(todos = []) {
   const first = list[0] || {};
   const warranty = Boolean(first.warranty);
   const isMaterial = first.status === "material";
-  return { eventId: todoBillingEventId(first), clientId: String(first.clientId || ""), client: String(first.client || ""), date: String(first.date || ""), start: String(first.start || ""), end: String(first.end || ""), title: String(first.title || "").slice(0, 300), notes: String(first.notes || "").slice(0, 10_000), material: String(first.material || "").slice(0, 10_000), status: String(first.status || ""), externalDelivery: Boolean(first.externalDelivery), materialAmount: isMaterial ? nonnegativeNumber(first.materialAmount, 0, 1_000_000) : 0, warranty, clientKm: warranty || isMaterial ? 0 : nonnegativeNumber(first.clientKm, 0, 1_000_000), clientVehicle: todoVehicle(first.clientVehicle), hours: warranty || isMaterial ? 0 : Number(list.reduce((sum, todo) => sum + todoDurationHours(todo), 0).toFixed(2)), todoIds: list.map((todo) => String(todo.id || "")).filter(Boolean) };
+  return { eventId: todoBillingEventId(first), clientId: String(first.clientId || ""), client: String(first.client || ""), date: String(first.date || ""), start: String(first.start || ""), end: String(first.end || ""), title: String(first.title || "").slice(0, 300), notes: String(first.notes || "").slice(0, 10_000), material: String(first.material || "").slice(0, 10_000), status: String(first.status || ""), externalDelivery: Boolean(first.externalDelivery), materialAmount: isMaterial ? nonnegativeNumber(first.materialAmount, 0, 1_000_000) : 0, warranty, clientKm: warranty || isMaterial ? 0 : nonnegativeNumber(first.clientKm, 0, 1_000_000), clientVehicle: todoVehicle(first.clientVehicle), hours: warranty || isMaterial ? 0 : clientBillableHoursForTodos(list), todoIds: list.map((todo) => String(todo.id || "")).filter(Boolean) };
 }
 function sameValue(left, right) { return JSON.stringify(left || {}) === JSON.stringify(right || {}); }
 function pendingCorrectionsForTodo(db, todo) {
@@ -3683,6 +3690,7 @@ function normalizeClientBill(input, db) {
       title: String(line?.title || "").trim().slice(0, 300),
       clientKm: nonnegativeNumber(line?.clientKm, 0, 1_000_000),
       clientVehicle: todoVehicle(line?.clientVehicle),
+      clientBillableMinutes: normalizedClientBillableMinutes(line?.clientBillableMinutes),
       warranty: Boolean(line?.warranty),
       status: String(line?.status || "").slice(0, 40),
       materialAmount: nonnegativeNumber(line?.materialAmount, 0, 1_000_000),
@@ -3795,6 +3803,50 @@ function todoDurationHours(todo = {}) {
   const startMinutes = Number(start[1]) * 60 + Number(start[2]);
   const endMinutes = Number(end[1]) * 60 + Number(end[2]);
   return endMinutes > startMinutes ? (endMinutes - startMinutes) / 60 : 0;
+}
+
+// Customer-billable time is deliberately independent from the worker's
+// attendance. null means automatic mode: it follows the actual worker
+// duration. A number is a boss-approved manual amount, rounded to the same
+// quarter-hour precision as the time picker. We keep the value in minutes so
+// zero remains an intentional, unambiguous customer charge.
+function normalizedClientBillableMinutes(value) {
+  const minutes = nonnegativeNumber(value, null, 1_000_000);
+  return minutes === null ? null : Math.round(minutes / 15) * 15;
+}
+
+function todoClientBillableMinutes(todo = {}) {
+  if (Number.isFinite(Number(todo.reportHours))) return Math.round(Number(todo.reportHours) * 60);
+  const manual = normalizedClientBillableMinutes(todo.clientBillableMinutes);
+  return manual === null ? Math.round(todoDurationHours(todo) * 60) : manual;
+}
+
+function clientBillableMinutesForTodos(todos = []) {
+  const list = (todos || []).filter(Boolean);
+  // An assignment group is one customer event. When its boss has set one
+  // shared manual amount, take it once instead of adding the same value for
+  // every assigned worker.
+  const manual = list.map((todo) => normalizedClientBillableMinutes(todo.clientBillableMinutes))
+    .find((minutes) => minutes !== null);
+  return manual === undefined ? list.reduce((sum, todo) => sum + todoClientBillableMinutes(todo), 0) : manual;
+}
+
+function clientBillableHoursForTodos(todos = []) {
+  return Number((clientBillableMinutesForTodos(todos) / 60).toFixed(2));
+}
+
+function clientBillableHoursWarning(beforeTodos = [], afterTodos = []) {
+  const beforeManual = (beforeTodos || []).map((todo) => normalizedClientBillableMinutes(todo?.clientBillableMinutes))
+    .find((minutes) => minutes !== null);
+  if (beforeManual === undefined) return null;
+  const beforeWorkerMinutes = Math.round((beforeTodos || []).reduce((sum, todo) => sum + todoDurationHours(todo) * 60, 0));
+  const afterWorkerMinutes = Math.round((afterTodos || []).reduce((sum, todo) => sum + todoDurationHours(todo) * 60, 0));
+  if (beforeWorkerMinutes === afterWorkerMinutes) return null;
+  return {
+    clientBillableHours: Number((beforeManual / 60).toFixed(2)),
+    beforeWorkerHours: Number((beforeWorkerMinutes / 60).toFixed(2)),
+    afterWorkerHours: Number((afterWorkerMinutes / 60).toFixed(2))
+  };
 }
 function clientReportSelection(db, input = {}) {
   const selection = clientBillCandidates(db, input);
@@ -4109,7 +4161,7 @@ function buildClientReportPdf(db, report, attachments = [], exportOptions = {}) 
         const todo = group.todos?.[0] || {};
         const warranty = Boolean(todo.warranty);
         const materialEntry = todo.status === "material";
-        const hours = warranty || materialEntry ? 0 : group.todos.reduce((sum, item) => sum + todoDurationHours(item), 0);
+        const hours = warranty || materialEntry ? 0 : clientBillableHoursForTodos(group.todos);
         const clientKm = warranty || materialEntry ? 0 : Math.max(0, Number(todo.clientKm || 0));
         const time = options.time === 'shown' && todo.start && todo.end ? `  ${todo.start}-${todo.end}` : '';
         doc.font(reportPdfFontPath('bold')).fontSize(13).fillColor('#143b34').text(`${reportPdfDate(todo.date)}${time}`);
@@ -4141,14 +4193,26 @@ function buildClientReportPdf(db, report, attachments = [], exportOptions = {}) 
         if (representative.warranty) return sum;
         const vehicle = representative.clientVehicle === 'van' ? 'van' : 'personal';
         travel[vehicle] += Math.max(0, Number(representative.clientKm || 0));
-        return sum + (group.todos || []).reduce((hours, item) => {
-          const duration = todoDurationHours(item);
-          if (options.worker === 'title') {
-            const label = reportPdfAssigneeTitle(db, item);
-            clientHoursByWorker.set(label, (clientHoursByWorker.get(label) || 0) + duration);
+        const billableHours = clientBillableHoursForTodos(group.todos || []);
+        if (options.worker === 'title' && billableHours) {
+          const manualCustomerMinutes = (group.todos || [])
+            .map((item) => normalizedClientBillableMinutes(item.clientBillableMinutes))
+            .find((minutes) => minutes !== null);
+          if (manualCustomerMinutes === undefined) {
+            for (const item of group.todos || []) {
+              const workerHours = todoDurationHours(item);
+              if (!workerHours) continue;
+              const label = reportPdfAssigneeTitle(db, item);
+              clientHoursByWorker.set(label, (clientHoursByWorker.get(label) || 0) + workerHours);
+            }
+          } else {
+            // A manually set customer amount belongs to the shared event and
+            // therefore appears once in the optional worker-title overview.
+            const label = reportPdfAssigneeTitle(db, representative);
+            clientHoursByWorker.set(label, (clientHoursByWorker.get(label) || 0) + billableHours);
           }
-          return hours + duration;
-        }, 0);
+        }
+        return sum + billableHours;
       }, 0);
       reportPdfEnsureSpace(doc, 105);
       doc.moveDown(0.4);
@@ -4558,6 +4622,7 @@ function buildClientBillSnapshot(db, input, actor) {
         title: representative.title,
         clientKm: representative.clientKm,
         clientVehicle: representative.clientVehicle,
+        clientBillableMinutes: clientBillableMinutesForTodos(group.todos),
         warranty: Boolean(representative.warranty),
         status: String(representative.status || ""),
         materialAmount: nonnegativeNumber(representative.materialAmount, 0, 1_000_000),
@@ -4829,6 +4894,7 @@ function todoEditableSnapshot(todo) {
     client: String(todo?.client || ""), clientId: String(todo?.clientId || ""), clientContactIds: cleanTodoClientContactIds(todo?.clientContactIds), clientContacts: cleanTodoClientContactSnapshots(todo?.clientContacts), notes: String(todo?.notes || ""), material: String(todo?.material || ""), materialAmount: isMaterial ? nonnegativeNumber(todo?.materialAmount, 0, 1_000_000) : 0, externalDelivery: isMaterial && Boolean(todo?.externalDelivery),
     status, urgent: Boolean(todo?.urgent), ordered: Boolean(todo?.ordered), warranty: status !== "meal" && !isMaterial && Boolean(todo?.warranty),
     sourceProjectTodoId: String(todo?.sourceProjectTodoId || ""), sourceProjectTitle: String(todo?.sourceProjectTitle || ""), billingHourlyRate: isTimeEntry ? nonnegativeNumber(todo?.billingHourlyRate, null, 10_000) : null,
+    clientBillableMinutes: isCompleted ? normalizedClientBillableMinutes(todo?.clientBillableMinutes) : null,
     billingKm: isTimeEntry ? nonnegativeNumber(todo?.billingKm, null, 1_000_000) : null, workFromHome: isTimeEntry && Boolean(todo?.workFromHome), clientKm: isCompleted ? nonnegativeNumber(todo?.clientKm, null, 1_000_000) : null,
     clientVehicle: isCompleted ? todoVehicle(todo?.clientVehicle) : "", driveFiles: files(todo?.driveFiles), photos: files(todo?.photos)
   });
@@ -4841,6 +4907,8 @@ function todoForUserRole(user, db, previous, todo) {
   const previousRate = nonnegativeNumber(previous?.billingHourlyRate, null, 10_000);
   const previousKm = nonnegativeNumber(previous?.billingKm, 0, 1_000_000);
   const previousClientKm = nonnegativeNumber(previous?.clientKm, 0, 1_000_000);
+  const previousClientBillableMinutes = normalizedClientBillableMinutes(previous?.clientBillableMinutes);
+  const requestedClientBillableMinutes = normalizedClientBillableMinutes(todo?.clientBillableMinutes);
   const previousClientVehicle = todoVehicle(previous?.clientVehicle);
   const requestedClientVehicle = todoVehicle(todo.clientVehicle);
   const isCompleted = todo.status === "execution";
@@ -4858,6 +4926,7 @@ function todoForUserRole(user, db, previous, todo) {
       workFromHome: isPaidTime && !isMaterial && Boolean(todo.workFromHome),
       warranty: isMeal || isMaterial ? false : Boolean(todo.warranty),
       imported: preserveImported,
+      clientBillableMinutes: isCompleted ? previousClientBillableMinutes : null,
       clientKm: isMeal || isMaterial ? 0 : canSetClientMileage ? nonnegativeNumber(todo.clientKm, previousClientKm, 1_000_000) : previousClientKm,
       clientVehicle: isMeal || isMaterial ? "personal" : canSetClientMileage ? requestedClientVehicle : previousClientVehicle,
       clientKmRate: 0
@@ -4870,6 +4939,7 @@ function todoForUserRole(user, db, previous, todo) {
     workFromHome: isPaidTime && !isMaterial && Boolean(todo.workFromHome),
     warranty: isMeal || isMaterial ? false : Boolean(todo.warranty),
     imported: !isPaidTime && preserveImported,
+    clientBillableMinutes: isCompleted ? requestedClientBillableMinutes : null,
     clientKm: isMeal || isMaterial ? 0 : canSetClientMileage ? nonnegativeNumber(todo.clientKm, previousClientKm, 1_000_000) : previousClientKm,
     clientVehicle: isMeal || isMaterial ? "personal" : requestedClientVehicle,
     clientKmRate: 0
@@ -5238,6 +5308,7 @@ function cleanTodo(input) {
     hoursNeedsReview: isTimeEntry && Boolean(input.hoursNeedsReview),
     workFromHome: isTimeEntry && Boolean(input.workFromHome),
     billingHourlyRate: isMaterial ? null : nonnegativeNumber(input.billingHourlyRate, null, 10_000),
+    clientBillableMinutes: status === "execution" ? normalizedClientBillableMinutes(input.clientBillableMinutes) : null,
     billingKm: isMeal || isMaterial ? 0 : nonnegativeNumber(input.billingKm, null, 1_000_000),
     clientKm: isMeal || isMaterial ? 0 : nonnegativeNumber(input.clientKm, null, 1_000_000),
     clientVehicle: isMeal || isMaterial ? "personal" : todoVehicle(input.clientVehicle),
@@ -9159,7 +9230,7 @@ async function handleApi(req, res) {
           return;
         }
         if (!overlapping) {
-          const operation = { previousTodo, assignmentIds, start, end, date, endDate };
+          const operation = { previousTodo, beforeTodos: assignmentItems.map((item) => ({ ...item })), assignmentIds, start, end, date, endDate };
           operations.push(operation);
           assignmentIds.forEach((id) => operationByAssignmentId.set(id, operation));
         }
@@ -9189,6 +9260,9 @@ async function handleApi(req, res) {
         user,
         now
       ));
+      const clientBillableHoursWarnings = operations
+        .map((operation) => clientBillableHoursWarning(operation.beforeTodos, todoAssignmentItems(db, operation.previousTodo)))
+        .filter(Boolean);
       const lateTimeEntryReports = operations
         .map((operation) => queueLateTimeEntryReport(db, {
           before: operation.previousTodo,
@@ -9200,7 +9274,11 @@ async function handleApi(req, res) {
         .filter(Boolean);
       await writeDbAsync(db);
       if (lateTimeEntryReports.length) scheduleLateTimeEntryReportDelivery();
-      sendJson(res, 200, { todos: visibleTodosForUser(db, user), lateTimeEntryReportsQueued: lateTimeEntryReports.length });
+      sendJson(res, 200, {
+        todos: visibleTodosForUser(db, user),
+        lateTimeEntryReportsQueued: lateTimeEntryReports.length,
+        clientBillableHoursWarnings
+      });
       return;
     }
 
@@ -9258,6 +9336,7 @@ async function handleApi(req, res) {
         user,
         now
       );
+      const clientBillableHoursWarningForMove = clientBillableHoursWarning(assignmentItems, todoAssignmentItems(db, previousTodo));
       const lateTimeEntryReport = queueLateTimeEntryReport(db, {
         before: previousTodo,
         after: db.todos.find((item) => item.id === previousTodo.id),
@@ -9268,7 +9347,11 @@ async function handleApi(req, res) {
       await writeDbAsync(db);
       releaseTodoAssignmentEditLock(db, previousTodo, user, editLockToken);
       if (lateTimeEntryReport) scheduleLateTimeEntryReportDelivery();
-      sendJson(res, 200, { todos: visibleTodosForUser(db, user), lateTimeEntryReportsQueued: lateTimeEntryReport ? 1 : 0 });
+      sendJson(res, 200, {
+        todos: visibleTodosForUser(db, user),
+        lateTimeEntryReportsQueued: lateTimeEntryReport ? 1 : 0,
+        clientBillableHoursWarning: clientBillableHoursWarningForMove
+      });
       return;
     }
     const todoRestoreMatch = url.pathname.match(/^\/api\/todos\/([^/]+)\/restore$/);
@@ -9520,6 +9603,7 @@ releaseTodoAssignmentEditLock(db, previousTodo, user, editLockToken);
         || updatedGroup.find((item) => item.syncUser === previousTodo.syncUser)
         || updatedGroup[0]
         || null;
+      const clientBillableHoursWarningForUpdate = clientBillableHoursWarning(assignmentItems, updatedGroup);
       const settlementChange = upsertSettlementCorrections(db, assignmentItems, updatedGroup, user, now);
       if (settlementChange.error) {
         sendJson(res, 409, { error: settlementChange.error });
@@ -9544,7 +9628,12 @@ releaseTodoAssignmentEditLock(db, previousTodo, user, editLockToken);
       await writeDbAsync(db);
       releaseTodoAssignmentEditLock(db, previousTodo, user, editLockToken);
       if (lateTimeEntryReport) scheduleLateTimeEntryReportDelivery();
-      sendJson(res, 200, { todos: visibleTodosForUser(db, user), debts: visibleDebtsForUser(db, user), lateTimeEntryReportsQueued: lateTimeEntryReport ? 1 : 0 });
+      sendJson(res, 200, {
+        todos: visibleTodosForUser(db, user),
+        debts: visibleDebtsForUser(db, user),
+        lateTimeEntryReportsQueued: lateTimeEntryReport ? 1 : 0,
+        clientBillableHoursWarning: clientBillableHoursWarningForUpdate
+      });
       return;
     }
 
@@ -9775,6 +9864,10 @@ module.exports = {
   settleCorrectionsForClientBill,
   pendingCorrectionsForTodo,
   buildClientBillSnapshot,
+  todoClientBillableMinutes,
+  clientBillableMinutesForTodos,
+  clientBillableHoursForTodos,
+  clientBillableHoursWarning,
   clientReportSelection,
   clientReportAttachmentSelection,
   attachmentContentDisposition,
