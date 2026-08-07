@@ -84,11 +84,13 @@ const AUDIT_LOG_MAX_EVENTS = 10_000;
 // snapshots only: sessions, OAuth credentials, notifications and attachment
 // payloads never enter the journal.
 const UNDO_JOURNAL_LIMIT = 20;
-const UNDO_SNAPSHOT_KEYS = [
-  "todos", "entries", "attachments", "debts", "advances", "personalPurchases",
-  "clients", "billingLocks", "payrolls", "clientBills", "settlementCorrections",
-  "settings", "calendarToken"
+const UNDO_JOURNAL_SCHEMA_VERSION = 2;
+const UNDO_MAX_PATCH_BYTES = 512 * 1024;
+const UNDO_ARRAY_SNAPSHOT_KEYS = [
+  "todos", "entries", "debts", "advances", "personalPurchases",
+  "clients", "billingLocks", "payrolls", "clientBills", "settlementCorrections"
 ];
+const UNDO_VALUE_SNAPSHOT_KEYS = ["settings", "calendarToken"];
 const MONITOR_MAX_RSS_MB = Math.max(256, Number(process.env.MONITOR_MAX_RSS_MB || 1_800));
 const MONITOR_DISK_WARNING_PERCENT = Math.min(99, Math.max(90, Number(process.env.MONITOR_DISK_WARNING_PERCENT || 90)));
 const REPORT_PDF_MAX_TOTAL_BYTES = 50 * 1024 * 1024;
@@ -385,38 +387,149 @@ function undoClone(value) {
   return JSON.parse(JSON.stringify(value == null ? null : value));
 }
 
-function undoSnapshotAttachments(attachments = {}) {
-  return Object.fromEntries(Object.entries(attachments || {}).map(([id, attachment]) => {
-    const copy = { ...(attachment || {}) };
-    // Media lives in the protected storage directory. Keeping base64 payloads
-    // in twenty journal entries would be wasteful and needlessly expose it.
-    delete copy.data;
-    delete copy.thumbnailData;
-    return [id, copy];
-  }));
+function undoAttachmentMetadata(attachment = {}) {
+  const copy = { ...(attachment || {}) };
+  // Files stay in protected media storage. History contains only metadata and
+  // never a second copy of the original or thumbnail.
+  delete copy.data;
+  delete copy.thumbnailData;
+  return copy;
 }
 
 function undoBusinessSnapshot(db = {}) {
   const snapshot = {};
-  for (const key of UNDO_SNAPSHOT_KEYS) {
-    if (key === "attachments") snapshot.attachments = undoSnapshotAttachments(db.attachments);
-    else snapshot[key] = undoClone(db[key]);
-  }
+  for (const key of UNDO_ARRAY_SNAPSHOT_KEYS) snapshot[key] = undoClone(db[key] || []);
+  snapshot.attachments = Object.fromEntries(Object.entries(db.attachments || {}).map(([id, attachment]) => [id, undoAttachmentMetadata(attachment)]));
+  for (const key of UNDO_VALUE_SNAPSHOT_KEYS) snapshot[key] = undoClone(db[key]);
   return snapshot;
+}
+
+function undoItemId(key, item) {
+  if (!item || typeof item !== "object") return "";
+  if (key === "clients") return String(item.clientId || item.id || "").trim();
+  if (key === "billingLocks") return String(item.id || (item.workerId && item.month ? item.workerId + ":" + item.month : "")).trim();
+  return String(item.id || "").trim();
+}
+
+function undoArrayPatch(key, before = [], after = []) {
+  const oldItems = Array.isArray(before) ? before : [];
+  const newItems = Array.isArray(after) ? after : [];
+  if ([...oldItems, ...newItems].some((item) => item && !undoItemId(key, item))) {
+    return JSON.stringify(oldItems) === JSON.stringify(newItems) ? null : { replace: undoClone(oldItems) };
+  }
+  const oldById = new Map(oldItems.map((item) => [undoItemId(key, item), item]));
+  const newById = new Map(newItems.map((item) => [undoItemId(key, item), item]));
+  const changes = [];
+  for (const id of new Set([...oldById.keys(), ...newById.keys()])) {
+    const previous = oldById.get(id);
+    const next = newById.get(id);
+    if (JSON.stringify(previous) !== JSON.stringify(next)) {
+      changes.push({ id, before: previous === undefined ? null : undoClone(previous) });
+    }
+  }
+  const oldOrder = oldItems.map((item) => undoItemId(key, item));
+  const newOrder = newItems.map((item) => undoItemId(key, item));
+  const order = JSON.stringify(oldOrder) === JSON.stringify(newOrder) ? null : oldOrder;
+  return changes.length || order ? { changes, ...(order ? { order } : {}) } : null;
+}
+
+function undoAttachmentPatch(before = {}, after = {}) {
+  const oldItems = before && typeof before === "object" ? before : {};
+  const newItems = after && typeof after === "object" ? after : {};
+  const changes = [];
+  for (const id of new Set([...Object.keys(oldItems), ...Object.keys(newItems)])) {
+    const previous = oldItems[id];
+    const next = newItems[id];
+    if (JSON.stringify(previous) !== JSON.stringify(next)) {
+      changes.push({ id, before: previous === undefined ? null : undoAttachmentMetadata(previous) });
+    }
+  }
+  return changes.length ? { changes } : null;
+}
+
+function normalizeUndoArrayPatch(key, raw) {
+  if (!raw || typeof raw !== "object") return null;
+  if (Array.isArray(raw.replace)) return { replace: undoClone(raw.replace) };
+  const changes = (Array.isArray(raw.changes) ? raw.changes : [])
+    .map((change) => ({
+      id: undoItemId(key, { id: change?.id, clientId: key === "clients" ? change?.id : "" }),
+      before: change && Object.hasOwn(change, "before") ? undoClone(change.before) : null
+    }))
+    .filter((change) => Boolean(change.id));
+  const order = (Array.isArray(raw.order) ? raw.order : [])
+    .map((id) => String(id || "").trim())
+    .filter(Boolean);
+  return changes.length || order.length ? { ...(changes.length ? { changes } : {}), ...(order.length ? { order } : {}) } : null;
+}
+
+function normalizeUndoAttachmentPatch(raw) {
+  const changes = (Array.isArray(raw?.changes) ? raw.changes : [])
+    .map((change) => ({
+      id: validTodoAttachmentId(change?.id) ? String(change.id) : "",
+      before: change && Object.hasOwn(change, "before") && change.before && typeof change.before === "object"
+        ? undoAttachmentMetadata(change.before)
+        : null
+    }))
+    .filter((change) => Boolean(change.id));
+  return changes.length ? { changes } : null;
+}
+
+function normalizeUndoPatch(raw) {
+  if (!raw || typeof raw !== "object" || Number(raw.version || 0) !== UNDO_JOURNAL_SCHEMA_VERSION) return null;
+  const arrays = {};
+  for (const key of UNDO_ARRAY_SNAPSHOT_KEYS) {
+    const patch = normalizeUndoArrayPatch(key, raw.arrays?.[key]);
+    if (patch) arrays[key] = patch;
+  }
+  const attachments = normalizeUndoAttachmentPatch(raw.attachments);
+  const values = {};
+  for (const key of UNDO_VALUE_SNAPSHOT_KEYS) {
+    if (raw.values && Object.hasOwn(raw.values, key)) values[key] = undoClone(raw.values[key]);
+  }
+  if (!Object.keys(arrays).length && !attachments && !Object.keys(values).length) return null;
+  const patch = {
+    version: UNDO_JOURNAL_SCHEMA_VERSION,
+    ...(Object.keys(arrays).length ? { arrays } : {}),
+    ...(attachments ? { attachments } : {}),
+    ...(Object.keys(values).length ? { values } : {})
+  };
+  return Buffer.byteLength(JSON.stringify(patch), "utf8") <= UNDO_MAX_PATCH_BYTES ? patch : null;
+}
+
+function undoPatchFromSnapshots(beforeState = {}, afterState = {}) {
+  const arrays = {};
+  for (const key of UNDO_ARRAY_SNAPSHOT_KEYS) {
+    const patch = undoArrayPatch(key, beforeState[key], afterState[key]);
+    if (patch) arrays[key] = patch;
+  }
+  const attachments = undoAttachmentPatch(beforeState.attachments, afterState.attachments);
+  const values = {};
+  for (const key of UNDO_VALUE_SNAPSHOT_KEYS) {
+    if (JSON.stringify(beforeState[key]) !== JSON.stringify(afterState[key])) values[key] = undoClone(beforeState[key]);
+  }
+  return normalizeUndoPatch({
+    version: UNDO_JOURNAL_SCHEMA_VERSION,
+    arrays,
+    attachments,
+    values
+  });
 }
 
 function normalizeUndoJournal(raw) {
   const values = Array.isArray(raw) ? raw : [];
   return values
-    .filter((record) => record && typeof record === "object" && typeof record.beforeState === "object")
-    .map((record) => ({
+    // Version 1 stored whole database copies. They are intentionally dropped
+    // during the migration: retaining them would keep the performance issue.
+    .map((record) => ({ record, patch: normalizeUndoPatch(record?.patch) }))
+    .filter(({ record, patch }) => record && typeof record === "object" && patch)
+    .map(({ record, patch }) => ({
       id: /^[a-f0-9-]{16,80}$/i.test(String(record.id || "")) ? String(record.id) : crypto.randomUUID(),
       createdAt: Number.isFinite(Date.parse(record.createdAt)) ? String(record.createdAt) : new Date().toISOString(),
       actorId: cleanUserId(record.actorId) || "system",
       actorName: cleanAuditActorName(record.actorName, "Sistem"),
       action: cleanAuditLogText(record.action || "Spremenjeni podatki", 220) || "Spremenjeni podatki",
       route: cleanAuditLogText(record.route || "", 180),
-      beforeState: record.beforeState,
+      patch,
       undoneAt: Number.isFinite(Date.parse(record.undoneAt)) ? String(record.undoneAt) : "",
       undoneBy: cleanUserId(record.undoneBy),
       undoneByName: cleanAuditActorName(record.undoneByName, ""),
@@ -428,13 +541,15 @@ function normalizeUndoJournal(raw) {
 
 function undoProtectedAttachmentIds(db = {}) {
   const protectedIds = new Set();
-  const include = (snapshot) => {
-    for (const attachmentId of Object.keys(snapshot?.attachments || {})) {
-      if (validTodoAttachmentId(attachmentId)) protectedIds.add(attachmentId);
+  const includePatch = (patch) => {
+    for (const change of patch?.attachments?.changes || []) {
+      if (change?.before && validTodoAttachmentId(change.id)) protectedIds.add(change.id);
     }
   };
-  for (const record of normalizeUndoJournal(db.undoJournal)) include(record.beforeState);
-  include(activeUndoCapture?.beforeState);
+  for (const record of normalizeUndoJournal(db.undoJournal)) includePatch(record.patch);
+  for (const attachmentId of Object.keys(activeUndoCapture?.beforeState?.attachments || {})) {
+    if (validTodoAttachmentId(attachmentId)) protectedIds.add(attachmentId);
+  }
   return protectedIds;
 }
 
@@ -462,28 +577,28 @@ function undoActionLabel({ req, actor, beforeState, afterState }) {
   const debt = undoChangedItem(beforeState.debts, afterState.debts);
   if (pathname.startsWith("/api/todos")) {
     const title = cleanAuditLogText(todo?.title || "brez naslova", 100);
-    if (method === "POST" && pathname === "/api/todos") return prefix + " ustvaril dogodek »" + title + "«";
-    if (method === "DELETE") return prefix + " izbrisal dogodek »" + title + "«";
+    if (method === "POST" && pathname === "/api/todos") return prefix + " ustvaril dogodek Â»" + title + "Â«";
+    if (method === "DELETE") return prefix + " izbrisal dogodek Â»" + title + "Â«";
     if (pathname.endsWith("/reorder")) return prefix + " prerazvrstil opravila";
-    return prefix + " spremenil dogodek »" + title + "«";
+    return prefix + " spremenil dogodek Â»" + title + "Â«";
   }
   if (pathname.startsWith("/api/clients")) {
     const name = cleanAuditLogText(client?.alias || client?.name || "stranko", 100);
     return method === "POST" && pathname === "/api/clients"
-      ? prefix + " dodal stranko »" + name + "«"
-      : method === "DELETE" ? prefix + " izbrisal stranko »" + name + "«" : prefix + " uredil stranko »" + name + "«";
+      ? prefix + " dodal stranko Â»" + name + "Â«"
+      : method === "DELETE" ? prefix + " izbrisal stranko Â»" + name + "Â«" : prefix + " uredil stranko Â»" + name + "Â«";
   }
   if (pathname.startsWith("/api/client-bills")) {
     const name = cleanAuditLogText(clientBill?.clientName || clientBill?.client || "stranko", 100);
-    return method === "POST" ? prefix + " potrdil obračun za stranko »" + name + "«" : prefix + " spremenil obračun stranke »" + name + "«";
+    return method === "POST" ? prefix + " potrdil obraÄŤun za stranko Â»" + name + "Â«" : prefix + " spremenil obraÄŤun stranke Â»" + name + "Â«";
   }
   if (pathname.startsWith("/api/payrolls")) {
     const workerName = cleanAuditLogText(payroll?.workerName || payroll?.personName || payroll?.workerId || "delavca", 100);
-    return prefix + " spremenil obračun ur za " + workerName;
+    return prefix + " spremenil obraÄŤun ur za " + workerName;
   }
-  if (pathname.startsWith("/api/advances")) return prefix + " spremenil založena sredstva" + (debt?.reason ? ": " + cleanAuditLogText(debt.reason, 90) : "");
+  if (pathname.startsWith("/api/advances")) return prefix + " spremenil zaloĹľena sredstva" + (debt?.reason ? ": " + cleanAuditLogText(debt.reason, 90) : "");
   if (pathname.startsWith("/api/personal-purchases")) return prefix + " spremenil osebni nakup" + (debt?.reason ? ": " + cleanAuditLogText(debt.reason, 90) : "");
-  if (pathname.startsWith("/api/settings")) return prefix + " spremenil nastavitve obračunavanja";
+  if (pathname.startsWith("/api/settings")) return prefix + " spremenil nastavitve obraÄŤunavanja";
   return prefix + " spremenil podatke";
 }
 
@@ -499,7 +614,8 @@ function appendUndoJournalForMutation(db) {
   const capture = activeUndoCapture;
   if (!capture || capture.recorded || !capture.actor) return false;
   const afterState = undoBusinessSnapshot(db);
-  if (JSON.stringify(capture.beforeState) === JSON.stringify(afterState)) return false;
+  const patch = undoPatchFromSnapshots(capture.beforeState, afterState);
+  if (!patch) return false;
   const record = {
     id: crypto.randomUUID(),
     createdAt: new Date().toISOString(),
@@ -507,7 +623,7 @@ function appendUndoJournalForMutation(db) {
     actorName: cleanAuditActorName(capture.actor.name, "Sistem"),
     action: undoActionLabel({ req: capture.req, actor: capture.actor, beforeState: capture.beforeState, afterState }),
     route: new URL(capture.req.url, "http://undo.local").pathname,
-    beforeState: capture.beforeState,
+    patch,
     undoneAt: "",
     undoneBy: "",
     undoneByName: "",
@@ -522,10 +638,55 @@ function currentUndoRecord(db = {}) {
   return normalizeUndoJournal(db.undoJournal).find((record) => !record.undoneAt) || null;
 }
 
-function restoreUndoSnapshot(db, snapshot) {
-  for (const key of UNDO_SNAPSHOT_KEYS) {
-    if (key === "attachments") db.attachments = undoClone(snapshot?.attachments || {});
-    else db[key] = undoClone(snapshot?.[key]);
+function restoreUndoArrayPatch(db, key, patch) {
+  if (Array.isArray(patch?.replace)) {
+    db[key] = undoClone(patch.replace);
+    return;
+  }
+  const current = Array.isArray(db[key]) ? db[key] : [];
+  const items = new Map(current.map((item) => [undoItemId(key, item), item]).filter(([id]) => id));
+  for (const change of patch?.changes || []) {
+    if (change.before === null) items.delete(change.id);
+    else items.set(change.id, undoClone(change.before));
+  }
+  const restored = [];
+  const used = new Set();
+  for (const id of patch?.order || []) {
+    const item = items.get(id);
+    if (item) {
+      restored.push(item);
+      used.add(id);
+    }
+  }
+  for (const item of current) {
+    const id = undoItemId(key, item);
+    if (id && !used.has(id) && items.has(id)) {
+      restored.push(items.get(id));
+      used.add(id);
+    }
+  }
+  for (const [id, item] of items) {
+    if (!used.has(id)) restored.push(item);
+  }
+  db[key] = restored;
+}
+
+function restoreUndoPatch(db, patch) {
+  const normalized = normalizeUndoPatch(patch);
+  if (!normalized) throw new Error("Zgodovina za to dejanje ni več veljavna.");
+  for (const key of UNDO_ARRAY_SNAPSHOT_KEYS) {
+    if (normalized.arrays?.[key]) restoreUndoArrayPatch(db, key, normalized.arrays[key]);
+  }
+  if (normalized.attachments) {
+    const attachments = { ...(db.attachments || {}) };
+    for (const change of normalized.attachments.changes || []) {
+      if (change.before === null) delete attachments[change.id];
+      else attachments[change.id] = { ...(attachments[change.id] || {}), ...undoAttachmentMetadata(change.before), id: change.id };
+    }
+    db.attachments = attachments;
+  }
+  for (const key of UNDO_VALUE_SNAPSHOT_KEYS) {
+    if (normalized.values && Object.hasOwn(normalized.values, key)) db[key] = undoClone(normalized.values[key]);
   }
 }
 
@@ -545,6 +706,7 @@ function visibleUndoJournal(db, user) {
       && (user?.role === "boss" || String(record.actorId) === String(user?.id))
   }));
 }
+
 
 function pruneUnusedTodoAttachments(db) {
   const pending = new Set(Object.keys(pendingAttachmentMap(db)));
@@ -2320,9 +2482,14 @@ function getPgPool() {
   if (pgPool) return pgPool;
   const { Pool } = require("pg");
   const isLocal = /localhost|127\.0\.0\.1/.test(DATABASE_URL);
+  // A small VM cannot keep ten full-state PostgreSQL requests in memory.
+  // Mutations are already serialized, so three connections cover reads without
+  // amplifying memory pressure or row-lock contention.
   pgPool = new Pool({
     connectionString: DATABASE_URL,
-    ssl: isLocal ? false : { rejectUnauthorized: false }
+    ssl: isLocal ? false : { rejectUnauthorized: false },
+    max: Math.max(1, Math.min(3, Number(process.env.INDUS_URE_PG_POOL_MAX || 3))),
+    idleTimeoutMillis: 10_000
   });
   return pgPool;
 }
@@ -2574,7 +2741,7 @@ async function writeDbAsync(db) {
     return;
   }
   await ensurePostgresDb();
-  await getPgStore().save(db);
+  await getPgStore().save(db, { protectedAttachmentIds: [...undoProtectedAttachmentIds(db)] });
 }
 
 function securityHeaders(extra = {}, nonce = "") {
@@ -7193,7 +7360,7 @@ async function handleApi(req, res) {
         actorName: user.name || user.id
       };
       try {
-        restoreUndoSnapshot(db, current.beforeState);
+        restoreUndoPatch(db, current.patch);
         const undoneAt = new Date().toISOString();
         db.undoJournal = normalizeUndoJournal(db.undoJournal).map((record) => record.id === current.id
           ? {

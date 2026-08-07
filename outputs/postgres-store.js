@@ -473,7 +473,7 @@ class PostgresStore {
     };
   }
 
-  async save(db) {
+  async save(db, { protectedAttachmentIds = [] } = {}) {
     const client = await this.pool.connect();
     const filesToDelete = [];
     try {
@@ -493,7 +493,7 @@ class PostgresStore {
       await this.#replacePayrolls(client, db.payrolls || []);
       await this.#replaceClientBills(client, db.clientBills || []);
       await this.#replaceRows(client, "indus_billing_locks", "id", (db.billingLocks || []).map((item, index) => [String(item.id || `${item.workerId || "worker"}:${item.month || index}`), item]));
-      filesToDelete.push(...await this.#replaceAttachments(client, db.attachments || {}));
+      filesToDelete.push(...await this.#replaceAttachments(client, db.attachments || {}, new Set(protectedAttachmentIds)));
       await client.query("commit");
     } catch (error) {
       await client.query("rollback");
@@ -660,7 +660,7 @@ class PostgresStore {
     else await client.query("delete from indus_client_bills");
   }
 
-  async #replaceAttachments(client, attachments) {
+  async #replaceAttachments(client, attachments, protectedAttachmentIds = new Set()) {
     const existing = await client.query("select id, storage_key, thumbnail_key, data from indus_attachments");
     const existingById = new Map(existing.rows.map((row) => [String(row.id), row]));
     const ids = [];
@@ -695,9 +695,12 @@ class PostgresStore {
       );
       attachments[id] = attachment;
     }
-    const stale = existing.rows.filter((row) => !ids.includes(String(row.id)));
-    if (ids.length) await client.query("delete from indus_attachments where id <> all($1::text[])", [ids]);
-    else await client.query("delete from indus_attachments");
+    // A deleted task can still be restored by the compact Undo journal. Keep only
+    // those protected media rows until that short history expires; ordinary
+    // unreferenced files are removed as before.
+    const stale = existing.rows.filter((row) => !ids.includes(String(row.id)) && !protectedAttachmentIds.has(String(row.id)));
+    const staleIds = stale.map((row) => String(row.id));
+    if (staleIds.length) await client.query("delete from indus_attachments where id = any($1::text[])", [staleIds]);
     return stale.flatMap((row) => [row.storage_key, row.thumbnail_key]).filter(Boolean).map((key) => this.#safeMediaPath(key)).filter(Boolean);
   }
 

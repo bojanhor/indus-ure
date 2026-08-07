@@ -82,6 +82,12 @@ test("Undo varno vrne zadnje poslovno dejanje in ga ne ponudi dvakrat", { timeou
     assert.match(journal.actions[0].action, /ustvaril dogodek/);
     assert.equal(journal.actions[0].canUndo, true);
 
+    const persisted = JSON.parse(await fs.readFile(path.join(dataDir, "db.json"), "utf8"));
+    const persistedUndo = persisted.undoJournal?.[0] || {};
+    assert.equal(Object.hasOwn(persistedUndo, "beforeState"), false);
+    assert.equal(persistedUndo.patch?.version, 2);
+    assert.ok(Buffer.byteLength(JSON.stringify(persistedUndo), "utf8") < 20_000);
+
     const undone = await request(port, "/api/undo-journal/" + encodeURIComponent(journal.actions[0].id), {
       method: "POST",
       headers,
