@@ -14873,12 +14873,13 @@
         renderReportAttachments(todo, { exportable: selectedForClientBill })
       ].filter(Boolean).join("");
       const hoursLabel = reportHoursMode() === "client_billable" || correction ? "Za obra\u010dun" : "Ure izvajalcev";
+      const hasExplicitClientHours = !correction && manualClientBillableMinutes(todo.clientBillableMinutes) !== null;
       const charges = warranty
         ? `<span class="client-billing-warranty">Garancija \u2013 storitev se ne obra\u010duna stranki.</span>`
         : materialEntry
           ? `<span>Material brez obra\u010duna zneska</span>`
           : [
-            hours ? `<span>${hoursLabel}: ${reportNumber(hours)} h</span>` : "<span>Ura ni vpisana</span>",
+            hours || hasExplicitClientHours ? `<span>${hoursLabel}: ${reportNumber(hours)} h</span>` : "<span>Ura ni vpisana</span>",
             reportHoursMode() === "worker_time" && workerTimes ? `<span>\u010cas izvajalcev: ${escapeHtml(workerTimes)}</span>` : "",
             clientKm ? `<span>Stro\u0161ki prevoza (obe smeri): ${reportVehicleLabel(vehicle)} &middot; ${reportNumber(clientKm, 1)} km</span>` : ""
           ].filter(Boolean).join("");
