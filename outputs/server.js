@@ -4146,8 +4146,15 @@ function clientBillCandidates(db, input = {}) {
   return { client, groups: [...groups.entries()].map(([eventId, todos]) => ({ eventId, todos })), requestedEventIds };
 }
 
+function optionalReportHours(todo = {}) {
+  const raw = todo?.reportHours;
+  if (raw === null || raw === "" || typeof raw === "undefined") return null;
+  const hours = Number(raw);
+  return Number.isFinite(hours) ? hours : null;
+}
 function todoDurationHours(todo = {}) {
-  if (Number.isFinite(Number(todo.reportHours))) return Number(todo.reportHours);
+  const reportHours = optionalReportHours(todo);
+  if (reportHours !== null) return reportHours;
   const start = /^(\d{2}):(\d{2})$/.exec(String(todo.start || ""));
   const end = /^(\d{2}):(\d{2})$/.exec(String(todo.end || ""));
   if (!start || !end) return 0;
@@ -4167,7 +4174,8 @@ function normalizedClientBillableMinutes(value) {
 }
 
 function todoClientBillableMinutes(todo = {}) {
-  if (Number.isFinite(Number(todo.reportHours))) return Math.round(Number(todo.reportHours) * 60);
+  const reportHours = optionalReportHours(todo);
+  if (reportHours !== null) return Math.round(reportHours * 60);
   const manual = normalizedClientBillableMinutes(todo.clientBillableMinutes);
   return manual === null ? Math.round(todoDurationHours(todo) * 60) : manual;
 }

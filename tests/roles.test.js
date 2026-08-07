@@ -1305,3 +1305,17 @@ test("ročne ure za obračun stranki ostanejo ločene od ur delavcev", () => {
   ]);
   assert.deepEqual(warning, { clientBillableHours: 1.5, beforeWorkerHours: 4, afterWorkerHours: 5 });
 });
+
+test("automatic customer hours use recorded time when manual value is null", () => {
+  const automatic = {
+    id: "automatic-client-hours",
+    status: "execution",
+    date: "2026-08-07",
+    start: "08:00",
+    end: "09:30",
+    reportHours: null,
+    clientBillableMinutes: null
+  };
+  assert.equal(clientBillableMinutesForTodos([automatic]), 90);
+  assert.equal(clientBillableMinutesForTodos([{ ...automatic, reportHours: 0 }]), 0);
+});

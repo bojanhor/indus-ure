@@ -9034,12 +9034,20 @@
     }
 
     function manualClientBillableMinutes(value) {
+      if (value === null || value === "" || typeof value === "undefined") return null;
       const number = Number(value);
       return Number.isFinite(number) && number >= 0 && number <= 1000000 ? Math.round(number / 15) * 15 : null;
     }
 
+    function optionalReportHours(todo = {}) {
+      const raw = todo?.reportHours;
+      if (raw === null || raw === "" || typeof raw === "undefined") return null;
+      const hours = Number(raw);
+      return Number.isFinite(hours) ? hours : null;
+    }
     function todoClientBillableMinutes(todo = {}) {
-      if (Number.isFinite(Number(todo.reportHours))) return Math.round(Number(todo.reportHours) * 60);
+      const reportHours = optionalReportHours(todo);
+      if (reportHours !== null) return Math.round(reportHours * 60);
       const grouped = manualClientBillableMinutes(todo.eventClientBillableMinutes);
       if (grouped !== null) return grouped;
       const manual = manualClientBillableMinutes(todo.clientBillableMinutes);
@@ -14030,10 +14038,10 @@
       $("todoFormBillingKm").value = Number(todo.billingKm || 0);
       $("todoFormClientKm").value = Number(todo.clientKm || 0);
       const clientBillableHoursInput = $("todoFormClientBillableHours");
-      const manualClientBillableMinutes = Number(todo.clientBillableMinutes);
-      const hasManualClientBillableMinutes = editing && isAdminView() && Number.isFinite(manualClientBillableMinutes) && manualClientBillableMinutes >= 0;
+      const manualClientMinutes = manualClientBillableMinutes(todo.clientBillableMinutes);
+      const hasManualClientBillableMinutes = editing && isAdminView() && manualClientMinutes !== null;
       clientBillableHoursInput.dataset.manual = String(hasManualClientBillableMinutes);
-      if (hasManualClientBillableMinutes) clientBillableHoursInput.value = formatClientBillableHours(manualClientBillableMinutes);
+      if (hasManualClientBillableMinutes) clientBillableHoursInput.value = formatClientBillableHours(manualClientMinutes);
       syncTodoFormClientBillableHours();
       $("todoFormClientVehicle").value = editing ? (todo.clientVehicle === "van" ? "van" : "personal") : (todo.clientVehicle === "van" ? "van" : preferredClientVehicle());
       $("deleteTodoFromDialog").classList.toggle("hidden", !editing);
@@ -14147,7 +14155,7 @@
         driveFiles: state.todoDialogDriveFiles,
         photos: state.todoDialogPhotos
       };
-      const previousClientBillableMinutes = Number(existing?.clientBillableMinutes);
+      const previousClientBillableMinutes = manualClientBillableMinutes(existing?.clientBillableMinutes);
       const workerHoursChanged = Boolean(existing)
         && Math.round(duration(existing) * 60) !== Math.round(duration(todo) * 60);
       if (workerHoursChanged && Number.isFinite(previousClientBillableMinutes) && previousClientBillableMinutes >= 0 && clientBillableMinutes !== null) {
