@@ -5491,11 +5491,12 @@
             <button class="primary hidden" id="confirmClientBill" type="button">Potrdi obračun stranki</button>
             <button class="secondary hidden" id="exportReportPdf" type="button">Prenesi PDF</button>
             <button class="secondary hidden" id="createReportGmailDraft" type="button">Gmail osnutek</button>
-            <label class="hidden report-export-option" id="reportExportWorkerOption">Izvajalec
-              <select id="reportExportWorker"><option value="hidden">Skrij</option><option value="title">Prikaži naziv</option></select>
-            </label>
-            <label class="hidden report-export-option" id="reportExportTimeOption">Točen čas
-              <select id="reportExportTime"><option value="hidden">Skrij</option><option value="shown">Prikaži</option></select>
+            <label class="hidden report-export-option" id="reportHoursModeOption">Prikaz ur
+              <select id="reportHoursMode">
+                <option value="client_billable">Obračunska vrednost za stranko</option>
+                <option value="worker_total">Skupne ure izvajalcev</option>
+                <option value="worker_time">Točen čas izvajalcev</option>
+              </select>
             </label>
           </div>
         </div>
@@ -14511,18 +14512,44 @@
       return items;
     }
 
-    function reportExportOptions() {
-      return {
-        worker: $("reportExportWorker").value === "title" ? "title" : "hidden",
-        time: $("reportExportTime").value === "shown" ? "shown" : "hidden"
-      };
+    const reportHoursModes = ["client_billable", "worker_total", "worker_time"];
+
+    function reportHoursMode() {
+      const mode = String($("reportHoursMode").value || "client_billable");
+      return reportHoursModes.includes(mode) ? mode : "client_billable";
     }
 
-    function reportExportWorkerLabel(todo) {
-      if (reportExportOptions().worker !== "title") return "";
-      const ids = todoAssigneeIds(todo);
-      const titles = ids.map((id) => String(state.workerBilling.find((worker) => worker.id === id)?.exportTitle || "").trim()).filter(Boolean);
-      return [...new Set(titles)].join(", ") || "Izvajalec";
+    function reportHoursModeLabel() {
+      return {
+        client_billable: "Ure za obra\u010dun stranki",
+        worker_total: "Skupne ure izvajalcev",
+        worker_time: "Ure izvajalcev (to\u010den \u010das)"
+      }[reportHoursMode()];
+    }
+
+    function reportHoursSummaryLabel() {
+      return reportHoursMode() === "client_billable" ? "Za obra\u010dun" : "Ure izvajalcev";
+    }
+
+    function reportWorkerTodos(todo) {
+      const eventId = todoEventId(todo);
+      const items = (state.todos || []).filter((item) => todoEventId(item) === eventId && !item.trashedAt);
+      return items.length ? items : [todo];
+    }
+
+    function reportWorkerName(todo) {
+      const id = String(todo?.syncUser || todo?.createdBy || "");
+      return String(state.workerBilling.find((worker) => worker.id === id)?.name || todo?.updatedByName || todo?.createdByName || "Izvajalec");
+    }
+
+    function reportWorkerTimeSummary(todos) {
+      return (todos || []).filter((todo) => todo.start && todo.end)
+        .map((todo) => reportWorkerName(todo) + ": " + todo.start + "\u2013" + todo.end)
+        .join(", ");
+    }
+
+    function reportExportOptions() {
+      return { hoursMode: reportHoursMode() };
     }
     function reportExportPayload() {
       const selection = reportClientSelection();
@@ -14615,10 +14642,13 @@
       const materialEntry = todo.status === "material";
       const warranty = Boolean(todo.warranty);
       const correction = todo?.settlement?.client?.[0] || null;
-      const hours = warranty || materialEntry ? 0 : correction ? Number(correction.delta?.hours || 0) : todoClientBillableHours(todo);
+      const workerTodos = correction ? [todo] : reportWorkerTodos(todo);
+      const clientBillableHours = correction ? Number(correction.delta?.hours || 0) : todoClientBillableHours(todo);
+      const workerHours = correction ? clientBillableHours : Number(workerTodos.reduce((sum, item) => sum + duration(item), 0).toFixed(2));
+      const hours = warranty || materialEntry ? 0 : (reportHoursMode() === "client_billable" || correction ? clientBillableHours : workerHours);
       const clientKm = warranty || materialEntry ? 0 : correction ? Number(correction.delta?.clientKm || 0) : Math.max(0, Number(todo.clientKm || 0));
       const materialAmount = materialEntry ? (correction ? Number(correction.delta?.materialAmount || 0) : Math.max(0, Number(todo.materialAmount || 0))) : 0;
-      return { todo, warranty, materialEntry, hours, clientKm, materialAmount, correction, vehicle: reportVehicleId(todo), clientBill: reportClientBill(todo) };
+      return { todo, warranty, materialEntry, hours, clientBillableHours, workerHours, workerTimes: correction ? "" : reportWorkerTimeSummary(workerTodos), clientKm, materialAmount, correction, vehicle: reportVehicleId(todo), clientBill: reportClientBill(todo) };
     }
 
     function reportTotals(lines) {
@@ -14743,31 +14773,33 @@
       return `<section class="client-billing-section"><strong>Priloge in dokumenti</strong>${attachmentCards ? `<div class="client-billing-attachments">${attachmentCards}</div>` : ""}${driveFiles.length ? `<div class="todo-drive-files">${renderTodoDriveFilesHtml(driveFiles)}</div>` : ""}</section>`;
     }
     function renderClientBillingRow(line) {
-      const { todo, warranty, materialEntry, hours, clientKm, materialAmount, vehicle, clientBill } = line;
-      const time = materialEntry ? "Material brez vpisa ur" : (todo.start && todo.end ? `${todo.start}–${todo.end}` : "Brez vpisane ure");
+      const { todo, warranty, materialEntry, hours, clientKm, vehicle, clientBill, workerTimes, correction } = line;
+      const time = materialEntry ? "Material brez vpisa ur" : (reportHoursMode() === "worker_time" ? "To\u010den \u010das izvajalcev" : (todo.start && todo.end ? todo.start + "\u2013" + todo.end : "Brez vpisane ure"));
       const eventId = todoEventId(todo);
       const selectedForClientBill = !clientBill && state.clientBillSelectedEventIds.has(eventId);
       const billSelection = clientBill
-        ? `<button class="client-billing-select is-billed" type="button" data-cancel-client-bill-id="${escapeHtml(clientBill.id)}" title="Prekliči obračun stranki"><span>Obračunano</span></button>`
-        : `<label class="client-billing-select ${selectedForClientBill ? "is-selected" : ""}"><input type="checkbox" data-client-bill-event-id="${escapeHtml(eventId)}" ${selectedForClientBill ? "checked" : ""}><span>Za obračun</span></label>`;
+        ? `<button class="client-billing-select is-billed" type="button" data-cancel-client-bill-id="${escapeHtml(clientBill.id)}" title="Prekli\u010di obra\u010dun stranki"><span>Obra\u010dunano</span></button>`
+        : `<label class="client-billing-select ${selectedForClientBill ? "is-selected" : ""}"><input type="checkbox" data-client-bill-event-id="${escapeHtml(eventId)}" ${selectedForClientBill ? "checked" : ""}><span>Za obra\u010dun</span></label>`;
       const details = [
         todo.notes ? `<section class="client-billing-section"><strong>Opis del</strong><div class="report-todo-description">${linkifyText(todo.notes)}</div></section>` : "",
         todo.material ? `<section class="client-billing-section"><strong>Material</strong><div class="report-todo-description">${linkifyText(todo.material)}</div></section>` : "",
         renderReportAttachments(todo, { exportable: selectedForClientBill })
       ].filter(Boolean).join("");
+      const hoursLabel = reportHoursMode() === "client_billable" || correction ? "Za obra\u010dun" : "Ure izvajalcev";
       const charges = warranty
-        ? `<span class="client-billing-warranty">Garancija – storitev se ne obračuna stranki.</span>`
+        ? `<span class="client-billing-warranty">Garancija \u2013 storitev se ne obra\u010duna stranki.</span>`
         : materialEntry
-          ? `<span>Material brez obračuna zneska</span>`
+          ? `<span>Material brez obra\u010duna zneska</span>`
           : [
-            hours ? `<span>Za obra\u010dun: ${reportNumber(hours)} h</span>` : "<span>Ura ni vpisana</span>",
-            clientKm ? `<span>Stroški prevoza (obe smeri): ${reportVehicleLabel(vehicle)} · ${reportNumber(clientKm, 1)} km</span>` : ""
+            hours ? `<span>${hoursLabel}: ${reportNumber(hours)} h</span>` : "<span>Ura ni vpisana</span>",
+            reportHoursMode() === "worker_time" && workerTimes ? `<span>\u010cas izvajalcev: ${escapeHtml(workerTimes)}</span>` : "",
+            clientKm ? `<span>Stro\u0161ki prevoza (obe smeri): ${reportVehicleLabel(vehicle)} &middot; ${reportNumber(clientKm, 1)} km</span>` : ""
           ].filter(Boolean).join("");
       return `<article class="client-billing-row">
         <div class="client-billing-when"><strong>${todo.date ? formatDate(todo.date) : "Brez datuma"}</strong><span>${escapeHtml(time)}</span></div>
         <div class="client-billing-main">
           <div class="client-billing-title-row"><h3><button class="client-billing-title-trigger open-report-todo" type="button" data-todo-id="${escapeHtml(todo.id)}" aria-label="Odpri vpis: ${escapeHtml(todo.title || "Brez naziva")}">${escapeHtml(todo.title || "Brez naziva")}</button></h3>${billSelection}</div>
-          <div class="client-billing-meta">${materialEntry ? `<span>Dostava materiala</span>` : `<span>Izvajalec: ${escapeHtml(todoAssigneeNames(todo))}</span>`}${clientBill ? `<span>Obračun stranki potrjen ${escapeHtml(formatDateTime(clientBill.confirmedAt))}</span>` : ""}${clientBill?.directSettlement ? `<span>Prejeto: ${money(clientBill.receivedAmount || 0)} EUR${clientBill.creditedWorkerName ? ` · v dobro ${escapeHtml(clientBill.creditedWorkerName)}` : ""}</span>` : ""}</div>
+          <div class="client-billing-meta">${materialEntry ? `<span>Dostava materiala</span>` : `<span>Izvajalec: ${escapeHtml(todoAssigneeNames(todo))}</span>`}${clientBill ? `<span>Obra\u010dun stranki potrjen ${escapeHtml(formatDateTime(clientBill.confirmedAt))}</span>` : ""}${clientBill?.directSettlement ? `<span>Prejeto: ${money(clientBill.receivedAmount || 0)} EUR${clientBill.creditedWorkerName ? ` &middot; v dobro ${escapeHtml(clientBill.creditedWorkerName)}` : ""}</span>` : ""}</div>
           <button class="client-billing-charges client-billing-charges-trigger open-report-todo" type="button" data-todo-id="${escapeHtml(todo.id)}" aria-label="Odpri vpis: ${escapeHtml(todo.title || "Brez naziva")}">${charges}</button>
           ${details}
         </div>
@@ -14779,12 +14811,11 @@
       const pending = summary.lines.filter((line) => !line.clientBill).length;
       return `<button class="client-billing-client-card open-client-report" type="button" data-client-id="${escapeHtml(id)}" data-client-name="${escapeHtml(name)}">
         <span class="client-billing-client-card-head"><strong>${escapeHtml(name)}</strong><span>${lastDate ? `Nazadnje: ${escapeHtml(formatDate(lastDate))}` : ""}</span></span>
-        <span class="client-billing-client-card-meta"><span>${totals.count} ${totals.count === 1 ? "zaključena storitev" : "zaključenih storitev"}</span><span>${reportNumber(totals.hours)} h</span><span>${pending ? `${pending} za obračun` : "obračunano"}</span></span>
+        <span class="client-billing-client-card-meta"><span>${totals.count} ${totals.count === 1 ? "zaklju\u010dena storitev" : "zaklju\u010denih storitev"}</span><span>${reportHoursSummaryLabel()}: ${reportNumber(totals.hours)} h</span><span>${pending ? `${pending} za obra\u010dun` : "obra\u010dunano"}</span></span>
         <span class="client-billing-client-travel"><span>Osebni avto: ${escapeHtml(reportTransportText(totals.personalKm))}</span><span>Kombi: ${escapeHtml(reportTransportText(totals.vanKm))}</span></span>
-        <span class="client-billing-client-open">Odpri poročilo ›</span>
+        <span class="client-billing-client-open">Odpri poro\u010dilo &rsaquo;</span>
       </button>`;
     }
-
     function renderReport() {
       const selection = reportClientSelection();
       const detail = Boolean(selection.id || selection.name);
@@ -14813,8 +14844,7 @@
       $("confirmClientBill").title = selectedClientBillLines.length ? "" : "Označi vsaj en vpis za obračun stranki.";
       $("confirmClientBill").textContent = `Potrdi izbrane vpise${pendingClientBillLines.length ? ` (${selectedClientBillLines.length})` : ""}`;
       $("exportReportPdf").classList.toggle("hidden", !detail);
-      $("reportExportWorkerOption").classList.toggle("hidden", !detail);
-      $("reportExportTimeOption").classList.toggle("hidden", !detail);
+      $("reportHoursModeOption").classList.toggle("hidden", !detail);
       $("createReportGmailDraft").classList.toggle("hidden", !detail);
       $("exportReportPdf").disabled = !selectedClientBillLines.length;
       const reportClient = findClient(selection.id) || findClient(selection.name);
@@ -14824,14 +14854,14 @@
       $("clearReportClient").textContent = detail ? "Počisti izbor" : "Počisti iskanje";
       const summaryRows = detail ? [
         ["Zaklju\u010dene storitve", `${totals.count}`],
-        ["Ure za obra\u010dun", `${reportNumber(totals.hours)} h`],
+        [reportHoursModeLabel(), `${reportNumber(totals.hours)} h`],
         ["Stro\u0161ki prevoza (obe smeri) \u2013 osebni avto", reportTransportText(totals.personalKm)],
         ["Stro\u0161ki prevoza (obe smeri) \u2013 kombi", reportTransportText(totals.vanKm)],
         ["Stro\u0161ki prevoza skupaj", `${reportNumber(totals.clientKm, 1)} km`],
       ] : [
         ["Stranke", `${summaries.length}`],
         ["Zaklju\u010dene storitve", `${totals.count}`],
-        ["Ure za obra\u010dun", `${reportNumber(totals.hours)} h`],
+        [reportHoursModeLabel(), `${reportNumber(totals.hours)} h`],
         ["Stro\u0161ki prevoza skupaj", `${reportNumber(totals.clientKm, 1)} km`],
       ];
       $("reportSummary").innerHTML = `<dl class="client-billing-summary-list">${summaryRows.map(([label, value]) => `<div class="${label.endsWith("skupaj") ? "is-total" : ""}"><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join("")}</dl>`;
@@ -16696,6 +16726,7 @@
       saveClientBillingFilter();
       renderReport();
     });
+    $("reportHoursMode").addEventListener("change", () => renderReport());
     ["reportShowPending", "reportShowBilled"].forEach((id) => {
       $(id).addEventListener("change", () => {
         state.showClientPending = $("reportShowPending").checked;

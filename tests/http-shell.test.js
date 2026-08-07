@@ -171,6 +171,21 @@ test("poročilo stranke odpre isti vpis s klikom na naslov ali zeleni povzetek",
   assert.match(html, /closest\("\.open-report-todo"\)[\s\S]*?reportTodos\(\)\.map\(\(item\) => item\.id\)[\s\S]*?openTodoDialog\(todo, \{ reportNavigationIds: navigationIds \}\)/);
   assert.doesNotMatch(html, />Odpri vpis</);
 });
+test("client report can switch between billable and worker hours", async () => {
+  const [html, server] = await Promise.all([
+    fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8"),
+    fs.readFile(path.join(__dirname, "..", "outputs", "server.js"), "utf8")
+  ]);
+  assert.match(html, /id="reportHoursMode"/);
+  assert.match(html, /value="client_billable"/);
+  assert.match(html, /value="worker_total"/);
+  assert.match(html, /value="worker_time"/);
+  assert.match(html, /function reportWorkerTimeSummary\(todos\)/);
+  assert.match(html, /reportHoursMode\(\) === "worker_time"/);
+  assert.match(server, /function clientReportExportOptions\(input = \{\}\) \{[\s\S]*?hoursMode/);
+  assert.match(server, /options\.hoursMode === "worker_time"/);
+  assert.match(server, /options\.hoursMode === "client_billable"/);
+});
 test("client billing filter, back navigation confirmation and scoped late mail are present", async () => {
   const [html, server] = await Promise.all([
     fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8"),

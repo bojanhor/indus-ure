@@ -4029,10 +4029,10 @@ function reportPdfDate(date) {
 }
 
 function clientReportExportOptions(input = {}) {
-  return {
-    worker: input?.worker === "title" ? "title" : "hidden",
-    time: input?.time === "shown" ? "shown" : "hidden"
-  };
+  const hoursMode = ["client_billable", "worker_total", "worker_time"].includes(String(input?.hoursMode || ""))
+    ? String(input.hoursMode)
+    : "client_billable";
+  return { hoursMode };
 }
 
 function reportPdfAssigneeTitle(db, todo) {
@@ -4161,16 +4161,22 @@ function buildClientReportPdf(db, report, attachments = [], exportOptions = {}) 
         const todo = group.todos?.[0] || {};
         const warranty = Boolean(todo.warranty);
         const materialEntry = todo.status === "material";
-        const hours = warranty || materialEntry ? 0 : clientBillableHoursForTodos(group.todos);
+        const clientBillableHours = warranty || materialEntry ? 0 : clientBillableHoursForTodos(group.todos);
+        const workerHours = warranty || materialEntry ? 0 : Number((group.todos || []).reduce((sum, item) => sum + todoDurationHours(item), 0).toFixed(2));
+        const hours = options.hoursMode === "client_billable" ? clientBillableHours : workerHours;
         const clientKm = warranty || materialEntry ? 0 : Math.max(0, Number(todo.clientKm || 0));
-        const time = options.time === 'shown' && todo.start && todo.end ? `  ${todo.start}-${todo.end}` : '';
-        doc.font(reportPdfFontPath('bold')).fontSize(13).fillColor('#143b34').text(`${reportPdfDate(todo.date)}${time}`);
+        doc.font(reportPdfFontPath('bold')).fontSize(13).fillColor('#143b34').text(reportPdfDate(todo.date));
         doc.font(reportPdfFontPath('bold')).fontSize(12).fillColor('#161f20').text(String(todo.title || 'Brez naziva'));
         doc.font(reportPdfFontPath()).fontSize(10).fillColor('#263634');
-        if (options.worker === 'title' && !materialEntry) reportPdfLine(doc, 'Izvajalec', reportPdfAssignees(db, group.todos));
+        if (!materialEntry) reportPdfLine(doc, 'Izvajalec', reportPdfAssignees(db, group.todos));
+        if (options.hoursMode === "worker_time" && !materialEntry) {
+          const workerTimes = (group.todos || []).filter((item) => item.start && item.end)
+            .map((item) => reportPdfAssigneeTitle(db, item) + ': ' + item.start + '-' + item.end).join(', ');
+          if (workerTimes) reportPdfLine(doc, '\u010cas izvajalcev', workerTimes);
+        }
         if (materialEntry) reportPdfLine(doc, todo.externalDelivery ? 'Dostava' : 'Vrsta vpisa', todo.externalDelivery ? 'Material je neposredno dostavil zunanji dobavitelj.' : 'Material brez izvajalca.');
         if (warranty) reportPdfLine(doc, 'Garancija', 'Storitev se ne obra\u010dunava stranki.');
-        if (hours) reportPdfLine(doc, 'Izvedeno', `${hours.toLocaleString('sl-SI', { maximumFractionDigits: 2 })} h`);
+        if (hours) reportPdfLine(doc, options.hoursMode === "client_billable" ? 'Za obra\u010dun' : 'Ure izvajalcev', hours.toLocaleString('sl-SI', { maximumFractionDigits: 2 }) + ' h');
         if (clientKm) reportPdfLine(doc, 'Stro\u0161ki prevoza (obe smeri)', `${reportPdfVehicleLabel(todo.clientVehicle)} - ${clientKm.toLocaleString('sl-SI', { maximumFractionDigits: 1 })} km`);
         if (todo.notes) reportPdfLine(doc, 'Opis del', todo.notes);
         if (todo.material) reportPdfLine(doc, 'Material', todo.material);
@@ -4185,44 +4191,35 @@ function buildClientReportPdf(db, report, attachments = [], exportOptions = {}) 
         doc.moveDown(0.75);
       }
 
-      const clientHoursByWorker = new Map();
+      const workerHoursByWorker = new Map();
       const travel = { personal: 0, van: 0 };
-      const totalClientHours = (report.groups || []).reduce((sum, group) => {
+      const totalHours = (report.groups || []).reduce((sum, group) => {
         const representative = group.todos?.[0] || {};
         if (representative.status === 'material') return sum;
         if (representative.warranty) return sum;
         const vehicle = representative.clientVehicle === 'van' ? 'van' : 'personal';
         travel[vehicle] += Math.max(0, Number(representative.clientKm || 0));
-        const billableHours = clientBillableHoursForTodos(group.todos || []);
-        if (options.worker === 'title' && billableHours) {
-          const manualCustomerMinutes = (group.todos || [])
-            .map((item) => normalizedClientBillableMinutes(item.clientBillableMinutes))
-            .find((minutes) => minutes !== null);
-          if (manualCustomerMinutes === undefined) {
-            for (const item of group.todos || []) {
-              const workerHours = todoDurationHours(item);
-              if (!workerHours) continue;
-              const label = reportPdfAssigneeTitle(db, item);
-              clientHoursByWorker.set(label, (clientHoursByWorker.get(label) || 0) + workerHours);
-            }
-          } else {
-            // A manually set customer amount belongs to the shared event and
-            // therefore appears once in the optional worker-title overview.
-            const label = reportPdfAssigneeTitle(db, representative);
-            clientHoursByWorker.set(label, (clientHoursByWorker.get(label) || 0) + billableHours);
+        const clientBillableHours = clientBillableHoursForTodos(group.todos || []);
+        const workerHours = (group.todos || []).reduce((hours, item) => hours + todoDurationHours(item), 0);
+        if (options.hoursMode !== "client_billable") {
+          for (const item of group.todos || []) {
+            const workerHoursForItem = todoDurationHours(item);
+            if (!workerHoursForItem) continue;
+            const label = reportPdfAssigneeTitle(db, item);
+            workerHoursByWorker.set(label, (workerHoursByWorker.get(label) || 0) + workerHoursForItem);
           }
         }
-        return sum + billableHours;
+        return sum + (options.hoursMode === "client_billable" ? clientBillableHours : workerHours);
       }, 0);
       reportPdfEnsureSpace(doc, 105);
       doc.moveDown(0.4);
-      doc.font(reportPdfFontPath('bold')).fontSize(13).fillColor('#0d536b').text('Izvedeno vseh ur');
-      if (options.worker === 'title' && clientHoursByWorker.size) {
-        [...clientHoursByWorker.entries()].sort(([left], [right]) => left.localeCompare(right, 'sl')).forEach(([label, hours]) => {
-          reportPdfLine(doc, label, `${hours.toLocaleString('sl-SI', { maximumFractionDigits: 2 })} h`);
+      doc.font(reportPdfFontPath('bold')).fontSize(13).fillColor('#0d536b').text(options.hoursMode === "client_billable" ? 'Ure za obra\u010dun' : 'Ure izvajalcev');
+      if (options.hoursMode !== "client_billable" && workerHoursByWorker.size) {
+        [...workerHoursByWorker.entries()].sort(([left], [right]) => left.localeCompare(right, 'sl')).forEach(([label, hours]) => {
+          reportPdfLine(doc, label, hours.toLocaleString('sl-SI', { maximumFractionDigits: 2 }) + ' h');
         });
       }
-      reportPdfLine(doc, 'Skupaj', `${totalClientHours.toLocaleString('sl-SI', { maximumFractionDigits: 2 })} h`);
+      reportPdfLine(doc, 'Skupaj', totalHours.toLocaleString('sl-SI', { maximumFractionDigits: 2 }) + ' h');
       if (travel.personal || travel.van) {
         doc.moveDown(0.35);
         doc.font(reportPdfFontPath('bold')).fontSize(13).fillColor('#0d536b').text('Skupaj prevoza');
