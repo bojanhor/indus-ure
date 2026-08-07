@@ -804,6 +804,38 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
     }
   });
 
+
+  test("history safely undoes only the latest business action through the menu", async ({ browser }) => {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    const title = "PW zgodovina sprememb";
+    try {
+      await localLogin(page, "bojan");
+      await page.locator("#materialEntryButton").click();
+      await page.locator("#todoFormTask").fill(title);
+      await page.locator("#todoFormClient").fill(CLIENT_ALIAS);
+      await page.locator("#quickAddClientBtn").click();
+      await expect(page.locator("#quickClientDialog")).toBeVisible();
+      await page.locator("#quickClientName").fill(CLIENT_ALIAS);
+      await page.locator("#quickClientForm button[type=submit]").click();
+      await expect(page.locator("#quickClientDialog")).toBeHidden();
+      await page.locator("#saveTodoDialog").click();
+      await expect(page.locator("#todoDialog")).toBeHidden();
+
+      await page.locator("#toolsMenu > summary").click();
+      await page.locator("#undoHistoryBtn").click();
+      await expect(page.locator("#undoHistoryDialog")).toBeVisible();
+      await expect(page.locator("#undoHistoryList")).toContainText(title);
+      await page.locator("[data-undo-history-id]").first().click();
+      await expect(page.locator("#appConfirmDialog")).toBeVisible();
+      await page.locator("#appConfirmAccept").click();
+      await expect(page.locator("#undoHistoryList")).toContainText("Razveljavljeno");
+      await expect(page.locator("#todoItems")).not.toContainText(title);
+    } finally {
+      await context.close();
+    }
+  });
+
   test("AJPES search fills an editable client draft without creating it", async ({ browser }) => {
     const context = await browser.newContext();
     const page = await context.newPage();

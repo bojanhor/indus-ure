@@ -177,6 +177,14 @@ test("client report can switch between billable and worker hours", async () => {
     fs.readFile(path.join(__dirname, "..", "outputs", "server.js"), "utf8")
   ]);
   assert.match(html, /id="reportHoursMode"/);
+  assert.match(html, /id="todoFormQuickTimeDuration"/);
+  assert.match(html, /function todoTimePickerDurationLabel\(\)/);
+  assert.match(html, /function reportClientSortMode\(value = state\.reportClientSort\)/);
+  assert.match(html, /state\.reportClientSort = reportClientSortMode\(\$\("reportClientSort"\)\.value\)/);
+  assert.match(html, /function reportOverviewSnapshot\(\)/);
+  assert.match(html, /function restoreReportOverviewSnapshot\(snapshot = \{\}\)/);
+  assert.match(html, /history\.pushState\(reportOverviewHistoryState\(snapshot\), "", location\.href\)/);
+  assert.match(html, /history\.back\(\);/);
   assert.match(html, /value="client_billable"/);
   assert.match(html, /value="worker_total"/);
   assert.match(html, /value="worker_time"/);
@@ -198,7 +206,7 @@ test("client billing filter, back navigation confirmation and scoped late mail a
   assert.match(html, /function clearClientReportSelection\([\s\S]*?setView\("report"\)/);
   assert.match(html, /function confirmLoggedInHistoryExit\(\)/);
   assert.match(html, /reportHistoryStateKey/);
-  assert.match(html, /function openClientReport\(client, clientId = "", \{ fromHistory = false \} = \{\}\)/);
+  assert.match(html, /function openClientReport\(client, clientId = "", \{ fromHistory = false, returnSnapshot = null \} = \{\}\)/);
   assert.match(html, /id="reportNewEntry"/);
   assert.match(html, /const settlementNotice = directAmount === 0/);
   assert.match(html, /skrit iz seznama/);

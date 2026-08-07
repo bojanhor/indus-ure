@@ -80,6 +80,15 @@ const DELETED_TODO_RETENTION_MS = DELETED_TODO_RETENTION_DAYS * 24 * 60 * 60 * 1
 const AUDIT_LOG_RETENTION_DAYS = 30;
 const AUDIT_LOG_RETENTION_MS = AUDIT_LOG_RETENTION_DAYS * 24 * 60 * 60 * 1000;
 const AUDIT_LOG_MAX_EVENTS = 10_000;
+// Undo is intentionally a short, ordered safety net. It keeps business-state
+// snapshots only: sessions, OAuth credentials, notifications and attachment
+// payloads never enter the journal.
+const UNDO_JOURNAL_LIMIT = 20;
+const UNDO_SNAPSHOT_KEYS = [
+  "todos", "entries", "attachments", "debts", "advances", "personalPurchases",
+  "clients", "billingLocks", "payrolls", "clientBills", "settlementCorrections",
+  "settings", "calendarToken"
+];
 const MONITOR_MAX_RSS_MB = Math.max(256, Number(process.env.MONITOR_MAX_RSS_MB || 1_800));
 const MONITOR_DISK_WARNING_PERCENT = Math.min(99, Math.max(90, Number(process.env.MONITOR_DISK_WARNING_PERCENT || 90)));
 const REPORT_PDF_MAX_TOTAL_BYTES = 50 * 1024 * 1024;
@@ -104,6 +113,8 @@ let auditLogStoreReady = null;
 let workerDigestStoreReady = null;
 let auditLogStoreCleanupAt = 0;
 let mutationQueue = Promise.resolve();
+let activeUndoCapture = null;
+let undoSystemLock = null;
 let monitorTimer = null;
 let alertTransport = null;
 const monitorAlertCooldowns = new Map();
@@ -370,11 +381,177 @@ function hydrateTodoAttachments(db, todo) {
   };
 }
 
+function undoClone(value) {
+  return JSON.parse(JSON.stringify(value == null ? null : value));
+}
+
+function undoSnapshotAttachments(attachments = {}) {
+  return Object.fromEntries(Object.entries(attachments || {}).map(([id, attachment]) => {
+    const copy = { ...(attachment || {}) };
+    // Media lives in the protected storage directory. Keeping base64 payloads
+    // in twenty journal entries would be wasteful and needlessly expose it.
+    delete copy.data;
+    delete copy.thumbnailData;
+    return [id, copy];
+  }));
+}
+
+function undoBusinessSnapshot(db = {}) {
+  const snapshot = {};
+  for (const key of UNDO_SNAPSHOT_KEYS) {
+    if (key === "attachments") snapshot.attachments = undoSnapshotAttachments(db.attachments);
+    else snapshot[key] = undoClone(db[key]);
+  }
+  return snapshot;
+}
+
+function normalizeUndoJournal(raw) {
+  const values = Array.isArray(raw) ? raw : [];
+  return values
+    .filter((record) => record && typeof record === "object" && typeof record.beforeState === "object")
+    .map((record) => ({
+      id: /^[a-f0-9-]{16,80}$/i.test(String(record.id || "")) ? String(record.id) : crypto.randomUUID(),
+      createdAt: Number.isFinite(Date.parse(record.createdAt)) ? String(record.createdAt) : new Date().toISOString(),
+      actorId: cleanUserId(record.actorId) || "system",
+      actorName: cleanAuditActorName(record.actorName, "Sistem"),
+      action: cleanAuditLogText(record.action || "Spremenjeni podatki", 220) || "Spremenjeni podatki",
+      route: cleanAuditLogText(record.route || "", 180),
+      beforeState: record.beforeState,
+      undoneAt: Number.isFinite(Date.parse(record.undoneAt)) ? String(record.undoneAt) : "",
+      undoneBy: cleanUserId(record.undoneBy),
+      undoneByName: cleanAuditActorName(record.undoneByName, ""),
+      undoAction: cleanAuditLogText(record.undoAction || "", 220)
+    }))
+    .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))
+    .slice(0, UNDO_JOURNAL_LIMIT);
+}
+
+function undoProtectedAttachmentIds(db = {}) {
+  const protectedIds = new Set();
+  const include = (snapshot) => {
+    for (const attachmentId of Object.keys(snapshot?.attachments || {})) {
+      if (validTodoAttachmentId(attachmentId)) protectedIds.add(attachmentId);
+    }
+  };
+  for (const record of normalizeUndoJournal(db.undoJournal)) include(record.beforeState);
+  include(activeUndoCapture?.beforeState);
+  return protectedIds;
+}
+
+function undoChangedItem(before = [], after = [], idKey = "id") {
+  const oldItems = new Map((Array.isArray(before) ? before : []).map((item) => [String(item?.[idKey] || item?.id || ""), item]));
+  const newItems = new Map((Array.isArray(after) ? after : []).map((item) => [String(item?.[idKey] || item?.id || ""), item]));
+  for (const [id, item] of newItems) {
+    if (!id) continue;
+    if (!oldItems.has(id) || JSON.stringify(oldItems.get(id)) !== JSON.stringify(item)) return item;
+  }
+  for (const [id, item] of oldItems) {
+    if (id && !newItems.has(id)) return item;
+  }
+  return null;
+}
+
+function undoActionLabel({ req, actor, beforeState, afterState }) {
+  const pathname = new URL(req.url, "http://undo.local").pathname;
+  const method = String(req.method || "").toUpperCase();
+  const prefix = cleanAuditActorName(actor?.name, "Uporabnik") + " je";
+  const todo = undoChangedItem(beforeState.todos, afterState.todos);
+  const client = undoChangedItem(beforeState.clients, afterState.clients, "clientId");
+  const clientBill = undoChangedItem(beforeState.clientBills, afterState.clientBills);
+  const payroll = undoChangedItem(beforeState.payrolls, afterState.payrolls);
+  const debt = undoChangedItem(beforeState.debts, afterState.debts);
+  if (pathname.startsWith("/api/todos")) {
+    const title = cleanAuditLogText(todo?.title || "brez naslova", 100);
+    if (method === "POST" && pathname === "/api/todos") return prefix + " ustvaril dogodek »" + title + "«";
+    if (method === "DELETE") return prefix + " izbrisal dogodek »" + title + "«";
+    if (pathname.endsWith("/reorder")) return prefix + " prerazvrstil opravila";
+    return prefix + " spremenil dogodek »" + title + "«";
+  }
+  if (pathname.startsWith("/api/clients")) {
+    const name = cleanAuditLogText(client?.alias || client?.name || "stranko", 100);
+    return method === "POST" && pathname === "/api/clients"
+      ? prefix + " dodal stranko »" + name + "«"
+      : method === "DELETE" ? prefix + " izbrisal stranko »" + name + "«" : prefix + " uredil stranko »" + name + "«";
+  }
+  if (pathname.startsWith("/api/client-bills")) {
+    const name = cleanAuditLogText(clientBill?.clientName || clientBill?.client || "stranko", 100);
+    return method === "POST" ? prefix + " potrdil obračun za stranko »" + name + "«" : prefix + " spremenil obračun stranke »" + name + "«";
+  }
+  if (pathname.startsWith("/api/payrolls")) {
+    const workerName = cleanAuditLogText(payroll?.workerName || payroll?.personName || payroll?.workerId || "delavca", 100);
+    return prefix + " spremenil obračun ur za " + workerName;
+  }
+  if (pathname.startsWith("/api/advances")) return prefix + " spremenil založena sredstva" + (debt?.reason ? ": " + cleanAuditLogText(debt.reason, 90) : "");
+  if (pathname.startsWith("/api/personal-purchases")) return prefix + " spremenil osebni nakup" + (debt?.reason ? ": " + cleanAuditLogText(debt.reason, 90) : "");
+  if (pathname.startsWith("/api/settings")) return prefix + " spremenil nastavitve obračunavanja";
+  return prefix + " spremenil podatke";
+}
+
+function undoEligibleRequest(req) {
+  if (!isUnsafeRequest(req)) return false;
+  const pathname = new URL(req.url, "http://undo.local").pathname;
+  if (/^\/api\/todos\/(?:video|drive-files|[^/]+\/(?:lock|completion-request))/.test(pathname)) return false;
+  if (/^\/api\/(?:attachments|notifications|auth|google|login|logout|password|profile|billing-locks|undo-journal|backup)\b/.test(pathname)) return false;
+  return /^\/api\/(?:todos(?:\/|$)|entries(?:\/|$)|clients(?:\/|$)|client-bills(?:\/|$)|payrolls(?:\/|$)|advances(?:\/|$)|personal-purchases(?:\/|$)|debts(?:\/|$)|settings\/billing$)/.test(pathname);
+}
+
+function appendUndoJournalForMutation(db) {
+  const capture = activeUndoCapture;
+  if (!capture || capture.recorded || !capture.actor) return false;
+  const afterState = undoBusinessSnapshot(db);
+  if (JSON.stringify(capture.beforeState) === JSON.stringify(afterState)) return false;
+  const record = {
+    id: crypto.randomUUID(),
+    createdAt: new Date().toISOString(),
+    actorId: cleanUserId(capture.actor.id) || "system",
+    actorName: cleanAuditActorName(capture.actor.name, "Sistem"),
+    action: undoActionLabel({ req: capture.req, actor: capture.actor, beforeState: capture.beforeState, afterState }),
+    route: new URL(capture.req.url, "http://undo.local").pathname,
+    beforeState: capture.beforeState,
+    undoneAt: "",
+    undoneBy: "",
+    undoneByName: "",
+    undoAction: ""
+  };
+  db.undoJournal = normalizeUndoJournal([record, ...(db.undoJournal || [])]);
+  capture.recorded = true;
+  return true;
+}
+
+function currentUndoRecord(db = {}) {
+  return normalizeUndoJournal(db.undoJournal).find((record) => !record.undoneAt) || null;
+}
+
+function restoreUndoSnapshot(db, snapshot) {
+  for (const key of UNDO_SNAPSHOT_KEYS) {
+    if (key === "attachments") db.attachments = undoClone(snapshot?.attachments || {});
+    else db[key] = undoClone(snapshot?.[key]);
+  }
+}
+
+function visibleUndoJournal(db, user) {
+  const current = currentUndoRecord(db);
+  return normalizeUndoJournal(db.undoJournal).map((record) => ({
+    id: record.id,
+    createdAt: record.createdAt,
+    actorId: record.actorId,
+    actorName: record.actorName,
+    action: record.action,
+    undoneAt: record.undoneAt,
+    undoneBy: record.undoneBy,
+    undoneByName: record.undoneByName,
+    undoAction: record.undoAction,
+    canUndo: !record.undoneAt && record.id === current?.id
+      && (user?.role === "boss" || String(record.actorId) === String(user?.id))
+  }));
+}
+
 function pruneUnusedTodoAttachments(db) {
   const pending = new Set(Object.keys(pendingAttachmentMap(db)));
   const used = new Set([
     ...(db.todos || []).flatMap((todo) => (todo.photos || []).map((photo) => photo.attachmentId)),
-    ...(db.debts || []).flatMap((debt) => (debt.photos || []).map((photo) => photo.attachmentId))
+    ...(db.debts || []).flatMap((debt) => (debt.photos || []).map((photo) => photo.attachmentId)),
+    ...undoProtectedAttachmentIds(db)
   ].filter(validTodoAttachmentId));
   let changed = false;
   for (const attachmentId of Object.keys(db.attachments || {})) {
@@ -1559,6 +1736,11 @@ function normalizeDb(db = {}) {
     db.auditLog = normalizedAuditLog;
     changed = true;
   }
+  const normalizedUndoJournal = normalizeUndoJournal(db.undoJournal);
+  if (!Array.isArray(db.undoJournal) || JSON.stringify(db.undoJournal) !== JSON.stringify(normalizedUndoJournal)) {
+    db.undoJournal = normalizedUndoJournal;
+    changed = true;
+  }
   const hasTodoCreateReceipts = db.todoCreateReceipts && typeof db.todoCreateReceipts === "object" && !Array.isArray(db.todoCreateReceipts);
   const normalizedTodoCreateReceipts = normalizeTodoCreateReceipts(db.todoCreateReceipts, db.users);
   if (!hasTodoCreateReceipts || JSON.stringify(db.todoCreateReceipts) !== JSON.stringify(normalizedTodoCreateReceipts)) {
@@ -2117,7 +2299,7 @@ function normalizeDb(db = {}) {
 function ensureDb() {
   if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
   if (!fs.existsSync(dbFile)) {
-    fs.writeFileSync(dbFile, JSON.stringify({ users: defaultUsers, sessions: {}, entries: [], todos: [], attachments: {}, debts: [], clients: [], clientBills: [], auditLog: [] }, null, 2), "utf8");
+    fs.writeFileSync(dbFile, JSON.stringify({ users: defaultUsers, sessions: {}, entries: [], todos: [], attachments: {}, debts: [], clients: [], clientBills: [], auditLog: [], undoJournal: [] }, null, 2), "utf8");
     return;
   }
 
@@ -2356,6 +2538,7 @@ function initialDatabaseState() {
     workerDigestRuns: [],
     lateTimeEntryReports: [],
     auditLog: [],
+    undoJournal: [],
     settings: {},
     calendarToken: crypto.randomBytes(24).toString("hex"),
     syncRevision: 0
@@ -2384,6 +2567,7 @@ async function readDbAsync() {
 }
 
 async function writeDbAsync(db) {
+  appendUndoJournalForMutation(db);
   db.syncRevision = Math.max(0, Number(db.syncRevision || 0)) + 1;
   if (!DATABASE_URL) {
     writeDb(db);
@@ -3929,7 +4113,7 @@ function clientReportDownloadTicketForRequest(req, user, token) {
 
 function safeReportFileName(value, fallback = "priloga") {
   const cleaned = String(value || "").trim()
-    .replace(/[\\/:*?"<>|\u0000-\u001f]+/g, "-")
+    .replace(/[\/:*?"<>|\u0000-\u001f]+/g, "-")
     .replace(/\s+/g, " ")
     .slice(0, 120);
   return cleaned || fallback;
@@ -5035,6 +5219,9 @@ async function getSessionUser(req) {
   req.indusSession = session || null;
   req.indusSessionToken = token;
   req.indusSessionUser = session && db.users[session.userId]?.active !== false ? (db.users[session.userId] || null) : null;
+  if (activeUndoCapture?.req === req && req.indusSessionUser) {
+    activeUndoCapture.actor = { id: req.indusSessionUser.id, name: req.indusSessionUser.name || req.indusSessionUser.id };
+  }
   return req.indusSessionUser;
 }
 
@@ -5958,7 +6145,7 @@ async function createManagedGoogleDriveFile(req, db, actor, input = {}) {
 
 function cleanDriveUploadName(value) {
   return String(value || "video")
-    .replace(/[\u0000-\u001f<>:"\\/|?*]+/g, " ")
+    .replace(/[\u0000-\u001f<>:"\/|?*]+/g, " ")
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, 180) || "video";
@@ -6774,6 +6961,13 @@ async function handleApi(req, res) {
   attachApiAuditTrail(req, res, url);
 
   try {
+    if (undoSystemLock && url.pathname !== "/api/health" && !url.pathname.startsWith("/api/undo-journal")) {
+      sendJson(res, 423, {
+        code: "undo_in_progress",
+        error: "Sistem varno razveljavlja spremembo. Počakaj trenutek in poskusi znova."
+      });
+      return;
+    }
     if (url.pathname === "/api/test-mode" && req.method === "GET") {
       sendJson(res, 200, { enabled: LOCAL_TEST_MODE, localNetwork: LOCAL_TEST_MODE ? "192.168.50.0/24" : "" });
       return;
@@ -6961,6 +7155,74 @@ async function handleApi(req, res) {
       return;
     }
 
+    if (url.pathname === "/api/undo-journal" && req.method === "GET") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      const db = await readDbAsync();
+      sendJson(res, 200, {
+        actions: visibleUndoJournal(db, user),
+        locked: Boolean(undoSystemLock),
+        maxActions: UNDO_JOURNAL_LIMIT
+      });
+      return;
+    }
+    const undoMatch = url.pathname.match(/^\/api\/undo-journal\/([a-f0-9-]{16,80})$/);
+    if (undoMatch && req.method === "POST") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      const body = await readBody(req);
+      if (body.confirm !== true) {
+        sendJson(res, 400, { error: "Za razveljavitev je potrebna izrecna potrditev." });
+        return;
+      }
+      const db = await readDbAsync();
+      const current = currentUndoRecord(db);
+      const requestedId = undoMatch[1];
+      if (!current || current.id !== requestedId) {
+        sendJson(res, 409, { error: "To dejanje ni več zadnje. Najprej razveljavi novejše dejanje." });
+        return;
+      }
+      if (user.role !== "boss" && String(current.actorId) !== String(user.id)) {
+        sendJson(res, 403, { error: "Razveljaviš lahko samo svoje zadnje dejanje." });
+        return;
+      }
+      undoSystemLock = {
+        actionId: current.id,
+        startedAt: new Date().toISOString(),
+        actorId: user.id,
+        actorName: user.name || user.id
+      };
+      try {
+        restoreUndoSnapshot(db, current.beforeState);
+        const undoneAt = new Date().toISOString();
+        db.undoJournal = normalizeUndoJournal(db.undoJournal).map((record) => record.id === current.id
+          ? {
+            ...record,
+            undoneAt,
+            undoneBy: user.id,
+            undoneByName: user.name || user.id,
+            undoAction: (user.name || user.id) + " je razveljavil: " + record.action
+          }
+          : record);
+        await writeDbAsync(db);
+        scheduleAuditLog({
+          actor: user,
+          action: "undo.applied",
+          targetType: "undo",
+          targetId: current.id,
+          context: { action: current.action }
+        });
+        sendJson(res, 200, {
+          ok: true,
+          undoneAction: current.action,
+          actions: visibleUndoJournal(db, user),
+          syncRevision: db.syncRevision
+        });
+      } finally {
+        undoSystemLock = null;
+      }
+      return;
+    }
     const notificationReadMatch = url.pathname.match(/^\/api\/notifications\/([^/]+)\/read$/);
     if (notificationReadMatch && req.method === "POST") {
       const user = await requireUser(req, res);
@@ -9765,7 +10027,24 @@ function runSerializedWork(work) {
 }
 
 function runSerializedMutation(req, res) {
-  const execution = mutationQueue.then(() => handleApi(req, res));
+  const execution = mutationQueue.then(async () => {
+    if (!undoEligibleRequest(req)) return handleApi(req, res);
+    // Capture the normalized state before the route reads or mutates it. All
+    // mutation routes use this one queue, so the snapshot has a precise,
+    // serial position in history.
+    const db = await readDbAsync();
+    activeUndoCapture = {
+      req,
+      beforeState: undoBusinessSnapshot(db),
+      actor: null,
+      recorded: false
+    };
+    try {
+      return await handleApi(req, res);
+    } finally {
+      activeUndoCapture = null;
+    }
+  });
   mutationQueue = execution.catch((error) => handleUnexpectedRequestError(error, res));
 }
 

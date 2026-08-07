@@ -829,6 +829,18 @@
     .audit-log-event.severity-warning .audit-log-severity { color: #9a6210; }
     .audit-log-event.severity-error .audit-log-severity { color: #9f3036; }
     .audit-log-event.severity-security .audit-log-severity { color: #5d3b89; }
+    .undo-history-dialog { width: min(820px, calc(100vw - 26px)); max-height: min(780px, calc(100dvh - 26px)); overflow-y: auto; overscroll-behavior: contain; }
+    .undo-history-note { margin: -2px 0 12px; color: var(--muted); font-size: 13px; line-height: 1.45; }
+    .undo-history-list { display: grid; gap: 9px; }
+    .undo-history-action { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 12px; border: 1px solid var(--line); border-left: 4px solid #9ab7ae; border-radius: 9px; background: #f8faf7; }
+    .undo-history-action.is-current { border-left-color: var(--accent); background: #edf7f4; box-shadow: 0 0 0 1px rgba(28, 116, 137, .12); }
+    .undo-history-action.is-undone { border-left-color: #8ca29b; background: #f4f6f4; opacity: .8; }
+    .undo-history-action strong { display: block; overflow-wrap: anywhere; }
+    .undo-history-action p { margin: 5px 0 0; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+    .undo-history-action .undo-history-state { display: inline-flex; align-items: center; min-height: 27px; padding: 3px 8px; border-radius: 999px; background: #e5ece8; color: #486057; font-size: 11px; font-weight: 900; white-space: nowrap; }
+    .undo-history-action.is-current .undo-history-state { background: #cae7df; color: #116d5d; }
+    .undo-history-action.is-undone .undo-history-state { background: #e8ecea; color: #68756f; }
+    .undo-history-action button { min-height: 37px; white-space: nowrap; }
     .app-issue-description {
       white-space: pre-wrap;
     }
@@ -3483,16 +3495,22 @@
     .todo-time-picker-targets,
     .todo-time-picker-mode { display: inline-flex; gap: 4px; padding: 3px; border-radius: 9px; background: #edf3ef; }
     .todo-time-picker-targets { position: relative; width: 100%; padding: 4px; border-radius: 12px; }
-    .todo-time-picker-targets::after {
-      content: "";
-      position: absolute;
-      z-index: 2;
-      top: 9px;
-      bottom: 9px;
-      left: 50%;
-      width: 1px;
-      background: #b7cec5;
-      pointer-events: none;
+    .todo-time-picker-targets::after { display: none; }
+    .todo-time-picker-target + .todo-time-picker-target { border-left-color: #b7cec5; border-radius: 0; }
+    .todo-time-picker-duration {
+      display: inline-flex;
+      flex: 0 0 auto;
+      align-items: center;
+      justify-content: center;
+      min-width: 106px;
+      margin: 5px 0;
+      padding: 0 11px;
+      border-left: 1px solid #b7cec5;
+      color: var(--accent-dark);
+      font-size: 14px;
+      font-weight: 900;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
     }
     .todo-time-picker-target {
       flex: 1 1 0;
@@ -5298,6 +5316,7 @@
               <button class="menu-action" id="trashMenuBtn" type="button">Koš opravil</button>
               <span class="tools-menu-label admin-only">Napredno</span>
               <button class="menu-action admin-only" id="serverStatusBtn" type="button">Stanje stre&#382;nika</button>
+              <button class="menu-action" id="undoHistoryBtn" type="button">Zgodovina sprememb</button>
               <button class="menu-action admin-only" id="auditLogBtn" type="button">Dnevnik dejavnosti</button>
               <button class="menu-action admin-only" id="appSettingsBtn" type="button">Nastavitve obračuna in arhiva</button>
               <button class="menu-action admin-only" id="exportCsv" type="button">Izvoz CSV</button>
@@ -5765,6 +5784,7 @@
                 <div class="todo-time-picker-targets" role="group" aria-label="Izberi uro od ali do">
                   <button class="todo-time-picker-target active" id="todoFormQuickTimeStart" type="button" data-time-picker-target="start">Od</button>
                   <button class="todo-time-picker-target" id="todoFormQuickTimeEnd" type="button" data-time-picker-target="end">Do</button>
+                  <output class="todo-time-picker-duration" id="todoFormQuickTimeDuration" aria-live="polite">Skupaj &mdash;</output>
                 </div>
               </div>
               <div class="todo-time-picker-head todo-time-picker-detail">
@@ -6170,6 +6190,18 @@
       </div>
     </form>
   </dialog>
+  <dialog id="undoHistoryDialog" class="undo-history-dialog">
+    <form method="dialog">
+      <div class="modal-head">
+        <div><h3>Zgodovina sprememb</h3><span class="todo-meta" id="undoHistorySubtitle"></span></div>
+        <button class="icon-btn" id="closeUndoHistory" type="button" title="Zapri" aria-label="Zapri">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="undo-history-note" id="undoHistoryNote"></p>
+        <div class="undo-history-list" id="undoHistoryList" aria-live="polite"></div>
+      </div>
+    </form>
+  </dialog>
   <div class="app-notice" id="appNotice" role="status" aria-live="polite" hidden>
     <span class="app-notice-message" id="appNoticeMessage"></span>
     <button class="app-notice-close" id="closeAppNotice" type="button" aria-label="Zapri obvestilo">&times;</button>
@@ -6385,6 +6417,8 @@
       auditLogRetentionDays: 30,
       auditLogMaxEvents: 500,
       auditLogTruncated: false,
+      undoActions: [],
+      undoLocked: false,
       todoRevision: 0,
       todoMutationPending: 0,
       debts: [],
@@ -6427,6 +6461,7 @@
       photoEditor: null,
       reportClient: "",
       reportClientSort: "recent",
+      reportReturnSnapshot: null,
       showClientPending: true,
       showClientBilled: false,
       clientBillSelectionKey: "",
@@ -7749,9 +7784,44 @@
       return { ...current, [loggedInHistoryStateKey]: value };
     }
 
-    function reportClientHistoryState(client, clientId) {
+    function reportOverviewSnapshot() {
+      return {
+        from: $("reportFrom")?.value || "",
+        to: $("reportTo")?.value || "",
+        sort: reportClientSortMode(),
+        pending: state.showClientPending !== false,
+        billed: state.showClientBilled === true,
+        scrollY: Math.max(0, Number(window.scrollY || window.pageYOffset || 0))
+      };
+    }
+
+    function restoreReportOverviewSnapshot(snapshot = {}) {
+      const from = String(snapshot?.from || "");
+      const to = String(snapshot?.to || "");
+      if ($("reportFrom")) $("reportFrom").value = isDateKey(from) ? from : "";
+      if ($("reportTo")) $("reportTo").value = isDateKey(to) ? to : "";
+      state.reportClientSort = reportClientSortMode(snapshot?.sort);
+      state.showClientPending = snapshot?.pending !== false;
+      state.showClientBilled = snapshot?.billed === true;
+      saveClientBillingFilter();
+    }
+
+    function reportClientHistoryState(client, clientId, returnSnapshot = null) {
       const current = history.state && typeof history.state === "object" ? history.state : {};
-      return { ...current, [reportHistoryStateKey]: { client: String(client || ""), clientId: String(clientId || "") } };
+      return {
+        ...current,
+        [reportHistoryStateKey]: {
+          kind: "detail",
+          client: String(client || ""),
+          clientId: String(clientId || ""),
+          returnSnapshot: returnSnapshot || null
+        }
+      };
+    }
+
+    function reportOverviewHistoryState(snapshot = reportOverviewSnapshot()) {
+      const current = history.state && typeof history.state === "object" ? history.state : {};
+      return { ...current, [reportHistoryStateKey]: { kind: "overview", snapshot } };
     }
 
     function protectLoggedInHistory() {
@@ -9773,6 +9843,14 @@
       return start !== null && end !== null && end > start ? end - start : 0;
     }
 
+    function todoTimePickerDurationLabel() {
+      const total = todoFormWorkerMinutes();
+      if (!total) return "Skupaj \u2014";
+      const hours = Math.floor(total / 60);
+      const minutes = total % 60;
+      return "Skupaj " + (hours ? hours + " h" : "") + (hours && minutes ? " " : "") + (minutes ? minutes + " min" : "");
+    }
+
     function formatClientBillableHours(minutes) {
       return Number((Math.max(0, Number(minutes) || 0) / 60).toFixed(2)).toLocaleString("sl-SI", { maximumFractionDigits: 2 });
     }
@@ -9860,6 +9938,7 @@
       $("todoFormQuickTimeEnd").setAttribute("aria-pressed", String(isOpen && target === "end"));
       $("todoFormQuickTimeStart").textContent = `Od ${startValue}`;
       $("todoFormQuickTimeEnd").textContent = `Do ${endValue}`;
+      $("todoFormQuickTimeDuration").textContent = todoTimePickerDurationLabel();
       $("todoFormQuickTimeHourMode").classList.toggle("active", mode === "hour");
       $("todoFormQuickTimeMinuteMode").classList.toggle("active", mode === "minute");
       $("todoFormQuickTimeHourMode").setAttribute("aria-pressed", String(mode === "hour"));
@@ -14682,9 +14761,9 @@
       };
     }
 
-    function reportClientSortMode() {
-      const value = String(state.reportClientSort || "recent");
-      return reportClientSortModes.includes(value) ? value : "recent";
+    function reportClientSortMode(value = state.reportClientSort) {
+      const normalized = String(value || "recent");
+      return reportClientSortModes.includes(normalized) ? normalized : "recent";
     }
 
     function reportClientSortLabel() {
@@ -14880,13 +14959,23 @@
       }
     }
 
-    function openClientReport(client, clientId = "", { fromHistory = false } = {}) {
+    function openClientReport(client, clientId = "", { fromHistory = false, returnSnapshot = null } = {}) {
+      const snapshot = returnSnapshot || reportOverviewSnapshot();
+      if (!fromHistory) {
+        state.reportReturnSnapshot = snapshot;
+        const currentReportState = history.state?.[reportHistoryStateKey];
+        if (state.token && state.user && currentReportState?.kind !== "overview") {
+          history.pushState(reportOverviewHistoryState(snapshot), "", location.href);
+        }
+      }
       state.reportClient = client;
       state.reportClientId = clientId;
       $("reportClient").value = client;
       setView("report");
       renderReport();
-      if (!fromHistory && state.token && state.user) history.pushState(reportClientHistoryState(client, clientId), "", location.href);
+      if (!fromHistory && state.token && state.user) {
+        history.pushState(reportClientHistoryState(client, clientId, snapshot), "", location.href);
+      }
     }
 
     async function cancelClientBillFromReport(billId) {
@@ -14903,19 +14992,25 @@
       await loadAll();
       renderReport();
     }
-    function clearClientReportSelection({ fromHistory = false } = {}) {
+    function clearClientReportSelection({ fromHistory = false, snapshot = null } = {}) {
       const hadDetail = Boolean(state.reportClient || state.reportClientId);
+      const returnSnapshot = snapshot || state.reportReturnSnapshot || reportOverviewSnapshot();
+      if (!fromHistory && hadDetail && history.state?.[reportHistoryStateKey]?.kind === "detail") {
+        history.back();
+        return;
+      }
       state.reportClient = "";
       state.reportClientId = "";
+      state.reportReturnSnapshot = null;
       state.clientBillSelectionKey = "";
       state.clientBillSelectedEventIds = new Set();
       state.reportAttachmentSelectionKey = "";
       state.reportIncludedAttachmentIds = new Set();
       $("reportClient").value = "";
+      restoreReportOverviewSnapshot(returnSnapshot);
       setView("report");
       renderReport();
-      requestAnimationFrame(() => $("clientDetailList")?.scrollIntoView({ block: "start", behavior: "smooth" }));
-      if (!fromHistory && hadDetail && history.state?.[reportHistoryStateKey]) history.back();
+      requestAnimationFrame(() => window.scrollTo({ top: Number(returnSnapshot?.scrollY || 0), behavior: "auto" }));
     }
 
     async function confirmClientBillFromReport() {
@@ -16201,6 +16296,71 @@
       $("auditLogDialog").showModal();
     }
 
+    function undoActionTimestamp(action) {
+      const value = String(action?.createdAt || "");
+      return Number.isFinite(Date.parse(value)) ? Date.parse(value) : 0;
+    }
+
+    function renderUndoHistory() {
+      const dialog = $("undoHistoryDialog");
+      const list = $("undoHistoryList");
+      const subtitle = $("undoHistorySubtitle");
+      const note = $("undoHistoryNote");
+      if (!dialog || !list || !subtitle || !note) return;
+      const actions = Array.isArray(state.undoActions) ? state.undoActions.slice() : [];
+      actions.sort((left, right) => undoActionTimestamp(right) - undoActionTimestamp(left));
+      const available = actions.find((action) => action.canUndo);
+      subtitle.textContent = actions.length ? actions.length + (actions.length === 1 ? " dejanje" : " dejanj") : "Brez dejanj";
+      note.textContent = available
+        ? "Razveljavitev se izvaja strogo po vrsti. Med postopkom sistem začasno blokira shranjevanje na vseh napravah."
+        : "Prikazanih je zadnjih 20 poslovnih sprememb. Že razveljavljeni zapisi ostanejo vidni zaradi preglednosti.";
+      if (!actions.length) {
+        list.innerHTML = '<p class="todo-meta">Za razveljavitev še ni zabeleženih dejanj.</p>';
+        return;
+      }
+      list.innerHTML = actions.map((action) => {
+        const undone = Boolean(action.undoneAt);
+        const current = Boolean(action.canUndo);
+        const stateLabel = undone
+          ? "Razveljavljeno" + (action.undoneByName ? " · " + action.undoneByName : "")
+          : current ? "Naslednje za razveljavitev" : "Najprej novejše dejanje";
+        const button = current
+          ? '<button class="primary" type="button" data-undo-history-id="' + escapeHtml(action.id) + '">Razveljavi</button>'
+          : "";
+        const time = undoActionTimestamp(action) ? formatDateTime(action.createdAt) : "Čas ni na voljo";
+        const actor = action.actorName || "Sistem";
+        return '<article class="undo-history-action' + (current ? " is-current" : "") + (undone ? " is-undone" : "") + '">' +
+          '<div><strong>' + escapeHtml(action.action || "Spremenjeni podatki") + '</strong>' +
+          '<p>' + escapeHtml(actor) + ' · ' + escapeHtml(time) + (undone && action.undoAction ? '<br>' + escapeHtml(action.undoAction) : "") + '</p></div>' +
+          '<div class="actions"><span class="undo-history-state">' + escapeHtml(stateLabel) + '</span>' + button + '</div></article>';
+      }).join("");
+    }
+
+    async function openUndoHistory() {
+      const data = await api("/api/undo-journal", { recoverSession: false });
+      state.undoActions = Array.isArray(data.actions) ? data.actions : [];
+      state.undoLocked = Boolean(data.locked);
+      renderUndoHistory();
+      $("undoHistoryDialog").showModal();
+    }
+
+    async function undoHistoryAction(id) {
+      const action = (state.undoActions || []).find((item) => item.id === id);
+      if (!action?.canUndo) throw new Error("To dejanje ni več naslednje za razveljavitev.");
+      const confirmed = await showAppConfirm("Razveljavim dejanje?\n\n" + (action.action || "Sprememba podatkov") + "\n\nMed postopkom bo shranjevanje na vseh napravah za trenutek blokirano.");
+      if (!confirmed) return;
+      const data = await api("/api/undo-journal/" + encodeURIComponent(id), {
+        method: "POST",
+        body: JSON.stringify({ confirm: true })
+      });
+      state.undoActions = Array.isArray(data.actions) ? data.actions : [];
+      state.syncRevision = Math.max(state.syncRevision || 0, Number(data.syncRevision || 0));
+      await loadAll();
+      setView(state.view);
+      renderUndoHistory();
+      showNotice("Razveljavljeno: " + (data.undoneAction || action.action));
+    }
+
     function renderDeletedTodos() {
       const list = $("deletedTodosList");
       const meta = $("deletedTodosMeta");
@@ -16425,6 +16585,13 @@
     $("closeNotifications").addEventListener("click", () => $("notificationsDialog").close());
     $("serverStatusBtn").addEventListener("click", () => openServerStatus().catch((error) => showNotice(error.message)));
     $("closeServerStatus").addEventListener("click", () => $("serverStatusDialog").close());
+    $("undoHistoryBtn").addEventListener("click", () => openUndoHistory().catch((error) => showNotice(error.message)));
+    $("closeUndoHistory").addEventListener("click", () => $("undoHistoryDialog").close());
+    $("undoHistoryList").addEventListener("click", (event) => {
+      const button = event.target.closest("[data-undo-history-id]");
+      if (!button) return;
+      undoHistoryAction(button.dataset.undoHistoryId).catch((error) => showNotice(error.message));
+    });
     $("auditLogBtn").addEventListener("click", () => openAuditLog().catch((error) => showNotice(error.message)));
     $("closeAuditLog").addEventListener("click", () => $("auditLogDialog").close());
     $("notificationsList").addEventListener("click", async (event) => {
@@ -16722,7 +16889,7 @@
     $("reportFrom").addEventListener("change", renderReport);
     $("reportTo").addEventListener("change", renderReport);
     $("reportClientSort").addEventListener("change", () => {
-      state.reportClientSort = reportClientSortMode();
+      state.reportClientSort = reportClientSortMode($("reportClientSort").value);
       saveClientBillingFilter();
       renderReport();
     });
@@ -17776,12 +17943,19 @@
       if (closeOpenModalFromBack(event)) return;
       if (!state.token || !state.user || loggedInHistoryExitInProgress) return;
       const reportState = event.state?.[reportHistoryStateKey];
+      if (reportState?.kind === "overview") {
+        clearClientReportSelection({ fromHistory: true, snapshot: reportState.snapshot || {} });
+        return;
+      }
       if (reportState?.client || reportState?.clientId) {
-        openClientReport(reportState.client, reportState.clientId, { fromHistory: true });
+        openClientReport(reportState.client, reportState.clientId, {
+          fromHistory: true,
+          returnSnapshot: reportState.returnSnapshot || null
+        });
         return;
       }
       if (state.view === "report" && (state.reportClient || state.reportClientId)) {
-        clearClientReportSelection({ fromHistory: true });
+        clearClientReportSelection({ fromHistory: true, snapshot: state.reportReturnSnapshot || {} });
         return;
       }
       if (event.state?.[loggedInHistoryStateKey] !== "base") return;
