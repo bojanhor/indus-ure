@@ -6783,7 +6783,7 @@
     async function openQuickCreateFromLink() {
       const mode = quickCreateModeFromLink();
       if (!mode || !state.user || state.offlineMode) return false;
-      clearQuickCreateLink();
+      state.quickCreateMode = mode;
       setView("todos");
       await new Promise((resolve) => requestAnimationFrame(resolve));
       if (mode === "hours") await openStandaloneHoursDialog();
@@ -9598,6 +9598,8 @@
     }
     const MONTH_TODO_DRAG_HOLD_MS = 350;
     const MONTH_TODO_DRAG_CANCEL_DISTANCE = 12;
+    const MONTH_TODO_AUTO_SCROLL_EDGE = 108;
+    const MONTH_TODO_AUTO_SCROLL_MAX_PX_PER_MS = 1.05;
     let monthTodoPointerDrag = null;
     let lastMonthTodoDragAt = 0;
 
@@ -9606,6 +9608,7 @@
       if (!drag) return null;
       monthTodoPointerDrag = null;
       if (drag.holdTimer) clearTimeout(drag.holdTimer);
+      if (drag.autoScrollFrame) cancelAnimationFrame(drag.autoScrollFrame);
       drag.item.classList.remove("month-drag-armed", "month-dragging");
       drag.targetElement?.classList.remove("month-drag-target");
       drag.ghostElement?.remove();
@@ -9628,6 +9631,24 @@
       }
     }
 
+    function monthTodoAutoScrollSpeed(position, size) {
+      const edge = Math.min(MONTH_TODO_AUTO_SCROLL_EDGE, Math.max(32, size / 3));
+      if (position < edge) return -Math.pow((edge - position) / edge, 1.45) * MONTH_TODO_AUTO_SCROLL_MAX_PX_PER_MS;
+      if (position > size - edge) return Math.pow((position - (size - edge)) / edge, 1.45) * MONTH_TODO_AUTO_SCROLL_MAX_PX_PER_MS;
+      return 0;
+    }
+    function tickMonthTodoPointerDragAutoScroll(timestamp) {
+      const drag = monthTodoPointerDrag;
+      if (!drag?.active) return;
+      const elapsed = Math.min(50, Math.max(0, timestamp - (drag.autoScrollAt || timestamp)));
+      drag.autoScrollAt = timestamp;
+      const dx = monthTodoAutoScrollSpeed(drag.clientX, window.innerWidth) * elapsed;
+      const dy = monthTodoAutoScrollSpeed(drag.clientY, window.innerHeight) * elapsed;
+      if (dx && drag.scrollHost) drag.scrollHost.scrollLeft += dx;
+      if (dy) window.scrollBy(0, dy);
+      if (dx || dy) updateMonthTodoPointerDragTarget(drag, drag.clientX, drag.clientY);
+      drag.autoScrollFrame = requestAnimationFrame(tickMonthTodoPointerDragAutoScroll);
+    }
     function updateMonthTodoPointerDragTarget(drag, clientX, clientY) {
       const target = document.elementFromPoint(clientX, clientY)?.closest(".day");
       const targetDate = String(target?.dataset.date || "");
@@ -9663,6 +9684,8 @@
         // Document-level listeners spodaj so rezerva za brskalnike brez zajema kazalca.
       }
       updateMonthTodoPointerDragTarget(drag, drag.clientX, drag.clientY);
+      drag.autoScrollAt = performance.now();
+      drag.autoScrollFrame = requestAnimationFrame(tickMonthTodoPointerDragAutoScroll);
       if (drag.pointerType === "touch") navigator.vibrate?.(12);
     }
 
@@ -9693,12 +9716,15 @@
         scrollHost,
         scrollLeft: scrollHost?.scrollLeft || 0,
         windowScrollX: window.scrollX,
-        windowScrollY: window.scrollY
+        windowScrollY: window.scrollY,
+        autoScrollFrame: 0,
+        autoScrollAt: 0
       };
       monthTodoPointerDrag = drag;
       try { item.setPointerCapture?.(event.pointerId); } catch {}
       item.classList.add("month-drag-armed");
-      drag.holdTimer = window.setTimeout(activateMonthTodoPointerDrag, MONTH_TODO_DRAG_HOLD_MS);
+      if (event.pointerType === "mouse") activateMonthTodoPointerDrag();
+      else drag.holdTimer = window.setTimeout(activateMonthTodoPointerDrag, MONTH_TODO_DRAG_HOLD_MS);
     }
 
     function updateMonthTodoPointerDrag(event) {
@@ -17579,6 +17605,7 @@
       event.currentTarget.value = "";
       restoreBackupFromFile(file).catch((error) => showNotice(error.message));
     });
+    $("todoDialog").addEventListener("close", () => { if (state.quickCreateMode) { state.quickCreateMode = ""; clearQuickCreateLink(); } });
     $("todoDialog").addEventListener("close", releaseTodoEditLockForDialog);
     $("todoDialog").addEventListener("close", () => { if ($("completionRequestDialog").open) $("completionRequestDialog").close(); });
     $("todoDialog").addEventListener("close", () => {

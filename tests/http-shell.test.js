@@ -701,6 +701,17 @@ test("hitre bližnjice odprejo pravo formo in filter zaključenih opravil ostane
   assert.match(html, /state\.todoSortMode === "completed"[\s\S]{0,360}todoHasConfirmedClientBill\(todo\)/);
   assert.match(html, /localStorage\.setItem\(todoBillingFilterStorageKey\(\), JSON\.stringify/);
 });
+test("monthly drag autoscrolls at the edge and mouse drag starts immediately", async () => {
+  const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  assert.match(html, /const MONTH_TODO_AUTO_SCROLL_EDGE = 108;/);
+  assert.match(html, /function tickMonthTodoPointerDragAutoScroll\(timestamp\)/);
+  assert.match(html, /cancelAnimationFrame\(drag\.autoScrollFrame\)/);
+  assert.match(html, /drag\.autoScrollFrame = requestAnimationFrame\(tickMonthTodoPointerDragAutoScroll\)/);
+  assert.match(html, /if \(event\.pointerType === "mouse"\) activateMonthTodoPointerDrag\(\);/);
+  assert.match(html, /state\.quickCreateMode = mode;/);
+  assert.match(html, /if \(state\.quickCreateMode\) \{ state\.quickCreateMode = ""; clearQuickCreateLink\(\); \}/);
+});
+
 test("boss can create a task for workers directly from admin view", async () => {
   const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
   assert.match(html, /\$\("newTodoButton"\)\.classList\.remove\("hidden"\);/);
