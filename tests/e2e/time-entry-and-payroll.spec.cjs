@@ -115,6 +115,39 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
     }
   });
 
+  test("task name suggestions contain only projects for the selected client", async ({ browser }) => {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    try {
+      await localLogin(page, "bojan");
+      await page.locator("#newTodoButton").click();
+      const suggestions = await page.evaluate(() => {
+        const target = { clientId: "pw-suggestions-target", name: "PW ciljna stranka", search: "PW ciljna stranka" };
+        const other = { clientId: "pw-suggestions-other", name: "PW druga stranka", search: "PW druga stranka" };
+        state.clients.push(target, other);
+        const date = new Date().toISOString().slice(0, 10);
+        state.todos.push(
+          { id: "pw-target-project", title: "PW samo ciljna", client: target.name, clientId: target.clientId, date },
+          { id: "pw-other-project", title: "PW samo druga", client: other.name, clientId: other.clientId, date },
+        );
+        const input = document.querySelector("#todoFormClient");
+        input.value = target.search;
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        return [...document.querySelectorAll("#todoFormTaskSuggestions option")].map((option) => option.value);
+      });
+      expect(suggestions).toEqual(["PW samo ciljna"]);
+      const emptySuggestions = await page.evaluate(() => {
+        const input = document.querySelector("#todoFormClient");
+        input.value = "";
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        return document.querySelectorAll("#todoFormTaskSuggestions option").length;
+      });
+      expect(emptySuggestions).toBe(0);
+    } finally {
+      await context.close();
+    }
+  });
+
   test("saving an event gives immediate feedback and blocks duplicate interaction", async ({ browser }) => {
     const context = await browser.newContext();
     const page = await context.newPage();

@@ -9211,6 +9211,7 @@
       $("todoFormClient").value = item.value;
       hideTodoClientSuggestions();
       syncTodoFormClientContacts();
+      renderTodoTaskSuggestions();
       $("todoFormClient").focus();
     }
 
@@ -13866,8 +13867,18 @@
       const cutoff = new Date();
       cutoff.setFullYear(cutoff.getFullYear() - 1);
       const cutoffDate = dateKey(cutoff);
+      const selectedClient = todoFormSelectedClient();
+      const selectedClientId = String(selectedClient?.clientId || selectedClient?.id || "").trim();
+      const selectedClientName = normalizeText($("todoFormClient").value);
       const names = [...new Set(state.todos
         .filter((item) => item.title && (!item.date || item.date >= cutoffDate))
+        .filter((item) => {
+          if (!selectedClientName) return false;
+          const itemClientId = String(item.clientId || "").trim();
+          return selectedClientId
+            ? itemClientId === selectedClientId
+            : normalizeText(item.client) === selectedClientName;
+        })
         .map((item) => item.title.trim())
         .filter(Boolean))]
         .sort((a, b) => a.localeCompare(b, "sl"));
@@ -17152,6 +17163,7 @@
     $("todoFormClient").addEventListener("input", () => {
       renderTodoClientSuggestions();
       syncTodoFormClientContacts();
+      renderTodoTaskSuggestions();
     });
     $("todoFormClient").addEventListener("keydown", (event) => {
       if (event.key === "ArrowDown" || event.key === "ArrowUp") {

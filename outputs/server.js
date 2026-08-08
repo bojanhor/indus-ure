@@ -577,29 +577,29 @@ function undoActionLabel({ req, actor, beforeState, afterState }) {
   const debt = undoChangedItem(beforeState.debts, afterState.debts);
   if (pathname.startsWith("/api/todos")) {
     const title = cleanAuditLogText(todo?.title || "brez naslova", 100);
-    if (method === "POST" && pathname === "/api/todos") return prefix + " ustvaril dogodek Â»" + title + "Â«";
-    if (method === "DELETE") return prefix + " izbrisal dogodek Â»" + title + "Â«";
+    if (method === "POST" && pathname === "/api/todos") return prefix + " ustvaril dogodek \u00bb" + title + "\u00ab";
+    if (method === "DELETE") return prefix + " izbrisal dogodek \u00bb" + title + "\u00ab";
     if (pathname.endsWith("/reorder")) return prefix + " prerazvrstil opravila";
     if (pathname.endsWith("/bulk-client")) return prefix + " paketno zamenjal stranko pri izbranih dogodkih";
-    return prefix + " spremenil dogodek Â»" + title + "Â«";
+    return prefix + " spremenil dogodek \u00bb" + title + "\u00ab";
   }
   if (pathname.startsWith("/api/clients")) {
     const name = cleanAuditLogText(client?.alias || client?.name || "stranko", 100);
     return method === "POST" && pathname === "/api/clients"
-      ? prefix + " dodal stranko Â»" + name + "Â«"
-      : method === "DELETE" ? prefix + " izbrisal stranko Â»" + name + "Â«" : prefix + " uredil stranko Â»" + name + "Â«";
+      ? prefix + " dodal stranko \u00bb" + name + "\u00ab"
+      : method === "DELETE" ? prefix + " izbrisal stranko \u00bb" + name + "\u00ab" : prefix + " uredil stranko \u00bb" + name + "\u00ab";
   }
   if (pathname.startsWith("/api/client-bills")) {
     const name = cleanAuditLogText(clientBill?.clientName || clientBill?.client || "stranko", 100);
-    return method === "POST" ? prefix + " potrdil obraÄŤun za stranko Â»" + name + "Â«" : prefix + " spremenil obraÄŤun stranke Â»" + name + "Â«";
+    return method === "POST" ? prefix + " potrdil obra\u010dun za stranko \u00bb" + name + "\u00ab" : prefix + " spremenil obra\u010dun stranke \u00bb" + name + "\u00ab";
   }
   if (pathname.startsWith("/api/payrolls")) {
     const workerName = cleanAuditLogText(payroll?.workerName || payroll?.personName || payroll?.workerId || "delavca", 100);
-    return prefix + " spremenil obraÄŤun ur za " + workerName;
+    return prefix + " spremenil obra\u010dun ur za " + workerName;
   }
-  if (pathname.startsWith("/api/advances")) return prefix + " spremenil zaloĹľena sredstva" + (debt?.reason ? ": " + cleanAuditLogText(debt.reason, 90) : "");
+  if (pathname.startsWith("/api/advances")) return prefix + " spremenil zalo\u017eena sredstva" + (debt?.reason ? ": " + cleanAuditLogText(debt.reason, 90) : "");
   if (pathname.startsWith("/api/personal-purchases")) return prefix + " spremenil osebni nakup" + (debt?.reason ? ": " + cleanAuditLogText(debt.reason, 90) : "");
-  if (pathname.startsWith("/api/settings")) return prefix + " spremenil nastavitve obraÄŤunavanja";
+  if (pathname.startsWith("/api/settings")) return prefix + " spremenil nastavitve obra\u010dunavanja";
   return prefix + " spremenil podatke";
 }
 
