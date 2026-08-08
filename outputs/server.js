@@ -580,6 +580,7 @@ function undoActionLabel({ req, actor, beforeState, afterState }) {
     if (method === "POST" && pathname === "/api/todos") return prefix + " ustvaril dogodek Â»" + title + "Â«";
     if (method === "DELETE") return prefix + " izbrisal dogodek Â»" + title + "Â«";
     if (pathname.endsWith("/reorder")) return prefix + " prerazvrstil opravila";
+    if (pathname.endsWith("/bulk-client")) return prefix + " paketno zamenjal stranko pri izbranih dogodkih";
     return prefix + " spremenil dogodek Â»" + title + "Â«";
   }
   if (pathname.startsWith("/api/clients")) {
@@ -8544,6 +8545,74 @@ async function handleApi(req, res) {
       }
       await writeDbAsync(db);
       sendJson(res, 200, { todos: visibleTodosForUser(db, user) });
+      return;
+    }
+
+    if (url.pathname === "/api/todos/bulk-client" && req.method === "POST") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      if (user.role !== "boss") {
+        sendJson(res, 403, { error: "Stranko pri obračunskih vpisih lahko paketno spremeni samo šef." });
+        return;
+      }
+      const body = await readBody(req);
+      const eventIds = [...new Set((Array.isArray(body.eventIds) ? body.eventIds : [])
+        .map((id) => String(id || "").trim()).filter(Boolean))];
+      if (!eventIds.length || eventIds.length > 2_000) {
+        sendJson(res, 400, { error: "Označi od 1 do 2000 še neobračunanih vpisov." });
+        return;
+      }
+      const db = await readDbAsync();
+      const client = clientForBilling(db, body);
+      if (!client) {
+        sendJson(res, 400, { error: "Izberi obstoječo stranko iz baze." });
+        return;
+      }
+      const selected = new Set(eventIds);
+      const billed = confirmedClientBillByEvent(db);
+      const groups = new Map();
+      for (const todo of db.todos || []) {
+        const eventId = todoBillingEventId(todo);
+        if (!selected.has(eventId) || isTrashedTodo(todo) || !todoRequiresClientBilling(todo)) continue;
+        if (!groups.has(eventId)) groups.set(eventId, []);
+        groups.get(eventId).push(todo);
+      }
+      if (groups.size !== selected.size) {
+        sendJson(res, 409, { error: "Eden ali več označenih vpisov ni več na voljo. Osveži poročilo in preveri izbor." });
+        return;
+      }
+      const lockedEventId = eventIds.find((eventId) => billed.has(eventId));
+      if (lockedEventId) {
+        sendJson(res, 409, { error: "Potrjenega obračuna stranki ni mogoče paketno spreminjati. Najprej prekliči pripadajoči obračun." });
+        return;
+      }
+      for (const todos of groups.values()) {
+        const lock = todoAssignmentEditLockConflict(db, todos[0], user);
+        if (lock) {
+          sendJson(res, 409, { error: `Opravilo trenutno ureja ${lock.lockedByName || lock.lockedById}.`, lock });
+          return;
+        }
+      }
+      const selectedTodoIds = new Set([...groups.values()].flat().map((todo) => String(todo.id || "")).filter(Boolean));
+      const now = new Date().toISOString();
+      db.todos = (db.todos || []).map((todo) => !selectedTodoIds.has(String(todo.id || "")) ? todo : {
+        ...todo,
+        clientId: String(client.clientId || ""),
+        client: String(client.name || ""),
+        clientContactIds: [],
+        clientContacts: [],
+        updatedAt: now,
+        updatedBy: user.id,
+        updatedByName: user.name,
+        history: [...(todo.history || []), audit(user, `stranka zamenjana na ${client.name}`)]
+      });
+      pruneUnusedAdHocClients(db);
+      await writeDbAsync(db);
+      sendJson(res, 200, {
+        client: { clientId: String(client.clientId || ""), name: String(client.name || "") },
+        affectedEventCount: eventIds.length,
+        todos: visibleTodosForUser(db, user)
+      });
       return;
     }
     if (url.pathname === "/api/ajpes/search" && req.method === "GET") {

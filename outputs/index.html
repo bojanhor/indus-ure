@@ -4443,12 +4443,18 @@
 
     .client-billing-row {
       display: grid;
-      grid-template-columns: minmax(116px, auto) minmax(0, 1fr) auto;
+      grid-template-columns: 34px minmax(116px, auto) minmax(0, 1fr);
       gap: 12px;
       align-items: start;
       margin-bottom: 14px;
       padding: 18px 0 24px;
       border-bottom: 2px solid #c8d9d5;
+    }
+
+    .client-billing-selection-slot {
+      display: flex;
+      justify-content: center;
+      padding-top: 1px;
     }
 
     .client-billing-row:last-child { margin-bottom: 0; border-bottom: 0; }
@@ -4514,26 +4520,30 @@
     .client-billing-title-trigger:focus-visible { color: #075a4b; text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 3px; }
 
     .client-billing-select {
+      position: relative;
       display: inline-flex;
+      width: 30px;
+      height: 30px;
       align-items: center;
-      gap: 6px;
-      min-height: 28px;
-      padding: 4px 8px;
+      justify-content: center;
+      padding: 0;
       border: 1px solid #b9cdc8;
-      border-radius: 999px;
-      color: #52666a;
+      border-radius: 8px;
+      color: #6b7b79;
       background: #f7fbfa;
-      font-size: 12px;
-      font-weight: 800;
-      white-space: nowrap;
+      font: inherit;
+      font-size: 17px;
+      font-weight: 900;
+      line-height: 1;
       cursor: pointer;
     }
 
     .client-billing-select.is-selected { border-color: #197e68; color: #075a4b; background: #dcf1e9; }
-    .client-billing-select.is-billed { border-color: #0d5b4b; color: #063f34; background: #d7f0e7; cursor: pointer; font: inherit; }
+    .client-billing-select.is-billed { border-color: #0d5b4b; color: #063f34; background: #d7f0e7; }
     .client-billing-select.is-billed:hover, .client-billing-select.is-billed:focus-visible { border-color: #9a2f35; color: #7c1620; background: #fff1f1; }
-    .client-billing-select input { width: 16px; height: 16px; margin: 0; accent-color: #197e68; }
-    .client-billing-select input:disabled { opacity: 1; cursor: default; }
+    .client-billing-select input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+    .client-billing-select input:focus-visible + .client-billing-select-icon { outline: 2px solid #075a4b; outline-offset: 4px; border-radius: 4px; }
+    .client-billing-select-icon { pointer-events: none; }
     .client-billing-client-name {
       color: #0d536b;
       font-size: 12px;
@@ -5167,9 +5177,11 @@
       .client-billing-controls .report-billing-filter-options { align-items: flex-start; }
       .client-billing-client-card-head { display: grid; gap: 3px; }
       .client-billing-client-travel { grid-template-columns: 1fr; }
-      .client-billing-row { grid-template-columns: 1fr; gap: 10px; padding: 16px 0 22px; }
-      .client-billing-when { grid-template-columns: auto 1fr; align-items: baseline; }
+      .client-billing-row { grid-template-columns: 34px minmax(0, 1fr); gap: 8px; padding: 16px 0 22px; }
+      .client-billing-selection-slot { grid-column: 1; grid-row: 1; }
+      .client-billing-when { grid-column: 2; grid-row: 1; grid-template-columns: auto 1fr; align-items: baseline; }
       .client-billing-when strong { grid-row: 1 / span 2; }
+      .client-billing-main { grid-column: 1 / -1; }
       .client-billing-open { width: 100%; }
       .client-billing-attachments { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .deleted-todo-card { grid-template-columns: minmax(0, 1fr); }
@@ -5507,7 +5519,10 @@
           <div class="client-billing-intro-actions">
             <button class="secondary hidden" id="reportBackToClients" type="button">&larr; Vse stranke</button>
             <button class="secondary hidden" id="reportNewEntry" type="button">Nov vpis</button>
-            <button class="primary hidden" id="confirmClientBill" type="button">Potrdi obračun stranki</button>
+            <button class="secondary hidden" id="selectAllClientBill" type="button">Označi vse</button>
+            <button class="secondary hidden" id="clearClientBillSelection" type="button">Počisti izbor</button>
+            <button class="secondary hidden" id="bulkChangeReportClient" type="button">Zamenjaj stranko</button>
+            <button class="primary hidden" id="confirmClientBill" type="button">Potrdi izbrane vpise</button>
             <button class="secondary hidden" id="exportReportPdf" type="button">Prenesi PDF</button>
             <button class="secondary hidden" id="createReportGmailDraft" type="button">Gmail osnutek</button>
             <label class="hidden report-export-option" id="reportHoursModeOption">Prikaz ur
@@ -6216,6 +6231,19 @@
     <form method="dialog">
       <div class="modal-head"><h3 id="appPromptTitle">Vnos</h3><button class="icon-btn" id="appPromptClose" type="button" title="Zapri">&times;</button></div>
       <div class="modal-body"><p class="app-dialog-message" id="appPromptMessage"></p><label id="appPromptLabel">Vrednost<input id="appPromptInput" type="text" autocomplete="off"></label><div class="actions"><button class="secondary" id="appPromptCancel" type="button">Prekliči</button><button class="primary" id="appPromptAccept" type="button">Potrdi</button></div></div>
+    </form>
+  </dialog>
+  <dialog id="bulkClientDialog">
+    <form method="dialog" id="bulkClientForm">
+      <div class="modal-head"><h3>Zamenjaj stranko</h3><button class="icon-btn" id="closeBulkClientDialog" type="button" title="Zapri" aria-label="Zapri">&times;</button></div>
+      <div class="modal-body">
+        <p class="app-dialog-message" id="bulkClientDialogMessage"></p>
+        <label>Nova stranka
+          <input id="bulkClientTarget" type="text" list="clientList" autocomplete="off" placeholder="Začni tipkati naziv ali vzdevek" required>
+        </label>
+        <p class="todo-meta">Spremenijo se samo še neobračunani izbrani vpisi. Kontakti stare stranke se pri tem varno odstranijo.</p>
+        <div class="actions"><button class="secondary" id="cancelBulkClientDialog" type="button">Prekliči</button><button class="primary" type="submit">Zamenjaj stranko</button></div>
+      </div>
     </form>
   </dialog>
   <dialog id="quickClientDialog">
@@ -14867,8 +14895,8 @@
       const eventId = todoEventId(todo);
       const selectedForClientBill = !clientBill && state.clientBillSelectedEventIds.has(eventId);
       const billSelection = clientBill
-        ? `<button class="client-billing-select is-billed" type="button" data-cancel-client-bill-id="${escapeHtml(clientBill.id)}" title="Prekli\u010di obra\u010dun stranki"><span>Obra\u010dunano</span></button>`
-        : `<label class="client-billing-select ${selectedForClientBill ? "is-selected" : ""}"><input type="checkbox" data-client-bill-event-id="${escapeHtml(eventId)}" ${selectedForClientBill ? "checked" : ""}><span>Za obra\u010dun</span></label>`;
+        ? `<button class="client-billing-select is-billed" type="button" data-cancel-client-bill-id="${escapeHtml(clientBill.id)}" title="Prekliči obračun stranki" aria-label="Prekliči obračun stranki"><span class="client-billing-select-icon" aria-hidden="true">&#10003;</span></button>`
+        : `<label class="client-billing-select ${selectedForClientBill ? "is-selected" : ""}" title="Označi za obračun"><input type="checkbox" data-client-bill-event-id="${escapeHtml(eventId)}" ${selectedForClientBill ? "checked" : ""} aria-label="Označi vpis za obračun stranki"><span class="client-billing-select-icon" aria-hidden="true">&#10003;</span></label>`;
       const details = [
         todo.notes ? `<section class="client-billing-section"><strong>Opis del</strong><div class="report-todo-description">${linkifyText(todo.notes)}</div></section>` : "",
         todo.material ? `<section class="client-billing-section"><strong>Material</strong><div class="report-todo-description">${linkifyText(todo.material)}</div></section>` : "",
@@ -14886,9 +14914,10 @@
             clientKm ? `<span>Stro\u0161ki prevoza (obe smeri): ${reportVehicleLabel(vehicle)} &middot; ${reportNumber(clientKm, 1)} km</span>` : ""
           ].filter(Boolean).join("");
       return `<article class="client-billing-row">
+        <div class="client-billing-selection-slot">${billSelection}</div>
         <div class="client-billing-when"><strong>${todo.date ? formatDate(todo.date) : "Brez datuma"}</strong><span>${escapeHtml(time)}</span></div>
         <div class="client-billing-main">
-          <div class="client-billing-title-row"><h3><button class="client-billing-title-trigger open-report-todo" type="button" data-todo-id="${escapeHtml(todo.id)}" aria-label="Odpri vpis: ${escapeHtml(todo.title || "Brez naziva")}">${escapeHtml(todo.title || "Brez naziva")}</button></h3>${billSelection}</div>
+          <div class="client-billing-title-row"><h3><button class="client-billing-title-trigger open-report-todo" type="button" data-todo-id="${escapeHtml(todo.id)}" aria-label="Odpri vpis: ${escapeHtml(todo.title || "Brez naziva")}">${escapeHtml(todo.title || "Brez naziva")}</button></h3></div>
           <div class="client-billing-meta">${materialEntry ? `<span>Dostava materiala</span>` : `<span>Izvajalec: ${escapeHtml(todoAssigneeNames(todo))}</span>`}${clientBill ? `<span>Obra\u010dun stranki potrjen ${escapeHtml(formatDateTime(clientBill.confirmedAt))}</span>` : ""}${clientBill?.directSettlement ? `<span>Prejeto: ${money(clientBill.receivedAmount || 0)} EUR${clientBill.creditedWorkerName ? ` &middot; v dobro ${escapeHtml(clientBill.creditedWorkerName)}` : ""}</span>` : ""}</div>
           <button class="client-billing-charges client-billing-charges-trigger open-report-todo" type="button" data-todo-id="${escapeHtml(todo.id)}" aria-label="Odpri vpis: ${escapeHtml(todo.title || "Brez naziva")}">${charges}</button>
           ${details}
@@ -14922,19 +14951,27 @@
       $("clientDetailTitle").textContent = detail ? `Poročilo: ${selection.name}` : "Povzetek po strankah";
       $("clientDetailRange").textContent = $("reportFrom").value || $("reportTo").value ? reportRangeLabel() : "";
       $("reportLineCount").textContent = detail
-        ? `${totals.count} ${totals.count === 1 ? "označen vpis" : "označenih vpisov"}`
+        ? `${selectedClientBillLines.length} / ${pendingClientBillLines.length} označenih za obračun`
         : `${summaries.length} ${summaries.length === 1 ? "stranka" : "strank"}`;
       const reportNotice = detail ? "" : `Izberi stranko za njen podroben kronolo\u0161ki pregled izvedenih storitev. Seznam je razvr\u0161\u010den po ${reportClientSortLabel()}.`;
       $("reportBillingNotice").textContent = reportNotice;
       $("reportBillingNotice").classList.toggle("hidden", !reportNotice);
       $("reportBackToClients").classList.toggle("hidden", !detail);
       $("reportNewEntry").classList.toggle("hidden", !detail);
-      $("confirmClientBill").classList.toggle("hidden", !detail || !pendingClientBillLines.length);
-      $("confirmClientBill").disabled = !detail || !selectedClientBillLines.length;
-      $("confirmClientBill").title = selectedClientBillLines.length ? "" : "Označi vsaj en vpis za obračun stranki.";
-      $("confirmClientBill").textContent = `Potrdi izbrane vpise${pendingClientBillLines.length ? ` (${selectedClientBillLines.length})` : ""}`;
-      $("exportReportPdf").classList.toggle("hidden", !detail);
-      $("reportHoursModeOption").classList.toggle("hidden", !detail);
+      const hasPendingClientBillLines = detail && pendingClientBillLines.length > 0;
+      const selectedClientBillCount = selectedClientBillLines.length;
+      $("confirmClientBill").classList.toggle("hidden", !hasPendingClientBillLines);
+      $("confirmClientBill").disabled = !selectedClientBillCount;
+      $("confirmClientBill").title = selectedClientBillCount ? "" : "Označi vsaj en vpis za obračun stranki.";
+      $("confirmClientBill").textContent = `Potrdi izbrane vpise (${selectedClientBillCount})`;
+      $("selectAllClientBill").classList.toggle("hidden", !hasPendingClientBillLines);
+      $("clearClientBillSelection").classList.toggle("hidden", !hasPendingClientBillLines);
+      $("bulkChangeReportClient").classList.toggle("hidden", !hasPendingClientBillLines);
+      $("selectAllClientBill").disabled = selectedClientBillCount === pendingClientBillLines.length;
+      $("clearClientBillSelection").disabled = !selectedClientBillCount;
+      $("bulkChangeReportClient").disabled = !selectedClientBillCount;
+      $("bulkChangeReportClient").title = selectedClientBillCount ? "" : "Označi vsaj en še neobračunan vpis.";
+      $("exportReportPdf").classList.toggle("hidden", !detail);      $("reportHoursModeOption").classList.toggle("hidden", !detail);
       $("createReportGmailDraft").classList.toggle("hidden", !detail);
       $("exportReportPdf").disabled = !selectedClientBillLines.length;
       const reportClient = findClient(selection.id) || findClient(selection.name);
@@ -15024,6 +15061,50 @@
       requestAnimationFrame(() => window.scrollTo({ top: Number(returnSnapshot?.scrollY || 0), behavior: "auto" }));
     }
 
+    function setClientBillSelectionForCurrentReport(selectAll) {
+      const selection = reportClientSelection();
+      const lines = reportTodos().map(reportTodoLine).filter((line) => !line.clientBill);
+      state.clientBillSelectionKey = reportClientBillSelectionKey(selection);
+      state.clientBillSelectedEventIds = selectAll
+        ? new Set(lines.map((line) => todoEventId(line.todo)).filter(Boolean))
+        : new Set();
+      renderReport();
+    }
+
+    function openBulkClientDialog() {
+      const selection = reportClientSelection();
+      const lines = syncClientBillSelection(reportTodos().map(reportTodoLine), selection);
+      if (!lines.length) { showNotice("Označi vsaj en še neobračunan vpis."); return; }
+      $("bulkClientDialogMessage").textContent = `${lines.length} ${lines.length === 1 ? "vpis bo" : "vpisi bodo"} premaknjeni z izbrane stranke.`;
+      $("bulkClientTarget").value = "";
+      $("bulkClientDialog").showModal();
+      requestAnimationFrame(() => $("bulkClientTarget").focus());
+    }
+
+    async function saveBulkClientFromDialog() {
+      const selection = reportClientSelection();
+      const lines = syncClientBillSelection(reportTodos().map(reportTodoLine), selection);
+      const eventIds = [...new Set(lines.map((line) => todoEventId(line.todo)).filter(Boolean))];
+      if (!eventIds.length) throw new Error("Označi vsaj en še neobračunan vpis.");
+      const requestedClient = String($("bulkClientTarget").value || "").trim();
+      const client = findClient(requestedClient);
+      if (!client?.clientId) throw new Error("Izberi obstoječo stranko iz predlogov.");
+      if (String(client.clientId) === String(selection.id)) throw new Error("Izbrana je že ista stranka.");
+      if (!await showAppConfirm(`${eventIds.length} ${eventIds.length === 1 ? "vpis" : "vpisov"} premaknem na stranko ${client.name}?`, { title: "Zamenjaj stranko" })) return;
+      const data = await api("/api/todos/bulk-client", {
+        method: "POST",
+        body: JSON.stringify({ eventIds, clientId: client.clientId })
+      });
+      $("bulkClientDialog").close();
+      state.todos = data.todos || state.todos;
+      state.clientBillSelectionKey = "";
+      state.clientBillSelectedEventIds = new Set();
+      state.reportAttachmentSelectionKey = "";
+      state.reportIncludedAttachmentIds = new Set();
+      await loadAll();
+      openClientReport(data.client?.name || client.name, data.client?.clientId || client.clientId);
+      showNotice(`${eventIds.length} ${eventIds.length === 1 ? "vpis je prestavljen" : "vpisov je prestavljenih"} na novo stranko.`);
+    }
     async function confirmClientBillFromReport() {
       const selection = reportClientSelection();
       if (!selection.id && !selection.name) return;
@@ -17265,6 +17346,12 @@
       if (!client.id && !client.name) { showNotice("Najprej izberi stranko."); return; }
       openTodoDialog({ _standaloneHours: true, status: "execution", date: dateKey(new Date()), client: client.name, clientId: client.id, _hoursAssigneeIds: [activeWorkerId()] }).catch((error) => showNotice(error.message));
     });
+    $("selectAllClientBill").addEventListener("click", () => setClientBillSelectionForCurrentReport(true));
+    $("clearClientBillSelection").addEventListener("click", () => setClientBillSelectionForCurrentReport(false));
+    $("bulkChangeReportClient").addEventListener("click", openBulkClientDialog);
+    $("bulkClientForm").addEventListener("submit", (event) => { event.preventDefault(); saveBulkClientFromDialog().catch((error) => showFormValidationError($("bulkClientForm"), error.message || "Stranke ni bilo mogoče zamenjati.", $("bulkClientTarget"))); });
+    $("closeBulkClientDialog").addEventListener("click", () => $("bulkClientDialog").close());
+    $("cancelBulkClientDialog").addEventListener("click", () => $("bulkClientDialog").close());
     $("confirmClientBill").addEventListener("click", () => confirmClientBillFromReport().catch((error) => showNotice(error.message)));
     $("exportReportPdf").addEventListener("click", () => downloadClientReportPdf().catch((error) => showNotice(error.message)));
     $("createReportGmailDraft").addEventListener("click", () => createClientReportGmailDraft().catch((error) => showNotice(error.message)));

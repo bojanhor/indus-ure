@@ -244,6 +244,25 @@ test("večdnevno opravilo dobi povezani mesečni trak in varne kontrole vnosa", 
   assert.match(html, /hasDropTarget: false/);
   assert.match(html, /if \(!active \|\| !hasDropTarget\) return;/);
 });
+test("client billing supports bulk selection and safe client reassignment", async () => {
+  const [html, server] = await Promise.all([
+    fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8"),
+    fs.readFile(path.join(__dirname, "..", "outputs", "server.js"), "utf8")
+  ]);
+  assert.match(html, /id="selectAllClientBill"/);
+  assert.match(html, /id="clearClientBillSelection"/);
+  assert.match(html, /id="bulkChangeReportClient"/);
+  assert.match(html, /id="bulkClientDialog"/);
+  assert.match(html, /data-client-bill-event-id/);
+  assert.match(html, /function setClientBillSelectionForCurrentReport\(selectAll\)/);
+  assert.match(html, /function saveBulkClientFromDialog\(\)/);
+  assert.match(server, /url\.pathname === "\/api\/todos\/bulk-client"/);
+  assert.match(server, /confirmedClientBillByEvent\(db\)/);
+  assert.match(server, /todoAssignmentEditLockConflict\(db, todos\[0\], user\)/);
+  assert.match(server, /clientContactIds: \[\],[\s\S]*?clientContacts: \[\]/);
+  assert.match(server, /pruneUnusedAdHocClients\(db\)/);
+  assert.match(server, /paketno zamenjal stranko pri izbranih dogodkih/);
+});
 test("imenik strank podpira več stabilnih kontaktov in varno brisanje", async () => {
   const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
   assert.match(html, /id="clientEditContacts"/);
