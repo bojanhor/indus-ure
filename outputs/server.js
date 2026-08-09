@@ -5272,6 +5272,25 @@ function defaultHourlyRateForUser(db, userId) {
   );
 }
 
+function quickCreateBootstrapFromDb(db, user) {
+  const activeUsers = Object.values(db.users || {}).filter((worker) => worker.active !== false);
+  return {
+    clients: db.clients || [],
+    users: activeUsers.map(publicDirectoryUser),
+    workers: activeUsers
+      .filter((worker) => user.role === "boss" || worker.id === user.id)
+      .map((worker) => ({
+        id: worker.id,
+        name: worker.name,
+        role: worker.role,
+        hourlyRate: defaultHourlyRateForUser(db, worker.id),
+        exportTitle: String(worker.billing?.exportTitle || ""),
+        commuteKmOneWay: commuteKmOneWayForUser(db, worker.id)
+      })),
+    settings: db.settings || {}
+  };
+}
+
 function todoEditableSnapshot(todo) {
   const status = String(todo?.status || "");
   const isTimeEntry = TIME_ENTRY_TODO_STATUSES.has(status);
@@ -6635,9 +6654,10 @@ function serveStatic(req, res) {
   }
 
   let pathname;
+  let requestUrl;
   try {
-    const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
-    pathname = decodeURIComponent(url.pathname);
+    requestUrl = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+    pathname = decodeURIComponent(requestUrl.pathname);
   } catch {
     sendText(res, 400, "Bad request", "text/plain");
     return;
@@ -6688,9 +6708,29 @@ function serveStatic(req, res) {
     let nonce = "";
     if (filePath === path.join(root, "index.html")) {
       nonce = crypto.randomBytes(18).toString("base64");
+      const quickMode = String(requestUrl.searchParams.get("quick") || "");
+      const quickManifest = ["task", "hours", "material"].includes(quickMode)
+        ? `/manifest.webmanifest?quick=${encodeURIComponent(quickMode)}`
+        : "/manifest.webmanifest";
       responseData = Buffer.from(data.toString("utf8")
+        .replace('href="/manifest.webmanifest"', `href="${quickManifest}"`)
         .replace("<style>", `<style nonce="${nonce}">`)
         .replace("<script>", `<script nonce="${nonce}">`), "utf8");
+    } else if (pathname === "/manifest.webmanifest") {
+      const quickMode = String(requestUrl.searchParams.get("quick") || "");
+      if (["task", "hours", "material"].includes(quickMode)) {
+        const quickNames = {
+          task: "Nov dogodek",
+          hours: "Vpis ur",
+          material: "Vpis materiala"
+        };
+        const manifest = JSON.parse(data.toString("utf8"));
+        manifest.id = `/?quick=${quickMode}`;
+        manifest.name = `${quickNames[quickMode]} · INDUS URE`;
+        manifest.short_name = quickNames[quickMode];
+        manifest.start_url = `/?quick=${quickMode}`;
+        responseData = Buffer.from(JSON.stringify(manifest), "utf8");
+      }
     }
     res.writeHead(200, securityHeaders({
       "Content-Type": type,
@@ -7707,6 +7747,30 @@ async function handleApi(req, res) {
         workers,
         payrolls: payrollForUser(db, user),
         clientBills: user.role === "boss" ? (db.clientBills || []) : []
+      });
+      return;
+    }
+
+    // Home-screen quick actions deliberately bypass the complete bootstrap.
+    // A new task, time entry or material delivery needs a client lookup and
+    // a small public directory, not the whole calendar history.
+    if (url.pathname === "/api/quick-create" && req.method === "GET") {
+      const user = await requireUserForLightweightSession(req, res);
+      if (!user) return;
+      const mode = String(url.searchParams.get("mode") || "");
+      if (!["task", "hours", "material"].includes(mode)) {
+        sendJson(res, 400, { error: "Neveljavna hitra bližnjica." });
+        return;
+      }
+      const quick = DATABASE_URL
+        ? await getPgStore().quickCreateSeed(user)
+        : quickCreateBootstrapFromDb(await readDbAsync(), user);
+      sendJson(res, 200, {
+        user: publicUser(user),
+        csrfToken: req.indusSession?.csrfToken || "",
+        sessionExpiresAt: req.indusSession?.expiresAt || 0,
+        syncRevision: Number(req.indusDb?.syncRevision || 0),
+        ...quick
       });
       return;
     }

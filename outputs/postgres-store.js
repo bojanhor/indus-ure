@@ -376,6 +376,47 @@ class PostgresStore {
     });
   }
 
+  // A home-screen quick action only needs the client directory, the public
+  // worker directory, and billing defaults for its one form. Keep it away
+  // from load(): the latter fetches all historic tasks and attachments.
+  async quickCreateSeed(user) {
+    const [meta, clients, users] = await Promise.all([
+      this.pool.query("select data from indus_meta where key = $1", ["application"]),
+      this.pool.query("select data from indus_clients order by lower(alias), lower(name)"),
+      this.pool.query(
+        `select id, data
+         from indus_users
+         where coalesce(data ->> 'active', 'true') <> 'false'
+         order by lower(coalesce(data ->> 'name', '')), id`
+      )
+    ]);
+    const settings = meta.rows[0]?.data?.settings || {};
+    const fallbackRate = Number(settings?.billing?.hourlyRate || 15);
+    const directory = users.rows.map((row) => ({
+      id: String(row.id || ""),
+      name: String(row.data?.name || ""),
+      role: String(row.data?.role || ""),
+      employmentType: String(row.data?.employmentType || "contractor"),
+      exportTitle: String(row.data?.billing?.exportTitle || "")
+    }));
+    const workers = users.rows
+      .filter((row) => user.role === "boss" || String(row.id) === String(user.id))
+      .map((row) => ({
+        id: String(row.id || ""),
+        name: String(row.data?.name || ""),
+        role: String(row.data?.role || ""),
+        hourlyRate: Number.isFinite(Number(row.data?.billing?.hourlyRate)) ? Number(row.data.billing.hourlyRate) : fallbackRate,
+        exportTitle: String(row.data?.billing?.exportTitle || ""),
+        commuteKmOneWay: Number(row.data?.billing?.commuteKmOneWay || 0)
+      }));
+    return {
+      clients: clients.rows.map((row) => row.data),
+      users: directory,
+      workers,
+      settings
+    };
+  }
+
   // A link from e-mail opens one assignment, not the whole task list.  Keep
   // this query deliberately narrow so it stays quick even when the calendar
   // history and attachment table have grown large.

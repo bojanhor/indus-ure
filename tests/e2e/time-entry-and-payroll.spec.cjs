@@ -7,13 +7,14 @@ const ENTRY_DATE = "2025-06-15";
 
 let app;
 
-async function localLogin(page, userId) {
-  await page.goto(app.baseUrl, { waitUntil: "networkidle" });
+async function localLogin(page, userId, path = "/", { expectApp = true } = {}) {
+  await page.goto(`${app.baseUrl}${path}`, { waitUntil: "networkidle" });
   await expect(page.locator("#localTestLoginPanel")).toBeVisible();
   await page.locator("#localTestUser").selectOption(userId);
   await page.locator("#localTestPassword").fill(TEST_PASSWORD);
   await page.locator("#localTestLoginBtn").click();
-  await expect(page.locator("#app")).toBeVisible();
+  if (expectApp) await expect(page.locator("#app")).toBeVisible();
+  else await expect(page.locator("#todoDialog")).toBeVisible();
 }
 
 async function chooseQuickTime(page, selector) {
@@ -307,6 +308,35 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
       expect(requestedApiPaths).not.toContain("/api/clients");
       const resources = await page.evaluate(() => performance.getEntriesByType("resource").map((entry) => entry.name));
       expect(resources.some((name) => name.includes("indus-hero-electro.png"))).toBeFalsy();
+    } finally {
+      await context.close();
+    }
+  });
+
+  test("quick home-screen task opens only its form and returns to the normal app on close", async ({ browser }) => {
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    const page = await context.newPage();
+    const requests = [];
+    page.on("request", (request) => {
+      if (request.url().startsWith(app.baseUrl)) requests.push(new URL(request.url()).pathname);
+    });
+    try {
+      await localLogin(page, "ibro", "/?quick=task", { expectApp: false });
+      await expect(page.locator("#todoDialog")).toBeVisible();
+      await expect(page.locator("#todoFormTitle")).toHaveText("Novo opravilo");
+      await expect(page.locator("body")).toHaveClass(/quick-create/);
+      await expect(page.locator("#app")).toBeHidden();
+      expect(requests).toContain("/api/quick-create");
+      expect(requests).not.toContain("/api/bootstrap");
+      await expect(page.locator('link[rel="manifest"]')).toHaveAttribute("href", "/manifest.webmanifest?quick=task");
+      // The quick form closes synchronously and then intentionally uses
+      // location.replace().  Waiting for a load navigation here is brittle:
+      // Playwright reports the replaced document as aborted even though the
+      // normal app has already become visible.  Assert the observable result
+      // instead: no quick mode, the regular app is present and the URL is root.
+      await page.locator("#closeTodoDialog").click();
+      await expect(page.locator("#app")).toBeVisible();
+      await expect.poll(() => new URL(page.url()).searchParams.has("quick")).toBeFalsy();
     } finally {
       await context.close();
     }

@@ -657,7 +657,7 @@ test("zagonska identiteta in imenik v PostgreSQL ostaneta ozka", async () => {
   ]);
   assert.match(server, /async function requireUserForLightweightSession\(req, res\) \{/);
   const bootstrapStart = server.indexOf('if (url.pathname === "/api/bootstrap" && req.method === "GET")');
-  const bootstrapEnd = server.indexOf('if (url.pathname === "/api/sync-state"', bootstrapStart);
+  const bootstrapEnd = server.indexOf('if (url.pathname === "/api/quick-create"', bootstrapStart);
   const bootstrap = server.slice(bootstrapStart, bootstrapEnd);
   assert.ok(bootstrapStart >= 0 && bootstrapEnd > bootstrapStart);
   assert.match(bootstrap, /await requireUserForLightweightSession\(req, res\)/);
@@ -671,6 +671,8 @@ test("zagonska identiteta in imenik v PostgreSQL ostaneta ozka", async () => {
   assert.match(store, /async sessionWithRevision\(tokenHash\) \{[\s\S]*?jsonb_build_object\(/);
   assert.match(store, /async publicUserDirectory\(\) \{/);
   assert.doesNotMatch(store, /async publicUserDirectory\(\) \{[\s\S]{0,900}this\.load\(\)/);
+  assert.match(store, /async quickCreateSeed\(user\) \{/);
+  assert.doesNotMatch(store, /async quickCreateSeed\(user\) \{[\s\S]{0,2400}this\.load\(\)/);
 });
 
 test("initial application shell waits for one snapshot and renders only the active view", async () => {
@@ -709,7 +711,32 @@ test("monthly drag autoscrolls at the edge and mouse drag starts immediately", a
   assert.match(html, /drag\.autoScrollFrame = requestAnimationFrame\(tickMonthTodoPointerDragAutoScroll\)/);
   assert.match(html, /if \(event\.pointerType === "mouse"\) activateMonthTodoPointerDrag\(\);/);
   assert.match(html, /state\.quickCreateMode = mode;/);
-  assert.match(html, /if \(state\.quickCreateMode\) \{ state\.quickCreateMode = ""; clearQuickCreateLink\(\); \}/);
+  assert.match(html, /\$\("todoDialog"\)\.addEventListener\("close", finishQuickCreateLink\);/);
+});
+
+test("hitre PWA bližnjice imajo ločen manifest in ne naložijo celotne zgodovine", async () => {
+  const [server, store, html, worker, manifest] = await Promise.all([
+    fs.readFile(path.join(__dirname, "..", "outputs", "server.js"), "utf8"),
+    fs.readFile(path.join(__dirname, "..", "outputs", "postgres-store.js"), "utf8"),
+    fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8"),
+    fs.readFile(path.join(__dirname, "..", "outputs", "service-worker.js"), "utf8"),
+    fs.readFile(path.join(__dirname, "..", "outputs", "manifest.webmanifest"), "utf8")
+  ]);
+  assert.match(server, /url\.pathname === "\/api\/quick-create"/);
+  assert.match(server, /getPgStore\(\)\.quickCreateSeed\(user\)/);
+  assert.match(server, /manifest\.start_url = `\/\?quick=\$\{quickMode\}`/);
+  assert.match(store, /async quickCreateSeed\(user\)/);
+  assert.match(store, /indus_clients order by lower\(alias\), lower\(name\)/);
+  const quickSeed = store.slice(store.indexOf("async quickCreateSeed"), store.indexOf("// A link from e-mail"));
+  assert.doesNotMatch(quickSeed, /this\.load\(/);
+  assert.match(html, /function applyQuickCreateSnapshot\(data\)/);
+  assert.match(html, /api\(`\/api\/quick-create\?mode=\$\{encodeURIComponent\(quickMode\)\}`/);
+  assert.match(html, /body\.quick-create #app \{ display: none !important; \}/);
+  assert.match(html, /const destination = current\.pathname \+ current\.search \+ current\.hash;/);
+  assert.match(html, /window\.setTimeout\(\(\) => location\.replace\(destination\), 0\)/);
+  assert.match(worker, /if \(!url\.searchParams\.has\("quick"\)\)/);
+  assert.match(manifest, /"shortcuts"/);
+  assert.match(manifest, /"url": "\/\?quick=task"/);
 });
 
 test("boss can create a task for workers directly from admin view", async () => {

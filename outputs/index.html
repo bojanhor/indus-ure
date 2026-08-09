@@ -5,6 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>INDUS URE</title>
   <meta name="theme-color" content="#1f6f8b">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <link rel="apple-touch-icon" href="/assets/indus-icon.svg">
   <link rel="manifest" href="/manifest.webmanifest">
   <style>
     :root {
@@ -69,6 +72,9 @@
     body.booting #bootScreen { display: flex; }
     body.booting #loginScreen,
     body.booting #app { display: none; }
+    /* A quick home-screen action is intentionally only the form. The normal
+       application view is created after the form is closed, never behind it. */
+    body.quick-create #app { display: none !important; }
 
     .app-startup-status {
       display: none;
@@ -6534,6 +6540,8 @@
       todoClientSuggestions: [],
       billingRangeDraft: null,
       todoClientSuggestionIndex: -1,
+      quickCreateMode: "",
+      quickCreateTransitioning: false,
       expandedTodoIds: new Set(),
       token: "",
       csrfToken: "",
@@ -6784,6 +6792,39 @@
       const current = new URL(location.href);
       current.searchParams.delete("quick");
       history.replaceState(history.state, "", current.pathname + current.search + current.hash);
+    }
+
+    function finishQuickCreateLink() {
+      if (!state.quickCreateMode || state.quickCreateTransitioning) return;
+      state.quickCreateMode = "";
+      document.body.classList.remove("quick-create");
+      const current = new URL(location.href);
+      current.searchParams.delete("quick");
+      // The full app intentionally starts only after the lightweight form is
+      // saved or cancelled. Defer replace() until the native dialog has
+      // completely finished its close event; some mobile browsers abort a
+      // navigation that is started from inside that event. replace() also
+      // prevents Back from reopening an already closed form.
+      const destination = current.pathname + current.search + current.hash;
+      window.setTimeout(() => location.replace(destination), 0);
+    }
+
+    function applyQuickCreateSnapshot(data) {
+      if (!data?.user?.id) throw new Error("Začetnih podatkov ni bilo mogoče prebrati.");
+      state.token = "cookie";
+      state.csrfToken = data.csrfToken || "";
+      state.sessionExpiresAt = Number(data.sessionExpiresAt || 0);
+      state.syncRevision = Number(data.syncRevision || 0);
+      state.lastServerSyncAt = new Date().toISOString();
+      state.offlineMode = false;
+      state.user = data.user;
+      state.users = [...new Map([...(data.users || []), state.user].map((user) => [user.id, user])).values()];
+      state.clients = data.clients || [];
+      state.settings = data.settings || state.settings;
+      state.workerBilling = data.workers || [];
+      refreshClientList();
+      localStorage.setItem(googleEmailKey, state.user.email || "");
+      localStorage.setItem("indus-ure-offline-user", state.user.id || "");
     }
 
     async function openQuickCreateFromLink() {
@@ -7723,6 +7764,18 @@
         ? loadLocalTestMode()
         : Promise.resolve();
       try {
+        const quickMode = quickCreateModeFromLink();
+        if (quickMode) {
+          const snapshot = await api(`/api/quick-create?mode=${encodeURIComponent(quickMode)}`, { recoverSession: false });
+          applyQuickCreateSnapshot(snapshot);
+          state.quickCreateMode = quickMode;
+          state.view = "todos";
+          initializeWorkContext();
+          document.body.classList.add("quick-create");
+          showApp({ minimal: true });
+          await openQuickCreateFromLink();
+          return;
+        }
         // A direct e-mail link is intentionally special: open its one task
         // from the lightweight route first, then hydrate the normal snapshot
         // behind the editor. This keeps the link quick even for a large
@@ -8213,7 +8266,7 @@
       $("loginScreen").classList.remove("hidden");
     }
 
-    function showApp() {
+    function showApp({ minimal = false } = {}) {
       protectLoggedInHistory();
       document.body.classList.remove("booting", "login-ready");
       $("loginScreen").classList.add("hidden");
@@ -8221,7 +8274,7 @@
       $("userName").textContent = state.user.name;
       updateAvatar("topAvatar", state.user);
       applyWorkContextUi();
-      setView(state.view);
+      if (!minimal) setView(state.view);
     }
 
     function initializeWorkContext() {
@@ -16856,13 +16909,22 @@
       const wantsHours = mode === "hours";
       const wantsMaterial = mode === "material";
       if ((wantsHours && state.todoStandaloneHours) || (wantsMaterial && state.todoMaterialEntry) || (!wantsHours && !wantsMaterial && !state.todoStandaloneHours && !state.todoMaterialEntry)) return;
+      const quickTransition = Boolean(state.quickCreateMode);
+      if (quickTransition) state.quickCreateTransitioning = true;
       $("todoDialog").close();
       (wantsHours
         ? openStandaloneHoursDialog(date, { adminCreate: isAdminView(), draft })
         : wantsMaterial
           ? openMaterialEntryDialog(date, { draft })
           : openTodoDialog({ ...draft, date, status: draft._taskStatus || "open", _adminCreate: isAdminView() })
-      ).catch((error) => showNotice(error.message));
+      ).then(() => {
+        if (!quickTransition) return;
+        const nextMode = wantsHours ? "hours" : wantsMaterial ? "material" : "task";
+        state.quickCreateMode = nextMode;
+        const current = new URL(location.href);
+        current.searchParams.set("quick", nextMode);
+        history.replaceState(history.state, "", current.pathname + current.search + current.hash);
+      }).catch((error) => showNotice(error.message)).finally(() => { state.quickCreateTransitioning = false; });
     });
 
     document.querySelectorAll(".debt-stat").forEach((button) => {
@@ -17612,7 +17674,7 @@
       event.currentTarget.value = "";
       restoreBackupFromFile(file).catch((error) => showNotice(error.message));
     });
-    $("todoDialog").addEventListener("close", () => { if (state.quickCreateMode) { state.quickCreateMode = ""; clearQuickCreateLink(); } });
+    $("todoDialog").addEventListener("close", finishQuickCreateLink);
     $("todoDialog").addEventListener("close", releaseTodoEditLockForDialog);
     $("todoDialog").addEventListener("close", () => { if ($("completionRequestDialog").open) $("completionRequestDialog").close(); });
     $("todoDialog").addEventListener("close", () => {

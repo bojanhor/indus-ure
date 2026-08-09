@@ -1,6 +1,6 @@
 "use strict";
 
-const CACHE_NAME = "indus-ure-shell-v4";
+const CACHE_NAME = "indus-ure-shell-v5";
 const SHELL = ["/", "/index.html", "/manifest.webmanifest", "/assets/indus-icon.svg"];
 
 self.addEventListener("install", (event) => {
@@ -24,8 +24,13 @@ self.addEventListener("fetch", (event) => {
   if (url.pathname.startsWith("/api/") || url.pathname === "/calendar.ics") return;
   if (request.mode === "navigate") {
     event.respondWith(fetch(request).then((response) => {
-      const copy = response.clone();
-      caches.open(CACHE_NAME).then((cache) => cache.put("/index.html", copy));
+      // A quick action has a mode-specific manifest. Never make that HTML
+      // the generic offline shell, otherwise a regular launch could inherit
+      // the last used quick action after an offline start.
+      if (!url.searchParams.has("quick")) {
+        const copy = response.clone();
+        caches.open(CACHE_NAME).then((cache) => cache.put("/index.html", copy));
+      }
       return response;
     }).catch(() => caches.match("/index.html")));
     return;

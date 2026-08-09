@@ -1,10 +1,17 @@
 {
   "name": "INDUS URE",
   "short_name": "INDUS URE",
+  "id": "/",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
   "background_color": "#f6f7f2",
   "theme_color": "#1f6f8b",
+  "shortcuts": [
+    { "name": "Nov dogodek", "short_name": "Nov dogodek", "url": "/?quick=task" },
+    { "name": "Vpis ur", "short_name": "Vpis ur", "url": "/?quick=hours" },
+    { "name": "Vpis materiala", "short_name": "Material", "url": "/?quick=material" }
+  ],
   "icons": [
     { "src": "/assets/indus-icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
   ]
