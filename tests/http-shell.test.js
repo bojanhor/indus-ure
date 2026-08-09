@@ -888,6 +888,8 @@ test("prijavljen uporabnik dobi neblokirajoč zagonski okvir in PostgreSQL indek
   assert.match(html, /id="appStartupStatus"/);
   assert.match(html, /function applyOnlineCachedSnapshot\(snapshot\)/);
   assert.match(html, /const bootstrapPromise = api\("\/api\/bootstrap", \{ recoverSession: false \}\);/);
+  assert.match(html, /get\("lan_support"\) === "1"/);
+  assert.match(html, /lanSupportRequested\)\s*\? loadLocalTestMode\(\)/);
   assert.match(html, /const cachedSnapshotPromise = usableOfflineSnapshot\(\)\.catch\(\(\) => null\);/);
   assert.match(html, /body\.app-hydrating #app \.main \{ pointer-events: none; \}/);
   assert.match(html, /setStartupHydrating\(false\);/);

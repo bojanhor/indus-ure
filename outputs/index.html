@@ -7716,9 +7716,10 @@
         $("serverWarning").classList.remove("hidden");
         return;
       }
-      // Test login is available only on a local development host. Production
-      // no longer waits for, or even sends, this otherwise unused request.
-      const localTestModePromise = ["localhost", "127.0.0.1"].includes(location.hostname)
+      // The LAN support route is opt-in so public production launches do not
+      // make an otherwise unused request or reveal an alternate login form.
+      const lanSupportRequested = new URLSearchParams(location.search).get("lan_support") === "1";
+      const localTestModePromise = (["localhost", "127.0.0.1"].includes(location.hostname) || lanSupportRequested)
         ? loadLocalTestMode()
         : Promise.resolve();
       try {
