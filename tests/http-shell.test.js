@@ -897,3 +897,72 @@ test("prijavljen uporabnik dobi neblokirajoč zagonski okvir in PostgreSQL indek
   assert.match(store, /indus_entries_worker_date_idx/);
   assert.match(store, /indus_client_bills_status_updated_idx/);
 });
+
+test("produkcijska lokalna podporna prijava zahteva zaupanja vreden LAN proxy", { timeout: 15_000 }, async () => {
+  const port = 19600 + Math.floor(Math.random() * 300);
+  const dataDir = path.join(os.tmpdir(), `indus-ure-lan-support-${process.pid}-${Date.now()}`);
+  const password = "lan-support-test-password-2026-only";
+  const child = spawn(process.execPath, ["outputs/server.js"], {
+    cwd: path.join(__dirname, ".."),
+    env: {
+      ...process.env,
+      PORT: String(port),
+      DATA_DIR: dataDir,
+      NODE_ENV: "test",
+      INDUS_URE_LAN_SUPPORT_TEST_MODE: "true",
+      LAN_SUPPORT_LOGIN_ENABLED: "true",
+      LAN_SUPPORT_LOGIN_PASSWORD: password
+    },
+    stdio: ["ignore", "ignore", "ignore"]
+  });
+  try {
+    let health = null;
+    for (let attempt = 0; attempt < 60; attempt += 1) {
+      try {
+        health = await request(port, "/api/health");
+        if (health.status === 200) break;
+      } catch {}
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    assert.equal(health?.status, 200);
+
+    const publicMode = await request(port, "/api/test-mode");
+    assert.deepEqual(JSON.parse(publicMode.body), { enabled: false, localNetwork: "" });
+
+    const publicAttempt = await request(port, "/api/test-login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Real-IP": "198.51.100.10" },
+      body: JSON.stringify({ userId: "bojan", password })
+    });
+    assert.equal(publicAttempt.status, 404);
+
+    const lanHeaders = { "X-Real-IP": "192.168.50.77" };
+    const lanMode = await request(port, "/api/test-mode", { headers: lanHeaders });
+    assert.deepEqual(JSON.parse(lanMode.body), {
+      enabled: true,
+      localNetwork: "192.168.50.0/24",
+      supportLogin: true
+    });
+    const rejected = await request(port, "/api/test-login", {
+      method: "POST",
+      headers: { ...lanHeaders, "Content-Type": "application/json" },
+      body: JSON.stringify({ userId: "bojan", password: "wrong-password" })
+    });
+    assert.equal(rejected.status, 401);
+    const accepted = await request(port, "/api/test-login", {
+      method: "POST",
+      headers: { ...lanHeaders, "Content-Type": "application/json" },
+      body: JSON.stringify({ userId: "bojan", password })
+    });
+    assert.equal(accepted.status, 200, accepted.body);
+    const cookie = accepted.headers["set-cookie"]?.[0] || "";
+    assert.match(cookie, /indus-ure-session=/);
+    assert.match(cookie, /HttpOnly/);
+    const me = await request(port, "/api/me", { headers: { ...lanHeaders, Cookie: cookie } });
+    assert.equal(me.status, 200, me.body);
+    assert.equal(JSON.parse(me.body).user.id, "bojan");
+  } finally {
+    child.kill("SIGTERM");
+    await fs.rm(dataDir, { recursive: true, force: true });
+  }
+});

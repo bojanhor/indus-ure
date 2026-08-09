@@ -5246,14 +5246,14 @@
       <h1>INDUS URE</h1>
       <div class="offline hidden" id="serverWarning">Odpri stran prek lokalnega stre&#382;nika, ne direktno kot datoteko.</div>
       <div class="local-test-login hidden" id="localTestLoginPanel">
-        <strong>LOKALNO TESTNO OKOLJE</strong>
-        <label>Testni uporabnik
+        <strong id="localTestLoginTitle">LOKALNO TESTNO OKOLJE</strong>
+        <label id="localTestUserLabel">Testni uporabnik
           <select id="localTestUser" disabled>
             <option value="bojan">Bojan (&#353;ef)</option>
             <option value="ibro">Ibro (delavec)</option>
           </select>
         </label>
-        <label>Testno geslo
+        <label id="localTestPasswordLabel">Testno geslo
           <input id="localTestPassword" type="password" autocomplete="current-password" required disabled>
         </label>
         <button class="primary" id="localTestLoginBtn" type="submit" disabled>Vstopi v testno okolje</button>
@@ -6718,14 +6718,20 @@
         const response = await fetch("/api/test-mode", { credentials: "same-origin", headers: { Accept: "application/json" } });
         const data = response.ok ? await response.json() : {};
         state.localTestMode = data?.enabled === true;
+        state.localSupportLogin = data?.supportLogin === true;
       } catch {
         state.localTestMode = false;
+        state.localSupportLogin = false;
       }
       panel.classList.toggle("hidden", !state.localTestMode);
       $("googleLoginBtn").classList.toggle("hidden", state.localTestMode);
       user.disabled = !state.localTestMode;
       password.disabled = !state.localTestMode;
       button.disabled = !state.localTestMode;
+      $("localTestLoginTitle").textContent = state.localSupportLogin ? "LOKALNI PODPORNI DOSTOP" : "LOKALNO TESTNO OKOLJE";
+      $("localTestUserLabel").childNodes[0].textContent = state.localSupportLogin ? "Uporabnik" : "Testni uporabnik";
+      $("localTestPasswordLabel").childNodes[0].textContent = state.localSupportLogin ? "Geslo" : "Testno geslo";
+      button.textContent = state.localSupportLogin ? "Vstopi prek lokalnega omrežja" : "Vstopi v testno okolje";
       if (state.localTestMode) password.value = "";
     }
 

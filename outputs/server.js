@@ -33,6 +33,14 @@ const DATABASE_URL = process.env.DATABASE_URL || "";
 // explicit opt-in flag are required.
 const LOCAL_TEST_MODE = NODE_ENV === "test" && process.env.INDUS_URE_TEST_MODE === "true";
 const TEST_LOCAL_LOGIN_PASSWORD = String(process.env.TEST_LOCAL_LOGIN_PASSWORD || "");
+// A support login is deliberately narrower than the test instance: it is
+// available only through the local Nginx proxy for the private LAN.  The Node
+// process itself is bound to loopback, so a client cannot forge these proxy
+// headers by connecting to the application directly.
+const LAN_SUPPORT_LOGIN_RUNTIME = NODE_ENV === "production"
+  || (NODE_ENV === "test" && process.env.INDUS_URE_LAN_SUPPORT_TEST_MODE === "true");
+const LAN_SUPPORT_LOGIN_ENABLED = LAN_SUPPORT_LOGIN_RUNTIME && process.env.LAN_SUPPORT_LOGIN_ENABLED === "true";
+const LAN_SUPPORT_LOGIN_PASSWORD = String(process.env.LAN_SUPPORT_LOGIN_PASSWORD || "");
 const TEST_LOCAL_NETWORK = String(process.env.TEST_LOCAL_NETWORK || "192.168.50.");
 const configuredBojanPassword = process.env.INITIAL_BOJAN_PASSWORD || "";
 const configuredIbroPassword = process.env.INITIAL_IBRO_PASSWORD || "";
@@ -1057,8 +1065,31 @@ function localTestRequestAllowed(req) {
   return remoteAddress === "127.0.0.1" || remoteAddress === "::1" || (TEST_LOCAL_NETWORK === "192.168.50." && remoteAddress.startsWith(TEST_LOCAL_NETWORK));
 }
 
+function requestComesFromLoopbackProxy(req) {
+  const remoteAddress = String(req.socket?.remoteAddress || "").replace(/^::ffff:/, "");
+  return remoteAddress === "127.0.0.1" || remoteAddress === "::1";
+}
+
+function forwardedLanAddress(req) {
+  return String(req.headers["x-real-ip"] || "").split(",")[0].trim().replace(/^::ffff:/, "");
+}
+
+function lanSupportRequestAllowed(req) {
+  const address = forwardedLanAddress(req);
+  return requestComesFromLoopbackProxy(req)
+    && TEST_LOCAL_NETWORK === "192.168.50."
+    && address.startsWith(TEST_LOCAL_NETWORK);
+}
+
+function lanSupportLoginEnabled(req) {
+  return LAN_SUPPORT_LOGIN_ENABLED
+    && LAN_SUPPORT_LOGIN_PASSWORD.length >= 24
+    && lanSupportRequestAllowed(req);
+}
+
 function localTestLoginEnabled(req) {
-  return LOCAL_TEST_MODE && TEST_LOCAL_LOGIN_PASSWORD.length >= 16 && localTestRequestAllowed(req);
+  return (LOCAL_TEST_MODE && TEST_LOCAL_LOGIN_PASSWORD.length >= 16 && localTestRequestAllowed(req))
+    || lanSupportLoginEnabled(req);
 }
 
 function localTestLoginKey(req) {
@@ -1087,6 +1118,16 @@ function validLocalTestPassword(value) {
   const received = Buffer.from(String(value || ""));
   const expected = Buffer.from(TEST_LOCAL_LOGIN_PASSWORD);
   return received.length === expected.length && crypto.timingSafeEqual(received, expected);
+}
+
+function validLanSupportPassword(value) {
+  const received = Buffer.from(String(value || ""));
+  const expected = Buffer.from(LAN_SUPPORT_LOGIN_PASSWORD);
+  return received.length === expected.length && crypto.timingSafeEqual(received, expected);
+}
+
+function validLocalLoginPassword(req, value) {
+  return lanSupportLoginEnabled(req) ? validLanSupportPassword(value) : validLocalTestPassword(value);
 }
 function sessionForToken(db, token, now = Date.now()) {
   if (!token) return null;
@@ -7145,7 +7186,12 @@ async function handleApi(req, res) {
       return;
     }
     if (url.pathname === "/api/test-mode" && req.method === "GET") {
-      sendJson(res, 200, { enabled: LOCAL_TEST_MODE, localNetwork: LOCAL_TEST_MODE ? "192.168.50.0/24" : "" });
+      const supportLogin = lanSupportLoginEnabled(req);
+      sendJson(res, 200, {
+        enabled: LOCAL_TEST_MODE || supportLogin,
+        localNetwork: (LOCAL_TEST_MODE || supportLogin) ? "192.168.50.0/24" : "",
+        ...(supportLogin ? { supportLogin: true } : {})
+      });
       return;
     }
 
@@ -7162,7 +7208,7 @@ async function handleApi(req, res) {
       }
       const body = await readBody(req);
       const userId = String(body.userId || "").trim();
-      if (!Object.hasOwn(defaultUsers, userId) || !validLocalTestPassword(body.password)) {
+      if (!Object.hasOwn(defaultUsers, userId) || !validLocalLoginPassword(req, body.password)) {
         recordLocalTestLoginFailure(req);
         sendJson(res, 401, { error: "Testno uporabniško ime ali geslo ni pravilno." });
         return;
