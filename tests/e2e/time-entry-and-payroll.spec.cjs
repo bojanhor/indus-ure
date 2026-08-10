@@ -258,6 +258,23 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
       await context.close();
     }
   });
+  test("note entry is client-only and never exposes a worker time entry", async ({ browser }) => {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    try {
+      await localLogin(page, "ibro");
+      await page.locator("#newTodoButton").click();
+      await page.locator("#todoFormStatusField > summary").click();
+      await page.locator('[data-status="note"]').click();
+      await expect(page.locator("#todoFormTitle")).toHaveText("Nov zapisek");
+      await expect(page.locator("#todoFormAssigneesField")).toBeHidden();
+      await expect(page.locator("#todoFormBillingKmField")).toBeHidden();
+      await expect(page.locator("#todoFormHourlyRateField")).toBeHidden();
+      await expect(page.locator("#todoFormDateTimeSection")).toBeVisible();
+    } finally {
+      await context.close();
+    }
+  });
   test("boss downloads the selected customer report as a real PDF on a touch browser", async ({ browser }) => {
     const context = await browser.newContext({
       acceptDownloads: true,

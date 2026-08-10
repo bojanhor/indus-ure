@@ -802,7 +802,7 @@ test("calendar-only task controls are date-bound, unavailable for time entries, 
   assert.match(html, /<details class="todo-status-direct-field" id="todoFormStatusField">/);
   assert.match(html, /id="todoFormStatusSummary"/);
   assert.match(html, /function closeOtherTodoFormFoldouts\(opened\)/);
-  assert.match(html, /\$\("todoFormStatusField"\)\.open = false;\s*\$\("todoFormDateTimeSection"\)\.open = Boolean\(state\.todoHoursSourceId \|\| state\.todoStandaloneHours \|\| timeEntryStatusIds\.has\(requestedStatus\)\);/);
+  assert.match(html, /\$\("todoFormStatusField"\)\.open = false;\s*\$\("todoFormDateTimeSection"\)\.open = Boolean\(state\.todoHoursSourceId \|\| state\.todoStandaloneHours \|\| state\.todoNoteEntry \|\| timeEntryStatusIds\.has\(requestedStatus\)\);/);
   assert.match(html, /#todoDialog \.todo-form-date-time-grid \{\s*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);/);
   assert.match(html, /id="todoFormWarrantyField"/);
   assert.match(html, /class="todo-form-option todo-form-warranty" id="todoFormWarrantyField"/);
@@ -815,9 +815,9 @@ test("calendar-only task controls are date-bound, unavailable for time entries, 
   assert.match(html, /class="inline-url"/);
   assert.match(html, /id="todoFormCalendarOnly"/);
   assert.match(html, /id="todoFormCalendarOnlyField"/);
-  assert.match(html, /const isTimeEntry = timeEntryStatusIds\.has\(\$\('todoFormStatus'\)\.value\);[\s\S]*?const isMaterialEntry = \$\('todoFormStatus'\)\.value === 'material';[\s\S]*?const lockedToOneDay = isTimeEntry \|\| isMaterialEntry;[\s\S]*?const canShowOnlyInCalendar = Boolean\(date && !lockedToOneDay\);/);
+  assert.match(html, /const isTimeEntry = timeEntryStatusIds\.has\(\$\('todoFormStatus'\)\.value\);[\s\S]*?const isMaterialEntry = \$\('todoFormStatus'\)\.value === 'material';[\s\S]*?const isNoteEntry = \$\('todoFormStatus'\)\.value === 'note';[\s\S]*?const lockedToOneDay = isTimeEntry \|\| isMaterialEntry \|\| isNoteEntry;[\s\S]*?const canShowOnlyInCalendar = Boolean\(date && !lockedToOneDay\);/);
   assert.match(html, /if \(!canShowOnlyInCalendar\) calendarOnly\.checked = false;/);
-  assert.match(html, /calendarOnly: Boolean\(!timeEntryStatusIds\.has\(selectedStatus\) && !materialEntry && \$\("todoFormDate"\)\.value && \$\("todoFormCalendarOnly"\)\.checked\)/);
+  assert.match(html, /calendarOnly: Boolean\(!timeEntryStatusIds\.has\(selectedStatus\) && !materialEntry && !noteEntry && \$\("todoFormDate"\)\.value && \$\("todoFormCalendarOnly"\)\.checked\)/);
   assert.match(html, /!todo\.calendarOnly && \(state\.todoSortMode === "imported" \? isImportedTodo\(todo\) : !isImportedTodo\(todo\)\)/);
   assert.match(html, /function calendarTodos\(\{ includeArchived = false \} = \{\}\) \{[\s\S]*?!isImportedTodo\(todo\)/);
 });

@@ -1235,6 +1235,36 @@ test("normalization preserves a material record", () => {
   normalizeDb(database);
   assert.deepEqual(database.todos[0] && { status: database.todos[0].status, done: database.todos[0].done, materialAmount: database.todos[0].materialAmount }, { status: "material", done: true, materialAmount: 18 });
 });
+test("note is client-billed without worker payroll or time charges", () => {
+  const db = {
+    users: { bojan: { id: "bojan", name: "Bojan", role: "boss" } },
+    clients: [{ clientId: "jerin", name: "Jerin", search: "jerin" }],
+    payrolls: [],
+    clientBills: [],
+    todos: [{
+      id: "note-1", assignmentGroupId: "note-event-1", syncUser: "bojan", status: "note", done: true,
+      date: "2026-07-15", title: "Dogovor o dobavi", clientId: "jerin", client: "Jerin",
+      notes: "Dostava je potrjena.", material: "2x stikalo"
+    }]
+  };
+  const normalized = cleanTodo(db.todos[0]);
+  assert.equal(normalized.done, true);
+  assert.equal(normalized.billingHourlyRate, null);
+  assert.equal(normalized.billingKm, 0);
+  assert.equal(normalized.clientKm, 0);
+  assert.equal(buildPayrollSnapshot(db, "bojan", "2026-07", { id: "payroll-note", status: "draft" }).lines.length, 0);
+
+  const bill = buildClientBillSnapshot(db, { clientId: "jerin", eventIds: ["note-event-1"] }, boss);
+  assert.ok(bill);
+  assert.equal(bill.lines[0].status, "note");
+  assert.equal(bill.lines[0].clientBillableMinutes, 0);
+  assert.equal(bill.lines[0].clientKm, 0);
+  db.clientBills.push(bill);
+
+  assert.equal(reconcileTodoArchives(db, boss).archived, 1);
+  assert.ok(db.todos[0].archivedAt);
+  assert.equal(db.todos[0].archivedPayrollId, "");
+});
 test("delavec lahko vpisuje ure zase in za delavce, ki jih določi šef", () => {
   const workerDb = {
     users: {

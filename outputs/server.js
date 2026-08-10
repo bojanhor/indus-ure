@@ -155,6 +155,7 @@ const TODO_STATUS_DEFINITIONS = Object.freeze({
   internal: { label: "Razno/Interno", googleColorId: "5" },
   drive: { label: "Vožnja", googleColorId: "7" },
   purchase: { label: "Nabava", googleColorId: "6" },
+  note: { label: "Zapisek", googleColorId: "7" },
   material: { label: "Material", googleColorId: "7" }
 });
 const TODO_STATUSES = new Set(Object.keys(TODO_STATUS_DEFINITIONS));
@@ -2256,11 +2257,11 @@ function normalizeDb(db = {}) {
     }
     // Material is a completed client-billing record without worker hours.
     // It must remain material after any normalisation/read-save cycle.
-    if (next.done && !["execution", "material"].includes(next.status)) {
+    if (next.done && !["execution", "material", "note"].includes(next.status)) {
       next.status = "execution";
       changed = true;
     }
-    const completed = ["execution", "material"].includes(next.status);
+    const completed = ["execution", "material", "note"].includes(next.status);
     const hoursNeedsReview = TIME_ENTRY_TODO_STATUSES.has(next.status) && Boolean(next.hoursNeedsReview);
     if (next.hoursNeedsReview !== hoursNeedsReview) {
       next.hoursNeedsReview = hoursNeedsReview;
@@ -3960,7 +3961,8 @@ function clientCorrectionSnapshot(todos = []) {
   const first = list[0] || {};
   const warranty = Boolean(first.warranty);
   const isMaterial = first.status === "material";
-  return { eventId: todoBillingEventId(first), clientId: String(first.clientId || ""), client: String(first.client || ""), date: String(first.date || ""), start: String(first.start || ""), end: String(first.end || ""), title: String(first.title || "").slice(0, 300), notes: String(first.notes || "").slice(0, 10_000), material: String(first.material || "").slice(0, 10_000), status: String(first.status || ""), externalDelivery: Boolean(first.externalDelivery), materialAmount: isMaterial ? nonnegativeNumber(first.materialAmount, 0, 1_000_000) : 0, warranty, clientKm: warranty || isMaterial ? 0 : nonnegativeNumber(first.clientKm, 0, 1_000_000), clientVehicle: todoVehicle(first.clientVehicle), hours: warranty || isMaterial ? 0 : clientBillableHoursForTodos(list), todoIds: list.map((todo) => String(todo.id || "")).filter(Boolean) };
+  const isClientOnly = isMaterial || first.status === "note";
+  return { eventId: todoBillingEventId(first), clientId: String(first.clientId || ""), client: String(first.client || ""), date: String(first.date || ""), start: String(first.start || ""), end: String(first.end || ""), title: String(first.title || "").slice(0, 300), notes: String(first.notes || "").slice(0, 10_000), material: String(first.material || "").slice(0, 10_000), status: String(first.status || ""), externalDelivery: Boolean(first.externalDelivery), materialAmount: isMaterial ? nonnegativeNumber(first.materialAmount, 0, 1_000_000) : 0, warranty, clientKm: warranty || isClientOnly ? 0 : nonnegativeNumber(first.clientKm, 0, 1_000_000), clientVehicle: todoVehicle(first.clientVehicle), hours: warranty || isClientOnly ? 0 : clientBillableHoursForTodos(list), todoIds: list.map((todo) => String(todo.id || "")).filter(Boolean) };
 }
 function sameValue(left, right) { return JSON.stringify(left || {}) === JSON.stringify(right || {}); }
 function pendingCorrectionsForTodo(db, todo) {
@@ -4044,7 +4046,7 @@ function todoBillingEventId(todo) {
 }
 
 function todoRequiresClientBilling(todo) {
-  return Boolean(todo && !todo.imported && ["execution", "material"].includes(String(todo.status || "")) && String(todo.clientId || todo.client || "").trim());
+  return Boolean(todo && !todo.imported && ["execution", "material", "note"].includes(String(todo.status || "")) && String(todo.clientId || todo.client || "").trim());
 }
 
 function clientBillIsConfirmed(bill) {
@@ -4562,20 +4564,22 @@ function buildClientReportPdf(db, report, attachments = [], exportOptions = {}) 
         const todo = group.todos?.[0] || {};
         const warranty = Boolean(todo.warranty);
         const materialEntry = todo.status === "material";
-        const clientBillableHours = warranty || materialEntry ? 0 : clientBillableHoursForTodos(group.todos);
-        const workerHours = warranty || materialEntry ? 0 : Number((group.todos || []).reduce((sum, item) => sum + todoDurationHours(item), 0).toFixed(2));
+        const noteEntry = todo.status === "note";
+        const clientBillableHours = warranty || materialEntry || noteEntry ? 0 : clientBillableHoursForTodos(group.todos);
+        const workerHours = warranty || materialEntry || noteEntry ? 0 : Number((group.todos || []).reduce((sum, item) => sum + todoDurationHours(item), 0).toFixed(2));
         const hours = options.hoursMode === "client_billable" ? clientBillableHours : workerHours;
-        const clientKm = warranty || materialEntry ? 0 : Math.max(0, Number(todo.clientKm || 0));
+        const clientKm = warranty || materialEntry || noteEntry ? 0 : Math.max(0, Number(todo.clientKm || 0));
         doc.font(reportPdfFontPath('bold')).fontSize(13).fillColor('#143b34').text(reportPdfDate(todo.date));
         doc.font(reportPdfFontPath('bold')).fontSize(12).fillColor('#161f20').text(String(todo.title || 'Brez naziva'));
         doc.font(reportPdfFontPath()).fontSize(10).fillColor('#263634');
-        if (!materialEntry) reportPdfLine(doc, 'Izvajalec', reportPdfAssignees(db, group.todos));
-        if (options.hoursMode === "worker_time" && !materialEntry) {
+        if (!materialEntry && !noteEntry) reportPdfLine(doc, 'Izvajalec', reportPdfAssignees(db, group.todos));
+        if (options.hoursMode === "worker_time" && !materialEntry && !noteEntry) {
           const workerTimes = (group.todos || []).filter((item) => item.start && item.end)
             .map((item) => reportPdfAssigneeTitle(db, item) + ': ' + item.start + '-' + item.end).join(', ');
           if (workerTimes) reportPdfLine(doc, '\u010cas izvajalcev', workerTimes);
         }
         if (materialEntry) reportPdfLine(doc, todo.externalDelivery ? 'Dostava' : 'Vrsta vpisa', todo.externalDelivery ? 'Material je neposredno dostavil zunanji dobavitelj.' : 'Material brez izvajalca.');
+        if (noteEntry) reportPdfLine(doc, 'Vrsta vpisa', 'Zapisek brez obračuna ur in kilometrine.');
         if (warranty) reportPdfLine(doc, 'Garancija', 'Storitev se ne obra\u010dunava stranki.');
         if (hours) reportPdfLine(doc, options.hoursMode === "client_billable" ? 'Za obra\u010dun' : 'Ure izvajalcev', hours.toLocaleString('sl-SI', { maximumFractionDigits: 2 }) + ' h');
         if (clientKm) reportPdfLine(doc, 'Stro\u0161ki prevoza (obe smeri)', `${reportPdfVehicleLabel(todo.clientVehicle)} - ${clientKm.toLocaleString('sl-SI', { maximumFractionDigits: 1 })} km`);
@@ -4596,7 +4600,7 @@ function buildClientReportPdf(db, report, attachments = [], exportOptions = {}) 
       const travel = { personal: 0, van: 0 };
       const totalHours = (report.groups || []).reduce((sum, group) => {
         const representative = group.todos?.[0] || {};
-        if (representative.status === 'material') return sum;
+        if (['material', 'note'].includes(representative.status)) return sum;
         if (representative.warranty) return sum;
         const vehicle = representative.clientVehicle === 'van' ? 'van' : 'personal';
         travel[vehicle] += Math.max(0, Number(representative.clientKm || 0));
@@ -5170,8 +5174,8 @@ function reconcileTodoArchives(db, actor = null) {
     const needsClientBill = todoRequiresClientBilling(todo);
     const bill = needsClientBill ? bills.get(todoBillingEventId(todo)) : null;
     const desiredClientBillId = bill?.id || "";
-    const materialOnly = todo.status === "material";
-    const readyForArchive = Boolean(!hasPendingCorrection && (materialOnly ? bill : (payroll && (!needsClientBill || bill))));
+    const clientOnly = ["material", "note"].includes(todo.status);
+    const readyForArchive = Boolean(!hasPendingCorrection && (clientOnly ? bill : (payroll && (!needsClientBill || bill))));
     if (todo.clientBillId !== desiredClientBillId || todo.clientBilledAt !== (bill?.confirmedAt || "")) {
       todo.clientBillId = desiredClientBillId;
       todo.clientBilledAt = bill?.confirmedAt || "";
@@ -5181,15 +5185,17 @@ function reconcileTodoArchives(db, actor = null) {
       changed = true;
     }
     if (readyForArchive) {
-      if (!todo.archivedAt || todo.archivedPayrollId !== (materialOnly ? "" : payroll.id) || todo.archivedClientBillId !== desiredClientBillId) {
+      if (!todo.archivedAt || todo.archivedPayrollId !== (clientOnly ? "" : payroll.id) || todo.archivedClientBillId !== desiredClientBillId) {
         todo.archivedAt = todo.archivedAt || now;
-        todo.archivedPayrollId = materialOnly ? "" : payroll.id;
+        todo.archivedPayrollId = clientOnly ? "" : payroll.id;
         todo.archivedClientBillId = desiredClientBillId;
         todo.updatedAt = now;
         todo.updatedBy = auditActor.id;
         todo.updatedByName = auditActor.name || "";
-        todo.history = [...(todo.history || []), audit(auditActor, materialOnly
-          ? `arhivirano po potrjenem obračunu materiala za stranko ${bill.clientName}`
+        todo.history = [...(todo.history || []), audit(auditActor, clientOnly
+          ? todo.status === "material"
+            ? `arhivirano po potrjenem obračunu materiala za stranko ${bill.clientName}`
+            : `arhivirano po potrjenem obračunu zapiska za stranko ${bill.clientName}`
           : needsClientBill
           ? `arhivirano po potrjenem obračunu delavca in stranke ${bill.clientName}`
           : `arhivirano po potrjenem obračunu delavca ${payroll.month}`)];
@@ -5205,8 +5211,10 @@ function reconcileTodoArchives(db, actor = null) {
       todo.updatedAt = now;
       todo.updatedBy = auditActor.id;
       todo.updatedByName = auditActor.name || "";
-      todo.history = [...(todo.history || []), audit(auditActor, materialOnly
-        ? "vrnjeno iz arhiva: manjka potrjeni obračun materiala za stranko"
+      todo.history = [...(todo.history || []), audit(auditActor, clientOnly
+        ? todo.status === "material"
+          ? "vrnjeno iz arhiva: manjka potrjeni obračun materiala za stranko"
+          : "vrnjeno iz arhiva: manjka potrjeni obračun zapiska za stranko"
         : needsClientBill
         ? "vrnjeno iz arhiva: manjka potrjeni obračun stranki ali delavca"
         : "vrnjeno iz arhiva: manjka potrjeni obračun delavca")];
@@ -5296,6 +5304,7 @@ function todoEditableSnapshot(todo) {
   const isTimeEntry = TIME_ENTRY_TODO_STATUSES.has(status);
   const isCompleted = status === "execution";
   const isMaterial = status === "material";
+  const isNote = status === "note";
   const files = (items) => (Array.isArray(items) ? items : []).map((item) => ({
     id: String(item?.id || ""),
     attachmentId: String(item?.attachmentId || ""),
@@ -5309,7 +5318,7 @@ function todoEditableSnapshot(todo) {
   return JSON.stringify({
     title: String(todo?.title || ""), date: String(todo?.date || ""), endDate: String(todo?.endDate || todo?.date || ""), calendarOnly: Boolean(!isTimeEntry && todo?.calendarOnly && todo?.date), start: String(todo?.start || ""), end: String(todo?.end || ""),
     client: String(todo?.client || ""), clientId: String(todo?.clientId || ""), clientContactIds: cleanTodoClientContactIds(todo?.clientContactIds), clientContacts: cleanTodoClientContactSnapshots(todo?.clientContacts), notes: String(todo?.notes || ""), material: String(todo?.material || ""), materialAmount: isMaterial ? nonnegativeNumber(todo?.materialAmount, 0, 1_000_000) : 0, externalDelivery: isMaterial && Boolean(todo?.externalDelivery),
-    status, urgent: Boolean(todo?.urgent), ordered: Boolean(todo?.ordered), warranty: status !== "meal" && !isMaterial && Boolean(todo?.warranty),
+    status, urgent: Boolean(todo?.urgent), ordered: Boolean(todo?.ordered), warranty: status !== "meal" && !isMaterial && !isNote && Boolean(todo?.warranty),
     sourceProjectTodoId: String(todo?.sourceProjectTodoId || ""), sourceProjectTitle: String(todo?.sourceProjectTitle || ""), billingHourlyRate: isTimeEntry ? nonnegativeNumber(todo?.billingHourlyRate, null, 10_000) : null,
     clientBillableMinutes: isCompleted ? normalizedClientBillableMinutes(todo?.clientBillableMinutes) : null,
     billingKm: isTimeEntry ? nonnegativeNumber(todo?.billingKm, null, 1_000_000) : null, workFromHome: isTimeEntry && Boolean(todo?.workFromHome), clientKm: isCompleted ? nonnegativeNumber(todo?.clientKm, null, 1_000_000) : null,
@@ -5331,6 +5340,8 @@ function todoForUserRole(user, db, previous, todo) {
   const isCompleted = todo.status === "execution";
   const isMeal = todo.status === "meal";
   const isMaterial = todo.status === "material";
+  const isNote = todo.status === "note";
+  const isClientOnly = isMaterial || isNote;
   const isPaidTime = TIME_ENTRY_TODO_STATUSES.has(todo.status);
   const canSetClientMileage = isCompleted;
   const defaultRate = defaultHourlyRateForUser(db, todo.syncUser || previous?.syncUser || user.id);
@@ -5338,27 +5349,27 @@ function todoForUserRole(user, db, previous, todo) {
   if (user.role !== "boss") {
     return {
       ...todo,
-      billingHourlyRate: isMaterial ? null : (isPaidTime ? previousRate ?? defaultRate : previousRate),
-      billingKm: isMeal || isMaterial ? 0 : isPaidTime ? nonnegativeNumber(todo.billingKm, previousKm, 1_000_000) : previousKm,
-      workFromHome: isPaidTime && !isMaterial && Boolean(todo.workFromHome),
-      warranty: isMeal || isMaterial ? false : Boolean(todo.warranty),
+      billingHourlyRate: isClientOnly ? null : (isPaidTime ? previousRate ?? defaultRate : previousRate),
+      billingKm: isMeal || isClientOnly ? 0 : isPaidTime ? nonnegativeNumber(todo.billingKm, previousKm, 1_000_000) : previousKm,
+      workFromHome: isPaidTime && !isClientOnly && Boolean(todo.workFromHome),
+      warranty: isMeal || isClientOnly ? false : Boolean(todo.warranty),
       imported: preserveImported,
       clientBillableMinutes: isCompleted ? previousClientBillableMinutes : null,
-      clientKm: isMeal || isMaterial ? 0 : canSetClientMileage ? nonnegativeNumber(todo.clientKm, previousClientKm, 1_000_000) : previousClientKm,
-      clientVehicle: isMeal || isMaterial ? "personal" : canSetClientMileage ? requestedClientVehicle : previousClientVehicle,
+      clientKm: isMeal || isClientOnly ? 0 : canSetClientMileage ? nonnegativeNumber(todo.clientKm, previousClientKm, 1_000_000) : previousClientKm,
+      clientVehicle: isMeal || isClientOnly ? "personal" : canSetClientMileage ? requestedClientVehicle : previousClientVehicle,
       clientKmRate: 0
     };
   }
   return {
     ...todo,
-    billingHourlyRate: isMaterial ? null : (isPaidTime ? nonnegativeNumber(todo.billingHourlyRate, previousRate ?? defaultRate, 10_000) : previousRate),
-    billingKm: isMeal || isMaterial ? 0 : isPaidTime ? nonnegativeNumber(todo.billingKm, previousKm, 1_000_000) : previousKm,
-    workFromHome: isPaidTime && !isMaterial && Boolean(todo.workFromHome),
-    warranty: isMeal || isMaterial ? false : Boolean(todo.warranty),
+    billingHourlyRate: isClientOnly ? null : (isPaidTime ? nonnegativeNumber(todo.billingHourlyRate, previousRate ?? defaultRate, 10_000) : previousRate),
+    billingKm: isMeal || isClientOnly ? 0 : isPaidTime ? nonnegativeNumber(todo.billingKm, previousKm, 1_000_000) : previousKm,
+    workFromHome: isPaidTime && !isClientOnly && Boolean(todo.workFromHome),
+    warranty: isMeal || isClientOnly ? false : Boolean(todo.warranty),
     imported: !isPaidTime && preserveImported,
     clientBillableMinutes: isCompleted ? requestedClientBillableMinutes : null,
-    clientKm: isMeal || isMaterial ? 0 : canSetClientMileage ? nonnegativeNumber(todo.clientKm, previousClientKm, 1_000_000) : previousClientKm,
-    clientVehicle: isMeal || isMaterial ? "personal" : requestedClientVehicle,
+    clientKm: isMeal || isClientOnly ? 0 : canSetClientMileage ? nonnegativeNumber(todo.clientKm, previousClientKm, 1_000_000) : previousClientKm,
+    clientVehicle: isMeal || isClientOnly ? "personal" : requestedClientVehicle,
     clientKmRate: 0
   };
 }
@@ -5693,6 +5704,8 @@ function cleanTodo(input) {
   const status = input.status === "billing" ? "execution" : TODO_STATUSES.has(input.status) ? input.status : "open";
   const isMeal = status === "meal";
   const isMaterial = status === "material";
+  const isNote = status === "note";
+  const isClientOnly = isMaterial || isNote;
   const isTimeEntry = TIME_ENTRY_TODO_STATUSES.has(status);
   const sourceProjectTodoId = status === "execution" ? String(input.sourceProjectTodoId || "").trim().slice(0, 100) : "";
   const sourceProjectTitle = sourceProjectTodoId ? String(input.sourceProjectTitle || "").trim().slice(0, 300) : "";
@@ -5701,7 +5714,7 @@ function cleanTodo(input) {
     title: isMeal ? "Malica" : capitalizeTodoText(input.title),
     date: String(input.date || ""),
     endDate: String(input.endDate || input.date || ""),
-    calendarOnly: Boolean(!isTimeEntry && !isMaterial && input.calendarOnly && input.date),
+    calendarOnly: Boolean(!isTimeEntry && !isClientOnly && input.calendarOnly && input.date),
     start: roundTimeToQuarterHour(input.start),
     end: roundTimeToQuarterHour(input.end),
     client: isMeal ? "" : String(input.client || "").trim(),
@@ -5717,21 +5730,21 @@ function cleanTodo(input) {
     // Older tasks without this field are intentionally shown as sorted.
     userOrderBuckets: cleanTodoUserOrderBuckets(input.userOrderBuckets),
     completionRequests: cleanTodoCompletionRequests(input.completionRequests),
-    urgent: isMeal || isTimeEntry || isMaterial || input.status === "billing" ? false : Boolean(input.urgent),
+    urgent: isMeal || isTimeEntry || isClientOnly || input.status === "billing" ? false : Boolean(input.urgent),
     imported: !isTimeEntry && Boolean(input.imported),
     ordered: ORDER_TODO_STATUSES.has(status) && Boolean(input.ordered),
-    warranty: !isMeal && !isMaterial && Boolean(input.warranty),
+    warranty: !isMeal && !isClientOnly && Boolean(input.warranty),
     syncUser: cleanUserId(input.syncUser),
     sourceProjectTodoId,
     sourceProjectTitle,
-    done: status === "execution" || status === "material",
+    done: status === "execution" || isClientOnly,
     hoursNeedsReview: isTimeEntry && Boolean(input.hoursNeedsReview),
     workFromHome: isTimeEntry && Boolean(input.workFromHome),
-    billingHourlyRate: isMaterial ? null : nonnegativeNumber(input.billingHourlyRate, null, 10_000),
+    billingHourlyRate: isClientOnly ? null : nonnegativeNumber(input.billingHourlyRate, null, 10_000),
     clientBillableMinutes: status === "execution" ? normalizedClientBillableMinutes(input.clientBillableMinutes) : null,
-    billingKm: isMeal || isMaterial ? 0 : nonnegativeNumber(input.billingKm, null, 1_000_000),
-    clientKm: isMeal || isMaterial ? 0 : nonnegativeNumber(input.clientKm, null, 1_000_000),
-    clientVehicle: isMeal || isMaterial ? "personal" : todoVehicle(input.clientVehicle),
+    billingKm: isMeal || isClientOnly ? 0 : nonnegativeNumber(input.billingKm, null, 1_000_000),
+    clientKm: isMeal || isClientOnly ? 0 : nonnegativeNumber(input.clientKm, null, 1_000_000),
+    clientVehicle: isMeal || isClientOnly ? "personal" : todoVehicle(input.clientVehicle),
     materialAmount: isMaterial ? nonnegativeNumber(input.materialAmount, 0, 1_000_000) : 0,
     externalDelivery: isMaterial && Boolean(input.externalDelivery),
     clientKmRate: 0,
@@ -5957,7 +5970,7 @@ function validateDebt(debt) {
 function validateTodo(todo, { requireClientId = false } = {}) {
   if (!todo.title) return "Manjka opis opravila.";
   if (requireClientId && todo.client && !todo.clientId) return "Stranke ni bilo mogoče identificirati.";
-  if (todo.status === "material" && !todo.clientId) return "Za vpis materiala izberi stranko.";
+  if (["material", "note"].includes(todo.status) && !todo.clientId) return todo.status === "note" ? "Za zapisek izberi stranko." : "Za vpis materiala izberi stranko.";
   if (todo.date && !/^\d{4}-\d{2}-\d{2}$/.test(todo.date)) return "Datum opravila ni pravilen.";
   if (todo.endDate && !/^\d{4}-\d{2}-\d{2}$/.test(todo.endDate)) return "Datum do opravila ni pravilen.";
   if (todo.endDate && !todo.date) return "Za datum do vnesi tudi datum od.";
@@ -9211,14 +9224,14 @@ async function handleApi(req, res) {
         sendJson(res, 403, { error: "Delavec lahko ure vpiše samo sebi ali za delavce, ki jih je določil šef." });
         return;
       }
-      if (hasExplicitAssignees && !requestedAssigneeIds.length && !["meal", "material"].includes(todo.status)) {
+      if (hasExplicitAssignees && !requestedAssigneeIds.length && !["meal", "material", "note"].includes(todo.status)) {
         sendJson(res, 400, { error: "Izberi vsaj enega izvajalca." });
         return;
       }
       let assigneeIds = requestedAssigneeIds.length
         ? requestedAssigneeIds
         : todoAssigneesForRequest(user, todo.syncUser, db.users);
-      if (["meal", "material"].includes(todo.status)) assigneeIds = [syncUserForRequest(user, todo.syncUser || assigneeIds[0] || user.id, "", db.users)];
+      if (["meal", "material", "note"].includes(todo.status)) assigneeIds = [syncUserForRequest(user, todo.syncUser || assigneeIds[0] || user.id, "", db.users)];
       if (TIME_ENTRY_TODO_STATUSES.has(todo.status) && assigneeIds.length !== 1) {
         sendJson(res, 400, { error: "Vnos ur se vpisuje posebej za enega delavca." });
         return;
@@ -10113,7 +10126,7 @@ async function handleApi(req, res) {
         assigneeIds = [...new Set(body.assigneeIds
           .map(cleanUserId)
           .filter((assigneeId) => Boolean(db.users?.[assigneeId]) && db.users[assigneeId].active !== false))];
-        if (!assigneeIds.length && todo.status !== "material") {
+        if (!assigneeIds.length && !["material", "note"].includes(todo.status)) {
           sendJson(res, 400, { error: "Izberi vsaj enega delavca." });
           return;
         }
@@ -10127,7 +10140,7 @@ async function handleApi(req, res) {
         sendJson(res, 403, { error: "Delavec lahko ure vpiše samo sebi ali za delavce, ki jih je določil šef." });
         return;
       }
-      if (["meal", "material"].includes(todo.status)) assigneeIds = [syncUserForRequest(user, todo.syncUser || assigneeIds[0] || previousTodo.syncUser || user.id, previousTodo.syncUser, db.users)];
+      if (["meal", "material", "note"].includes(todo.status)) assigneeIds = [syncUserForRequest(user, todo.syncUser || assigneeIds[0] || previousTodo.syncUser || user.id, previousTodo.syncUser, db.users)];
       if (TIME_ENTRY_TODO_STATUSES.has(todo.status) && assigneeIds.length !== 1) {
         sendJson(res, 400, { error: "Vnos ur se vpisuje posebej za enega delavca." });
         return;

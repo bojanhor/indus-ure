@@ -636,6 +636,8 @@
       background: #edf2ee;
     }
 
+    .billing-top-shortcut { white-space: nowrap; }
+
     .view-btn {
       min-height: 34px;
       border-radius: 6px;
@@ -1706,6 +1708,7 @@
     .todo-status-internal { --todo-bg: #fbd75b; --todo-fg: #202124; --todo-border: #d6ad2f; }
     .todo-status-drive { --todo-bg: #46d6db; --todo-fg: #202124; --todo-border: #249ca2; }
     .todo-status-purchase { --todo-bg: #ffb878; --todo-fg: #202124; --todo-border: #d8883f; }
+    .todo-status-note { --todo-bg: #e7eff8; --todo-fg: #174d70; --todo-border: #92b8d4; }
     .todo-status-material { --todo-bg: #4eb54b; --todo-fg: #fff; --todo-border: #2f8b31; }
 
 
@@ -2634,6 +2637,7 @@
     /* A green time entry is completed by definition, but its title must stay
        legible in the monthly view. */
     .day-todo.done.todo-status-execution,
+    .day-todo.done.todo-status-note,
     .day-todo.done.todo-status-material {
       opacity: 1;
       text-decoration: none;
@@ -4417,7 +4421,7 @@
       line-height: 1.4;
     }
 
-    .client-billing-summary { display: block; }
+    .client-billing-summary { display: block; max-width: 640px; }
 
     .client-billing-summary-list {
       display: grid;
@@ -4444,6 +4448,20 @@
     .client-billing-summary-list .is-total { background: #e8f3f0; }
     .client-billing-summary-list .is-total dt,
     .client-billing-summary-list .is-total dd { color: #07536d; font-weight: 900; }
+
+    .client-billing-client-card.is-return-target {
+      outline: 3px solid #167794;
+      outline-offset: 2px;
+      background: #e7f4f8;
+    }
+
+    .todo-form-client-billing-grid {
+      grid-template-columns: minmax(230px, 1.25fr) minmax(170px, .8fr) minmax(130px, .55fr);
+      align-items: end;
+    }
+    .todo-form-client-billable-hours { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: end; }
+    .todo-form-client-billable-hours > label { min-width: 0; }
+    .todo-form-client-billable-reset { padding-bottom: 2px; }
 
     .client-billing-detail { display: grid; gap: 0; }
 
@@ -4913,6 +4931,8 @@
         padding-left: 6px;
         padding-right: 6px;
       }
+      .billing-top-shortcut { display: none; }
+      .todo-form-client-billing-grid { grid-template-columns: 1fr; }
       .search-control,
       .search,
       .tools .secondary { width: 100%; max-width: none; }
@@ -5281,6 +5301,8 @@
           <div class="view-switch" aria-label="Pogled">
             <button class="view-btn active" id="todosViewBtn" type="button">Opravila</button>
             <button class="view-btn" id="calendarViewBtn" type="button">Koledar</button>
+            <button class="view-btn billing-top-shortcut boss-only" id="billingTopViewBtn" type="button">Obračun delavcev</button>
+            <button class="view-btn billing-top-shortcut admin-only" id="clientBillingTopViewBtn" type="button">Obračun strank</button>
 
             <button class="view-btn legacy-report-button" id="reportViewBtn" type="button">Arhiv poro&#269;il</button>
           </div>
@@ -5314,7 +5336,7 @@
               <button class="menu-action" id="accountBtn" type="button">Ra&#269;un in profil</button>
               <button class="menu-action boss-only" id="workersMenuBtn" type="button">Delavci</button>
               <span class="tools-menu-label">Delo</span>
-              <button class="menu-action view-menu-action" id="billingMenuBtn" type="button">Obra&#269;uni</button>
+              <button class="menu-action view-menu-action" id="billingMenuBtn" type="button">Obra&#269;un delavcev</button>
               <button class="menu-action view-menu-action admin-only" id="clientBillingMenuBtn" type="button">Obra&#269;un strank</button>
               <button class="menu-action view-menu-action" id="clientsMenuBtn" type="button">Stranke</button>
               <button class="menu-action admin-only" id="requestCompletionMenuBtn" type="button">Zahtevaj dopolnitev</button>
@@ -5547,7 +5569,7 @@
           <label class="client-billing-range-control hidden">Do
             <input id="reportTo" type="date">
           </label>
-          <label class="client-billing-client">I&#353;&#269;i stranko
+          <label class="client-billing-client" id="reportClientControl">I&#353;&#269;i stranko
             <input id="reportClient" list="clientList" placeholder="Vse stranke">
           </label>
           <div class="client-billing-sort-control report-billing-filter-options" id="reportBillingFilterControl">
@@ -5664,6 +5686,7 @@
         <button class="todo-creation-tab" type="button" role="tab" data-create-mode="task">Nov dogodek</button>
         <button class="todo-creation-tab" type="button" role="tab" data-create-mode="hours">Vpis ur</button>
         <button class="todo-creation-tab" type="button" role="tab" data-create-mode="material">Vpis materiala</button>
+        <button class="todo-creation-tab" type="button" role="tab" data-create-mode="note">Zapisek</button>
       </div>
       <div class="modal-body">
         <input type="hidden" id="todoFormId">
@@ -5724,13 +5747,15 @@
           <small>Uvožen zapis je prikazan samo v filtru UVOŽENO in se ne vključi v koledar ali obračune.</small>
         </label>
         <div class="todo-form-billing" id="todoFormClientBilling">
-          <div class="modal-grid">
-            <label id="todoFormClientBillableHoursField">Ure za obra&#269;un stranki
+          <div class="modal-grid todo-form-client-billing-grid">
+            <div class="todo-form-client-billable-hours" id="todoFormClientBillableHoursField">
+              <label>Ure za obra&#269;un stranki
               <input id="todoFormClientBillableHours" type="number" min="0" max="10000" step="0.25" inputmode="decimal">
               <small class="todo-meta" id="todoFormClientBillableHoursNote">Samodejno sledi uram delavca.</small>
-            </label>
-            <div class="todo-form-client-billable-reset" id="todoFormClientBillableHoursResetField">
-              <button type="button" id="todoFormClientBillableHoursReset">Samodejno</button>
+              </label>
+              <div class="todo-form-client-billable-reset" id="todoFormClientBillableHoursResetField">
+                <button type="button" id="todoFormClientBillableHoursReset">Samodejno</button>
+              </div>
             </div>
             <label>Kilometrina, ki se zara&#269;una stranki (obe smeri vo&#382;nje)
               <input id="todoFormClientKm" type="number" min="0" max="1000000" step="0.1">
@@ -6350,6 +6375,7 @@
       { id: "internal", label: "Razno/Interno" },
       { id: "drive", label: "Vožnja" },
       { id: "purchase", label: "Nabava" },
+      { id: "note", label: "Zapisek" },
       { id: "material", label: "Material" }
     ];
     const todoStatusById = Object.fromEntries(todoStatusDefinitions.map((status) => [status.id, status]));
@@ -6398,7 +6424,7 @@
       const standaloneHours = Boolean(state.todoStandaloneHours && !state.todoHoursSourceId);
       const availableStatuses = standaloneHours
         ? todoStatusDefinitions.filter((status) => timeEntryStatusIds.has(status.id))
-        : (state.todoHoursSourceId || state.todoMealEntry || state.todoMaterialEntry || timeEntryStatusIds.has(current) || current === "material"
+        : (state.todoHoursSourceId || state.todoMealEntry || state.todoMaterialEntry || state.todoNoteEntry || timeEntryStatusIds.has(current) || current === "material" || current === "note"
           ? []
           : todoStatusDefinitions.filter((status) => !timeEntryStatusIds.has(status.id) && status.id !== "material"));
       $("todoFormStatusChoices").innerHTML = availableStatuses.map((status) => `
@@ -6466,6 +6492,7 @@
       todoStandaloneHours: false,
       todoMealEntry: false,
       todoMaterialEntry: false,
+      todoNoteEntry: false,
       todoCreationTaskStatus: "open",
       todoHoursSourceOriginal: null,
       todoDraftSourceProjectTodoId: "",
@@ -6496,6 +6523,7 @@
       reportClient: "",
       reportClientSort: "recent",
       reportReturnSnapshot: null,
+      reportOverviewFocusKey: "",
       showClientPending: true,
       showClientBilled: false,
       clientBillSelectionKey: "",
@@ -7879,6 +7907,7 @@
         sort: reportClientSortMode(),
         pending: state.showClientPending !== false,
         billed: state.showClientBilled === true,
+        focusKey: String(state.reportOverviewFocusKey || ""),
         scrollY: Math.max(0, Number(window.scrollY || window.pageYOffset || 0))
       };
     }
@@ -7891,6 +7920,10 @@
       state.reportClientSort = reportClientSortMode(snapshot?.sort);
       state.showClientPending = snapshot?.pending !== false;
       state.showClientBilled = snapshot?.billed === true;
+      state.reportOverviewFocusKey = String(snapshot?.focusKey || "");
+      if ($("reportShowPending")) $("reportShowPending").checked = state.showClientPending;
+      if ($("reportShowBilled")) $("reportShowBilled").checked = state.showClientBilled;
+      if ($("reportClientSort")) $("reportClientSort").value = state.reportClientSort;
       saveClientBillingFilter();
     }
 
@@ -9339,11 +9372,12 @@
 
     function validateTodo(todo) {
       const materialEntry = todo.status === "material";
-      if (!materialEntry && (!todo.id || Array.isArray(todo.assigneeIds)) && (!Array.isArray(todo.assigneeIds) || todo.assigneeIds.length === 0)) {
+      const noteEntry = todo.status === "note";
+      if (!materialEntry && !noteEntry && (!todo.id || Array.isArray(todo.assigneeIds)) && (!Array.isArray(todo.assigneeIds) || todo.assigneeIds.length === 0)) {
         return invalidTodoForm("Izberi vsaj enega delavca.", $("todoFormAssignees").querySelector("input") || $("todoFormAssigneeLabel"));
       }
-      if (materialEntry && !todo.clientId) {
-        return invalidTodoForm("Za vpis materiala izberi stranko.", "todoFormClient");
+      if ((materialEntry || noteEntry) && !todo.clientId) {
+        return invalidTodoForm(materialEntry ? "Za vpis materiala izberi stranko." : "Za zapisek izberi stranko.", "todoFormClient");
       }
       if (materialEntry && !todo.date) {
         return invalidTodoForm("Za vpis materiala vnesi datum.", "todoFormDate");
@@ -9397,6 +9431,8 @@
       $("todosViewBtn").classList.toggle("active", view === "todos");
       $("billingMenuBtn").classList.toggle("active", view === "billing");
       $("clientBillingMenuBtn").classList.toggle("active", view === "report");
+      $("billingTopViewBtn").classList.toggle("active", view === "billing");
+      $("clientBillingTopViewBtn").classList.toggle("active", view === "report");
       $("clientsMenuBtn").classList.toggle("active", view === "clients");
       $("reportViewBtn").classList.toggle("active", view === "report");
       if (view === "calendar") renderMonth();
@@ -9423,7 +9459,7 @@
 
     function todoManualCategory(todo) {
       if (todo?.urgent) return "urgent";
-      if (manualOrderingStatusIds.has(todo?.status)) return "ordering";
+      if (todoNeedsOrdering(todo)) return "ordering";
       return todoManualBucketForCurrentUser(todo);
     }
 
@@ -9470,10 +9506,10 @@
       return todoSort(a, b);
     }
 
-    const todoTextOrderMarker = /(^|[^\p{L}\p{N}_])naro\u010di(?=$|[^\p{L}\p{N}_])/iu;
+    const todoTextOrderMarker = /(^|[^\p{L}\p{N}_])naroci(?=$|[^\p{L}\p{N}_])/iu;
 
     function todoUsesTextOrdering(todo) {
-      return todoTextOrderMarker.test([todo.title, todo.notes, todo.material].filter(Boolean).join("\n"));
+      return todoTextOrderMarker.test(normalizeText([todo.title, todo.notes, todo.material].filter(Boolean).join("\n")));
     }
 
     function todoNeedsOrdering(todo) {
@@ -12393,7 +12429,7 @@
               ${showStatusChip ? `<span class="todo-chip todo-status-chip todo-status-color ${todoStatusClass(todo.status)}">${escapeHtml(todoStatus(todo.status).label)}</span>` : ""}
               <span class="client-todo-task-content">
                 <strong>${todo.urgent ? '<span class="todo-chip todo-urgent-chip">NUJNO</span> ' : ""}${escapeHtml(todo.title || "Brez naslova")}</strong>
-                <small>${escapeHtml(dateText)}${todo.status === "material" ? " · Dostava tretjega" : ` · Za: ${escapeHtml(todoAssigneeNames(todo))}`}</small>
+                <small>${escapeHtml(dateText)}${todo.status === "material" ? " · Dostava tretjega" : todo.status === "note" ? " · Zapisek" : ` · Za: ${escapeHtml(todoAssigneeNames(todo))}`}</small>
               </span>
             `;
             row.addEventListener("click", () => openTodoDialog(todo));
@@ -12465,7 +12501,7 @@
         const attachmentCount = todoAttachmentCount(todo);
         const assigneeCount = todoAssigneeIds(todo).length;
         item.dataset.todoId = todo.id;
-        const completedPresentation = ["execution", "material"].includes(todo.status) && (state.todoSortMode === "completed" || showManualSections);
+        const completedPresentation = ["execution", "material", "note"].includes(todo.status) && (state.todoSortMode === "completed" || showManualSections);
         const orderedPresentation = todoUsesOrderConfirmation(todo) && Boolean(todo.ordered);
         item.className = `todo-item ${todo.done ? "done" : ""} ${completedPresentation ? "completed-view-item" : ""} ${orderedPresentation ? "ordered-confirmed" : ""} ${todo.urgent ? "urgent" : ""} ${detailsExpanded ? "details-expanded" : ""}`;
         item.innerHTML = `
@@ -12494,7 +12530,7 @@
             </div>
             <div class="todo-primary-meta">
               <span class="todo-chip todo-date-chip ${todo.date ? "" : "is-empty"}" ${todo.date ? "" : 'aria-hidden="true"'}>${todo.date ? todoDateTimeLabel(todo) : "&nbsp;"}</span>
-              ${todo.status === "material" ? '<span class="todo-chip todo-assignees-chip">Dostava tretjega</span>' : `<span class="todo-chip todo-assignees-chip ${assigneeCount > 1 ? "is-multiple" : ""}">Za: ${escapeHtml(todoAssigneeNames(todo))}</span>`}
+              ${todo.status === "material" ? '<span class="todo-chip todo-assignees-chip">Dostava tretjega</span>' : todo.status === "note" ? '<span class="todo-chip todo-assignees-chip">Zapisek</span>' : `<span class="todo-chip todo-assignees-chip ${assigneeCount > 1 ? "is-multiple" : ""}">Za: ${escapeHtml(todoAssigneeNames(todo))}</span>`}
             </div>
             ${hasExpandedDetails ? todoExpandedDetailsMarkup(todo) : ""}
           </div>
@@ -13787,7 +13823,8 @@
       const calendarOnlyField = $('todoFormCalendarOnlyField');
       const isTimeEntry = timeEntryStatusIds.has($('todoFormStatus').value);
       const isMaterialEntry = $('todoFormStatus').value === 'material';
-      const lockedToOneDay = isTimeEntry || isMaterialEntry;
+      const isNoteEntry = $('todoFormStatus').value === 'note';
+      const lockedToOneDay = isTimeEntry || isMaterialEntry || isNoteEntry;
       const canShowOnlyInCalendar = Boolean(date && !lockedToOneDay);
       calendarOnlyField.classList.toggle('hidden', !canShowOnlyInCalendar);
       if (!canShowOnlyInCalendar) calendarOnly.checked = false;
@@ -13897,9 +13934,10 @@
       const completed = selectedStatus === "execution";
       const meal = selectedStatus === "meal";
       const materialEntry = selectedStatus === "material" || state.todoMaterialEntry;
+      const noteEntry = selectedStatus === "note" || state.todoNoteEntry;
       const standaloneHours = Boolean(state.todoStandaloneHours && !state.todoHoursSourceId);
       const statusField = $("todoFormStatusField");
-      const hideStatusField = !standaloneHours && (Boolean(state.todoHoursSourceId) || state.todoMealEntry || materialEntry || timeEntryStatusIds.has(selectedStatus));
+      const hideStatusField = !standaloneHours && (Boolean(state.todoHoursSourceId) || state.todoMealEntry || materialEntry || noteEntry || timeEntryStatusIds.has(selectedStatus));
       statusField.classList.toggle("hidden", hideStatusField);
       if (hideStatusField) statusField.open = false;
       const mealNote = $("todoFormMealNote");
@@ -13907,13 +13945,15 @@
       mealNote.textContent = meal ? `Malica se stranki ne obračuna. Delavcu se plača največ ${mealPaidMinutes()} min.` : "";
       $("todoFormTitle").textContent = materialEntry
         ? ($("todoFormId").value ? "Uredi vpis materiala" : "Vpis materiala")
+        : noteEntry
+          ? ($("todoFormId").value ? "Uredi zapisek" : "Nov zapisek")
         : meal ? ($("todoFormId").value ? "Uredi malico" : "Nova malica") : state.todoHoursSourceId || state.todoStandaloneHours
           ? "Vpis ur"
           : completed
             ? ($("todoFormId").value ? "Uredi vpis ur" : "Novo zaključeno opravilo")
             : $("todoFormId").value ? "Uredi opravilo" : "Novo opravilo";
       $("todoFormClientField").classList.toggle("hidden", meal);
-      $("todoFormAssigneeField").classList.toggle("hidden", meal || materialEntry);
+      $("todoFormAssigneeField").classList.toggle("hidden", meal || materialEntry || noteEntry);
       $("todoFormAttachments").classList.toggle("hidden", meal);
       if (meal) $("todoFormClientContactsField").classList.add("hidden");
       else syncTodoFormClientContacts({ preserve: true });
@@ -13939,11 +13979,11 @@
       $("todoFormHourlyRateField").classList.toggle("hidden", !showHourlyRate);
       $("todoFormWorkFromHomeField").classList.toggle("hidden", !showWorkerMileage);
       if (!showWorkerMileage) $("todoFormWorkFromHome").checked = false;
-      $("todoFormWarrantyField").classList.toggle("hidden", meal || materialEntry);
-      if (meal || materialEntry) $("todoFormWarranty").checked = false;
+      $("todoFormWarrantyField").classList.toggle("hidden", meal || materialEntry || noteEntry);
+      if (meal || materialEntry || noteEntry) $("todoFormWarranty").checked = false;
       $("todoFormImportedField").classList.add("hidden");
-      $("todoFormUrgentField").classList.toggle("hidden", timeEntry || materialEntry);
-      if (timeEntry || materialEntry) $("todoFormUrgent").checked = false;
+      $("todoFormUrgentField").classList.toggle("hidden", timeEntry || materialEntry || noteEntry);
+      if (timeEntry || materialEntry || noteEntry) $("todoFormUrgent").checked = false;
       syncTodoFormDateRangeControls();
       updateTodoFormLateTimeEntryNotice();
       syncTodoFormDirectClientSettlement();
@@ -14052,6 +14092,16 @@
       return { start: dayTimelineTime(startMinutes), end: dayTimelineTime(Math.min(23 * 60 + 45, startMinutes + 60)) };
     }
 
+    function suggestedNoteTimeRange() {
+      const now = new Date();
+      const startMinutes = Math.floor((now.getHours() * 60 + now.getMinutes()) / 15) * 15;
+      return {
+        date: dateKey(now),
+        start: dayTimelineTime(startMinutes),
+        end: dayTimelineTime(Math.min(23 * 60 + 45, startMinutes + 15))
+      };
+    }
+
     function syncReportTodoDialogNavigation(todoId, navigationIds = null) {
       if (Array.isArray(navigationIds)) state.reportTodoNavigationIds = [...new Set(navigationIds.map((id) => String(id || "")).filter(Boolean))];
       else state.reportTodoNavigationIds = [];
@@ -14078,6 +14128,7 @@
       state.todoHoursSourceId = String(todo._hoursSourceId || "");
       state.todoStandaloneHours = Boolean(todo._standaloneHours);
       state.todoMaterialEntry = Boolean(todo._materialEntry || requestedStatus === "material");
+      state.todoNoteEntry = Boolean(todo._noteEntry || requestedStatus === "note");
       state.todoDialogClientSettlement = todo.clientSettlement || { confirmed: false };
       $("todoFormDirectClientSettled").checked = false;
       $("todoFormDirectClientSettled").disabled = false;
@@ -14089,7 +14140,7 @@
         ? "Vpis ur za delavca"
         : isAdminView() ? "Dodeli delavcem" : "Delo opravil";
       state.todoMealEntry = Boolean(todo._mealEntry);
-      state.todoCreationTaskStatus = !editing && !timeEntryStatusIds.has(requestedTaskStatus) && requestedStatus !== "material" ? requestedTaskStatus : "open";
+      state.todoCreationTaskStatus = !editing && !timeEntryStatusIds.has(requestedTaskStatus) && !["material", "note"].includes(requestedStatus) ? requestedTaskStatus : "open";
       state.todoDraftSourceProjectTodoId = String(todo.sourceProjectTodoId || "");
       state.todoDraftSourceProjectTitle = String(todo.sourceProjectTitle || sourceProjectDetailsForTodo(todo).source?.title || "").trim().slice(0, 300);
       const canChooseCreationMode = !editing && !state.todoHoursSourceId;
@@ -14097,17 +14148,18 @@
       creationTabs.classList.toggle("hidden", !canChooseCreationMode);
       creationTabs.dataset.date = todo.date || "";
       creationTabs.querySelectorAll("[data-create-mode]").forEach((button) => {
-        const active = state.todoMealEntry ? button.dataset.createMode === "meal" : state.todoMaterialEntry ? button.dataset.createMode === "material" : state.todoStandaloneHours ? button.dataset.createMode === "hours" : button.dataset.createMode === "task";
+        const active = state.todoMealEntry ? button.dataset.createMode === "meal" : state.todoMaterialEntry ? button.dataset.createMode === "material" : state.todoNoteEntry ? button.dataset.createMode === "note" : state.todoStandaloneHours ? button.dataset.createMode === "hours" : button.dataset.createMode === "task";
         button.classList.toggle("active", active);
         button.setAttribute("aria-selected", String(active));
       });
       const client = findClient(todo.clientId || todo.client);
       const needsTimeSuggestion = !editing && (state.todoHoursSourceId || state.todoStandaloneHours || timeEntryStatusIds.has(requestedStatus)) && !todo.start && !todo.end;
       const suggestedTimes = needsTimeSuggestion ? suggestedTimeRange(todo) : null;
+      const noteTimeSuggestion = !editing && state.todoNoteEntry && !todo.start && !todo.end ? suggestedNoteTimeRange() : null;
       $("todoFormId").value = todo.id || "";
-      $("todoFormStart").value = todo.start || suggestedTimes?.start || "";
-      $("todoFormEnd").value = todo.end || suggestedTimes?.end || "";
-      $("todoFormDate").value = todo.date || (needsTimeSuggestion ? dateKey(new Date()) : "");
+      $("todoFormStart").value = todo.start || suggestedTimes?.start || noteTimeSuggestion?.start || "";
+      $("todoFormEnd").value = todo.end || suggestedTimes?.end || noteTimeSuggestion?.end || "";
+      $("todoFormDate").value = todo.date || (needsTimeSuggestion ? dateKey(new Date()) : noteTimeSuggestion?.date || "");
       $("todoFormEndDate").value = todo.date ? todoEndDate(todo) : "";
       $("todoFormEndDate").dataset.auto = String(!todo.date || todoEndDate(todo) === todo.date);
       $("todoFormClient").value = client?.search || todo.client || "";
@@ -14133,14 +14185,14 @@
       // opens the relevant one automatically if a required date or time is
       // missing, so a short form never hides the reason it cannot save.
       $("todoFormStatusField").open = false;
-      $("todoFormDateTimeSection").open = Boolean(state.todoHoursSourceId || state.todoStandaloneHours || timeEntryStatusIds.has(requestedStatus));
+      $("todoFormDateTimeSection").open = Boolean(state.todoHoursSourceId || state.todoStandaloneHours || state.todoNoteEntry || timeEntryStatusIds.has(requestedStatus));
       updateTodoFormStatus();
       syncTodoFormClientContacts({ preserve: true });
        autosizeTodoNarrativeFields();
        if (state.todoMealEntry && !editing) applyMealDefaults();
       const draftAssignees = Array.isArray(todo._draftAssigneeIds)
         ? todo._draftAssigneeIds
-        : state.todoMaterialEntry
+        : state.todoMaterialEntry || state.todoNoteEntry
           ? [todo.syncUser || activeWorkerId()]
           : todo._adminCreate
             ? []
@@ -14150,7 +14202,7 @@
       const selectedAssignees = editing ? todoAssigneeIds(todo) : draftAssignees;
       const isTimeEntryForm = Boolean(state.todoHoursSourceId || state.todoStandaloneHours || timeEntryStatusIds.has(requestedStatus));
       const permittedAssigneeIds = isTimeEntryForm ? timeEntryTargetUsers().map((worker) => worker.id) : null;
-      renderTodoFormAssignees(selectedAssignees, permittedAssigneeIds, { disabled: state.todoMealEntry || state.todoMaterialEntry, single: isTimeEntryForm });
+      renderTodoFormAssignees(selectedAssignees, permittedAssigneeIds, { disabled: state.todoMealEntry || state.todoMaterialEntry || state.todoNoteEntry, single: isTimeEntryForm });
       state.todoDialogPhotos = (todo.photos || []).map((photo) => ({ ...photo }));
       state.todoDialogDriveFiles = (todo.driveFiles || []).map((file) => ({ ...file }));
       renderTodoFormPhotos();
@@ -14222,11 +14274,12 @@
       const client = findTodoClient($("todoFormClient").value);
       const meal = $("todoFormStatus").value === "meal";
       const materialEntry = $("todoFormStatus").value === "material";
+      const noteEntry = $("todoFormStatus").value === "note";
       const assigneeIds = selectedTodoFormAssignees();
-      if (!meal && !materialEntry && !assigneeIds.length) {
+      if (!meal && !materialEntry && !noteEntry && !assigneeIds.length) {
         return invalidTodoForm("Izberi vsaj enega izvajalca.", $("todoFormAssignees").querySelector("input") || $("todoFormAssigneeLabel"));
       }
-      if (meal || materialEntry) assigneeIds.splice(0, assigneeIds.length, existing?.syncUser || activeWorkerId());
+      if (meal || materialEntry || noteEntry) assigneeIds.splice(0, assigneeIds.length, existing?.syncUser || activeWorkerId());
       const hourlyRate = parseBillingNumber($("todoFormHourlyRate").value, 10_000);
       const billingKm = parseBillingNumber($("todoFormBillingKm").value, 1_000_000);
       const clientKm = parseBillingNumber($("todoFormClientKm").value, 1_000_000);
@@ -14262,23 +14315,23 @@
         order: existing?.order || nextTodoOrder(),
         assigneeIds,
         syncUser: existing?.syncUser || assigneeIds[0] || activeWorkerId(),
-        urgent: timeEntryStatusIds.has(selectedStatus) || materialEntry ? false : $("todoFormUrgent").checked,
+        urgent: timeEntryStatusIds.has(selectedStatus) || materialEntry || noteEntry ? false : $("todoFormUrgent").checked,
         imported: Boolean(existing?.imported),
         ordered: todoOrderStatusIds.has($("todoFormStatus").value) && $("todoFormOrdered").checked,
-        warranty: !meal && !materialEntry && Boolean($("todoFormWarranty").checked),
+        warranty: !meal && !materialEntry && !noteEntry && Boolean($("todoFormWarranty").checked),
         sourceProjectTodoId,
         sourceProjectTitle,
-        done: selectedStatus === "execution" || materialEntry,
-        billingHourlyRate: materialEntry ? null : hourlyRate,
+        done: selectedStatus === "execution" || materialEntry || noteEntry,
+        billingHourlyRate: materialEntry || noteEntry ? null : hourlyRate,
         clientBillableMinutes,
-        billingKm: materialEntry ? 0 : billingKm,
-        workFromHome: !materialEntry && Boolean($("todoFormWorkFromHome").checked),
+        billingKm: materialEntry || noteEntry ? 0 : billingKm,
+        workFromHome: !materialEntry && !noteEntry && Boolean($("todoFormWorkFromHome").checked),
         clientContactIds: meal ? [] : [...state.todoDialogClientContactIds],
-        clientKm: meal || materialEntry ? 0 : clientKm,
-        clientVehicle: meal || materialEntry ? "personal" : clientVehicle,
+        clientKm: meal || materialEntry || noteEntry ? 0 : clientKm,
+        clientVehicle: meal || materialEntry || noteEntry ? "personal" : clientVehicle,
         materialAmount: materialEntry ? materialAmount : 0,
         externalDelivery: materialEntry,
-        calendarOnly: Boolean(!timeEntryStatusIds.has(selectedStatus) && !materialEntry && $("todoFormDate").value && $("todoFormCalendarOnly").checked),
+        calendarOnly: Boolean(!timeEntryStatusIds.has(selectedStatus) && !materialEntry && !noteEntry && $("todoFormDate").value && $("todoFormCalendarOnly").checked),
         driveFiles: state.todoDialogDriveFiles,
         photos: state.todoDialogPhotos
       };
@@ -14575,6 +14628,26 @@
       });
     }
 
+    async function openNoteEntryDialog({ draft = {} } = {}) {
+      const suggestion = suggestedNoteTimeRange();
+      await openTodoDialog({
+        ...draft,
+        _noteEntry: true,
+        _adminCreate: false,
+        date: draft.date || suggestion.date,
+        endDate: draft.endDate || draft.date || suggestion.date,
+        start: draft.start || suggestion.start,
+        end: draft.end || suggestion.end,
+        status: "note",
+        urgent: false,
+        warranty: false,
+        billingHourlyRate: null,
+        billingKm: 0,
+        clientKm: 0,
+        clientVehicle: "personal"
+      });
+    }
+
     async function duplicateTodoFromCurrent() {
       const sourceId = $("todoFormId").value;
       const source = state.todos.find((todo) => todo.id === sourceId);
@@ -14668,7 +14741,7 @@
     }
 
     function reportTodoIsCompleted(todo) {
-      return Boolean(todo.done || ["execution", "material"].includes(todo.status));
+      return Boolean(todo.done || ["execution", "material", "note"].includes(todo.status));
     }
 
     function reportClientSelection() {
@@ -14854,15 +14927,16 @@
     }
     function reportTodoLine(todo) {
       const materialEntry = todo.status === "material";
+      const noteEntry = todo.status === "note";
       const warranty = Boolean(todo.warranty);
       const correction = todo?.settlement?.client?.[0] || null;
       const workerTodos = correction ? [todo] : reportWorkerTodos(todo);
       const clientBillableHours = correction ? Number(correction.delta?.hours || 0) : todoClientBillableHours(todo);
       const workerHours = correction ? clientBillableHours : Number(workerTodos.reduce((sum, item) => sum + duration(item), 0).toFixed(2));
-      const hours = warranty || materialEntry ? 0 : (reportHoursMode() === "client_billable" || correction ? clientBillableHours : workerHours);
-      const clientKm = warranty || materialEntry ? 0 : correction ? Number(correction.delta?.clientKm || 0) : Math.max(0, Number(todo.clientKm || 0));
+      const hours = warranty || materialEntry || noteEntry ? 0 : (reportHoursMode() === "client_billable" || correction ? clientBillableHours : workerHours);
+      const clientKm = warranty || materialEntry || noteEntry ? 0 : correction ? Number(correction.delta?.clientKm || 0) : Math.max(0, Number(todo.clientKm || 0));
       const materialAmount = materialEntry ? (correction ? Number(correction.delta?.materialAmount || 0) : Math.max(0, Number(todo.materialAmount || 0))) : 0;
-      return { todo, warranty, materialEntry, hours, clientBillableHours, workerHours, workerTimes: correction ? "" : reportWorkerTimeSummary(workerTodos), clientKm, materialAmount, correction, vehicle: reportVehicleId(todo), clientBill: reportClientBill(todo) };
+      return { todo, warranty, materialEntry, noteEntry, hours, clientBillableHours, workerHours, workerTimes: correction ? "" : reportWorkerTimeSummary(workerTodos), clientKm, materialAmount, correction, vehicle: reportVehicleId(todo), clientBill: reportClientBill(todo) };
     }
 
     function reportTotals(lines) {
@@ -14987,8 +15061,8 @@
       return `<section class="client-billing-section"><strong>Priloge in dokumenti</strong>${attachmentCards ? `<div class="client-billing-attachments">${attachmentCards}</div>` : ""}${driveFiles.length ? `<div class="todo-drive-files">${renderTodoDriveFilesHtml(driveFiles)}</div>` : ""}</section>`;
     }
     function renderClientBillingRow(line) {
-      const { todo, warranty, materialEntry, hours, clientKm, vehicle, clientBill, workerTimes, correction } = line;
-      const time = materialEntry ? "Material brez vpisa ur" : (reportHoursMode() === "worker_time" ? "To\u010den \u010das izvajalcev" : (todo.start && todo.end ? todo.start + "\u2013" + todo.end : "Brez vpisane ure"));
+      const { todo, warranty, materialEntry, noteEntry, hours, clientKm, vehicle, clientBill, workerTimes, correction } = line;
+      const time = materialEntry ? "Material brez vpisa ur" : noteEntry ? "Zapisek brez vpisa ur" : (reportHoursMode() === "worker_time" ? "To\u010den \u010das izvajalcev" : (todo.start && todo.end ? todo.start + "\u2013" + todo.end : "Brez vpisane ure"));
       const eventId = todoEventId(todo);
       const selectedForClientBill = !clientBill && state.clientBillSelectedEventIds.has(eventId);
       const billSelection = clientBill
@@ -15005,6 +15079,8 @@
         ? `<span class="client-billing-warranty">Garancija \u2013 storitev se ne obra\u010duna stranki.</span>`
         : materialEntry
           ? `<span>Material brez obra\u010duna zneska</span>`
+          : noteEntry
+            ? `<span>Zapisek brez obra\u010duna ur in kilometrine</span>`
           : [
             hours || hasExplicitClientHours ? `<span>${hoursLabel}: ${reportNumber(hours)} h</span>` : "<span>Ura ni vpisana</span>",
             reportHoursMode() === "worker_time" && workerTimes ? `<span>\u010cas izvajalcev: ${escapeHtml(workerTimes)}</span>` : "",
@@ -15015,7 +15091,7 @@
         <div class="client-billing-when"><strong>${todo.date ? formatDate(todo.date) : "Brez datuma"}</strong><span>${escapeHtml(time)}</span></div>
         <div class="client-billing-main">
           <div class="client-billing-title-row"><h3><button class="client-billing-title-trigger open-report-todo" type="button" data-todo-id="${escapeHtml(todo.id)}" aria-label="Odpri vpis: ${escapeHtml(todo.title || "Brez naziva")}">${escapeHtml(todo.title || "Brez naziva")}</button></h3></div>
-          <div class="client-billing-meta">${materialEntry ? `<span>Dostava materiala</span>` : `<span>Izvajalec: ${escapeHtml(todoAssigneeNames(todo))}</span>`}${clientBill ? `<span>Obra\u010dun stranki potrjen ${escapeHtml(formatDateTime(clientBill.confirmedAt))}</span>` : ""}${clientBill?.directSettlement ? `<span>Prejeto: ${money(clientBill.receivedAmount || 0)} EUR${clientBill.creditedWorkerName ? ` &middot; v dobro ${escapeHtml(clientBill.creditedWorkerName)}` : ""}</span>` : ""}</div>
+          <div class="client-billing-meta">${materialEntry ? `<span>Dostava materiala</span>` : noteEntry ? `<span>Zapisek</span>` : `<span>Izvajalec: ${escapeHtml(todoAssigneeNames(todo))}</span>`}${clientBill ? `<span>Obra\u010dun stranki potrjen ${escapeHtml(formatDateTime(clientBill.confirmedAt))}</span>` : ""}${clientBill?.directSettlement ? `<span>Prejeto: ${money(clientBill.receivedAmount || 0)} EUR${clientBill.creditedWorkerName ? ` &middot; v dobro ${escapeHtml(clientBill.creditedWorkerName)}` : ""}</span>` : ""}</div>
           <button class="client-billing-charges client-billing-charges-trigger open-report-todo" type="button" data-todo-id="${escapeHtml(todo.id)}" aria-label="Odpri vpis: ${escapeHtml(todo.title || "Brez naziva")}">${charges}</button>
           ${details}
         </div>
@@ -15023,9 +15099,10 @@
     }
 
     function renderReportClientCard(summary) {
-      const { name, id, totals, lastDate } = summary;
+      const { name, id, key, totals, lastDate } = summary;
       const pending = summary.lines.filter((line) => !line.clientBill).length;
-      return `<button class="client-billing-client-card open-client-report" type="button" data-client-id="${escapeHtml(id)}" data-client-name="${escapeHtml(name)}">
+      const returnTarget = key === state.reportOverviewFocusKey;
+      return `<button class="client-billing-client-card open-client-report${returnTarget ? " is-return-target" : ""}" type="button" data-client-key="${escapeHtml(key)}" data-client-id="${escapeHtml(id)}" data-client-name="${escapeHtml(name)}"${returnTarget ? ' aria-current="true"' : ""}>
         <span class="client-billing-client-card-head"><strong>${escapeHtml(name)}</strong><span>${lastDate ? `Nazadnje: ${escapeHtml(formatDate(lastDate))}` : ""}</span></span>
         <span class="client-billing-client-card-meta"><span>${totals.count} ${totals.count === 1 ? "zaklju\u010dena storitev" : "zaklju\u010denih storitev"}</span><span>${reportHoursSummaryLabel()}: ${reportNumber(totals.hours)} h</span><span>${pending ? `${pending} za obra\u010dun` : "obra\u010dunano"}</span></span>
         <span class="client-billing-client-travel"><span>Osebni avto: ${escapeHtml(reportTransportText(totals.personalKm))}</span><span>Kombi: ${escapeHtml(reportTransportText(totals.vanKm))}</span></span>
@@ -15037,6 +15114,8 @@
       const detail = Boolean(selection.id || selection.name);
       $("reportBillingFilterControl").classList.toggle("hidden", detail);
       $("reportClientSortControl").classList.toggle("hidden", detail);
+      $("reportClientControl").classList.toggle("hidden", detail);
+      $("clearReportClient").classList.toggle("hidden", detail);
       $("reportClientSort").value = reportClientSortMode();
       const summaries = detail ? [] : reportClientSummaries();
       const lines = detail ? reportTodos().map(reportTodoLine) : reportOverviewLines();
@@ -15105,8 +15184,10 @@
     }
 
     function openClientReport(client, clientId = "", { fromHistory = false, returnSnapshot = null } = {}) {
-      const snapshot = returnSnapshot || reportOverviewSnapshot();
+      const clientDescriptor = reportClientDescriptor({ client, clientId });
+      const snapshot = returnSnapshot || { ...reportOverviewSnapshot(), focusKey: clientDescriptor.key };
       if (!fromHistory) {
+        state.reportOverviewFocusKey = clientDescriptor.key;
         state.reportReturnSnapshot = snapshot;
         const currentReportState = history.state?.[reportHistoryStateKey];
         if (state.token && state.user && currentReportState?.kind !== "overview") {
@@ -15155,7 +15236,13 @@
       restoreReportOverviewSnapshot(returnSnapshot);
       setView("report");
       renderReport();
-      requestAnimationFrame(() => window.scrollTo({ top: Number(returnSnapshot?.scrollY || 0), behavior: "auto" }));
+      requestAnimationFrame(() => {
+        const target = state.reportOverviewFocusKey
+          ? document.querySelector(`.open-client-report[data-client-key="${CSS.escape(state.reportOverviewFocusKey)}"]`)
+          : null;
+        if (target) target.scrollIntoView({ block: "center", behavior: "auto" });
+        else window.scrollTo({ top: Number(returnSnapshot?.scrollY || 0), behavior: "auto" });
+      });
     }
 
     function setClientBillSelectionForCurrentReport(selectAll) {
@@ -15313,7 +15400,7 @@
     function todoManualOrderDomain(todo) {
       if (!todo || todo.done || timeEntryStatusIds.has(todo.status)) return "";
       if (todo.urgent) return "urgent";
-      if (manualOrderingStatusIds.has(todo.status)) return "ordering";
+      if (todoNeedsOrdering(todo)) return "ordering";
       return "active";
     }
 
@@ -16900,6 +16987,17 @@
     $("newTodoButton").addEventListener("click", () => startTodoForDate());
     $("writeHoursButton").addEventListener("click", () => openStandaloneHoursDialog().catch((error) => showNotice(error.message)));
     $("materialEntryButton").addEventListener("click", () => openMaterialEntryDialog().catch((error) => showNotice(error.message)));
+    document.addEventListener("keydown", (event) => {
+      if ((event.key !== "Enter") || (!event.ctrlKey && !event.metaKey) || event.isComposing) return;
+      const target = event.target;
+      if (!(target instanceof HTMLElement) || !target.matches("input, textarea, select")) return;
+      const form = target.closest("form");
+      const submit = form?.querySelector('button[type="submit"]:not([disabled])');
+      if (!submit) return;
+      event.preventDefault();
+      if (typeof form.requestSubmit === "function") form.requestSubmit(submit);
+      else submit.click();
+    });
     $("todoCreationTabs").addEventListener("click", (event) => {
       const tab = event.target.closest("[data-create-mode]");
       if (!tab) return;
@@ -16908,7 +17006,8 @@
       const mode = tab.dataset.createMode;
       const wantsHours = mode === "hours";
       const wantsMaterial = mode === "material";
-      if ((wantsHours && state.todoStandaloneHours) || (wantsMaterial && state.todoMaterialEntry) || (!wantsHours && !wantsMaterial && !state.todoStandaloneHours && !state.todoMaterialEntry)) return;
+      const wantsNote = mode === "note";
+      if ((wantsHours && state.todoStandaloneHours) || (wantsMaterial && state.todoMaterialEntry) || (wantsNote && state.todoNoteEntry) || (!wantsHours && !wantsMaterial && !wantsNote && !state.todoStandaloneHours && !state.todoMaterialEntry && !state.todoNoteEntry)) return;
       const quickTransition = Boolean(state.quickCreateMode);
       if (quickTransition) state.quickCreateTransitioning = true;
       $("todoDialog").close();
@@ -16916,10 +17015,12 @@
         ? openStandaloneHoursDialog(date, { adminCreate: isAdminView(), draft })
         : wantsMaterial
           ? openMaterialEntryDialog(date, { draft })
+          : wantsNote
+            ? openNoteEntryDialog({ draft })
           : openTodoDialog({ ...draft, date, status: draft._taskStatus || "open", _adminCreate: isAdminView() })
       ).then(() => {
         if (!quickTransition) return;
-        const nextMode = wantsHours ? "hours" : wantsMaterial ? "material" : "task";
+        const nextMode = wantsHours ? "hours" : wantsMaterial ? "material" : wantsNote ? "note" : "task";
         state.quickCreateMode = nextMode;
         const current = new URL(location.href);
         current.searchParams.set("quick", nextMode);
@@ -16980,6 +17081,13 @@
 
     $("calendarViewBtn").addEventListener("click", () => setView("calendar"));
     $("todosViewBtn").addEventListener("click", () => setView("todos"));
+    $("billingTopViewBtn").addEventListener("click", () => setView("billing"));
+    $("clientBillingTopViewBtn").addEventListener("click", () => {
+      state.reportClient = "";
+      state.reportClientId = "";
+      $("reportClient").value = "";
+      setView("report");
+    });
     $("billingMenuBtn").addEventListener("click", () => {
       setView("billing");
       $("toolsMenu").open = false;
@@ -17231,6 +17339,13 @@
       }
       if (todoStatusUsesInternalCompanyClient(button.dataset.status)) applyTodoFormInternalCompanyClient();
       if (button.dataset.status === "meal") applyMealDefaults();
+      if (button.dataset.status === "note" && !$("todoFormDate").value) {
+        const suggestion = suggestedNoteTimeRange();
+        $("todoFormDate").value = suggestion.date;
+        $("todoFormEndDate").value = suggestion.date;
+        $("todoFormStart").value = suggestion.start;
+        $("todoFormEnd").value = suggestion.end;
+      }
       renderTodoStatusChoices(button.dataset.status);
       updateTodoFormStatus();
       $("todoFormStatusField").open = false;
