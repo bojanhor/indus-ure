@@ -116,6 +116,24 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
     }
   });
 
+  test("a standard gallery photo can be added to a new task before it is saved", async ({ browser }) => {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    try {
+      await localLogin(page, "ibro");
+      await page.locator("#newTodoButton").click();
+      await page.locator("#todoFormAttachmentInput").setInputFiles({
+        name: "testna-fotografija.png",
+        mimeType: "image/png",
+        buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLk7wAAAABJRU5ErkJggg==", "base64")
+      });
+      await expect(page.locator("#todoFormPhotoList img")).toBeVisible();
+      await expect(page.locator("#todoFormPhotoList")).toContainText("testna-fotografija.png");
+    } finally {
+      await context.close();
+    }
+  });
+
   test("task name suggestions contain only projects for the selected client", async ({ browser }) => {
     const context = await browser.newContext();
     const page = await context.newPage();

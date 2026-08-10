@@ -16224,9 +16224,24 @@
       throw new Error("Urejena slika je prevelika.");
     }
 
+    function isSupportedImageFile(file) {
+      const type = String(file?.type || "").toLowerCase();
+      const name = String(file?.name || "");
+      return type.startsWith("image/") || /\.(?:jpe?g|png|webp)$/i.test(name);
+    }
+
+    function imageLoadError(file) {
+      const type = String(file?.type || "").toLowerCase();
+      const name = String(file?.name || "");
+      if (type === "image/heic" || type === "image/heif" || /\.hei[cf]$/i.test(name)) {
+        return new Error("Fotografija je v formatu HEIC/HEIF, ki ga ta brskalnik ne podpira. Izberi JPG, PNG ali WEBP.");
+      }
+      return new Error("Slike ni bilo mogoče odpreti. Poskusi znova ali izberi JPG, PNG oziroma WEBP.");
+    }
+
     function resizeImageAsDataUrl(file) {
       return new Promise((resolve, reject) => {
-        if (!file.type.startsWith("image/")) {
+        if (!isSupportedImageFile(file)) {
           reject(new Error("Izberi slikovno datoteko."));
           return;
         }
@@ -16250,7 +16265,7 @@
               createdAt: new Date().toISOString()
             });
           };
-          image.onerror = () => reject(new Error("Slike ni bilo mogoče naložiti."));
+          image.onerror = () => reject(imageLoadError(file));
           image.src = reader.result;
         };
         reader.onerror = () => reject(new Error("Slike ni bilo mogoče prebrati."));
@@ -16335,7 +16350,7 @@
           createdAt: new Date().toISOString()
         };
       }
-      if (file.type.startsWith("image/")) return resizeImageAsDataUrl(file);
+      if (isSupportedImageFile(file)) return resizeImageAsDataUrl(file);
       throw new Error("Izberi sliko ali PDF datoteko.");
     }
 
