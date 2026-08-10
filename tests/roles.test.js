@@ -1265,6 +1265,32 @@ test("note is client-billed without worker payroll or time charges", () => {
   assert.ok(db.todos[0].archivedAt);
   assert.equal(db.todos[0].archivedPayrollId, "");
 });
+test("visible todos expose attachment metadata without eager media payloads", () => {
+  const attachmentId = "a".repeat(64);
+  const db = {
+    attachments: {
+      [attachmentId]: {
+        id: attachmentId,
+        data: "data:image/jpeg;base64,AA==",
+        thumbnailData: "data:image/jpeg;base64,AA==",
+        mimeType: "image/jpeg"
+      }
+    },
+    todos: [{ id: "attachment-lazy", syncUser: "bojan", title: "Priloga", photos: [{ id: "photo-lazy", attachmentId, name: "slika.jpg" }] }]
+  };
+  const visible = visibleTodosForUser(db, boss);
+  assert.equal(visible.length, 1);
+  assert.deepEqual(visible[0].photos[0], {
+    id: "photo-lazy",
+    attachmentId,
+    name: "slika.jpg",
+    data: "",
+    thumbnailData: "",
+    url: `/api/attachments/${attachmentId}`,
+    thumbnailUrl: `/api/attachments/${attachmentId}/thumbnail`,
+    mimeType: "image/jpeg"
+  });
+});
 test("delavec lahko vpisuje ure zase in za delavce, ki jih določi šef", () => {
   const workerDb = {
     users: {

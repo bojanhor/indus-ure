@@ -376,19 +376,22 @@ function hydrateTodoAttachments(db, todo) {
     ...todo,
     photos: (todo.photos || []).map((photo) => {
       const attachment = db.attachments?.[photo.attachmentId] || {};
-      const data = String(photo.data || attachment.data || "");
-      const thumbnailData = String(photo.thumbnailData || attachment.thumbnailData || "");
-      const hasStoredOriginal = Boolean(attachment.storageKey);
-      const hasStoredThumbnail = Boolean(attachment.thumbnailKey);
+      const originalData = String(attachment.data || "");
+      const hasOriginal = Boolean(attachment.storageKey || originalData);
+      const hasThumbnail = Boolean(attachment.thumbnailKey || attachment.thumbnailData);
+      const dataMimeType = (originalData.match(/^data:([^;,]+)[;,]/i) || [])[1] || "";
       return {
         ...photo,
-        data,
-        thumbnailData,
-        url: hasStoredOriginal ? attachmentApiUrl(photo.attachmentId) : "",
-        thumbnailUrl: hasStoredThumbnail ? attachmentApiUrl(photo.attachmentId, true) : "",
-        mimeType: String(attachment.mimeType || "")
+        // The bootstrap response intentionally contains metadata only. Media is
+        // fetched from the protected attachment route after the user explicitly
+        // opens it, so opening a task or report never downloads all its files.
+        data: "",
+        thumbnailData: "",
+        url: hasOriginal ? attachmentApiUrl(photo.attachmentId) : "",
+        thumbnailUrl: hasThumbnail ? attachmentApiUrl(photo.attachmentId, true) : "",
+        mimeType: String(attachment.mimeType || photo.mimeType || dataMimeType || "")
       };
-    }).filter((photo) => validTodoAttachmentDataUrl(photo.data) || Boolean(photo.url))
+    }).filter((photo) => Boolean(photo.url))
   };
 }
 

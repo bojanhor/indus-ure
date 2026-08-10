@@ -2149,6 +2149,32 @@
       font-weight: 900;
     }
 
+    .todo-attachment-file-icon {
+      width: 54px;
+      min-height: 42px;
+      display: inline-grid;
+      place-items: center;
+      flex: 0 0 54px;
+      border: 1px solid #aabec8;
+      border-radius: 7px;
+      background: #edf5f7;
+      color: #174d70;
+      font-size: 10px;
+      font-weight: 900;
+      letter-spacing: .05em;
+    }
+
+    .todo-attachment-file-icon.is-pdf { color: #a52e2e; border-color: #e0b5b5; background: #fff4f4; }
+    .todo-attachment-file-icon.is-video { color: #5b3f12; border-color: #d8c18b; background: #fff8e9; }
+
+    .todo-image-preview .todo-attachment-file-icon {
+      width: 100%;
+      min-height: 104px;
+      border: 0;
+      border-radius: 0;
+      font-size: 13px;
+    }
+
     .todo-form-attachment-thumb img {
       width: 100%;
       height: 100%;
@@ -8870,7 +8896,13 @@
     }
 
     function renderAdvancePhotos() {
-      $("advancePhotoList").innerHTML = state.advancePhotos.map((photo) => `<div class="todo-form-photo-row"><button class="todo-form-attachment-preview advance-photo-preview" type="button" data-photo-id="${escapeHtml(photo.id)}"><span class="todo-form-attachment-thumb">${isPdfAttachment(photo) ? pdfThumbnailMarkup(photo) : `<img src="${escapeHtml(attachmentSource(photo))}" alt="">`}</span><span>${escapeHtml(attachmentLabel(photo))}</span></button><input class="todo-form-photo-comment" type="text" maxlength="500" data-advance-photo-comment-id="${escapeHtml(photo.id)}" placeholder="Komentar priloge" value="${escapeHtml(photo.comment || "")}"><button class="danger remove-advance-photo" type="button" data-photo-id="${escapeHtml(photo.id)}">Odstrani</button></div>`).join("");
+      $("advancePhotoList").innerHTML = state.advancePhotos.map((photo) => {
+        const localImageDraft = !isPdfAttachment(photo) && !isVideoAttachment(photo) && /^data:image\//i.test(String(photo.data || ""));
+        const preview = localImageDraft
+          ? `<span class="todo-form-attachment-thumb"><img src="${escapeHtml(attachmentSource(photo))}" alt=""></span>`
+          : attachmentSymbolMarkup(photo);
+        return `<div class="todo-form-photo-row"><button class="todo-form-attachment-preview advance-photo-preview" type="button" data-photo-id="${escapeHtml(photo.id)}">${preview}<span>${escapeHtml(attachmentDisplayName(photo))}</span></button><input class="todo-form-photo-comment" type="text" maxlength="500" data-advance-photo-comment-id="${escapeHtml(photo.id)}" placeholder="Komentar priloge" value="${escapeHtml(photo.comment || "")}"><button class="danger remove-advance-photo" type="button" data-photo-id="${escapeHtml(photo.id)}">Odstrani</button></div>`;
+      }).join("");
     }
 
     function financialEntryPermission(entry) {
@@ -12596,17 +12628,29 @@
 
     function isPdfAttachment(photo) {
       return String(photo?.mimeType || "").toLowerCase() === "application/pdf"
-        || attachmentSource(photo).startsWith("data:application/pdf;base64,");
+        || attachmentSource(photo).startsWith("data:application/pdf;base64,")
+        || /\.pdf$/i.test(String(photo?.name || ""));
     }
 
     function isVideoAttachment(photo) {
-      return String(photo?.mimeType || "").toLowerCase().startsWith("video/");
+      return String(photo?.mimeType || "").toLowerCase().startsWith("video/")
+        || /\.(mp4|mov|m4v|webm|avi|mkv)$/i.test(String(photo?.name || ""));
     }
 
     function attachmentLabel(photo) {
       if (isVideoAttachment(photo)) return "Video";
       if (isPdfAttachment(photo)) return "PDF dokument";
       return "Fotografija";
+    }
+
+    function attachmentDisplayName(photo) {
+      return String(photo?.name || "").trim() || attachmentLabel(photo);
+    }
+
+    function attachmentSymbolMarkup(photo) {
+      const type = isVideoAttachment(photo) ? "video" : isPdfAttachment(photo) ? "pdf" : "photo";
+      const label = type === "video" ? "VIDEO" : type === "pdf" ? "PDF" : "FOTO";
+      return `<span class="todo-attachment-file-icon is-${type}" aria-hidden="true">${label}</span>`;
     }
 
     function pdfThumbnailMarkup(photo, showBadge = false) {
@@ -13425,18 +13469,14 @@
     function renderTodoPhotoHtml(todo) {
       if (!(todo.photos || []).length) return "";
       return `<div class="todo-photos-inline">${todo.photos.map((photo) => {
-        const pdf = isPdfAttachment(photo);
-        const video = isVideoAttachment(photo);
         const label = attachmentLabel(photo);
-        const media = video
-          ? `<video class="todo-video-preview" controls preload="metadata" src="${escapeHtml(attachmentSource(photo))}">Video ni podprt v tem brskalniku.</video>`
-          : pdf
-            ? `<a class="todo-pdf-preview" href="${escapeHtml(attachmentSource(photo))}" target="_blank" rel="noopener noreferrer" aria-label="Odpri PDF ${escapeHtml(label)}">${pdfThumbnailMarkup(photo, true)}</a>`
-            : `<button class="todo-image-preview" type="button" data-photo-id="${escapeHtml(photo.id)}" aria-label="Povečaj sliko ${escapeHtml(label)}"><img src="${escapeHtml(attachmentSource(photo))}" alt="${escapeHtml(label)}"></button>`;
+        const name = attachmentDisplayName(photo);
+        const media = `<button class="todo-image-preview" type="button" data-photo-id="${escapeHtml(photo.id)}" aria-label="Odpri prilogo ${escapeHtml(name)}">${attachmentSymbolMarkup(photo)}</button>`;
         return `<article class="photo-card">
           ${media}
           <div>
-            <strong>${escapeHtml(label)}</strong>
+            <strong>${escapeHtml(name)}</strong>
+            <span class="todo-meta">${escapeHtml(label)}</span>
             ${photo.comment ? `<span class="todo-meta">${escapeHtml(photo.comment)}</span>` : ""}
           </div>
         </article>`;
@@ -13700,16 +13740,14 @@
         const uploading = video && Boolean(photo.uploading);
         const uploadError = video && String(photo.uploadError || "");
         const label = uploading ? "Video se nalaga" : attachmentLabel(photo);
-        const thumb = video
-          ? "VIDEO"
-          : isPdfAttachment(photo)
-            ? pdfThumbnailMarkup(photo)
-            : `<img src="${escapeHtml(attachmentSource(photo))}" alt="">`;
+        const displayName = uploading ? label : attachmentDisplayName(photo);
+        const localImageDraft = !video && !isPdfAttachment(photo) && /^data:image\//i.test(String(photo.data || ""));
+        const thumb = localImageDraft
+          ? `<span class="todo-form-attachment-thumb"><img src="${escapeHtml(attachmentSource(photo))}" alt=""></span>`
+          : attachmentSymbolMarkup(photo);
         const preview = uploading || uploadError
-          ? `<div class="todo-form-attachment-preview" aria-live="polite"><span class="todo-form-attachment-thumb">${thumb}</span><span>${escapeHtml(label)}</span></div>`
-          : video
-            ? `<video class="todo-form-video-player" controls preload="metadata" src="${escapeHtml(attachmentSource(photo))}">Video ni podprt v tem brskalniku.</video>`
-            : `<button class="todo-form-attachment-preview" type="button" data-photo-id="${escapeHtml(photo.id)}"><span class="todo-form-attachment-thumb">${thumb}</span><span>${escapeHtml(label)}</span></button>`;
+          ? `<div class="todo-form-attachment-preview" aria-live="polite">${attachmentSymbolMarkup(photo)}<span>${escapeHtml(displayName)}</span></div>`
+          : `<button class="todo-form-attachment-preview" type="button" data-photo-id="${escapeHtml(photo.id)}">${thumb}<span>${escapeHtml(displayName)}</span></button>`;
         const metadata = photo.createdByName ? `<span class="todo-meta">Dodal: ${escapeHtml(photo.createdByName)}</span>` : "";
         const comment = `<input class="todo-form-photo-comment" type="text" maxlength="500" data-photo-comment-id="${escapeHtml(photo.id)}" placeholder="Komentar priloge" value="${escapeHtml(photo.comment || "")}">`;
         const detail = uploading
@@ -14248,7 +14286,6 @@
       $("todoDialog").showModal();
       autosizeTodoNarrativeFieldsAfterLayout();
       requestAnimationFrame(() => $("todoDialog").focus({ preventScroll: true }));
-      fillMissingPdfThumbnailsForDialog(state.todoDialogPhotos).catch((error) => console.warn(error));
       return true;
     }
 
@@ -15044,18 +15081,15 @@
       if (!photos.length && !driveFiles.length) return "";
       const attachmentCards = photos.map((photo) => {
         const video = isVideoAttachment(photo);
-        const title = escapeHtml(attachmentLabel(photo));
+        const title = escapeHtml(attachmentDisplayName(photo));
+        const kind = escapeHtml(attachmentLabel(photo));
         const attachmentId = String(photo.attachmentId || "");
         const canChooseForExport = exportable && !video && /^[a-f0-9]{64}$/.test(attachmentId);
         const includeInExport = canChooseForExport && state.reportIncludedAttachmentIds.has(attachmentId);
         const exportToggle = canChooseForExport
           ? `<label class="client-billing-attachment-export"><input type="checkbox" data-report-export-attachment-id="${escapeHtml(attachmentId)}" ${includeInExport ? "checked" : ""}><span>Vključi v izvoz</span></label>`
           : "";
-        const media = video
-          ? `<span class="client-billing-attachment"><span class="todo-drive-kind">VIDEO</span><span>Video je v aplikaciji in se ne vključuje v PDF/Gmail izvoz.</span></span>`
-          : isPdfAttachment(photo)
-            ? `<a class="client-billing-attachment" href="${escapeHtml(attachmentSource(photo))}" target="_blank" rel="noopener noreferrer"><span>${pdfThumbnailMarkup(photo)}</span><span>${title}</span></a>`
-            : `<button class="client-billing-attachment report-image-preview" type="button" data-report-todo-id="${escapeHtml(todo.id)}" data-photo-id="${escapeHtml(photo.id)}"><img src="${escapeHtml(attachmentThumbnailSource(photo))}" alt="${title}"><span>${title}</span></button>`;
+        const media = `<button class="client-billing-attachment report-image-preview" type="button" data-report-todo-id="${escapeHtml(todo.id)}" data-photo-id="${escapeHtml(photo.id)}" aria-label="Odpri prilogo ${title}">${attachmentSymbolMarkup(photo)}<span><strong>${title}</strong><small>${kind}${video ? " · povezava do videa" : ""}</small></span></button>`;
         return `<div class="client-billing-attachment-wrap">${media}${exportToggle}</div>`;
       }).join("");
       return `<section class="client-billing-section"><strong>Priloge in dokumenti</strong>${attachmentCards ? `<div class="client-billing-attachments">${attachmentCards}</div>` : ""}${driveFiles.length ? `<div class="todo-drive-files">${renderTodoDriveFilesHtml(driveFiles)}</div>` : ""}</section>`;
