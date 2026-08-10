@@ -23,7 +23,10 @@ test("nepooblaščena Google prijava ima splošno zavrnitev in trajni zapis", as
 });
 
 test("front-end naročila in foto urejevalnik ohranita dogovorjeni mobilni prikaz", async () => {
-  const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  const [html, server] = await Promise.all([
+    fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8"),
+    fs.readFile(path.join(__dirname, "..", "outputs", "server.js"), "utf8")
+  ]);
   assert.match(html, /function todoOrderingSort\(a, b\) \{[\s\S]*?orderedDifference/);
   assert.match(html, /ordered-confirmed/);
   assert.match(html, /photo-editor-main-tools/);
@@ -44,6 +47,10 @@ test("front-end naročila in foto urejevalnik ohranita dogovorjeni mobilni prika
   assert.match(html, /todoFormFooterActions/);
   assert.match(html, /id="todoFormAttachmentMenu"/);
   assert.match(html, /id="todoFormAttachmentInput"/);
+  assert.match(html, /function uploadTodoImageFile\(file, onProgress = null, csrfRetried = false\)/);
+  assert.match(html, /request\.open\("POST", "\/api\/todos\/image", true\)/);
+  assert.match(html, /Predogled se prikaže takoj po strežniški obdelavi/);
+  assert.match(html, /attachmentThumbnailSource\(photo\)/);
   assert.match(html, /id="todoFormCameraInput"[^>]*capture="environment"/);
   assert.match(html, /id="todoFormVideoInput"[^>]*accept="video\/\*"/);
   assert.match(html, /id="showTodoDriveLink"/);
@@ -87,6 +94,11 @@ test("front-end naročila in foto urejevalnik ohranita dogovorjeni mobilni prika
   assert.match(html, /\.main,\s*\.sidebar \{ padding: 8px; \}/);
   assert.match(html, /\.todo-title-row \.todo-client-name \{[\s\S]*?flex: 1 1 0;/);
   assert.doesNotMatch(html, /serverStatusPanel/);
+  assert.match(server, /async function receiveLocalTodoImage\(input = \{\}\)/);
+  assert.match(server, /TODO_IMAGE_DISPLAY_MAX_SIDE = 2_560/);
+  assert.match(server, /TODO_IMAGE_THUMBNAIL_MAX_SIDE = 420/);
+  assert.match(server, /url\.pathname === "\/api\/todos\/image" && req\.method === "POST"/);
+  assert.match(server, /\["thumbnail", inputPath, `\$\{outputPath\}\[Q=\$\{quality\},strip\]`, String\(maxSide\)\]/);
 });
 test("ročni filter loči in omogoča razvrščanje nujnih opravil", async () => {
   const [html, server] = await Promise.all([

@@ -13471,7 +13471,8 @@
       return `<div class="todo-photos-inline">${todo.photos.map((photo) => {
         const label = attachmentLabel(photo);
         const name = attachmentDisplayName(photo);
-        const media = `<button class="todo-image-preview" type="button" data-photo-id="${escapeHtml(photo.id)}" aria-label="Odpri prilogo ${escapeHtml(name)}">${attachmentSymbolMarkup(photo)}</button>`;
+        const thumbnail = !isPdfAttachment(photo) && !isVideoAttachment(photo) ? attachmentThumbnailSource(photo) : "";
+        const media = `<button class="todo-image-preview" type="button" data-photo-id="${escapeHtml(photo.id)}" aria-label="Odpri prilogo ${escapeHtml(name)}">${thumbnail ? `<img src="${escapeHtml(thumbnail)}" alt="">` : attachmentSymbolMarkup(photo)}</button>`;
         return `<article class="photo-card">
           ${media}
           <div>
@@ -13708,6 +13709,118 @@
       }
     }
 
+    function todoImageMimeType(file) {
+      const nativeType = String(file?.type || "").split(";", 1)[0].trim().toLowerCase();
+      const name = String(file?.name || "").toLowerCase();
+      const extension = name.includes(".") ? name.slice(name.lastIndexOf(".")) : "";
+      return ({
+        ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp",
+        ".gif": "image/gif", ".heic": "image/heic", ".heif": "image/heif", ".avif": "image/avif",
+        ".tif": "image/tiff", ".tiff": "image/tiff", ".bmp": "image/bmp", ".jxl": "image/jxl"
+      })[extension] || (nativeType.startsWith("image/") ? nativeType : "application/octet-stream");
+    }
+
+    function isTodoImageFile(file) {
+      return todoImageMimeType(file).startsWith("image/");
+    }
+
+    function canFallbackToBrowserImageProcessing(file) {
+      const type = todoImageMimeType(file);
+      return isSupportedImageFile(file) && type !== "image/heic" && type !== "image/heif";
+    }
+
+    function uploadTodoImageFile(file, onProgress = null, csrfRetried = false) {
+      return new Promise((resolve, reject) => {
+        const request = new XMLHttpRequest();
+        request.open("POST", "/api/todos/image", true);
+        request.responseType = "json";
+        request.withCredentials = true;
+        request.setRequestHeader("Content-Type", todoImageMimeType(file));
+        request.setRequestHeader("X-Indus-File-Name", encodeURIComponent(file.name));
+        if (state.csrfToken) request.setRequestHeader("X-CSRF-Token", state.csrfToken);
+        request.upload.addEventListener("progress", (event) => {
+          if (!event.lengthComputable) return;
+          const percent = Math.min(100, Math.round((event.loaded / event.total) * 100));
+          if (typeof onProgress === "function") onProgress(percent, event);
+        });
+        request.addEventListener("load", async () => {
+          let data = request.response;
+          if (!data || typeof data === "string") {
+            try { data = request.responseText ? JSON.parse(request.responseText) : null; } catch { data = null; }
+          }
+          const csrfFailure = request.status === 403 && /varnostna potrditev seje manjka/i.test(String(data?.error || ""));
+          if (csrfFailure && !csrfRetried && navigator.onLine) {
+            try {
+              await refreshSessionSecurityContext();
+              resolve(await uploadTodoImageFile(file, onProgress, true));
+              return;
+            } catch (error) {
+              reject(error);
+              return;
+            }
+          }
+          if (request.status < 200 || request.status >= 300 || !data?.photo) {
+            const error = new Error(data?.error || (request.status === 413
+              ? "Slika je prevelika za nalaganje. Največja dovoljena velikost je 25 MB."
+              : request.status ? "Slike ni bilo mogoče naložiti (HTTP " + request.status + ")." : "Prenos slike ni uspel."));
+            error.status = request.status;
+            reject(error);
+            return;
+          }
+          resolve(data);
+        });
+        request.addEventListener("error", () => reject(new Error("Povezava med nalaganjem slike je bila prekinjena.")));
+        request.addEventListener("abort", () => reject(new Error("Nalaganje slike je bilo prekinjeno.")));
+        request.send(file);
+      });
+    }
+
+    async function uploadTodoImageFiles(files) {
+      const selectedFiles = [...(files || [])];
+      const maxBytes = 25 * 1024 * 1024;
+      for (const file of selectedFiles) {
+        if (state.todoDialogPhotos.length >= 8) throw new Error("Največ je 8 prilog na opravilo.");
+        if (!file.size) throw new Error("Prazne slike ni mogoče dodati.");
+        if (file.size > maxBytes) throw new Error("Slika je prevelika. Največja dovoljena velikost je 25 MB.");
+        const draft = {
+          id: createLocalUuid(),
+          name: file.name || "Fotografija",
+          comment: "",
+          mimeType: todoImageMimeType(file),
+          uploading: true,
+          uploadKind: "image",
+          uploadPercent: 0,
+          createdByName: state.user?.name || ""
+        };
+        state.todoDialogPhotos.push(draft);
+        renderTodoFormPhotos();
+        try {
+          const data = await uploadTodoImageFile(file, (percent) => updateTodoVideoUploadDraft(draft, percent));
+          const draftIndex = state.todoDialogPhotos.findIndex((item) => item.id === draft.id);
+          if (draftIndex >= 0 && !state.todoDialogPhotos.some((item, itemIndex) => itemIndex !== draftIndex && item.attachmentId === data.photo.attachmentId)) {
+            state.todoDialogPhotos.splice(draftIndex, 1, data.photo);
+          }
+          renderTodoFormPhotos();
+        } catch (uploadError) {
+          if (canFallbackToBrowserImageProcessing(file)) {
+            try {
+              const fallback = await todoAttachmentFromFile(file);
+              const draftIndex = state.todoDialogPhotos.findIndex((item) => item.id === draft.id);
+              if (draftIndex >= 0) state.todoDialogPhotos.splice(draftIndex, 1, fallback);
+              renderTodoFormPhotos();
+              continue;
+            } catch (fallbackError) {
+              uploadError = fallbackError;
+            }
+          }
+          draft.uploading = false;
+          draft.uploadError = String(uploadError?.message || "Neznana napaka.");
+          renderTodoFormPhotos();
+          throw uploadError;
+        }
+      }
+    }
+
     function addTodoDriveLink() {
       const input = $("todoFormDriveLink");
       const info = todoWorkspaceFileInfo(input.value);
@@ -13737,13 +13850,14 @@
       const list = $("todoFormPhotoList");
       list.innerHTML = state.todoDialogPhotos.map((photo) => {
         const video = isVideoAttachment(photo);
-        const uploading = video && Boolean(photo.uploading);
-        const uploadError = video && String(photo.uploadError || "");
-        const label = uploading ? "Video se nalaga" : attachmentLabel(photo);
+        const uploading = Boolean(photo.uploading);
+        const uploadError = String(photo.uploadError || "");
+        const uploadLabel = photo.uploadKind === "image" ? "Slika se obdeluje" : "Video se nalaga";
+        const label = uploading ? uploadLabel : attachmentLabel(photo);
         const displayName = uploading ? label : attachmentDisplayName(photo);
-        const localImageDraft = !video && !isPdfAttachment(photo) && /^data:image\//i.test(String(photo.data || ""));
-        const thumb = localImageDraft
-          ? `<span class="todo-form-attachment-thumb"><img src="${escapeHtml(attachmentSource(photo))}" alt=""></span>`
+        const imageThumbnail = !video && !isPdfAttachment(photo) && attachmentThumbnailSource(photo);
+        const thumb = imageThumbnail
+          ? `<span class="todo-form-attachment-thumb"><img src="${escapeHtml(imageThumbnail)}" alt=""></span>`
           : attachmentSymbolMarkup(photo);
         const preview = uploading || uploadError
           ? `<div class="todo-form-attachment-preview" aria-live="polite">${attachmentSymbolMarkup(photo)}<span>${escapeHtml(displayName)}</span></div>`
@@ -13751,9 +13865,9 @@
         const metadata = photo.createdByName ? `<span class="todo-meta">Dodal: ${escapeHtml(photo.createdByName)}</span>` : "";
         const comment = `<input class="todo-form-photo-comment" type="text" maxlength="500" data-photo-comment-id="${escapeHtml(photo.id)}" placeholder="Komentar priloge" value="${escapeHtml(photo.comment || "")}">`;
         const detail = uploading
-          ? `<div class="todo-form-video-progress" data-todo-video-upload-id="${escapeHtml(photo.id)}"><span class="todo-form-video-progress-label">Nalagam video: ${Math.max(0, Math.min(100, Number(photo.uploadPercent) || 0))} %</span><progress max="100" value="${Math.max(0, Math.min(100, Number(photo.uploadPercent) || 0))}"></progress><span>Video bo dodan med priloge takoj po prenosu.</span></div>`
+          ? `<div class="todo-form-video-progress" data-todo-video-upload-id="${escapeHtml(photo.id)}"><span class="todo-form-video-progress-label">${escapeHtml(uploadLabel)}: ${Math.max(0, Math.min(100, Number(photo.uploadPercent) || 0))} %</span><progress max="100" value="${Math.max(0, Math.min(100, Number(photo.uploadPercent) || 0))}"></progress><span>${photo.uploadKind === "image" ? "Predogled se prikaže takoj po strežniški obdelavi." : "Video bo dodan med priloge takoj po prenosu."}</span></div>`
           : uploadError
-            ? `<div class="todo-form-video-progress todo-form-video-error"><span>Video ni bil dodan: ${escapeHtml(uploadError)}</span></div>`
+            ? `<div class="todo-form-video-progress todo-form-video-error"><span>${photo.uploadKind === "image" ? "Slika" : "Video"} ni bil dodan: ${escapeHtml(uploadError)}</span></div>`
             : `<div class="todo-form-attachment-detail">${video ? "<strong>Video</strong>" : ""}${comment}${metadata}</div>`;
         const actions = uploading
           ? ""
@@ -15089,7 +15203,8 @@
         const exportToggle = canChooseForExport
           ? `<label class="client-billing-attachment-export"><input type="checkbox" data-report-export-attachment-id="${escapeHtml(attachmentId)}" ${includeInExport ? "checked" : ""}><span>Vključi v izvoz</span></label>`
           : "";
-        const media = `<button class="client-billing-attachment report-image-preview" type="button" data-report-todo-id="${escapeHtml(todo.id)}" data-photo-id="${escapeHtml(photo.id)}" aria-label="Odpri prilogo ${title}">${attachmentSymbolMarkup(photo)}<span><strong>${title}</strong><small>${kind}${video ? " · povezava do videa" : ""}</small></span></button>`;
+        const thumbnail = !isPdfAttachment(photo) && !video ? attachmentThumbnailSource(photo) : "";
+        const media = `<button class="client-billing-attachment report-image-preview" type="button" data-report-todo-id="${escapeHtml(todo.id)}" data-photo-id="${escapeHtml(photo.id)}" aria-label="Odpri prilogo ${title}">${thumbnail ? `<img src="${escapeHtml(thumbnail)}" alt="">` : attachmentSymbolMarkup(photo)}<span><strong>${title}</strong><small>${kind}${video ? " · povezava do videa" : ""}</small></span></button>`;
         return `<div class="client-billing-attachment-wrap">${media}${exportToggle}</div>`;
       }).join("");
       return `<section class="client-billing-section"><strong>Priloge in dokumenti</strong>${attachmentCards ? `<div class="client-billing-attachments">${attachmentCards}</div>` : ""}${driveFiles.length ? `<div class="todo-drive-files">${renderTodoDriveFilesHtml(driveFiles)}</div>` : ""}</section>`;
@@ -17559,7 +17674,9 @@
         const remaining = Math.max(0, 8 - state.todoDialogPhotos.length);
         const files = [...event.target.files].slice(0, remaining);
         const videoFiles = files.filter(isTodoVideoFile);
-        const standardFiles = files.filter((file) => !isTodoVideoFile(file));
+        const imageFiles = files.filter((file) => !isTodoVideoFile(file) && isTodoImageFile(file));
+        const standardFiles = files.filter((file) => !isTodoVideoFile(file) && !isTodoImageFile(file));
+        if (imageFiles.length) await uploadTodoImageFiles(imageFiles);
         for (const file of standardFiles) {
           const attachment = await todoAttachmentFromFile(file);
           if (todoAttachmentsDataLength(state.todoDialogPhotos) + attachment.data.length > 4_800_000) throw new Error("Priloge so skupaj prevelike. Odstrani katero od njih.");

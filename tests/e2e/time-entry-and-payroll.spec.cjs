@@ -121,6 +121,25 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
     const page = await context.newPage();
     try {
       await localLogin(page, "ibro");
+      let serverImageUploadCalled = false;
+      await page.route("**/api/todos/image", async (route) => {
+        serverImageUploadCalled = true;
+        await route.fulfill({
+          status: 201,
+          contentType: "application/json",
+          body: JSON.stringify({
+            photo: {
+              id: "pw-image-upload",
+              attachmentId: "a".repeat(64),
+              name: "testna-fotografija.png",
+              comment: "",
+              mimeType: "image/jpeg",
+              url: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLk7wAAAABJRU5ErkJggg==",
+              thumbnailUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLk7wAAAABJRU5ErkJggg=="
+            }
+          })
+        });
+      });
       await page.locator("#newTodoButton").click();
       await page.locator("#todoFormAttachmentInput").setInputFiles({
         name: "testna-fotografija.png",
@@ -129,6 +148,7 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
       });
       await expect(page.locator("#todoFormPhotoList img")).toBeVisible();
       await expect(page.locator("#todoFormPhotoList")).toContainText("testna-fotografija.png");
+      expect(serverImageUploadCalled).toBe(true);
     } finally {
       await context.close();
     }

@@ -24,14 +24,17 @@ sudo sha256sum /var/backups/indus-ure/pre-v2.dump
 
 ```bash
 sudo apt update
-sudo apt install -y git nginx postgresql postgresql-contrib tar certbot python3-certbot-nginx
+sudo apt install -y git nginx postgresql postgresql-contrib tar certbot python3-certbot-nginx libvips-tools libheif-examples
 sudo useradd --system --home /var/lib/indus-ure --create-home --shell /usr/sbin/nologin indus-ure || true
 sudo install -d -o indus-ure -g indus-ure -m 0700 /var/lib/indus-ure/media
 sudo install -d -o indus-ure -g indus-ure -m 0700 /var/backups/indus-ure
 sudo install -d -o root -g root -m 0755 /opt/indus-ure/releases
 ```
 
-Node.js 20 LTS ali novejši mora biti že nameščen.
+Node.js 20 LTS ali novejši mora biti že nameščen. `libvips-tools` in
+`libheif-examples` sta obvezna za strežniško obdelavo vseh običajnih slik,
+vključno z HEIC/HEIF: aplikacija shrani optimizirano JPEG različico ter ločen
+thumbnail za hiter prikaz.
 
 ## 2. PostgreSQL
 

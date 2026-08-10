@@ -6,6 +6,8 @@ const crypto = require("crypto");
 const os = require("os");
 const { Readable, Transform } = require("stream");
 const { pipeline } = require("stream/promises");
+const { execFile } = require("child_process");
+const { promisify } = require("util");
 const PDFDocument = require("pdfkit");
 const { PostgresStore } = require("./postgres-store");
 const {
@@ -134,6 +136,7 @@ const clientReportDownloadTickets = new Map();
 let archiveRetentionCleanupLastAt = 0;
 let archiveRetentionCleanupPromise = null;
 let lateTimeEntryReportDeliveryScheduled = false;
+const execFileAsync = promisify(execFile);
 
 const TODO_STATUS_DEFINITIONS = Object.freeze({
   open: { label: "Čaka", googleColorId: "8" },
@@ -180,6 +183,14 @@ const MAX_TODO_THUMBNAIL_DATA_LENGTH = 100_000;
 // Video is streamed to the application's private media storage. Keep a finite
 // limit so a slow or malicious upload cannot exhaust the server disk.
 const MAX_VIDEO_BYTES = Math.min(500 * 1024 * 1024, Math.max(20 * 1024 * 1024, Number(process.env.MAX_VIDEO_BYTES || process.env.MAX_DRIVE_VIDEO_BYTES || 200 * 1024 * 1024)));
+// Photos are streamed directly to the server and converted there. This keeps
+// HEIC/HEIF usable even where the browser cannot decode it, while the saved
+// JPEG remains small enough for the editor and report viewer.
+const MAX_TODO_IMAGE_BYTES = Math.min(50 * 1024 * 1024, Math.max(5 * 1024 * 1024, Number(process.env.MAX_TODO_IMAGE_BYTES || 25 * 1024 * 1024)));
+const TODO_IMAGE_DISPLAY_MAX_SIDE = 2_560;
+const TODO_IMAGE_THUMBNAIL_MAX_SIDE = 420;
+const TODO_IMAGE_PROCESS_TIMEOUT_MS = 90_000;
+const IMAGE_PROCESSOR = String(process.env.INDUS_IMAGE_PROCESSOR || "vips").trim() || "vips";
 const PENDING_ATTACHMENT_TTL_MS = 12 * 60 * 60 * 1000;
 const TODO_CREATE_RECEIPT_TTL_MS = 90 * 24 * 60 * 60 * 1000;
 const MAX_TODO_CREATE_RECEIPTS = 10_000;
@@ -6450,6 +6461,123 @@ function videoStorageExtension(mimeType, filename = "") {
   return known[String(mimeType || "").toLowerCase()] || path.extname(String(filename || "")).toLowerCase() || ".video";
 }
 
+function imageMimeType(value, filename = "") {
+  const requested = String(value || "").split(";", 1)[0].trim().toLowerCase();
+  const extension = path.extname(String(filename || "")).toLowerCase();
+  const knownByExtension = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".webp": "image/webp",
+    ".gif": "image/gif",
+    ".heic": "image/heic",
+    ".heif": "image/heif",
+    ".avif": "image/avif",
+    ".tif": "image/tiff",
+    ".tiff": "image/tiff",
+    ".bmp": "image/bmp",
+    ".jxl": "image/jxl"
+  };
+  if (knownByExtension[extension]) return knownByExtension[extension];
+  // Do not pass arbitrary `image/*` formats (notably SVG) to a native image
+  // decoder. We accept the ordinary camera/gallery raster formats only.
+  return Object.values(knownByExtension).includes(requested) ? requested : "";
+}
+
+function imageProcessorError(error) {
+  if (error?.code === "ENOENT") return new Error("Strežniška obdelava slik ni pripravljena. Obvesti skrbnika sistema.");
+  const detail = String(error?.stderr || error?.message || "").replace(/\s+/g, " ").trim();
+  if (/timeout|timed out/i.test(detail)) return new Error("Obdelava slike je trajala predolgo. Izberi manjšo sliko.");
+  return new Error(`Slike ni bilo mogoče obdelati${detail ? `: ${detail.slice(0, 180)}` : "."}`);
+}
+
+async function createTodoJpegDerivative(inputPath, outputPath, maxSide, quality) {
+  try {
+    await execFileAsync(
+      IMAGE_PROCESSOR,
+      ["thumbnail", inputPath, `${outputPath}[Q=${quality},strip]`, String(maxSide)],
+      { timeout: TODO_IMAGE_PROCESS_TIMEOUT_MS, maxBuffer: 1_000_000, windowsHide: true }
+    );
+  } catch (error) {
+    throw imageProcessorError(error);
+  }
+  const result = await fsp.readFile(outputPath);
+  if (!IMAGE_SIGNATURES.jpeg(result)) throw new Error("Strežnik ni ustvaril veljavne JPEG slike.");
+  return result;
+}
+
+async function moveAttachmentFile(tempPath, targetPath) {
+  await fsp.mkdir(path.dirname(targetPath), { recursive: true, mode: 0o700 });
+  try {
+    await fsp.rename(tempPath, targetPath);
+    return true;
+  } catch (error) {
+    if (error.code !== "EEXIST") throw error;
+    await fsp.rm(tempPath, { force: true });
+    return false;
+  }
+}
+
+async function receiveLocalTodoImage(input = {}) {
+  const mimeType = imageMimeType(input.mimeType, input.name);
+  if (!mimeType) throw new Error("Izberi veljavno slikovno datoteko.");
+  const declaredBytes = Number(input.contentLength);
+  if (Number.isSafeInteger(declaredBytes) && declaredBytes <= 0) throw new Error("Prazne slike ni mogoče dodati.");
+  if (Number.isSafeInteger(declaredBytes) && declaredBytes > MAX_TODO_IMAGE_BYTES) throw new Error(`Slika je prevelika. Največja dovoljena velikost je ${Math.round(MAX_TODO_IMAGE_BYTES / 1024 / 1024)} MB.`);
+
+  const uploadDirectory = path.join(MEDIA_DIR, ".uploads");
+  await fsp.mkdir(uploadDirectory, { recursive: true, mode: 0o700 });
+  const uploadId = crypto.randomUUID();
+  const sourcePath = path.join(uploadDirectory, `${uploadId}.source`);
+  const displayTempPath = path.join(uploadDirectory, `${uploadId}.display.jpg`);
+  const thumbnailTempPath = path.join(uploadDirectory, `${uploadId}.thumb.jpg`);
+  let byteSize = 0;
+  const counter = new Transform({
+    transform(chunk, encoding, callback) {
+      byteSize += chunk.length;
+      if (byteSize > MAX_TODO_IMAGE_BYTES) {
+        callback(new Error(`Slika je prevelika. Največja dovoljena velikost je ${Math.round(MAX_TODO_IMAGE_BYTES / 1024 / 1024)} MB.`));
+        return;
+      }
+      callback(null, chunk);
+    }
+  });
+  input.stream.once("aborted", () => counter.destroy(new Error("Nalaganje slike je bilo prekinjeno.")));
+  let displayTargetPath = "";
+  let thumbnailTargetPath = "";
+  let displayCreated = false;
+  let thumbnailCreated = false;
+  try {
+    await pipeline(input.stream, counter, fs.createWriteStream(sourcePath, { mode: 0o600 }));
+    if (!byteSize) throw new Error("Prazne slike ni mogoče dodati.");
+    const display = await createTodoJpegDerivative(sourcePath, displayTempPath, TODO_IMAGE_DISPLAY_MAX_SIDE, 85);
+    await createTodoJpegDerivative(sourcePath, thumbnailTempPath, TODO_IMAGE_THUMBNAIL_MAX_SIDE, 72);
+    const attachmentId = crypto.createHash("sha256").update(display).digest("hex");
+    const storageKey = path.posix.join("objects", `${attachmentId}.jpg`);
+    const thumbnailKey = path.posix.join("thumbnails", `${attachmentId}.jpg`);
+    displayTargetPath = path.join(MEDIA_DIR, ...storageKey.split("/"));
+    thumbnailTargetPath = path.join(MEDIA_DIR, ...thumbnailKey.split("/"));
+    displayCreated = await moveAttachmentFile(displayTempPath, displayTargetPath);
+    thumbnailCreated = await moveAttachmentFile(thumbnailTempPath, thumbnailTargetPath);
+    return {
+      attachmentId,
+      mimeType: "image/jpeg",
+      byteSize: display.length,
+      storageKey,
+      thumbnailKey,
+      displayTargetPath,
+      thumbnailTargetPath,
+      createdFiles: { display: displayCreated, thumbnail: thumbnailCreated }
+    };
+  } catch (error) {
+    if (displayCreated && displayTargetPath) await fsp.rm(displayTargetPath, { force: true }).catch(() => {});
+    if (thumbnailCreated && thumbnailTargetPath) await fsp.rm(thumbnailTargetPath, { force: true }).catch(() => {});
+    throw error;
+  } finally {
+    await Promise.all([sourcePath, displayTempPath, thumbnailTempPath].map((file) => fsp.rm(file, { force: true }).catch(() => {})));
+  }
+}
+
 async function receiveLocalTodoVideo(input = {}) {
   const mimeType = videoMimeType(input.mimeType, input.name);
   if (!mimeType) throw new Error("Izberi veljavno video datoteko.");
@@ -7325,7 +7453,7 @@ async function handleApi(req, res) {
         ? path.resolve(MEDIA_DIR, relativeStorageKey)
         : "";
       if (localFile && localFile.startsWith(`${MEDIA_DIR}${path.sep}`) && fs.existsSync(localFile)) {
-        await sendAttachmentFile(res, { filePath: localFile, mimeType: source?.mimeType });
+        await sendAttachmentFile(res, { filePath: localFile, mimeType: attachmentMatch[2] ? source?.thumbnailMimeType || "image/jpeg" : source?.mimeType });
         return;
       }
       const dataUrl = attachmentMatch[2] ? source?.thumbnailData : source?.data;
@@ -9303,6 +9431,57 @@ async function handleApi(req, res) {
       return;
     }
 
+    if (url.pathname === "/api/todos/image" && req.method === "POST") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      let name = String(req.headers["x-indus-file-name"] || "fotografija");
+      try { name = decodeURIComponent(name); } catch { /* keep encoded value */ }
+      const received = await receiveLocalTodoImage({
+        stream: req,
+        name,
+        mimeType: req.headers["content-type"],
+        contentLength: req.headers["content-length"]
+      });
+      try {
+        const photo = await runSerializedWork(async () => {
+          const db = await readDbAsync();
+          const pending = pendingAttachmentMap(db);
+          db.attachments[received.attachmentId] = {
+            ...(db.attachments[received.attachmentId] || {}),
+            id: received.attachmentId,
+            mimeType: received.mimeType,
+            byteSize: received.byteSize,
+            storageKey: received.storageKey,
+            thumbnailKey: received.thumbnailKey,
+            thumbnailMimeType: "image/jpeg",
+            createdBy: user.id,
+            createdByName: user.name,
+            createdAt: new Date().toISOString()
+          };
+          pending[received.attachmentId] = { userId: user.id, expiresAt: Date.now() + PENDING_ATTACHMENT_TTL_MS };
+          await writeDbAsync(db);
+          return {
+            id: crypto.randomUUID(),
+            attachmentId: received.attachmentId,
+            name: name.slice(0, 120) || "Fotografija",
+            comment: "",
+            createdBy: user.id,
+            createdByName: user.name,
+            createdAt: new Date().toISOString(),
+            mimeType: received.mimeType,
+            url: attachmentApiUrl(received.attachmentId),
+            thumbnailUrl: attachmentApiUrl(received.attachmentId, true)
+          };
+        });
+        sendJson(res, 201, { photo });
+      } catch (error) {
+        if (received.createdFiles?.display) await fsp.rm(received.displayTargetPath, { force: true }).catch(() => {});
+        if (received.createdFiles?.thumbnail) await fsp.rm(received.thumbnailTargetPath, { force: true }).catch(() => {});
+        throw error;
+      }
+      return;
+    }
+
     if (url.pathname === "/api/todos/video" && req.method === "POST") {
       const user = await requireUser(req, res);
       if (!user) return;
@@ -10432,10 +10611,11 @@ async function start() {
 
   const server = http.createServer((req, res) => {
     if (req.url.startsWith("/api/")) {
-      // A video upload only creates a Drive file; it does not alter app state. Do
-      // not hold the global mutation queue while a large body is streaming.
-      const streamedVideoUpload = req.method === "POST" && req.url.startsWith("/api/todos/video");
-      if (streamedVideoUpload) {
+      // Media uploads only stage a protected attachment; they do not alter an
+      // event until its form is saved. Do not hold the global mutation queue
+      // while a large body is streaming or while an image is being converted.
+      const streamedMediaUpload = req.method === "POST" && (/^\/api\/todos\/(?:video|image)(?:[/?]|$)/).test(req.url);
+      if (streamedMediaUpload) {
         handleApi(req, res).catch((error) => handleUnexpectedRequestError(error, res));
       } else if (req.method !== "GET" || req.url.startsWith("/api/google/callback")) {
         runSerializedMutation(req, res);
