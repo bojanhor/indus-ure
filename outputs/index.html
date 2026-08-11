@@ -5279,11 +5279,17 @@
     .worker-permissions legend { padding: 0 4px; font-weight: 800; }
     .worker-permissions-list { display: flex; flex-wrap: wrap; gap: 7px 14px; }
     .worker-permissions-list label { display: inline-flex; align-items: center; gap: 6px; margin: 0; }
+    .worker-report-delivery { margin: 13px 0 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 9px; background: #f8faf7; }
+    .worker-report-delivery legend { padding: 0 4px; font-weight: 800; }
+    .worker-report-delivery-grid { display: grid; grid-template-columns: minmax(240px, 1fr) minmax(220px, 1fr); gap: 9px 12px; align-items: end; }
+    .worker-report-delivery-grid .worker-report-check { display: inline-flex; align-items: center; gap: 7px; margin: 0; }
+    .worker-report-delivery-grid .worker-report-zero { grid-column: 1 / -1; }
+    .worker-report-delivery .todo-meta { margin: 8px 0 0; }
     .worker-management-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 13px; }
     .worker-management-actions .danger { color: #a82d35; border-color: #e1b8bc; background: #fff7f7; }
     .worker-active-field { display: inline-flex; align-items: center; gap: 7px; margin: 0; }
     @media (max-width: 620px) {
-      .worker-create-grid, .worker-management-grid { grid-template-columns: 1fr; }
+      .worker-create-grid, .worker-management-grid, .worker-report-delivery-grid { grid-template-columns: 1fr; }
       .worker-management-head { align-items: flex-start; flex-direction: column; }
       .worker-management-actions { justify-content: stretch; flex-wrap: wrap; }
       .worker-management-actions button { flex: 1 1 130px; }
@@ -16857,6 +16863,7 @@
       list.innerHTML = workers.map((worker) => {
         const locked = worker.role === "boss";
         const disabled = worker.active ? "" : "disabled";
+        const dailyReport = worker.dailyReport || {};
         const targets = activeTargets.map((target) => {
           const own = target.id === worker.id;
           const checked = own || (worker.timeEntryForIds || []).includes(target.id);
@@ -16870,6 +16877,15 @@
             <label>Način obračunavanja<select data-worker-employment-type ${disabled}><option value="contractor" selected>Kooperant</option></select></label>
           </div>
           <fieldset class="worker-permissions" ${disabled}><legend>Lahko vpisuje ure za</legend><div class="worker-permissions-list">${targets || '<span class="todo-meta">Ni aktivnih delavcev.</span>'}</div></fieldset>
+          <fieldset class="worker-report-delivery" ${disabled}>
+            <legend>Dnevna poročila po e-pošti</legend>
+            <div class="worker-report-delivery-grid">
+              <label class="worker-report-check"><input type="checkbox" data-worker-report-email-enabled ${dailyReport.emailEnabled !== false ? "checked" : ""}>Pošiljaj dnevno poročilo</label>
+              <label>Prejemnik poročila<input data-worker-report-recipient type="email" maxlength="240" value="${escapeHtml(dailyReport.recipientEmail || "")}" placeholder="bojan@indus.si"></label>
+              <label class="worker-report-check worker-report-zero"><input type="checkbox" data-worker-report-zero-hours ${dailyReport.includeZeroHours ? "checked" : ""}>Pošiljaj tudi prazno poročilo za dan z 0 urami</label>
+            </div>
+            <p class="todo-meta">Opozorilo o nepopolno vpisanih urah se pošlje tudi, kadar je skupno število ur 0.</p>
+          </fieldset>
           <p class="todo-meta">${worker.email ? "Google prijava je omogočena za navedeni naslov." : "Brez Google e-pošte je delavec pripravljen v evidenci, dostop pa se vključi pozneje z vpisom e-pošte."}</p>
           <div class="worker-management-actions">
             <button class="secondary" type="button" data-save-worker ${worker.active ? "" : "disabled"}>Shrani</button>
@@ -16922,7 +16938,12 @@
           email: card.querySelector("[data-worker-email]")?.value || "",
           employmentType: "contractor",
           active: activate || Boolean(card.querySelector("[data-worker-active]")?.checked),
-          timeEntryForIds: targets
+          timeEntryForIds: targets,
+          dailyReport: {
+            emailEnabled: Boolean(card.querySelector("[data-worker-report-email-enabled]")?.checked),
+            recipientEmail: card.querySelector("[data-worker-report-recipient]")?.value || "",
+            includeZeroHours: Boolean(card.querySelector("[data-worker-report-zero-hours]")?.checked)
+          }
         })
       });
       await refreshAfterWorkerManagement(data);

@@ -460,6 +460,9 @@ test("lokalna testna instanca omogoča ločeno prijavo samo v testnem načinu", 
     assert.equal(createdWorker.email, "");
     assert.equal(createdWorker.employmentType, "contractor");
     assert.deepEqual(createdWorker.timeEntryForIds, [createdWorker.id]);
+    assert.equal(createdWorker.dailyReport.emailEnabled, true);
+    assert.equal(createdWorker.dailyReport.includeZeroHours, false);
+    assert.match(createdWorker.dailyReport.recipientEmail, /@/);
     const permissionUpdate = await request(port, `/api/workers/${encodeURIComponent("ibro")}`, {
       method: "PUT",
       headers: bossTodoHeaders,
@@ -468,10 +471,20 @@ test("lokalna testna instanca omogoča ločeno prijavo samo v testnem načinu", 
         email: "ibrahim.etemaj04@gmail.com",
         active: true,
         employmentType: "contractor",
-        timeEntryForIds: ["ibro", createdWorker.id]
+        timeEntryForIds: ["ibro", createdWorker.id],
+        dailyReport: {
+          emailEnabled: true,
+          recipientEmail: "porocila@example.test",
+          includeZeroHours: true
+        }
       })
     });
     assert.equal(permissionUpdate.status, 200, permissionUpdate.body);
+    assert.deepEqual(JSON.parse(permissionUpdate.body).worker.dailyReport, {
+      emailEnabled: true,
+      recipientEmail: "porocila@example.test",
+      includeZeroHours: true
+    });
     const assigned = await request(port, "/api/todos", {
       method: "POST",
       headers: bossTodoHeaders,

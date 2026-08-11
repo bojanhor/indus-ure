@@ -2064,6 +2064,11 @@ function normalizeDb(db = {}) {
     } else {
       user.billing.hourlyRate = currentRate;
     }
+    const dailyReport = workerDailyReportSettings(db, user);
+    if (JSON.stringify(user.dailyReport || {}) !== JSON.stringify(dailyReport)) {
+      user.dailyReport = dailyReport;
+      changed = true;
+    }
   }
 
   if (!Array.isArray(db.clients)) {
@@ -3504,6 +3509,32 @@ function normalizeWorkerProfile(id, user, users = {}) {
   return changed;
 }
 
+function dailyReportBossEmail(db) {
+  const boss = Object.values(db?.users || {}).find((user) => user?.role === "boss" && user.active !== false);
+  return String(boss?.email || GOOGLE_DRIVE_OWNER_EMAIL || "").trim().toLowerCase();
+}
+
+function workerDailyReportSettings(db, worker) {
+  const settings = worker?.dailyReport && typeof worker.dailyReport === "object" ? worker.dailyReport : {};
+  const requestedRecipient = String(settings.recipientEmail || "").trim().toLowerCase();
+  const fallbackRecipient = dailyReportBossEmail(db);
+  return {
+    // Keep the established daily-report behaviour for existing workers, while
+    // allowing the boss to turn it off per worker.
+    emailEnabled: settings.emailEnabled !== false,
+    recipientEmail: validEmailAddress(requestedRecipient) ? requestedRecipient : fallbackRecipient,
+    includeZeroHours: settings.includeZeroHours === true
+  };
+}
+
+function shouldSendWorkerDailyReport(report, settings) {
+  if (!settings?.emailEnabled || !validEmailAddress(settings.recipientEmail)) return false;
+  return Boolean(settings.includeZeroHours)
+    || Number(report?.totals?.hours || 0) > 0
+    // A warning has operational value even when the calculated total is zero.
+    || (report?.warnings || []).length > 0;
+}
+
 function workerHasBusinessData(db, userId) {
   const targetId = cleanUserId(userId);
   if (!targetId) return false;
@@ -3528,7 +3559,8 @@ function publicWorkerManagementUser(db, user) {
     role: user.role || "worker",
     active: user.active !== false,
     employmentType: user.employmentType || "contractor",
-    timeEntryForIds: timeEntryTargetIds(db, user)
+    timeEntryForIds: timeEntryTargetIds(db, user),
+    dailyReport: workerDailyReportSettings(db, user)
   };
 }
 function nonnegativeNumber(value, fallback = null, maximum = Number.MAX_SAFE_INTEGER) {
@@ -6206,12 +6238,20 @@ async function runDailyWorkerDigest({ date = "", dryRun = false } = {}) {
     .filter((user) => ["boss", "worker"].includes(user?.role) && user.active !== false)
     .sort((left, right) => String(left.name || left.id).localeCompare(String(right.name || right.id), "sl"));
   const reports = workers.map((worker) => workerDailyDigestSnapshot(db, worker.id, reportDate)).filter(Boolean);
+  const reportsWithDelivery = reports.map((report) => {
+    const settings = workerDailyReportSettings(db, db.users?.[report.workerId]);
+    return { report, settings, eligible: shouldSendWorkerDailyReport(report, settings) };
+  });
   if (dryRun) {
-    const reportStatuses = await Promise.all(reports.map(async (report) => ({
+    const reportStatuses = await Promise.all(reportsWithDelivery.map(async ({ report, settings, eligible }) => ({
       workerId: report.workerId,
       workerName: report.workerName,
       lines: report.lines.length,
       warnings: report.warnings.length,
+      emailEnabled: settings.emailEnabled,
+      recipientEmail: settings.recipientEmail,
+      includeZeroHours: settings.includeZeroHours,
+      eligible,
       sent: String((await workerDigestDeliveryStatus(db, report.workerId, reportDate))?.status || "") === "sent"
     })));
     return { date: reportDate, dryRun: true, reports: reportStatuses, skipped: workers.length - reports.length };
@@ -6219,7 +6259,8 @@ async function runDailyWorkerDigest({ date = "", dryRun = false } = {}) {
 
   await purgeExpiredWorkerDigestRuns(db);
 
-  if (!reports.length) {
+  const reportsToSend = reportsWithDelivery.filter(({ eligible }) => eligible);
+  if (!reportsToSend.length) {
     const result = { date: reportDate, sent: [], alreadySent: [], skipped: workers.length };
     scheduleAuditLog({
       actor: { id: "system", name: "Sistem" },
@@ -6243,11 +6284,12 @@ async function runDailyWorkerDigest({ date = "", dryRun = false } = {}) {
   const sent = [];
   const alreadySent = [];
   const errors = [];
-  for (const report of reports) {
+  for (const { report, settings } of reportsToSend) {
+    const recipientEmail = settings.recipientEmail;
     let reserved = false;
     let gmailSent = false;
     try {
-      const reservation = await reserveWorkerDigestDelivery(db, report, ownerEmail);
+      const reservation = await reserveWorkerDigestDelivery(db, report, recipientEmail);
       reserved = Boolean(reservation.reserved);
       if (!reserved) {
         if (String(reservation.run?.status || "") === "sending") {
@@ -6267,16 +6309,16 @@ async function runDailyWorkerDigest({ date = "", dryRun = false } = {}) {
       const message = await gmail.users.messages.send({
         userId: "me",
         requestBody: {
-          raw: gmailWorkerDigestMessageRaw({ to: ownerEmail, workerName: report.workerName, date: report.date, html, text })
+          raw: gmailWorkerDigestMessageRaw({ to: recipientEmail, workerName: report.workerName, date: report.date, html, text })
         }
       });
       gmailSent = true;
       const messageId = String(message.data?.id || "");
-      await completeWorkerDigestDelivery(db, report, ownerEmail, messageId);
+      await completeWorkerDigestDelivery(db, report, recipientEmail, messageId);
       // JSON installs have no separate digest table, so persist the delivered
       // marker only after Gmail accepted the message.
       if (!DATABASE_URL) await writeDbAsync(db);
-      sent.push({ workerId: report.workerId, workerName: report.workerName, recipientEmail: ownerEmail, messageId, lines: report.lines.length, warnings: report.warnings.length });
+      sent.push({ workerId: report.workerId, workerName: report.workerName, recipientEmail, messageId, lines: report.lines.length, warnings: report.warnings.length });
     } catch (error) {
       if (reserved && !gmailSent) {
         try {
@@ -6293,7 +6335,7 @@ async function runDailyWorkerDigest({ date = "", dryRun = false } = {}) {
     await recordOperationalAlert({ code: `worker-digest-failed-${reportDate}`, severity: "warning", title: "No\u010dni povzetek ur ni v celoti pripravljen", message });
     throw new Error(message);
   }
-  const result = { date: reportDate, sent, alreadySent, skipped: workers.length - reports.length };
+  const result = { date: reportDate, sent, alreadySent, skipped: workers.length - reportsToSend.length };
   scheduleAuditLog({
     actor: { id: "system", name: "Sistem" },
     action: "system.worker_digest.completed",
@@ -7994,6 +8036,7 @@ async function handleApi(req, res) {
         timeEntryForIds: [id],
         billing: {}
       };
+      db.users[id].dailyReport = workerDailyReportSettings(db, db.users[id]);
       recordAuditLog(db, {
         actor: user,
         action: "dodan delavec",
@@ -8044,11 +8087,29 @@ async function handleApi(req, res) {
       const timeEntryForIds = [...new Set([id, ...requestedTargets]
         .map(cleanUserId)
         .filter((targetId) => Boolean(db.users?.[targetId]) && db.users[targetId].active !== false))];
+      const currentDailyReport = workerDailyReportSettings(db, worker);
+      const requestedDailyReport = body.dailyReport && typeof body.dailyReport === "object" ? body.dailyReport : currentDailyReport;
+      const reportEmailEnabled = requestedDailyReport.emailEnabled !== false;
+      const requestedReportRecipient = String(requestedDailyReport.recipientEmail || "").trim().toLowerCase();
+      const reportRecipientEmail = requestedReportRecipient || dailyReportBossEmail(db);
+      if (reportEmailEnabled && !validEmailAddress(reportRecipientEmail)) {
+        sendJson(res, 400, { error: "Vpiši veljaven e-poštni naslov za dnevna poročila." });
+        return;
+      }
+      if (requestedReportRecipient && !validEmailAddress(requestedReportRecipient)) {
+        sendJson(res, 400, { error: "E-poštni naslov za dnevna poročila ni pravilen." });
+        return;
+      }
       worker.name = name;
       worker.email = email;
       worker.active = active;
       worker.employmentType = "contractor";
       worker.timeEntryForIds = active ? timeEntryForIds : [];
+      worker.dailyReport = {
+        emailEnabled: reportEmailEnabled,
+        recipientEmail: reportRecipientEmail,
+        includeZeroHours: requestedDailyReport.includeZeroHours === true
+      };
       for (const candidate of Object.values(db.users || {})) {
         if (!candidate || candidate.id === id) continue;
         if (Array.isArray(candidate.timeEntryForIds)) candidate.timeEntryForIds = candidate.timeEntryForIds.filter((targetId) => targetId !== id);
@@ -8059,7 +8120,7 @@ async function handleApi(req, res) {
         action: "spremenjen delavec",
         targetType: "worker",
         targetId: id,
-        context: { userId: id, name, hasGoogleLogin: Boolean(email), active: worker.active, employmentType: worker.employmentType, timeEntryForIds: worker.timeEntryForIds }
+        context: { userId: id, name, hasGoogleLogin: Boolean(email), active: worker.active, employmentType: worker.employmentType, timeEntryForIds: worker.timeEntryForIds, dailyReport: worker.dailyReport }
       });
       await writeDbAsync(db);
       sendJson(res, 200, {
@@ -10666,6 +10727,8 @@ module.exports = {
   canRecordHoursFor,
   timeEntryTargetIds,
   normalizeWorkerProfile,
+  workerDailyReportSettings,
+  shouldSendWorkerDailyReport,
   workerHasBusinessData,
   acquireEntryEditLock,
   acquireTodoEditLock,

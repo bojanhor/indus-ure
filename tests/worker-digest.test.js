@@ -18,7 +18,9 @@ const {
   workerDailyReportFilename,
   workerDigestPortalUrl,
   workerDigestRunFor,
-  workerDigestRunKey
+  workerDigestRunKey,
+  workerDailyReportSettings,
+  shouldSendWorkerDailyReport
 } = require("../outputs/server");
 
 const database = {
@@ -117,6 +119,24 @@ test("dnevni report lahko bere sef ali delavec sam", () => {
   assert.equal(canReadWorkerDailyReport({ id: "ibro", role: "worker" }, "ibro"), true);
   assert.equal(canReadWorkerDailyReport({ id: "ibro", role: "worker" }, "bojan"), false);
   assert.equal(canReadWorkerDailyReport(null, "ibro"), false);
+});
+
+test("nastavitve dnevnega poročila so po delavcu, ničurni dnevi pa so privzeto izključeni", () => {
+  const db = JSON.parse(JSON.stringify(database));
+  const defaultSettings = workerDailyReportSettings(db, db.users.ibro);
+  assert.equal(defaultSettings.emailEnabled, true);
+  assert.equal(defaultSettings.recipientEmail, "bojan@example.test");
+  assert.equal(defaultSettings.includeZeroHours, false);
+
+  const emptyReport = workerDailyDigestSnapshot(db, "bojan", "2026-07-22");
+  assert.equal(shouldSendWorkerDailyReport(emptyReport, workerDailyReportSettings(db, db.users.bojan)), false);
+  assert.equal(shouldSendWorkerDailyReport({ ...emptyReport, warnings: [{ title: "Preveri uro" }] }, workerDailyReportSettings(db, db.users.bojan)), true);
+
+  db.users.ibro.dailyReport = { emailEnabled: true, recipientEmail: "racunovodstvo@example.test", includeZeroHours: true };
+  const customSettings = workerDailyReportSettings(db, db.users.ibro);
+  assert.deepEqual(customSettings, { emailEnabled: true, recipientEmail: "racunovodstvo@example.test", includeZeroHours: true });
+  assert.equal(shouldSendWorkerDailyReport(emptyReport, { ...customSettings, emailEnabled: false }), false);
+  assert.equal(shouldSendWorkerDailyReport(emptyReport, customSettings), true);
 });
 
 test("pozni vpis ur se trajno zabeleĹľi s stanjem prej in potem", () => {
