@@ -605,7 +605,6 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
       await page.evaluate(() => {
         state.current = new Date(2025, 5, 1);
         setView("calendar");
-        rememberSessionRecoveryUiState();
       });
       await page.reload({ waitUntil: "networkidle" });
       await expect(page.locator("#app")).toBeVisible();

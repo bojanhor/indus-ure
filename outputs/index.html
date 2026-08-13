@@ -1437,8 +1437,8 @@
     .todo-order-section-chevron { width: 15px; color: var(--accent-dark); }
     .todo-order-drop-zone { min-height: 36px; }
     .todo-order-drop-zone-end {
-      min-height: 28px;
-      margin: 0 4px 4px;
+      min-height: 40px;
+      margin: 0 4px 10px;
       border-radius: 7px;
     }
     .todo-order-drop-zone-end.todo-drop-target {
@@ -5539,7 +5539,7 @@
           <label>Dr&#382;ava
             <input id="newClientCountry" value="Slovenija">
           </label>
-          <label>Zavezanec za DDV
+          <label>Zavezanec za DDV (76.a)
             <select id="newClientVatPayer">
               <option value="false">NE</option>
               <option value="true">DA</option>
@@ -6060,7 +6060,7 @@
           <label>Dr&#382;ava
             <input id="clientEditCountry">
           </label>
-          <label>Zavezanec za DDV
+          <label>Zavezanec za DDV (76.a)
             <select id="clientEditVatPayer">
               <option value="false">NE</option>
               <option value="true">DA</option>
@@ -8099,6 +8099,11 @@
         return result;
       };
       document.querySelectorAll("dialog").forEach((dialog) => {
+        dialog.addEventListener("click", (event) => {
+          if (event.target !== dialog || !dialog.open || todoDialogSaveInFlight || state.dayTimelineSaving) return;
+          event.preventDefault();
+          dialog.close();
+        });
         dialog.addEventListener("close", () => {
           unregisterClosedModalHistory(dialog);
           syncModalPageScrollLock();
@@ -9750,7 +9755,10 @@
           item.className = `day-multiday-event todo-status-color ${todoStatusClass(todo.status)} ${todo.urgent ? 'urgent' : ''} ${actualStart ? 'is-span-start' : 'is-span-continuation'} ${actualEnd ? 'is-span-end' : ''}`;
           const title = `${todo.urgent ? `NUJNO ${String.fromCharCode(183)} ` : ''}${todo.title || 'Brez naslova'}`;
           item.setAttribute('aria-label', `${title}; ${todoDateTimeLabel(todo)}`);
-          if (actualStart) {
+          // A span crosses the grid's weekly rows on Monday. Repeat its title
+          // there so the pale continuation has meaning on its own.
+          const startsNewWeek = parseDate(key)?.getDay() === 1;
+          if (actualStart || startsNewWeek) {
             const titleElement = document.createElement('span');
             titleElement.className = 'day-multiday-event-title';
             titleElement.textContent = title;
@@ -15743,7 +15751,7 @@
       if (!drag) return;
       const atPoint = document.elementFromPoint(clientX, clientY);
       const target = atPoint?.closest(".todo-item");
-      const section = atPoint?.closest("[data-todo-drop-bucket]");
+      const section = atPoint?.closest("[data-todo-drop-bucket]") || todoTailDropZoneAtPoint(clientX, clientY);
       const source = contextTodos().find((todo) => todo.id === drag.sourceId);
       let targetElement = null;
       let targetId = "";
@@ -15778,6 +15786,14 @@
       drag.hasDropTarget = Boolean(targetElement);
       updateTodoPointerDragGhost(drag);
       updateTodoPointerDragIndicator(drag);
+    }
+
+    function todoTailDropZoneAtPoint(clientX, clientY) {
+      return [...document.querySelectorAll(".todo-order-drop-zone-end[data-todo-drop-bucket]")]
+        .map((zone) => ({ zone, rect: zone.getBoundingClientRect() }))
+        .filter(({ rect }) => clientX >= rect.left - 12 && clientX <= rect.right + 12
+          && clientY >= rect.top - 12 && clientY <= rect.bottom + 72)
+        .sort((left, right) => Math.abs(clientY - left.rect.top) - Math.abs(clientY - right.rect.top))[0]?.zone || null;
     }
 
     function todoPointerDragScrollBounds() {
@@ -17726,9 +17742,12 @@
     });
     $("todoFormAssignees").addEventListener("change", () => {
       const hourlyRate = $("todoFormHourlyRate");
-      if (!isAdminView() || hourlyRate.dataset.autoRate !== "true" || $("todoFormStatus").value !== "execution") return;
+      const isTimeEntry = Boolean(state.todoHoursSourceId || state.todoStandaloneHours || timeEntryStatusIds.has($("todoFormStatus").value));
+      if (!isAdminView() || $("todoFormStatus").value !== "execution") return;
       const assignees = selectedTodoFormAssignees();
-      if (assignees.length === 1) hourlyRate.value = workerDefaultHourlyRate(assignees[0]);
+      if (assignees.length !== 1 || (!isTimeEntry && hourlyRate.dataset.autoRate !== "true")) return;
+      hourlyRate.value = workerDefaultHourlyRate(assignees[0]);
+      hourlyRate.dataset.autoRate = "true";
     });
     $("todoFormClient").addEventListener("focus", renderTodoClientSuggestions);
     $("todoFormClient").addEventListener("input", () => {
@@ -18627,7 +18646,10 @@
       clearOfflineTodoRetry();
       updateOfflineSyncNotice().catch(() => {});
     });
-    window.addEventListener("pagehide", releaseTodoEditLockOnPageHide);
+    window.addEventListener("pagehide", () => {
+      rememberSessionRecoveryUiState();
+      releaseTodoEditLockOnPageHide();
+    });
 
     initializeModalBackNavigation();
     window.addEventListener("popstate", (event) => {

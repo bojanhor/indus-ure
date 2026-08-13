@@ -250,6 +250,8 @@ test("večdnevno opravilo dobi povezani mesečni trak in varne kontrole vnosa", 
   assert.match(html, /function appendMonthMultiDayLanes\(day, key, weekIndex, layout\)/);
   assert.match(html, /day-multiday-event-title/);
   assert.match(html, /is-span-continuation/);
+  assert.match(html, /const startsNewWeek = parseDate\(key\)\?\.getDay\(\) === 1/);
+  assert.match(html, /if \(actualStart \|\| startsNewWeek\)/);
   assert.match(html, /!multiDayLayout\.todoIds\.has\(todo\.id\)/);
   assert.match(html, /function syncTodoFormDateRangeControls\(\)/);
   assert.match(html, /field\.disabled = multiDay \|\| isMaterialEntry;/);
@@ -257,6 +259,18 @@ test("večdnevno opravilo dobi povezani mesečni trak in varne kontrole vnosa", 
   assert.match(html, /function todoPointerDragScrollBounds\(\)/);
   assert.match(html, /hasDropTarget: false/);
   assert.match(html, /if \(!active \|\| !hasDropTarget\) return;/);
+  assert.match(html, /function todoTailDropZoneAtPoint\(clientX, clientY\)/);
+  assert.match(html, /todoTailDropZoneAtPoint\(clientX, clientY\)/);
+  assert.match(html, /min-height: 40px/);
+});
+test("obrazci, obnova pogleda in tarifa pri vpisu ur imajo varne uporabniške kontrole", async () => {
+  const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  assert.match(html, /event\.target !== dialog \|\| !dialog\.open \|\| todoDialogSaveInFlight \|\| state\.dayTimelineSaving/);
+  assert.match(html, /dialog\.close\(\);/);
+  assert.match(html, /window\.addEventListener\("pagehide", \(\) => \{\s*rememberSessionRecoveryUiState\(\);/);
+  assert.match(html, /Zavezanec za DDV \(76\.a\)/);
+  assert.match(html, /const isTimeEntry = Boolean\(state\.todoHoursSourceId \|\| state\.todoStandaloneHours/);
+  assert.match(html, /hourlyRate\.value = workerDefaultHourlyRate\(assignees\[0\]\)/);
 });
 test("client billing supports bulk selection and safe client reassignment", async () => {
   const [html, server] = await Promise.all([
