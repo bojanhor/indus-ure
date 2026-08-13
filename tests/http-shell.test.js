@@ -640,7 +640,7 @@ test("completion request UI and authenticated link flow are present", async () =
   assert.match(html, /id="completionRequestDialog"/);
   assert.match(html, /id="completionRequestTodoSelect"/);
   assert.match(html, /id="completionRequestRecipients"/);
-  assert.match(html, /id="requestCompletionMenuBtn"/);
+  assert.doesNotMatch(html, /id="requestCompletionMenuBtn"/, "Zahtevek za dopolnitev ostane le znotraj posameznega opravila.");
   assert.match(html, /recipientUserIds/);
   assert.match(html, /function openCompletionRequestFromLink\(\)/);
   assert.match(html, /requestTodoCompletion/);
@@ -728,13 +728,14 @@ test("hitre bližnjice odprejo pravo formo in filter zaključenih opravil ostane
   assert.match(html, /state\.todoSortMode === "completed"[\s\S]{0,360}todoHasConfirmedClientBill\(todo\)/);
   assert.match(html, /localStorage\.setItem\(todoBillingFilterStorageKey\(\), JSON\.stringify/);
 });
-test("monthly drag autoscrolls at the edge and mouse drag starts immediately", async () => {
+test("monthly drag autoscrolls at the edge while a short mouse click still opens the event", async () => {
   const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
   assert.match(html, /const MONTH_TODO_AUTO_SCROLL_EDGE = 108;/);
   assert.match(html, /function tickMonthTodoPointerDragAutoScroll\(timestamp\)/);
   assert.match(html, /cancelAnimationFrame\(drag\.autoScrollFrame\)/);
   assert.match(html, /drag\.autoScrollFrame = requestAnimationFrame\(tickMonthTodoPointerDragAutoScroll\)/);
-  assert.match(html, /if \(event\.pointerType === "mouse"\) activateMonthTodoPointerDrag\(\);/);
+  assert.match(html, /drag\.holdTimer = window\.setTimeout\(activateMonthTodoPointerDrag, MONTH_TODO_DRAG_HOLD_MS\);/);
+  assert.match(html, /if \(drag\.pointerType === "touch"\)[\s\S]{0,600}else \{[\s\S]{0,400}activateMonthTodoPointerDrag\(\);/);
   assert.match(html, /state\.quickCreateMode = mode;/);
   assert.match(html, /\$\("todoDialog"\)\.addEventListener\("close", finishQuickCreateLink\);/);
 });

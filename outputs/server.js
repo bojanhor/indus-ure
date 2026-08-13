@@ -545,19 +545,28 @@ function normalizeUndoJournal(raw) {
     // during the migration: retaining them would keep the performance issue.
     .map((record) => ({ record, patch: normalizeUndoPatch(record?.patch) }))
     .filter(({ record, patch }) => record && typeof record === "object" && patch)
-    .map(({ record, patch }) => ({
-      id: /^[a-f0-9-]{16,80}$/i.test(String(record.id || "")) ? String(record.id) : crypto.randomUUID(),
-      createdAt: Number.isFinite(Date.parse(record.createdAt)) ? String(record.createdAt) : new Date().toISOString(),
-      actorId: cleanUserId(record.actorId) || "system",
-      actorName: cleanAuditActorName(record.actorName, "Sistem"),
-      action: cleanAuditLogText(record.action || "Spremenjeni podatki", 220) || "Spremenjeni podatki",
-      route: cleanAuditLogText(record.route || "", 180),
-      patch,
-      undoneAt: Number.isFinite(Date.parse(record.undoneAt)) ? String(record.undoneAt) : "",
-      undoneBy: cleanUserId(record.undoneBy),
-      undoneByName: cleanAuditActorName(record.undoneByName, ""),
-      undoAction: cleanAuditLogText(record.undoAction || "", 220)
-    }))
+    .map(({ record, patch }) => {
+      const title = (patch.arrays?.todos?.changes || [])
+        .map((change) => String(change?.before?.title || "").trim())
+        .find(Boolean) || "";
+      const rawAction = cleanAuditLogText(record.action || "Spremenjeni podatki", 220) || "Spremenjeni podatki";
+      const action = title && /\u00bbbrez naslova\u00ab/iu.test(rawAction)
+        ? rawAction.replace(/\u00bbbrez naslova\u00ab/iu, `\u00bb${title.slice(0, 100)}\u00ab`)
+        : rawAction;
+      return {
+        id: /^[a-f0-9-]{16,80}$/i.test(String(record.id || "")) ? String(record.id) : crypto.randomUUID(),
+        createdAt: Number.isFinite(Date.parse(record.createdAt)) ? String(record.createdAt) : new Date().toISOString(),
+        actorId: cleanUserId(record.actorId) || "system",
+        actorName: cleanAuditActorName(record.actorName, "Sistem"),
+        action,
+        route: cleanAuditLogText(record.route || "", 180),
+        patch,
+        undoneAt: Number.isFinite(Date.parse(record.undoneAt)) ? String(record.undoneAt) : "",
+        undoneBy: cleanUserId(record.undoneBy),
+        undoneByName: cleanAuditActorName(record.undoneByName, ""),
+        undoAction: cleanAuditLogText(record.undoAction || "", 220)
+      };
+    })
     .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))
     .slice(0, UNDO_JOURNAL_LIMIT);
 }
@@ -2291,6 +2300,11 @@ function normalizeDb(db = {}) {
       next.workFromHome = workFromHome;
       changed = true;
     }
+    const commuteEligible = TIME_ENTRY_TODO_STATUSES.has(next.status) && Boolean(next.commuteEligible);
+    if (next.commuteEligible !== commuteEligible) {
+      next.commuteEligible = commuteEligible;
+      changed = true;
+    }
     if (completed && next.urgent) {
       next.urgent = false;
       changed = true;
@@ -2727,13 +2741,14 @@ async function appendAuditLogToPostgres(input) {
 async function persistedAuditLogForUser(user, limit = 500) {
   if (!DATABASE_URL || !user) return [];
   await ensureAuditLogStore();
+  const safeLimit = Math.max(1, Math.min(AUDIT_LOG_MAX_EVENTS, Number(limit) || 500));
   const result = await getPgPool().query(
     `select id, actor_id, actor_name, action, target_type, target_id, severity, context, created_at
        from indus_audit_log
       where created_at >= now() - interval '30 days'
       order by created_at desc, id desc
       limit $1`,
-    [Math.max(1, Math.min(501, Number(limit) || 500))]
+    [safeLimit]
   );
   const db = {
     auditLog: normalizeAuditLog(result.rows.map((row) => ({
@@ -3509,6 +3524,25 @@ function normalizeWorkerProfile(id, user, users = {}) {
   return changed;
 }
 
+function auditLogCsvCell(value) {
+  const text = typeof value === "string" ? value : JSON.stringify(value ?? "");
+  return '"' + String(text).replaceAll('"', '""') + '"';
+}
+
+function auditLogCsv(events = []) {
+  const header = ["Čas", "Uporabnik", "Dejanje", "Vrsta", "ID", "Stopnja", "Kontekst"];
+  const rows = events.map((event) => [
+    event.createdAt || "",
+    event.actorName || event.actorId || "",
+    event.action || "",
+    event.targetType || "",
+    event.targetId || "",
+    event.severity || "info",
+    event.context || {}
+  ]);
+  return "\uFEFF" + [header, ...rows].map((row) => row.map(auditLogCsvCell).join(",")).join("\r\n") + "\r\n";
+}
+
 function dailyReportBossEmail(db) {
   const boss = Object.values(db?.users || {}).find((user) => user?.role === "boss" && user.active !== false);
   return String(boss?.email || GOOGLE_DRIVE_OWNER_EMAIL || "").trim().toLowerCase();
@@ -3716,6 +3750,7 @@ function payrollLineForTodo(db, todo, workerId = "") {
     hourlyRate,
     workerKm,
     workFromHome: Boolean(todo.workFromHome),
+    commuteEligible: Boolean(todo.commuteEligible),
     commuteKm: 0,
     km: workerKm,
     kmRate,
@@ -3743,7 +3778,7 @@ function withDailyCommuteInPayroll(db, workerId, lines = []) {
     // the one return journey reimbursement.
     // A meal is paid time but never represents a journey to work.  It must
     // neither receive the daily commute nor consume that day's commute slot.
-    const addCommute = line.status !== "meal" && !Boolean(line.workFromHome) && !appliedDates.has(line.date);
+    const addCommute = line.status !== "meal" && Boolean(line.commuteEligible) && !Boolean(line.workFromHome) && !appliedDates.has(line.date);
     if (addCommute) appliedDates.add(line.date);
     const lineCommuteKm = addCommute ? commuteKm : 0;
     const km = Number((workerKm + lineCommuteKm).toFixed(2));
@@ -5412,6 +5447,7 @@ function todoForUserRole(user, db, previous, todo) {
       billingHourlyRate: isClientOnly ? null : (isPaidTime ? previousRate ?? defaultRate : previousRate),
       billingKm: isMeal || isClientOnly ? 0 : isPaidTime ? nonnegativeNumber(todo.billingKm, previousKm, 1_000_000) : previousKm,
       workFromHome: isPaidTime && !isClientOnly && Boolean(todo.workFromHome),
+      commuteEligible: isPaidTime && Boolean(previous?.commuteEligible ?? todo.commuteEligible),
       warranty: isMeal || isClientOnly ? false : Boolean(todo.warranty),
       imported: preserveImported,
       clientBillableMinutes: isCompleted ? previousClientBillableMinutes : null,
@@ -5425,6 +5461,7 @@ function todoForUserRole(user, db, previous, todo) {
     billingHourlyRate: isClientOnly ? null : (isPaidTime ? nonnegativeNumber(todo.billingHourlyRate, previousRate ?? defaultRate, 10_000) : previousRate),
     billingKm: isMeal || isClientOnly ? 0 : isPaidTime ? nonnegativeNumber(todo.billingKm, previousKm, 1_000_000) : previousKm,
     workFromHome: isPaidTime && !isClientOnly && Boolean(todo.workFromHome),
+    commuteEligible: isPaidTime && Boolean(previous?.commuteEligible ?? todo.commuteEligible),
     warranty: isMeal || isClientOnly ? false : Boolean(todo.warranty),
     imported: !isPaidTime && preserveImported,
     clientBillableMinutes: isCompleted ? requestedClientBillableMinutes : null,
@@ -5800,6 +5837,7 @@ function cleanTodo(input) {
     done: status === "execution" || isClientOnly,
     hoursNeedsReview: isTimeEntry && Boolean(input.hoursNeedsReview),
     workFromHome: isTimeEntry && Boolean(input.workFromHome),
+    commuteEligible: isTimeEntry && Boolean(input.commuteEligible),
     billingHourlyRate: isClientOnly ? null : nonnegativeNumber(input.billingHourlyRate, null, 10_000),
     clientBillableMinutes: status === "execution" ? normalizedClientBillableMinutes(input.clientBillableMinutes) : null,
     billingKm: isMeal || isClientOnly ? 0 : nonnegativeNumber(input.billingKm, null, 1_000_000),
@@ -6054,6 +6092,41 @@ function validateTodo(todo, { requireClientId = false } = {}) {
     return !validGoogleDriveId(file?.fileId) || !info || info.fileId !== file.fileId || (file.kind && info.kind !== file.kind);
   })) return "Zunanja povezava mora biti veljaven Google Dokument ali Preglednica.";
   return "";
+}
+
+function timeOfDayMinutes(value) {
+  const match = /^(\d{2}):(\d{2})$/.exec(String(value || ""));
+  if (!match) return null;
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  return hours >= 0 && hours <= 23 && minutes >= 0 && minutes <= 59 ? hours * 60 + minutes : null;
+}
+
+function timeEntryConflictForWorker(db, candidate, workerId, { ignoreIds = [] } = {}) {
+  if (!TIME_ENTRY_TODO_STATUSES.has(String(candidate?.status || ""))) return null;
+  const date = String(candidate?.date || "");
+  const start = timeOfDayMinutes(candidate?.start);
+  const end = timeOfDayMinutes(candidate?.end);
+  const userId = cleanUserId(workerId || candidate?.syncUser || candidate?.createdBy);
+  if (!date || start === null || end === null || end <= start || !userId) return null;
+  const ignored = new Set((Array.isArray(ignoreIds) ? ignoreIds : []).map(String));
+  return (db?.todos || []).find((todo) => {
+    if (!todo || ignored.has(String(todo.id || "")) || isTrashedTodo(todo)) return false;
+    if (!TIME_ENTRY_TODO_STATUSES.has(String(todo.status || ""))) return false;
+    if (String(todo.syncUser || todo.createdBy || "") !== userId || String(todo.date || "") !== date) return false;
+    const otherStart = timeOfDayMinutes(todo.start);
+    const otherEnd = timeOfDayMinutes(todo.end);
+    return otherStart !== null && otherEnd !== null && start < otherEnd && otherStart < end;
+  }) || null;
+}
+
+function timeEntryConflictMessage(db, candidate, workerId, options = {}) {
+  const conflict = timeEntryConflictForWorker(db, candidate, workerId, options);
+  if (!conflict) return "";
+  const cleanWorkerId = cleanUserId(workerId);
+  const workerName = db?.users?.[cleanWorkerId]?.name || cleanWorkerId || "delavec";
+  const title = String(conflict.title || "drug vpis ur").slice(0, 120);
+  return `Za ${workerName} se ura prekriva z vpisom »${title}« (${conflict.start}–${conflict.end}).`;
 }
 
 function stampTodoPhotos(todo, user) {
@@ -7584,6 +7657,29 @@ async function handleApi(req, res) {
       const result = await restoreBrowserBackup(upload, current);
       clearSessionCookie(req, res);
       sendJson(res, 200, { ok: true, ...result, requiresLogin: true });
+      return;
+    }
+
+    if (url.pathname === "/api/audit-log.csv" && req.method === "GET") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      if (user.role !== "boss") {
+        sendJson(res, 403, { error: "Revizijski dnevnik vidi samo šef." });
+        return;
+      }
+      const scope = url.searchParams.get("scope") === "all" ? "all" : "recent";
+      const limit = scope === "all" ? AUDIT_LOG_MAX_EVENTS : 500;
+      const events = DATABASE_URL
+        ? await persistedAuditLogForUser(user, limit)
+        : visibleAuditLogForUser(await readDbAsync(), user).slice(0, limit);
+      const filename = scope === "all" ? "indus-ure-dnevnik-celoten.csv" : "indus-ure-dnevnik-zadnjih-500.csv";
+      const csv = auditLogCsv(events);
+      res.writeHead(200, securityHeaders({
+        "Content-Type": "text/csv; charset=utf-8",
+        "Content-Disposition": attachmentContentDisposition(filename),
+        "Cache-Control": "no-store"
+      }));
+      res.end(csv);
       return;
     }
 
@@ -9442,6 +9538,16 @@ async function handleApi(req, res) {
         sendJson(res, 400, { error: "Vnos ur se vpisuje posebej za enega delavca." });
         return;
       }
+      if (TIME_ENTRY_TODO_STATUSES.has(todo.status)) {
+        // Dnevna pot se začne obračunavati šele za vpise, ustvarjene po
+        // uvedbi tega pravila; stari zgodovinski vnosi ostanejo nedotaknjeni.
+        todo = { ...todo, commuteEligible: true };
+        const conflictMessage = timeEntryConflictMessage(db, { ...todo, syncUser: assigneeIds[0] }, assigneeIds[0]);
+        if (conflictMessage) {
+          sendJson(res, 409, { error: conflictMessage, code: "time_entry_overlap" });
+          return;
+        }
+      }
       const assignmentGroupId = crypto.randomUUID();
       const createdTodoIds = [];
       assigneeIds.forEach((assigneeId, index) => {
@@ -10865,6 +10971,9 @@ module.exports = {
   googleWorkspaceFileInfo,
   cleanTodoDriveFiles,
   validateTodo,
+  timeEntryConflictForWorker,
+  timeEntryConflictMessage,
+  auditLogCsv,
   visibleDebtsForUser,
   visibleEntriesForUser,
   visibleTodosForUser,

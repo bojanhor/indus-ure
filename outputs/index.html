@@ -3374,9 +3374,18 @@
 
     .date-input-with-clear {
       display: grid;
-      grid-template-columns: minmax(0, 1fr) 42px;
+      grid-template-columns: minmax(0, 1fr) auto auto 42px;
       gap: 6px;
       align-items: stretch;
+    }
+
+    .date-input-with-clear .date-jump-button {
+      min-width: 48px;
+      min-height: 42px;
+      padding: 0 9px;
+      border-radius: 8px;
+      white-space: nowrap;
+      font-weight: 800;
     }
 
     .date-input-with-clear .date-clear-button {
@@ -5371,7 +5380,6 @@
               <button class="menu-action view-menu-action" id="billingMenuBtn" type="button">Obra&#269;un delavcev</button>
               <button class="menu-action view-menu-action admin-only" id="clientBillingMenuBtn" type="button">Obra&#269;un strank</button>
               <button class="menu-action view-menu-action" id="clientsMenuBtn" type="button">Stranke</button>
-              <button class="menu-action admin-only" id="requestCompletionMenuBtn" type="button">Zahtevaj dopolnitev</button>
               <span class="tools-menu-label">Hitre bližnjice</span>
               <div class="tools-menu-quick-links" aria-label="Povezave za namizne bližnjice">
                 <div class="tools-menu-quick-link"><span>Nov dogodek</span><a href="?quick=task" data-quick-open="task">Odpri</a><button type="button" data-copy-quick-link="task">Kopiraj povezavo</button></div>
@@ -5663,7 +5671,7 @@
         </div>
         <div class="modal-head-actions">
           <button class="primary day-timeline-control" id="saveDayTimeline" type="button" title="Shrani spremembe dnevnega pogleda" aria-label="Shrani spremembe dnevnega pogleda" disabled>&#10003;</button>
-          <button class="icon-btn day-timeline-control" id="closeDayTimeline" type="submit" title="Prekli&#269;i spremembe" aria-label="Prekli&#269;i spremembe in zapri dnevni pregled">&times;</button>
+          <button class="icon-btn day-timeline-control" id="closeDayTimeline" type="button" title="Prekli&#269;i spremembe" aria-label="Prekli&#269;i spremembe in zapri dnevni pregled">&times;</button>
         </div>
       </div>
       <div class="day-timeline-toolbar">
@@ -5837,6 +5845,8 @@
               <label>Datum od
                 <span class="date-input-with-clear">
                   <input id="todoFormDate" type="date">
+                  <button class="secondary date-jump-button" id="setTodoFormDateToday" type="button">Danes</button>
+                  <button class="secondary date-jump-button" id="advanceTodoFormDate" type="button" title="Naslednji dan" aria-label="Naslednji dan">+1</button>
                   <button class="date-clear-button" id="clearTodoFormDate" type="button" title="Odstrani datum" aria-label="Odstrani datum">&times;</button>
                 </span>
               </label>
@@ -5880,21 +5890,6 @@
         <div class="todo-form-attachments" id="todoFormAttachments">
           <div class="todo-form-attachments-head">
             <strong>Priloge</strong>
-            <details class="todo-attachment-menu" id="todoFormAttachmentMenu">
-              <summary class="secondary todo-attachment-add"><span aria-hidden="true">&#128206;</span><span>Dodaj prilogo</span></summary>
-              <div class="todo-attachment-menu-options" role="group" aria-label="Vrsta priloge">
-                <label class="secondary">Fotografiraj
-                  <input class="hidden-file" id="todoFormCameraInput" type="file" accept="image/*" capture="environment">
-                </label>
-                <label class="secondary">Slika ali PDF
-                  <input class="hidden-file" id="todoFormAttachmentInput" type="file" accept="image/*,application/pdf,.pdf" multiple>
-                </label>
-                <label class="secondary">Video (do 200 MB)
-                  <input class="hidden-file" id="todoFormVideoInput" type="file" accept="video/*" multiple>
-                </label>
-                <button class="secondary" id="showTodoDriveLink" type="button">Povezava Docs/Sheets</button>
-              </div>
-            </details>
           </div>
           <div id="todoFormPhotoList"></div>
           <div class="todo-drive-files" id="todoFormDriveFileList"></div>
@@ -5904,6 +5899,21 @@
             <button class="secondary" id="addTodoDriveLink" type="button">Dodaj povezavo</button>
           </div>
           <div class="todo-upload-status" id="todoFormVideoStatus" role="status" aria-live="polite" hidden><progress id="todoFormVideoProgress" max="100" value="0"></progress><span></span></div>
+          <details class="todo-attachment-menu" id="todoFormAttachmentMenu">
+            <summary class="secondary todo-attachment-add"><span aria-hidden="true">&#128206;</span><span>Dodaj prilogo</span></summary>
+            <div class="todo-attachment-menu-options" role="group" aria-label="Vrsta priloge">
+              <label class="secondary">Fotografiraj
+                <input class="hidden-file" id="todoFormCameraInput" type="file" accept="image/*" capture="environment">
+              </label>
+              <label class="secondary">Slika ali PDF
+                <input class="hidden-file" id="todoFormAttachmentInput" type="file" accept="image/*,application/pdf,.pdf" multiple>
+              </label>
+              <label class="secondary">Video (do 200 MB)
+                <input class="hidden-file" id="todoFormVideoInput" type="file" accept="video/*" multiple>
+              </label>
+              <button class="secondary" id="showTodoDriveLink" type="button">Povezava Docs/Sheets</button>
+            </div>
+          </details>
         </div>
         <div class="audit-box hidden" id="todoFormAudit"></div>
         <div class="audit-box hidden" id="todoFormSourceProject">
@@ -6264,6 +6274,10 @@
       </div>
       <div class="modal-body">
         <p class="audit-log-retention" id="auditLogRetention"></p>
+        <div class="modal-actions audit-log-export-actions">
+          <button class="secondary" id="exportAuditLogRecent" type="button">CSV zadnjih 500</button>
+          <button class="secondary" id="exportAuditLogAll" type="button">CSV celoten dnevnik</button>
+        </div>
         <div class="audit-log-list" id="auditLogList" aria-live="polite"></div>
       </div>
     </form>
@@ -8769,7 +8783,7 @@
         // Delo od doma se normalno plača, ne sme pa sprožiti poti dom–fabrika.
         // Malica je plačan čas, vendar sama po sebi ne pomeni poti v službo.
         // Ne sme dobiti kilometrine in ne sme porabiti dnevne poti za teren.
-        const addCommute = line.status !== "meal" && !Boolean(line.workFromHome) && !appliedDates.has(line.date);
+        const addCommute = line.status !== "meal" && Boolean(line.commuteEligible) && !Boolean(line.workFromHome) && !appliedDates.has(line.date);
         if (addCommute) appliedDates.add(line.date);
         const commuteKm = addCommute ? dailyCommuteKm : 0;
         const km = Number((workerKm + commuteKm).toFixed(2));
@@ -8977,18 +8991,36 @@
     }
     async function deleteAdvanceFromBilling(id) {
       if (!await showAppConfirm("Izbrišem založeni znesek?")) return;
-      const data = await api(`/api/advances/${encodeURIComponent(id)}`, { method: "DELETE" });
-      state.advances = data.advances || state.advances;
-      await loadAll();
+      const before = state.advances;
+      state.advances = before.filter((item) => item.id !== id);
       renderBillingView();
+      try {
+        const data = await api(`/api/advances/${encodeURIComponent(id)}`, { method: "DELETE" });
+        state.advances = data.advances || state.advances;
+        await loadAll();
+        renderBillingView();
+      } catch (error) {
+        state.advances = before;
+        renderBillingView();
+        throw error;
+      }
     }
 
     async function deletePersonalPurchaseFromBilling(id) {
       if (!await showAppConfirm("Izbrišem osebni nakup?")) return;
-      const data = await api(`/api/personal-purchases/${encodeURIComponent(id)}`, { method: "DELETE" });
-      state.personalPurchases = data.purchases || state.personalPurchases;
-      await loadAll();
+      const before = state.personalPurchases;
+      state.personalPurchases = before.filter((item) => item.id !== id);
       renderBillingView();
+      try {
+        const data = await api(`/api/personal-purchases/${encodeURIComponent(id)}`, { method: "DELETE" });
+        state.personalPurchases = data.purchases || state.personalPurchases;
+        await loadAll();
+        renderBillingView();
+      } catch (error) {
+        state.personalPurchases = before;
+        renderBillingView();
+        throw error;
+      }
     }
     async function deletePayrollPaymentFromBilling(payrollId, paymentId) {
       if (!await showAppConfirm("Izbrišem evidentirano izplačilo? Obračun bo znova odprt za preostanek izplačila.")) return;
@@ -9571,7 +9603,9 @@
       if (state.todoSortMode === "imported") return list.sort(todoDateSort);
       if (state.todoSortMode === "date") return list.filter((todo) => todo.date && !timeEntryStatusIds.has(todo.status)).sort(todoDateSort);
       if (state.todoSortMode === "order") return list.filter((todo) => todoNeedsOrdering(todo)).sort(todoOrderingSort);
-      if (state.todoSortMode === "open") return list.filter((todo) => todo.status === "open").sort(todoManualBucketSort);
+      // Opravilo, kjer je v besedilu jasno zapisano »naroči«, mora biti
+      // vidno tako v Naroči kot tudi med čakajočimi opravili.
+      if (state.todoSortMode === "open") return list.filter((todo) => todo.status === "open" || todoUsesTextOrdering(todo)).sort(todoManualBucketSort);
       if (state.todoSortMode === "in_progress") return list.filter((todo) => todo.status === "in_progress").sort(todoManualBucketSort);
       if (state.todoSortMode === "client") return list.filter((todo) => !timeEntryStatusIds.has(todo.status) || todo.status === "execution").sort(todoSort);
       if (state.todoSortMode === "manual") {
@@ -9857,8 +9891,9 @@
       monthTodoPointerDrag = drag;
       try { item.setPointerCapture?.(event.pointerId); } catch {}
       item.classList.add("month-drag-armed");
-      if (event.pointerType === "mouse") activateMonthTodoPointerDrag();
-      else drag.holdTimer = window.setTimeout(activateMonthTodoPointerDrag, MONTH_TODO_DRAG_HOLD_MS);
+      // Kratek klik mora odpreti opravilo. Vlečenje se začne šele po kratkem
+      // pridržanju oziroma pri miški, ko kazalec zares zapusti kartico.
+      drag.holdTimer = window.setTimeout(activateMonthTodoPointerDrag, MONTH_TODO_DRAG_HOLD_MS);
     }
 
     function updateMonthTodoPointerDrag(event) {
@@ -9882,10 +9917,12 @@
             event.preventDefault();
             panMonthTodoPointerGesture(drag, event);
           } else {
-            clearMonthTodoPointerDrag();
+            // Pri miški je premik z gumbom pritisnjen jasen znak vlečenja;
+            // zato ga ne zamenjamo za klik in ga aktiviramo takoj.
+            activateMonthTodoPointerDrag();
           }
         }
-        return;
+        if (!drag.active) return;
       }
       event.preventDefault();
       updateMonthTodoPointerDragTarget(drag, event.clientX, event.clientY);
@@ -11490,7 +11527,7 @@
           const workerKm = Number(todo.billingKm || 0);
           const workAmount = Number((hours * hourlyRate).toFixed(2));
           const kmAmount = Number((workerKm * kmRate).toFixed(2));
-          return { todoId: todo.id, assignmentGroupId: todo.assignmentGroupId || todo.id, workerId, date: todo.date, start: todo.start, end: todo.end, title: todo.title, client: todo.client, status: todo.status, minutes, unpaidMealMinutes, hours, hourlyRate, workerKm, workFromHome: Boolean(todo.workFromHome), commuteKm: 0, km: workerKm, kmRate, workAmount, kmAmount, totalAmount: Number((workAmount + kmAmount).toFixed(2)) };
+          return { todoId: todo.id, assignmentGroupId: todo.assignmentGroupId || todo.id, workerId, date: todo.date, start: todo.start, end: todo.end, title: todo.title, client: todo.client, status: todo.status, minutes, unpaidMealMinutes, hours, hourlyRate, workerKm, workFromHome: Boolean(todo.workFromHome), commuteEligible: Boolean(todo.commuteEligible), commuteKm: 0, km: workerKm, kmRate, workAmount, kmAmount, totalAmount: Number((workAmount + kmAmount).toFixed(2)) };
         })
         .filter((line) => line.hours > 0)
         .sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.start).localeCompare(String(b.start)) || String(a.title).localeCompare(String(b.title)));
@@ -15967,15 +16004,24 @@
       };
     }
 
+    let clientSearchRenderTimer = 0;
     function handleClientSearchInput() {
       const hasQuery = Boolean($("clientSearch").value.trim());
       if (hasQuery) rememberSearchReturnState();
       else state.searchReturnState = null;
       $("clearClientSearch").classList.toggle("hidden", !hasQuery);
-      renderSearch();
+      window.clearTimeout(clientSearchRenderTimer);
+      if (!hasQuery) {
+        renderSearch();
+        return;
+      }
+      // Celoten seznam dogodkov je na telefonu velik; filtriranje ob vsakem
+      // znaku zato izvedemo šele, ko uporabnik za hip neha tipkati.
+      clientSearchRenderTimer = window.setTimeout(renderSearch, 120);
     }
 
     function clearClientSearchAndRestoreView() {
+      window.clearTimeout(clientSearchRenderTimer);
       const previous = state.searchReturnState;
       $("clientSearch").value = "";
       $("clearClientSearch").classList.add("hidden");
@@ -16776,6 +16822,24 @@
       $("auditLogDialog").showModal();
     }
 
+    async function exportAuditLogCsv(scope = "recent") {
+      const response = await fetch(`/api/audit-log.csv?scope=${encodeURIComponent(scope)}`, { credentials: "same-origin", cache: "no-store" });
+      if (!response.ok) {
+        let message = "Izvoz dnevnika ni uspel.";
+        try { message = (await response.json()).error || message; } catch {}
+        throw new Error(message);
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = scope === "all" ? "indus-ure-dnevnik-celoten.csv" : "indus-ure-dnevnik-zadnjih-500.csv";
+      document.body.append(anchor);
+      anchor.click();
+      anchor.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
+    }
+
     function undoActionTimestamp(action) {
       const value = String(action?.createdAt || "");
       return Number.isFinite(Date.parse(value)) ? Date.parse(value) : 0;
@@ -16803,7 +16867,7 @@
         const current = Boolean(action.canUndo);
         const stateLabel = undone
           ? "Razveljavljeno" + (action.undoneByName ? " · " + action.undoneByName : "")
-          : current ? "Naslednje za razveljavitev" : "Najprej novejše dejanje";
+          : "";
         const button = current
           ? '<button class="primary" type="button" data-undo-history-id="' + escapeHtml(action.id) + '">Razveljavi</button>'
           : "";
@@ -16812,7 +16876,7 @@
         return '<article class="undo-history-action' + (current ? " is-current" : "") + (undone ? " is-undone" : "") + '">' +
           '<div><strong>' + escapeHtml(action.action || "Spremenjeni podatki") + '</strong>' +
           '<p>' + escapeHtml(actor) + ' · ' + escapeHtml(time) + (undone && action.undoAction ? '<br>' + escapeHtml(action.undoAction) : "") + '</p></div>' +
-          '<div class="actions"><span class="undo-history-state">' + escapeHtml(stateLabel) + '</span>' + button + '</div></article>';
+          '<div class="actions">' + (stateLabel ? '<span class="undo-history-state">' + escapeHtml(stateLabel) + '</span>' : '') + button + '</div></article>';
       }).join("");
     }
 
@@ -17088,6 +17152,8 @@
       undoHistoryAction(button.dataset.undoHistoryId).catch((error) => showNotice(error.message));
     });
     $("auditLogBtn").addEventListener("click", () => openAuditLog().catch((error) => showNotice(error.message)));
+    $("exportAuditLogRecent").addEventListener("click", () => exportAuditLogCsv("recent").catch((error) => showNotice(error.message)));
+    $("exportAuditLogAll").addEventListener("click", () => exportAuditLogCsv("all").catch((error) => showNotice(error.message)));
     $("closeAuditLog").addEventListener("click", () => $("auditLogDialog").close());
     $("notificationsList").addEventListener("click", async (event) => {
       const button = event.target.closest(".read-notification");
@@ -17527,6 +17593,19 @@
       syncTodoFormEndDate();
       updateTodoFormLateTimeEntryNotice();
     });
+    $("setTodoFormDateToday").addEventListener("click", () => {
+      $("todoFormDate").value = dateKey(new Date());
+      syncTodoFormEndDate();
+      updateTodoFormLateTimeEntryNotice();
+      $("todoFormDate").focus();
+    });
+    $("advanceTodoFormDate").addEventListener("click", () => {
+      const current = $("todoFormDate").value || dateKey(new Date());
+      $("todoFormDate").value = shiftDateKey(current, 1);
+      syncTodoFormEndDate();
+      updateTodoFormLateTimeEntryNotice();
+      $("todoFormDate").focus();
+    });
     $("todoFormEndDate").addEventListener("change", () => {
       const date = $("todoFormDate").value;
       const endDate = $("todoFormEndDate");
@@ -17667,7 +17746,7 @@
     $("requestTodoCompletion").addEventListener("click", () => {
       try { openCompletionRequestDialog($("todoFormId").value); } catch (error) { showNotice(error.message); }
     });
-    $("requestCompletionMenuBtn").addEventListener("click", () => {
+    $("requestCompletionMenuBtn")?.addEventListener("click", () => {
       try {
         closeToolsMenu();
         openCompletionRequestDialog();
@@ -17946,6 +18025,13 @@
     $("dayTimelineFit").addEventListener("click", fitDayTimeline);
     $("saveDayTimeline").addEventListener("click", () => {
       saveDayTimelineDrafts({ closeAfterSave: true }).catch((error) => showNotice(error.message));
+    });
+    $("closeDayTimeline").addEventListener("click", () => {
+      if (state.dayTimelineSaving) {
+        showNotice("Dnevni pogled se še shranjuje.");
+        return;
+      }
+      $("dayTimelineDialog").close();
     });
     $("prevDayTimeline").addEventListener("click", () => navigateDayTimeline(-1));
     $("nextDayTimeline").addEventListener("click", () => navigateDayTimeline(1));

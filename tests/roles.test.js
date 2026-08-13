@@ -76,7 +76,9 @@ const {
   visibleEntriesForUser,
   visibleTodosForUser,
   payrollMinutesForTodo,
-  validateTodo
+  validateTodo,
+  timeEntryConflictForWorker,
+  timeEntryConflictMessage
 } = require("../outputs/server");
 
 const boss = { id: "bojan", role: "boss" };
@@ -627,9 +629,9 @@ test("delo od doma ohrani ročno kilometrino, vendar ne sproži poti v službo",
     settings: { billing: { workerOwnVehicleKmRate: 0.22 } },
     payrolls: [],
     todos: [
-      { id: "remote-first", syncUser: "ibro", status: "execution", date: "2026-07-20", start: "08:00", end: "09:00", title: "Od doma", billingKm: 3, workFromHome: true },
-      { id: "onsite-later", syncUser: "ibro", status: "execution", date: "2026-07-20", start: "10:00", end: "11:00", title: "Na terenu", billingKm: 1, workFromHome: false },
-      { id: "remote-only", syncUser: "ibro", status: "execution", date: "2026-07-21", start: "08:00", end: "09:00", title: "Samo doma", billingKm: 2, workFromHome: true }
+      { id: "remote-first", syncUser: "ibro", status: "execution", date: "2026-07-20", start: "08:00", end: "09:00", title: "Od doma", billingKm: 3, workFromHome: true, commuteEligible: true },
+      { id: "onsite-later", syncUser: "ibro", status: "execution", date: "2026-07-20", start: "10:00", end: "11:00", title: "Na terenu", billingKm: 1, workFromHome: false, commuteEligible: true },
+      { id: "remote-only", syncUser: "ibro", status: "execution", date: "2026-07-21", start: "08:00", end: "09:00", title: "Samo doma", billingKm: 2, workFromHome: true, commuteEligible: true }
     ]
   };
   const payroll = buildPayrollSnapshot(db, "ibro", { from: "2026-07-20", to: "2026-07-21" }, { status: "draft" });
@@ -649,7 +651,7 @@ test("malica sama ne sproži poti v službo", () => {
     todos: [
       { id: "meal-only", syncUser: "ibro", status: "meal", date: "2026-07-20", start: "08:00", end: "09:00", title: "Malica" },
       { id: "meal-before-work", syncUser: "ibro", status: "meal", date: "2026-07-21", start: "08:00", end: "09:00", title: "Malica" },
-      { id: "onsite-after-meal", syncUser: "ibro", status: "execution", date: "2026-07-21", start: "10:00", end: "11:00", title: "Teren" }
+      { id: "onsite-after-meal", syncUser: "ibro", status: "execution", date: "2026-07-21", start: "10:00", end: "11:00", title: "Teren", commuteEligible: true }
     ]
   };
   const payroll = buildPayrollSnapshot(db, "ibro", { from: "2026-07-20", to: "2026-07-21" }, { status: "draft" });
@@ -676,15 +678,40 @@ test("pot v sluzbo se obracuna enkrat na dejanski delovni dan", () => {
     settings: { billing: { workerOwnVehicleKmRate: 0.22 } },
     payrolls: [],
     todos: [
-      { id: "day-one-first", syncUser: "ibro", status: "execution", date: "2026-07-20", start: "08:00", end: "09:00", title: "Prvo", billingKm: 3 },
-      { id: "day-one-second", syncUser: "ibro", status: "execution", date: "2026-07-20", start: "10:00", end: "11:00", title: "Drugo", billingKm: 1 },
-      { id: "day-two", syncUser: "ibro", status: "execution", date: "2026-07-21", start: "08:00", end: "09:00", title: "Tretje", billingKm: 0 }
+      { id: "day-one-first", syncUser: "ibro", status: "execution", date: "2026-07-20", start: "08:00", end: "09:00", title: "Prvo", billingKm: 3, commuteEligible: true },
+      { id: "day-one-second", syncUser: "ibro", status: "execution", date: "2026-07-20", start: "10:00", end: "11:00", title: "Drugo", billingKm: 1, commuteEligible: true },
+      { id: "day-two", syncUser: "ibro", status: "execution", date: "2026-07-21", start: "08:00", end: "09:00", title: "Tretje", billingKm: 0, commuteEligible: true }
     ]
   };
   const payroll = buildPayrollSnapshot(db, "ibro", { from: "2026-07-20", to: "2026-07-21" }, { status: "draft" });
   assert.deepEqual(payroll.lines.map((line) => [line.workerKm, line.commuteKm, line.km]), [[3, 14, 17], [1, 0, 1], [0, 14, 14]]);
   assert.equal(payroll.km, 32);
   assert.equal(payroll.kmAmount, 7.04);
+});
+
+test("stari vnosi ne dobijo poti v službo, novi pa samo enkrat na dan", () => {
+  const db = {
+    users: { ibro: { id: "ibro", name: "Ibro", billing: { hourlyRate: 20, commuteKmOneWay: 7 } } },
+    settings: { billing: { workerOwnVehicleKmRate: 0.22 } },
+    payrolls: [],
+    todos: [
+      { id: "legacy", syncUser: "ibro", status: "execution", date: "2026-08-12", start: "08:00", end: "09:00", title: "Stari vpis" },
+      { id: "new", syncUser: "ibro", status: "execution", date: "2026-08-12", start: "10:00", end: "11:00", title: "Nov vpis", commuteEligible: true }
+    ]
+  };
+  const payroll = buildPayrollSnapshot(db, "ibro", { from: "2026-08-12", to: "2026-08-12" }, { status: "draft" });
+  assert.deepEqual(payroll.lines.map((line) => [line.todoId, line.commuteKm]), [["legacy", 0], ["new", 14]]);
+});
+
+test("nov vpis ur ne sme prekrivati obstoječega vpisa istega delavca", () => {
+  const db = {
+    users: { ibro: { id: "ibro", name: "Ibro" } },
+    todos: [{ id: "old", syncUser: "ibro", status: "execution", date: "2026-08-13", start: "08:00", end: "10:00", title: "Montaža" }]
+  };
+  const conflict = timeEntryConflictForWorker(db, { status: "execution", date: "2026-08-13", start: "09:45", end: "11:00" }, "ibro");
+  assert.equal(conflict?.id, "old");
+  assert.match(timeEntryConflictMessage(db, { status: "execution", date: "2026-08-13", start: "09:45", end: "11:00" }, "ibro"), /Montaža/);
+  assert.equal(timeEntryConflictForWorker(db, { status: "execution", date: "2026-08-13", start: "10:00", end: "11:00" }, "ibro"), null);
 });
 test("delna izplačila se seštejejo in zmanjšajo preostanek", () => {
   const db = { users: { ibro: { id: "ibro" } } };
