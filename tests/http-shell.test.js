@@ -150,6 +150,7 @@ test("obračunsko obdobje samodejno sledi novemu dnevu, ročna izbira pa ostane 
   assert.match(html, /data-billing-range-preset="previous-month"/);
   assert.match(html, /data-billing-range-preset="today"/);
   assert.match(html, /data-billing-range-preset="yesterday"/);
+  assert.match(html, /data-billing-range-preset="open-to-yesterday"/);
   assert.match(html, /function billingAvailableEntryDates\(workerId, now = new Date\(\)\)/);
   assert.match(html, /function billingFallbackEntryDate\(workerId, targetDate, now = new Date\(\)\)/);
   assert.match(html, /function applyBillingQuickRange\(preset, now = new Date\(\)\)/);
@@ -159,6 +160,7 @@ test("obračunsko obdobje samodejno sledi novemu dnevu, ročna izbira pa ostane 
   assert.match(html, /billingStaleDraftNotice/);
   assert.match(html, /function lockedBillingFinancialIds\(workerId, field\)/);
   assert.match(html, /const from = previous \? billingDateAfter\(previous\.to\)/);
+  assert.match(html, /Do včeraj ni odprtih dni za obračun\./);
   assert.match(html, /saveBillingRangeSelection\(billingWorkerId\(\), \{ from: \$\("billingFrom"\)\.value, to: \$\("billingTo"\)\.value \}\);/);
   assert.match(html, /saveBillingRangeSelection\(state\.billingWorkerId, \{ from: button\.dataset\.from, to: button\.dataset\.to \}\);/);
 });
@@ -1025,6 +1027,9 @@ test("dnevni obračun prikaže ločene postavke in ne povprečne urne tarife", a
   const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
   const server = await fs.readFile(path.join(__dirname, "..", "outputs", "server.js"), "utf8");
   assert.match(html, /function billingHoursBreakdown\(lines\)/);
+  assert.match(html, /function billingDayBreakdownMarkup\(lines, totals\)/);
+  assert.match(html, /Skupaj prevoz/);
+  assert.match(html, /Skupaj za izplačilo/);
   assert.match(html, /group\.type === "meal" \? "malica " : ""/);
   assert.match(html, /function billingUnpaidMealMinutes\(line\)/);
   assert.doesNotMatch(html, /const hourlyRate = day\.hours > 0 \? Number\(\(day\.workAmount \/ day\.hours\)/);

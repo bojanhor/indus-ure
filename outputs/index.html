@@ -990,6 +990,7 @@
     .billing-quick-ranges { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
     .billing-quick-ranges > span { color: var(--muted); font-size: 12px; font-weight: 800; }
     .billing-quick-ranges button { min-height: 34px; padding: 5px 9px; white-space: nowrap; }
+    .billing-quick-ranges [data-billing-range-preset="open-to-yesterday"] { font-weight: 800; }
     .billing-range-picker { min-height: 40px; white-space: nowrap; }
     .billing-range-calendar { display: grid; gap: 10px; }
     .billing-range-calendar-head { display: grid; grid-template-columns: 40px minmax(0, 1fr) 40px; align-items: center; gap: 8px; text-align: center; }
@@ -1031,9 +1032,17 @@
     .billing-explorer-row { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; text-align: left; align-items: center; padding: 10px; border: 1px solid var(--line); border-radius: 9px; background: #f8fbf8; color: var(--ink); }
     .billing-explorer-row span:last-child { grid-column: 1 / -1; color: var(--muted); font-size: 12px; }
     .billing-day { overflow: hidden; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--ink); }
-    .billing-day-overview { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; gap: 10px; align-items: center; padding: 12px; border: 0; background: #fff; color: var(--ink); text-align: left; font: inherit; font-weight: 800; cursor: pointer; }
+    .billing-day-overview { width: 100%; display: grid; grid-template-columns: minmax(116px, auto) minmax(0, 1fr); grid-template-areas: "date breakdown"; gap: 12px; align-items: start; padding: 12px; border: 0; background: #fff; color: var(--ink); text-align: left; font: inherit; font-weight: 800; cursor: pointer; }
     .billing-day-overview:hover, .billing-day-overview:focus-visible { background: #f4f8f5; }
-    .billing-day-hours { color: var(--muted); font-size: 13px; white-space: normal; text-align: right; }
+    .billing-day-date { grid-area: date; display: inline-flex; align-items: center; gap: 6px; min-width: 0; padding-top: 2px; }
+    .billing-day-breakdown { grid-area: breakdown; display: grid; gap: 4px; min-width: 0; }
+    .billing-day-breakdown-line { display: grid; grid-template-columns: minmax(0, 1fr) max-content; gap: 10px; align-items: baseline; min-width: 0; font-size: 13px; line-height: 1.25; font-variant-numeric: tabular-nums; }
+    .billing-day-breakdown-line > span { min-width: 0; overflow-wrap: anywhere; }
+    .billing-day-breakdown-line > strong { min-width: 96px; color: var(--accent-dark); text-align: right; white-space: nowrap; }
+    .billing-day-breakdown-line.is-detail { color: var(--muted); font-weight: 700; }
+    .billing-day-breakdown-line.is-total { margin-top: 3px; padding-top: 6px; border-top: 1px solid var(--line); font-weight: 900; }
+    .billing-day-breakdown-line.is-payout { color: var(--accent-dark); font-size: 14px; }
+    .billing-day-breakdown-line.is-payout > strong { color: var(--accent-dark); font-size: 15px; }
     .billing-financial-row { display: grid; grid-template-columns: 104px minmax(0, 1fr) auto auto; gap: 9px; align-items: center; padding: 8px 12px; border-top: 1px solid var(--line); background: #fbfdfb; color: var(--muted); font-size: 13px; }
     .billing-financial-date { color: var(--ink); font-weight: 800; white-space: nowrap; }
     .billing-financial-only .billing-financial-row:first-child { border-top: 0; }
@@ -1057,7 +1066,6 @@
       line-height: 1;
       vertical-align: -3px;
     }
-    .billing-day-work, .billing-day-km { color: var(--accent-dark); font-size: 13px; font-weight: 900; white-space: normal; }
     .billing-task-row { display: grid; grid-template-columns: 92px minmax(0, 1fr) 64px 92px; gap: 10px; align-items: center; padding: 10px 12px; border-top: 1px solid var(--line); }
     .billing-task-row small { color: var(--muted); }
     .billing-task-time,
@@ -5170,16 +5178,15 @@
       .billing-quick-ranges { width: 100%; }
       .billing-quick-ranges > span { width: 100%; }
       .billing-quick-ranges button { flex: 1 1 calc(50% - 4px); }
+      .billing-quick-ranges [data-billing-range-preset="open-to-yesterday"] { flex-basis: 100%; }
       .billing-summary-row { grid-template-columns: minmax(0, 1fr) minmax(0, auto) minmax(92px, auto); gap: 7px; padding: 9px 10px; }
       .billing-summary-formula { font-size: 12px; }
       .billing-summary-value { min-width: 92px; font-size: 15px; }
       .billing-summary-row.is-emphasis .billing-summary-label,
       .billing-summary-row.is-emphasis .billing-summary-value { font-size: 16px; }
-      .billing-day-overview { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "date hours" "work km"; row-gap: 5px; }
-      .billing-day-overview > strong { grid-area: date; align-self: center; }
-      .billing-day-hours { grid-area: hours; }
-      .billing-day-work { grid-area: work; }
-      .billing-day-km { grid-area: km; }
+      .billing-day-overview { grid-template-columns: minmax(0, 1fr); grid-template-areas: "date" "breakdown"; gap: 8px; }
+      .billing-day-breakdown-line { gap: 8px; }
+      .billing-day-breakdown-line > strong { min-width: 88px; }
       .billing-financial-row { grid-template-columns: 82px minmax(0, 1fr) auto auto; gap: 6px; padding: 8px 9px; }
       .billing-task-row { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "time hours" "info pay"; gap: 4px 8px; align-items: start; }
       .billing-task-time { grid-area: time; }
@@ -5459,6 +5466,7 @@
             <button class="secondary" type="button" data-billing-range-preset="previous-month">Pretekli mesec</button>
             <button class="secondary" type="button" data-billing-range-preset="today">Danes</button>
             <button class="secondary" type="button" data-billing-range-preset="yesterday">Včeraj</button>
+            <button class="secondary" type="button" data-billing-range-preset="open-to-yesterday">Vse odprto do včeraj</button>
           </div>
         </div>
         <div class="billing-stale-draft hidden" id="billingStaleDraftNotice" role="status"></div>
@@ -11316,6 +11324,16 @@
       } else if (preset === "previous-month") {
         const previousMonthEnd = billingDateBefore(currentMonthStart);
         range = { from: billingMonthStart(previousMonthEnd), to: previousMonthEnd };
+      } else if (preset === "open-to-yesterday") {
+        const yesterday = billingDateBefore(today);
+        const previous = latestCompletedPayroll(workerId);
+        const availableDates = billingAvailableEntryDates(workerId, now).filter((date) => date <= yesterday);
+        const from = previous ? billingDateAfter(previous.to) : (availableDates[0] || billingMonthStart(yesterday));
+        if (from > yesterday) {
+          showNotice("Do včeraj ni odprtih dni za obračun.");
+          return;
+        }
+        range = { from, to: yesterday };
       } else if (preset === "today" || preset === "yesterday") {
         const requestedDate = preset === "today" ? today : billingDateBefore(today);
         let selectedDate = requestedDate;
@@ -11611,6 +11629,53 @@
       return groups.map((group) => `${group.type === "meal" ? "malica " : ""}${(group.minutes / 60).toLocaleString("sl-SI", { maximumFractionDigits: 2 })} h po ${money(group.hourlyRate)} EUR/h`).join(" · ");
     }
 
+    function billingDayBreakdownMarkup(lines, totals) {
+      const workGroups = [];
+      const kmGroups = [];
+      const appendWork = (rawMinutes, rawRate, type) => {
+        const minutesValue = Math.max(0, Math.round(Number(rawMinutes || 0)));
+        if (!minutesValue) return;
+        const hourlyRate = Number.isFinite(Number(rawRate)) ? Number(rawRate) : 0;
+        const existing = workGroups.find((group) => group.hourlyRate === hourlyRate && group.type === type);
+        if (existing) existing.minutes += minutesValue;
+        else workGroups.push({ minutes: minutesValue, hourlyRate, type });
+      };
+      const appendKm = (line) => {
+        const km = Math.max(0, Number(line?.km || 0));
+        if (!km) return;
+        const kmRate = Number.isFinite(Number(line?.kmRate)) ? Number(line.kmRate) : 0;
+        const amount = Number(line?.kmAmount || 0);
+        const existing = kmGroups.find((group) => group.kmRate === kmRate);
+        if (existing) {
+          existing.km += km;
+          existing.amount += amount;
+        } else {
+          kmGroups.push({ km, kmRate, amount });
+        }
+      };
+      lines.forEach((line) => {
+        const type = String(line?.status || "") === "meal" ? "meal" : "work";
+        appendWork(line?.minutes, line?.hourlyRate, type);
+        if (type === "meal") appendWork(billingUnpaidMealMinutes(line), 0, "meal");
+        appendKm(line);
+      });
+      const rows = [
+        ...workGroups.map((group) => {
+          const hours = group.minutes / 60;
+          const label = `${group.type === "meal" ? "Malica" : "Delo"}: ${hours.toLocaleString("sl-SI", { maximumFractionDigits: 2 })} h po ${money(group.hourlyRate)} EUR/h`;
+          return `<span class="billing-day-breakdown-line is-detail"><span>${escapeHtml(label)}</span><strong>${money(hours * group.hourlyRate)} EUR</strong></span>`;
+        }),
+        ...kmGroups.map((group) => {
+          const label = `Prevoz: ${group.km.toLocaleString("sl-SI", { maximumFractionDigits: 1 })} km po ${money(group.kmRate)} EUR/km`;
+          return `<span class="billing-day-breakdown-line is-detail"><span>${escapeHtml(label)}</span><strong>${money(group.amount)} EUR</strong></span>`;
+        })
+      ];
+      rows.push(`<span class="billing-day-breakdown-line is-total"><span>Skupaj delo</span><strong>${money(totals.workAmount)} EUR</strong></span>`);
+      rows.push(`<span class="billing-day-breakdown-line is-total"><span>Skupaj prevoz · ${totals.km.toLocaleString("sl-SI", { maximumFractionDigits: 1 })} km</span><strong>${money(totals.kmAmount)} EUR</strong></span>`);
+      rows.push(`<span class="billing-day-breakdown-line is-total is-payout"><span>Skupaj za izplačilo</span><strong>${money(totals.totalAmount)} EUR</strong></span>`);
+      return `<span class="billing-day-breakdown">${rows.join("")}</span>`;
+    }
+
     function payrollStateLabel(payroll, isAdmin) {
       if (!payroll) return isAdmin ? "Za potrditev" : "V pripravi";
       if (payroll.status === "draft") return "Odprto za potrditev";
@@ -11802,11 +11867,9 @@
             ...items.purchases.map((purchase) => `<div class="billing-financial-row purchase">${financialDate}<span>Osebni nakup${purchase.reason ? ` · ${escapeHtml(purchase.reason)}` : ""}</span><strong>-${money(purchase.amount)} EUR</strong>${financialEntryActions(purchase, "purchase")}</div>`),
             ...items.payments.map((payment) => `<div class="billing-financial-row payment">${financialDate}<span>Izplačano${payment.note ? ` · ${escapeHtml(payment.note)}` : ""}</span><strong>${money(payment.amount)} EUR</strong>${isBoss ? `<button class="danger billing-financial-delete delete-billing-payment" type="button" data-payroll-id="${escapeHtml(payroll.id)}" data-payment-id="${escapeHtml(payment.id)}">Izbriši</button>` : ""}</div>`)
           ].join("");
-          const kmRate = day.km > 0 ? Number((day.kmAmount / day.km).toFixed(3)) : Number(items.work.find((row) => Number.isFinite(Number(row.kmRate)))?.kmRate || state.settings.billing?.workerOwnVehicleKmRate || state.settings.billing?.kmRate || 0);
-          const hoursLabel = billingHoursBreakdown(items.work);
-          const kmLabel = `${day.km.toLocaleString("sl-SI", { maximumFractionDigits: 1 })} km po ${money(kmRate)} EUR/km`;
           if (!items.work.length) return `<div class="billing-day billing-financial-only">${financialRows}</div>`;
-          return `<div class="billing-day"><button class="billing-day-overview billing-open-day" type="button" data-date="${escapeHtml(date)}" data-worker-id="${escapeHtml(workerId)}"><strong>${escapeHtml(formatDate(date))}</strong><span class="billing-day-hours">${hasGap ? '<span class="billing-gap-alert" title="Ure niso v neprekinjenem kosu" aria-label="Ure niso v neprekinjenem kosu">↕</span> ' : ""}${escapeHtml(hoursLabel)}</span><span class="billing-day-work">Delo: ${money(day.workAmount)} EUR</span><span class="billing-day-km">${escapeHtml(kmLabel)}</span></button>${financialRows}</div>`;
+          const dayBreakdown = billingDayBreakdownMarkup(items.work, day);
+          return `<div class="billing-day"><button class="billing-day-overview billing-open-day" type="button" data-date="${escapeHtml(date)}" data-worker-id="${escapeHtml(workerId)}"><span class="billing-day-date"><strong>${escapeHtml(formatDate(date))}</strong>${hasGap ? '<span class="billing-gap-alert" title="Ure niso v neprekinjenem kosu" aria-label="Ure niso v neprekinjenem kosu">↕</span>' : ""}</span>${dayBreakdown}</button>${financialRows}</div>`;
         }).join("");
         list.querySelectorAll(".billing-open-day").forEach((button) => button.addEventListener("click", () => openBillingDayTimeline(button.dataset.workerId, button.dataset.date)));
         list.querySelectorAll(".edit-billing-advance").forEach((button) => button.addEventListener("click", () => {
