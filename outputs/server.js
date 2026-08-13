@@ -3663,13 +3663,19 @@ function payrollPeriodEnded(value, now = new Date()) {
   const currentMonth = Number(localParts.month || 0);
   return year < currentYear || (year === currentYear && month < currentMonth);
 }
-function payrollMinutesForTodo(db, todo) {
-  if (!todo || !PAYROLL_PAID_TODO_STATUSES.has(todo.status) || !/^\d{4}-\d{2}-\d{2}$/.test(String(todo.date || ""))) return null;
+function scheduledPayrollMinutesForTodo(todo) {
+  if (!todo || !/^\d{4}-\d{2}-\d{2}$/.test(String(todo.date || ""))) return null;
   const start = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(String(todo.start || ""));
   const end = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(String(todo.end || ""));
   if (!start || !end) return null;
   const minutes = (Number(end[1]) * 60 + Number(end[2])) - (Number(start[1]) * 60 + Number(start[2]));
-  if (minutes <= 0) return null;
+  return minutes > 0 ? minutes : null;
+}
+
+function payrollMinutesForTodo(db, todo) {
+  if (!todo || !PAYROLL_PAID_TODO_STATUSES.has(todo.status)) return null;
+  const minutes = scheduledPayrollMinutesForTodo(todo);
+  if (!minutes) return null;
   if (todo.status === "meal") {
     const mealPaidMinutes = Math.round(nonnegativeNumber(db?.settings?.billing?.mealPaidMinutes, 45, 240));
     return Math.min(minutes, mealPaidMinutes) || null;
@@ -3680,6 +3686,8 @@ function payrollMinutesForTodo(db, todo) {
 function payrollLineForTodo(db, todo, workerId = "") {
   const minutes = payrollMinutesForTodo(db, todo);
   if (!minutes) return null;
+  const scheduledMinutes = scheduledPayrollMinutesForTodo(todo) || minutes;
+  const unpaidMealMinutes = todo.status === "meal" ? Math.max(0, scheduledMinutes - minutes) : 0;
   const hourlyRate = nonnegativeNumber(todo.billingHourlyRate, defaultHourlyRateForUser(db, todo.syncUser || todo.createdBy), 10_000);
   const workerKm = nonnegativeNumber(todo.billingKm, 0, 1_000_000);
   // Kilometrina delavca je povračilo za njegovo lastno vozilo.
@@ -3703,6 +3711,7 @@ function payrollLineForTodo(db, todo, workerId = "") {
     client: String(todo.client || "").slice(0, 240),
     status: String(todo.status || ""),
     minutes,
+    unpaidMealMinutes,
     hours,
     hourlyRate,
     workerKm,
@@ -3795,6 +3804,10 @@ function normalizePayroll(input, db) {
     const km = correction ? signedNumber(line?.km, workerKm + commuteKm) : Number((workerKm + commuteKm).toFixed(2));
     const kmRate = nonnegativeNumber(line?.kmRate, 0, 1_000);
     if (!String(line?.todoId || "") || (!correction && minutes <= 0) || (correction && !Number.isFinite(minutes)) || hourlyRate === null) return null;
+    const scheduledMinutes = correction ? null : scheduledPayrollMinutesForTodo(line);
+    const unpaidMealMinutes = !correction && String(line?.status || "") === "meal"
+      ? Math.max(0, Number.isFinite(scheduledMinutes) ? scheduledMinutes - minutes : Math.round(Number(line?.unpaidMealMinutes || 0)))
+      : 0;
     const hours = correction ? signedNumber(line?.hours, minutes / 60) : minutes / 60;
     const workAmount = correction ? signedNumber(line?.workAmount, hours * hourlyRate) : Number((hours * hourlyRate).toFixed(2));
     const kmAmount = correction ? signedNumber(line?.kmAmount, km * kmRate) : Number((km * kmRate).toFixed(2));
@@ -3812,6 +3825,7 @@ function normalizePayroll(input, db) {
       client: String(line.client || "").slice(0, 240),
       status: String(line.status || ""),
       minutes,
+      unpaidMealMinutes,
       hours,
       hourlyRate,
       workerKm,
@@ -4072,7 +4086,7 @@ function upsertSettlementCorrections(db, beforeTodos, afterTodos, actor, now = n
 }
 function correctionPayrollLine(correction) {
   const after = correction.after || {}, delta = correction.delta || {};
-  return { todoId: "correction:" + correction.id, sourceTodoId: String(correction.todoId || ""), correctionId: String(correction.id || ""), correction: true, assignmentGroupId: String(after.assignmentGroupId || correction.eventId || correction.todoId || ""), workerId: String(correction.workerId || after.workerId || ""), date: String(correction.effectiveDate || correctionDateKey()), start: "", end: "", title: "Popravek: " + String(after.title || "vpis ur").slice(0, 270), client: String(after.client || ""), status: "correction", minutes: Math.round(signedNumber(delta.minutes)), hours: signedNumber(delta.hours), hourlyRate: nonnegativeNumber(after.hourlyRate, 0, 10_000), workerKm: signedNumber(delta.workerKm), workFromHome: Boolean(after.workFromHome), commuteKm: signedNumber(delta.commuteKm), km: signedNumber(delta.km), kmRate: nonnegativeNumber(after.kmRate, 0, 1_000), workAmount: Number(signedNumber(delta.workAmount).toFixed(2)), kmAmount: Number(signedNumber(delta.kmAmount).toFixed(2)), totalAmount: Number(signedNumber(delta.totalAmount).toFixed(2)) };
+  return { todoId: "correction:" + correction.id, sourceTodoId: String(correction.todoId || ""), correctionId: String(correction.id || ""), correction: true, assignmentGroupId: String(after.assignmentGroupId || correction.eventId || correction.todoId || ""), workerId: String(correction.workerId || after.workerId || ""), date: String(correction.effectiveDate || correctionDateKey()), start: "", end: "", title: "Popravek: " + String(after.title || "vpis ur").slice(0, 270), client: String(after.client || ""), status: "correction", minutes: Math.round(signedNumber(delta.minutes)), unpaidMealMinutes: 0, hours: signedNumber(delta.hours), hourlyRate: nonnegativeNumber(after.hourlyRate, 0, 10_000), workerKm: signedNumber(delta.workerKm), workFromHome: Boolean(after.workFromHome), commuteKm: signedNumber(delta.commuteKm), km: signedNumber(delta.km), kmRate: nonnegativeNumber(after.kmRate, 0, 1_000), workAmount: Number(signedNumber(delta.workAmount).toFixed(2)), kmAmount: Number(signedNumber(delta.kmAmount).toFixed(2)), totalAmount: Number(signedNumber(delta.totalAmount).toFixed(2)) };
 }
 function settleCorrectionsForPayroll(db, payroll, actor) {
   const ids = new Set((payroll.lines || []).map((line) => String(line.correctionId || "")).filter(Boolean));

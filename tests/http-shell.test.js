@@ -1020,3 +1020,12 @@ test("produkcijska lokalna podporna prijava zahteva zaupanja vreden LAN proxy", 
     await fs.rm(dataDir, { recursive: true, force: true });
   }
 });
+test("dnevni obračun prikaže ločene postavke in ne povprečne urne tarife", async () => {
+  const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  const server = await fs.readFile(path.join(__dirname, "..", "outputs", "server.js"), "utf8");
+  assert.match(html, /function billingHoursBreakdown\(lines\)/);
+  assert.match(html, /group\.type === "meal" \? "malica " : ""/);
+  assert.match(html, /function billingUnpaidMealMinutes\(line\)/);
+  assert.doesNotMatch(html, /const hourlyRate = day\.hours > 0 \? Number\(\(day\.workAmount \/ day\.hours\)/);
+  assert.match(server, /unpaidMealMinutes/);
+});

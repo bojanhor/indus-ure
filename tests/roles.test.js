@@ -658,6 +658,7 @@ test("malica sama ne sproži poti v službo", () => {
     ["meal-before-work", 45, 0, 0],
     ["onsite-after-meal", 60, 14, 14]
   ]);
+  assert.deepEqual(payroll.lines.filter((line) => line.status === "meal").map((line) => [line.minutes, line.unpaidMealMinutes]), [[45, 15], [45, 15]]);
 });
 
 test("vnos ur ohrani oznako dela od doma, navadno opravilo pa je nima", () => {
