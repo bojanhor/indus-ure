@@ -5738,6 +5738,7 @@
       </div>
       <div class="modal-body">
         <input type="hidden" id="todoFormId">
+        <p class="todo-meta hidden" id="todoFormDraftNotice">Obnovljen je nedokončan osnutek s te naprave. <button class="secondary" id="discardTodoCreationDraft" type="button">Začni prazno</button></p>
         <div class="modal-grid">
           <div class="todo-client-field" id="todoFormClientField">
             <label for="todoFormClient">Stranka</label>
@@ -6548,6 +6549,9 @@
       todoMaterialEntry: false,
       todoNoteEntry: false,
       todoCreationTaskStatus: "open",
+      todoCreationDraftCommitted: true,
+      todoCreationDraftRestored: false,
+      todoCreationDraftModeAtOpen: "task",
       todoHoursSourceOriginal: null,
       todoDraftSourceProjectTodoId: "",
       todoDraftSourceProjectTitle: "",
@@ -7184,8 +7188,12 @@
     }
 
     const offlineTodoDbName = "indus-ure-offline";
-    const offlineDbVersion = 3;
+    const offlineDbVersion = 4;
     const offlineSnapshotStore = "snapshots";
+    const offlineTodoCreationDraftStore = "creationDrafts";
+    const offlineTodoCreationDraftPrefix = "indus-ure-creation-draft:";
+    const offlineTodoCreationDraftMaxAgeMs = 14 * 24 * 60 * 60 * 1000;
+    let offlineTodoCreationDraftTimer = 0;
     let offlineSnapshotTimer = 0;
     let offlineTodoRetryTimer = 0;
     let offlineTodoRetryDelayMs = 1_500;
@@ -7197,6 +7205,7 @@
           const database = request.result;
           if (!database.objectStoreNames.contains("todoOps")) database.createObjectStore("todoOps", { keyPath: "id", autoIncrement: true });
           if (!database.objectStoreNames.contains(offlineSnapshotStore)) database.createObjectStore(offlineSnapshotStore, { keyPath: "userId" });
+          if (!database.objectStoreNames.contains(offlineTodoCreationDraftStore)) database.createObjectStore(offlineTodoCreationDraftStore, { keyPath: "key" });
         };
         request.onsuccess = () => resolve(request.result);
         request.onerror = () => reject(request.error);
@@ -7384,6 +7393,9 @@
         .filter((operation) => operation.userId === id)
         .map((operation) => removeOfflineTodoOp(operation.id)));
       await offlineStoreRequest(offlineSnapshotStore, "readwrite", (store) => store.delete(id));
+      const creationDraftKey = `${offlineTodoCreationDraftPrefix}${id}`;
+      await offlineStoreRequest(offlineTodoCreationDraftStore, "readwrite", (store) => store.delete(creationDraftKey));
+      localStorage.removeItem(creationDraftKey);
       if (localStorage.getItem("indus-ure-offline-user") === id) localStorage.removeItem("indus-ure-offline-user");
     }
 
@@ -13690,6 +13702,7 @@
 
     function renderTodoFormDriveFiles() {
       $("todoFormDriveFileList").innerHTML = renderTodoDriveFilesHtml(state.todoDialogDriveFiles, { removable: true });
+      if ($("todoDialog").open) scheduleTodoCreationDraftSave();
     }
 
     async function createTodoGoogleDriveFile(kind) {
@@ -14022,6 +14035,7 @@
           : `<div class="todo-form-photo-actions">${isPdfAttachment(photo) || video ? "" : `<button class="secondary edit-todo-form-photo" type="button" data-photo-id="${escapeHtml(photo.id)}">Uredi</button>`}<button class="danger remove-todo-form-photo" type="button" data-photo-id="${escapeHtml(photo.id)}">Odstrani</button></div>`;
         return `<div class="todo-form-photo-row ${uploading ? "todo-form-video-uploading" : ""}">${preview}${detail}${actions}</div>`;
       }).join("");
+      if ($("todoDialog").open) scheduleTodoCreationDraftSave();
     }
     async function attachmentDataForProcessing(photo) {
       if (photo?.data) return photo.data;
@@ -14338,6 +14352,23 @@
         return value === "" ? undefined : Number(value);
       };
       return {
+        _creationMode: state.todoHoursSourceId
+          ? "project-hours"
+          : state.todoStandaloneHours
+            ? "hours"
+            : state.todoMaterialEntry
+              ? "material"
+              : state.todoNoteEntry
+                ? "note"
+                : state.todoMealEntry
+                  ? "meal"
+                  : selectedStatus === "material"
+                    ? "material"
+                    : selectedStatus === "note"
+                      ? "note"
+                      : selectedStatus === "meal"
+                        ? "meal"
+                        : "task",
         _taskStatus: timeEntryStatusIds.has(taskStatus) ? "open" : taskStatus,
         _draftAssigneeIds: selectedTodoFormAssignees(),
         client: $("todoFormClient").value.trim(),
@@ -14363,6 +14394,144 @@
         externalDelivery: true,
         photos: state.todoDialogPhotos.map((photo) => ({ ...photo })),
         driveFiles: state.todoDialogDriveFiles.map((file) => ({ ...file }))
+      };
+    }
+
+    function todoCreationDraftKey(userId = state.user?.id) {
+      const id = String(userId || "").trim();
+      return id ? `${offlineTodoCreationDraftPrefix}${id}` : "";
+    }
+
+    function todoCreationDraftHasContent(draft) {
+      if (!draft || typeof draft !== "object") return false;
+      return [
+        draft.client,
+        draft.title,
+        draft.notes,
+        draft.material,
+        ...(draft.photos || []).map((photo) => photo?.data || photo?.attachmentId || photo?.url || photo?.name),
+        ...(draft.driveFiles || []).map((file) => file?.url || file?.fileId || file?.name)
+      ].some((value) => String(value || "").trim());
+    }
+
+    function todoCreationDraftMode(todo = {}) {
+      if (todo._hoursSourceId) return "project-hours";
+      if (todo._standaloneHours) return "hours";
+      if (todo._materialEntry || todoStatus(todo.status).id === "material") return "material";
+      if (todo._noteEntry || todoStatus(todo.status).id === "note") return "note";
+      if (todo._mealEntry || todoStatus(todo.status).id === "meal") return "meal";
+      return "task";
+    }
+
+    function persistableTodoCreationDraftPhotos(photos, { compact = false } = {}) {
+      return (photos || [])
+        .filter((photo) => !photo?.uploading)
+        .map((photo) => {
+          const copy = { ...photo };
+          if (compact) {
+            delete copy.data;
+            delete copy.url;
+            delete copy.thumbnailData;
+            delete copy.thumbnailUrl;
+          }
+          return copy;
+        })
+        .filter((photo) => photo.data || photo.url || photo.attachmentId || photo.name);
+    }
+
+    function creationDraftStorageRecord(draft, { compact = false } = {}) {
+      const key = todoCreationDraftKey();
+      if (!key) return null;
+      return {
+        key,
+        userId: state.user.id,
+        savedAt: Date.now(),
+        draft: {
+          ...draft,
+          photos: persistableTodoCreationDraftPhotos(draft.photos, { compact }),
+          driveFiles: (draft.driveFiles || []).map((file) => ({ ...file }))
+        }
+      };
+    }
+
+    function isNewTodoCreationDialog() {
+      return Boolean(state.user?.id && !$("todoFormId").value && !state.todoCreationDraftCommitted && state.todoCreationDraftModeAtOpen !== "project-hours");
+    }
+
+    function writeTodoCreationDraftFallback(record) {
+      if (!record?.key) return;
+      try {
+        localStorage.setItem(record.key, JSON.stringify(record));
+      } catch {
+        // A full browser quota must never make typing in the form fail.
+      }
+    }
+
+    async function clearTodoCreationDraft(userId = state.user?.id) {
+      const key = todoCreationDraftKey(userId);
+      if (!key) return;
+      if (offlineTodoCreationDraftTimer) {
+        clearTimeout(offlineTodoCreationDraftTimer);
+        offlineTodoCreationDraftTimer = 0;
+      }
+      localStorage.removeItem(key);
+      try {
+        await offlineStoreRequest(offlineTodoCreationDraftStore, "readwrite", (store) => store.delete(key));
+      } catch {
+        // localStorage is already cleared; IndexedDB is only the richer copy.
+      }
+    }
+
+    async function persistTodoCreationDraft() {
+      if (!isNewTodoCreationDialog()) return;
+      const draft = todoCreationDraftFromForm();
+      if (!todoCreationDraftHasContent(draft)) {
+        await clearTodoCreationDraft();
+        return;
+      }
+      // This small synchronous copy survives a browser process being killed
+      // before IndexedDB can finish writing.  The IndexedDB copy additionally
+      // retains locally selected images and PDF files.
+      writeTodoCreationDraftFallback(creationDraftStorageRecord(draft, { compact: true }));
+      try {
+        await offlineStoreRequest(offlineTodoCreationDraftStore, "readwrite", (store) => store.put(creationDraftStorageRecord(draft)));
+      } catch {
+        // The fallback above remains enough to restore the written fields.
+      }
+    }
+
+    function scheduleTodoCreationDraftSave() {
+      if (!isNewTodoCreationDialog()) return;
+      if (offlineTodoCreationDraftTimer) clearTimeout(offlineTodoCreationDraftTimer);
+      offlineTodoCreationDraftTimer = window.setTimeout(() => {
+        offlineTodoCreationDraftTimer = 0;
+        persistTodoCreationDraft().catch(() => {});
+      }, 300);
+    }
+
+    async function loadTodoCreationDraft(requestedMode = "task") {
+      const key = todoCreationDraftKey();
+      if (!key) return null;
+      let localRecord = null;
+      try { localRecord = JSON.parse(localStorage.getItem(key) || "null"); } catch { localStorage.removeItem(key); }
+      let indexedRecord = null;
+      try { indexedRecord = await offlineStoreRequest(offlineTodoCreationDraftStore, "readonly", (store) => store.get(key)); } catch {}
+      const record = [localRecord, indexedRecord]
+        .filter((item) => item?.draft && Number(item.savedAt || 0) > 0)
+        .sort((left, right) => Number(right.savedAt) - Number(left.savedAt))[0];
+      if (!record) return null;
+      if (Date.now() - Number(record.savedAt) > offlineTodoCreationDraftMaxAgeMs) {
+        await clearTodoCreationDraft();
+        return null;
+      }
+      const mode = String(record.draft._creationMode || "task");
+      if (mode !== requestedMode) return null;
+      return {
+        ...record.draft,
+        _standaloneHours: mode === "hours",
+        _materialEntry: mode === "material",
+        _noteEntry: mode === "note",
+        _mealEntry: mode === "meal"
       };
     }
 
@@ -14418,7 +14587,20 @@
     async function openTodoDialog(todo = {}, { reportNavigationIds = null } = {}) {
       clearFormValidationError($("todoForm"));
       setTodoDialogSaving(false);
+      const requestedCreationMode = todoCreationDraftMode(todo);
+      const hasIncomingCreationData = Boolean(todo.title || todo.client || todo.notes || todo.material || todo._taskStatus || (todo._draftAssigneeIds || []).length || (todo.photos || []).length || (todo.driveFiles || []).length);
+      if (!todo.id && !todo._skipPersistedDraft && !hasIncomingCreationData && requestedCreationMode !== "project-hours") {
+        const savedDraft = await loadTodoCreationDraft(requestedCreationMode);
+        if (savedDraft) todo = { ...savedDraft, _restoredCreationDraft: true };
+      }
+      if (!todo.status && todo._standaloneHours) todo = { ...todo, status: "execution" };
+      if (!todo.status && todo._materialEntry) todo = { ...todo, status: "material" };
+      if (!todo.status && todo._noteEntry) todo = { ...todo, status: "note" };
+      if (!todo.status && todo._mealEntry) todo = { ...todo, status: "meal" };
       const editing = Boolean(todo.id);
+      state.todoCreationDraftCommitted = editing;
+      state.todoCreationDraftRestored = Boolean(todo._restoredCreationDraft);
+      state.todoCreationDraftModeAtOpen = todoCreationDraftMode(todo);
       state.todoTimePickerTarget = "start";
       state.todoTimePickerMode = "hour";
       state.todoTimePickerOpen = false;
@@ -14457,6 +14639,7 @@
       const suggestedTimes = needsTimeSuggestion ? suggestedTimeRange(todo) : null;
       const noteTimeSuggestion = !editing && state.todoNoteEntry && !todo.start && !todo.end ? suggestedNoteTimeRange() : null;
       $("todoFormId").value = todo.id || "";
+      $("todoFormDraftNotice").classList.toggle("hidden", !state.todoCreationDraftRestored);
       $("todoFormStart").value = todo.start || suggestedTimes?.start || noteTimeSuggestion?.start || "";
       $("todoFormEnd").value = todo.end || suggestedTimes?.end || noteTimeSuggestion?.end || "";
       $("todoFormDate").value = todo.date || (needsTimeSuggestion ? dateKey(new Date()) : noteTimeSuggestion?.date || "");
@@ -14547,6 +14730,7 @@
       if (editing && !(await acquireTodoEditLockForDialog(todo.id))) return false;
       $("todoDialog").showModal();
       autosizeTodoNarrativeFieldsAfterLayout();
+      if (state.todoCreationDraftRestored) showNotice("Nedokončan osnutek je obnovljen.");
       requestAnimationFrame(() => $("todoDialog").focus({ preventScroll: true }));
       return true;
     }
@@ -14686,6 +14870,10 @@
           sourceId: state.todoHoursSourceId
         };
         state.todoHoursFixingTime = true;
+        if (!id) {
+          state.todoCreationDraftCommitted = true;
+          await clearTodoCreationDraft();
+        }
         $("todoDialog").close();
         await new Promise((resolve) => setTimeout(resolve, 0));
         openDayTimeline(todo.date);
@@ -14713,6 +14901,10 @@
       await saveTodoToServer(todo);
       if (todo.status === "execution" && !meal) rememberClientVehicle(clientVehicle);
       if (state.todoHoursSourceId) state.todoHoursSavedSourceId = state.todoHoursSourceId;
+      if (!id) {
+        state.todoCreationDraftCommitted = true;
+        await clearTodoCreationDraft();
+      }
       $("todoDialog").close();
     }
 
@@ -17590,6 +17782,27 @@
       });
     });
     $("closeTodoDialog").addEventListener("click", () => $("todoDialog").close());
+    $("discardTodoCreationDraft").addEventListener("click", async () => {
+      if (!await showAppConfirm("Zavržem nedokončan osnutek in odprem prazen obrazec?", {
+        title: "Zavrzi osnutek",
+        confirmLabel: "Zavrzi",
+        danger: true
+      })) return;
+      const mode = todoCreationDraftMode({
+        _standaloneHours: state.todoStandaloneHours,
+        _materialEntry: state.todoMaterialEntry,
+        _noteEntry: state.todoNoteEntry,
+        _mealEntry: state.todoMealEntry
+      });
+      state.todoCreationDraftCommitted = true;
+      await clearTodoCreationDraft();
+      $("todoDialog").close();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      if (mode === "hours") await openStandaloneHoursDialog();
+      else if (mode === "material") await openMaterialEntryDialog();
+      else if (mode === "note") await openNoteEntryDialog();
+      else await openTodoDialog({ _skipPersistedDraft: true, _adminCreate: isAdminView() });
+    });
     $("closeOfflineConflicts").addEventListener("click", () => $("offlineConflictsDialog").close());
     $("offlineConflictsList").addEventListener("click", (event) => {
       const action = event.target.closest("[data-offline-conflict-action]");
@@ -17797,6 +18010,14 @@
     $("todoForm").addEventListener("submit", (event) => {
       event.preventDefault();
       submitTodoDialog();
+    });
+    ["input", "change"].forEach((eventName) => {
+      $("todoForm").addEventListener(eventName, scheduleTodoCreationDraftSave);
+    });
+    $("todoForm").addEventListener("click", () => {
+      // Time and status controls are buttons, so they do not always emit an
+      // input event. Debouncing keeps their change in the same local draft.
+      window.setTimeout(scheduleTodoCreationDraftSave, 0);
     });
     $("todoForm").addEventListener("keydown", (event) => {
       if (event.key !== "Enter" || (!event.ctrlKey && !event.metaKey)) return;
@@ -18214,8 +18435,12 @@
     });
     $("todoDialog").addEventListener("close", hideTodoClientSuggestions);
     $("todoDialog").addEventListener("close", () => {
-      discardTemporaryTodoAttachments();
+      const keepAsDraft = isNewTodoCreationDialog();
+      if (keepAsDraft) persistTodoCreationDraft().catch(() => {});
+      else discardTemporaryTodoAttachments();
       state.todoDialogPhotos = [];
+      state.todoDialogDriveFiles = [];
+      state.todoCreationDraftRestored = false;
     });
     function beginPhotoEditorTextControlChange() {
       const editor = state.photoEditor;
@@ -18647,6 +18872,7 @@
       updateOfflineSyncNotice().catch(() => {});
     });
     window.addEventListener("pagehide", () => {
+      persistTodoCreationDraft().catch(() => {});
       rememberSessionRecoveryUiState();
       releaseTodoEditLockOnPageHide();
     });
@@ -18678,6 +18904,7 @@
     setInterval(autoRefreshSharedData, 60_000);
     window.addEventListener("focus", autoRefreshSharedData);
     document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "hidden") persistTodoCreationDraft().catch(() => {});
       if (document.visibilityState === "visible") autoRefreshSharedData();
     });
 

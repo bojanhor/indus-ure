@@ -267,7 +267,7 @@ test("obrazci, obnova pogleda in tarifa pri vpisu ur imajo varne uporabniške ko
   const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
   assert.match(html, /event\.target !== dialog \|\| !dialog\.open \|\| todoDialogSaveInFlight \|\| state\.dayTimelineSaving/);
   assert.match(html, /dialog\.close\(\);/);
-  assert.match(html, /window\.addEventListener\("pagehide", \(\) => \{\s*rememberSessionRecoveryUiState\(\);/);
+  assert.match(html, /window\.addEventListener\("pagehide", \(\) => \{\s*persistTodoCreationDraft\(\)\.catch\(\(\) => \{\}\);\s*rememberSessionRecoveryUiState\(\);/);
   assert.match(html, /Zavezanec za DDV \(76\.a\)/);
   assert.match(html, /const isTimeEntry = Boolean\(state\.todoHoursSourceId \|\| state\.todoStandaloneHours/);
   assert.match(html, /hourlyRate\.value = workerDefaultHourlyRate\(assignees\[0\]\)/);
@@ -810,6 +810,19 @@ test("nova forma opravila ohrani osnutek med vrstama vnosa in ne podeduje strank
   assert.match(html, /const todoInternalCompanyStatusIds = new Set\(\["internal", \.\.\.todoOrderStatusIds\]\);/);
   assert.match(html, /function applyTodoFormInternalCompanyClient\(\)/);
   assert.match(html, /todoStatusUsesInternalCompanyClient\(button\.dataset\.status\)/);
+});
+
+test("nova forma samodejno ohrani lokalni osnutek brez potrditve ob zaprtju", async () => {
+  const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  assert.match(html, /const offlineTodoCreationDraftStore = "creationDrafts"/);
+  assert.match(html, /const offlineTodoCreationDraftMaxAgeMs = 14 \* 24 \* 60 \* 60 \* 1000/);
+  assert.match(html, /function persistTodoCreationDraft\(\)/);
+  assert.match(html, /localStorage\.setItem\(record\.key, JSON\.stringify\(record\)\)/);
+  assert.match(html, /document\.visibilityState === "hidden"\) persistTodoCreationDraft\(\)\.catch/);
+  assert.match(html, /\$\("closeTodoDialog"\)\.addEventListener\("click", \(\) => \$\("todoDialog"\)\.close\(\)\);/);
+  assert.match(html, /if \(keepAsDraft\) persistTodoCreationDraft\(\)\.catch/);
+  assert.match(html, /id="discardTodoCreationDraft"/);
+  assert.match(html, /await clearTodoCreationDraft\(\);\s*\$\("todoDialog"\)\.close\(\);/);
 });
 
 test("todo polish persists client report sorting and closes the daily view after explicit save", async () => {

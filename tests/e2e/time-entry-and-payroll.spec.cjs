@@ -86,7 +86,7 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
     }
   });
 
-  test("new task keeps its draft when switching to hours and resets its client on the next task", async ({ browser }) => {
+  test("new task draft survives a close and browser reload on the same device", async ({ browser }) => {
     const context = await browser.newContext();
     const page = await context.newPage();
     try {
@@ -109,8 +109,15 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
       await expect(page.locator("#todoFormStatus")).toHaveValue("internal");
       await expect(page.locator("#todoFormTask")).toHaveValue("PW preklop osnutka");
       await page.locator("#closeTodoDialog").click();
+      await expect(page.locator("#todoDialog")).toBeHidden();
+      const storedDraft = await page.evaluate(() => Object.entries(localStorage).find(([key]) => key.startsWith("indus-ure-creation-draft:"))?.[1] || "");
+      expect(storedDraft).toContain("PW preklop osnutka");
+      await page.reload({ waitUntil: "networkidle" });
+      await expect(page.locator("#app")).toBeVisible();
       await page.locator("#newTodoButton").click();
-      await expect(page.locator("#todoFormClient")).toHaveValue("");
+      await expect(page.locator("#todoFormClient")).toHaveValue("Bojan Horvat s.p.");
+      await expect(page.locator("#todoFormTask")).toHaveValue("PW preklop osnutka");
+      await expect(page.locator("#todoFormDraftNotice")).toBeVisible();
     } finally {
       await context.close();
     }
