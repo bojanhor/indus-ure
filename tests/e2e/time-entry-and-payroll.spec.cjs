@@ -86,7 +86,7 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
     }
   });
 
-  test("new task draft survives a close and browser reload on the same device", async ({ browser }) => {
+  test("new task draft restores itself after browser reload and X discards it", async ({ browser }) => {
     const context = await browser.newContext();
     const page = await context.newPage();
     try {
@@ -108,16 +108,22 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
       await page.locator('[data-create-mode="task"]').click();
       await expect(page.locator("#todoFormStatus")).toHaveValue("internal");
       await expect(page.locator("#todoFormTask")).toHaveValue("PW preklop osnutka");
-      await page.locator("#closeTodoDialog").click();
-      await expect(page.locator("#todoDialog")).toBeHidden();
       const storedDraft = await page.evaluate(() => Object.entries(localStorage).find(([key]) => key.startsWith("indus-ure-creation-draft:"))?.[1] || "");
       expect(storedDraft).toContain("PW preklop osnutka");
       await page.reload({ waitUntil: "networkidle" });
       await expect(page.locator("#app")).toBeVisible();
-      await page.locator("#newTodoButton").click();
+      await expect(page.locator("#todoDialog")).toBeVisible();
       await expect(page.locator("#todoFormClient")).toHaveValue("Bojan Horvat s.p.");
       await expect(page.locator("#todoFormTask")).toHaveValue("PW preklop osnutka");
       await expect(page.locator("#todoFormDraftNotice")).toBeVisible();
+      await page.locator("#todoDialog").evaluate((node) => node.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+      await expect(page.locator("#todoDialog")).toBeVisible();
+      await page.locator("#closeTodoDialog").click();
+      await expect(page.locator("#todoDialog")).toBeHidden();
+      await page.locator("#newTodoButton").click();
+      await expect(page.locator("#todoFormTask")).toHaveValue("");
+      await page.locator("#todoDialog").evaluate((node) => node.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+      await expect(page.locator("#todoDialog")).toBeHidden();
     } finally {
       await context.close();
     }

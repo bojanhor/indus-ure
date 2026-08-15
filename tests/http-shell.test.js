@@ -791,7 +791,7 @@ test("boss can create a task for workers directly from admin view", async () => 
   assert.match(html, /function setTodoDialogSaving\(saving\)/);
   assert.match(html, /save\.classList\.toggle\("is-saving", Boolean\(saving\)\)/);
   assert.match(html, /todoDialogSaveInFlight\) event\.preventDefault\(\)/);
-  assert.match(html, /\$\("todoDialog"\)\.addEventListener\("click", \(event\) => \{\s*if \(event\.target !== event\.currentTarget\) return;\s*event\.preventDefault\(\);\s*\}\);/);
+  assert.match(html, /\$\("todoDialog"\)\.addEventListener\("click", \(event\) => \{\s*if \(event\.target !== event\.currentTarget\) return;\s*event\.preventDefault\(\);[\s\S]*?const hasContent = isNew && todoCreationDraftHasContent\(todoCreationDraftFromForm\(\)\);/);
   assert.match(html, /\$\("newTodoButton"\)\.textContent = "Dodaj opravilo";/);
   assert.match(html, /add\.title = isAdminView\(\) \? 'Dodaj opravilo'/);
   assert.doesNotMatch(html, /Dodaj opravilo za delavca/);
@@ -812,15 +812,19 @@ test("nova forma opravila ohrani osnutek med vrstama vnosa in ne podeduje strank
   assert.match(html, /todoStatusUsesInternalCompanyClient\(button\.dataset\.status\)/);
 });
 
-test("nova forma samodejno ohrani lokalni osnutek brez potrditve ob zaprtju", async () => {
+test("nova forma samodejno obnovi osnutek po osvežitvi, X pa ga izrecno zavrže", async () => {
   const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
   assert.match(html, /const offlineTodoCreationDraftStore = "creationDrafts"/);
   assert.match(html, /const offlineTodoCreationDraftMaxAgeMs = 14 \* 24 \* 60 \* 60 \* 1000/);
   assert.match(html, /function persistTodoCreationDraft\(\)/);
   assert.match(html, /localStorage\.setItem\(record\.key, JSON\.stringify\(record\)\)/);
   assert.match(html, /document\.visibilityState === "hidden"\) persistTodoCreationDraft\(\)\.catch/);
-  assert.match(html, /\$\("closeTodoDialog"\)\.addEventListener\("click", \(\) => \$\("todoDialog"\)\.close\(\)\);/);
+  assert.match(html, /\$\("closeTodoDialog"\)\.addEventListener\("click", \(\) => \{[\s\S]*?if \(isNewTodoCreationDialog\(\)\) \{[\s\S]*?state\.todoCreationDraftCommitted = true;[\s\S]*?clearTodoCreationDraft\(\)\.catch\(\(\) => \{\}\);[\s\S]*?\$\("todoDialog"\)\.close\(\);/);
   assert.match(html, /if \(keepAsDraft\) persistTodoCreationDraft\(\)\.catch/);
+  assert.match(html, /async function openRecoveredTodoCreationDraftAtStartup\(\)/);
+  assert.match(html, /await openRecoveredTodoCreationDraftAtStartup\(\);/);
+  assert.match(html, /const hasContent = isNew && todoCreationDraftHasContent\(todoCreationDraftFromForm\(\)\);/);
+  assert.match(html, /if \(!isNew \|\| hasContent \|\| todoDialogSaveInFlight\) \{[\s\S]*?event\.stopImmediatePropagation\(\);/);
   assert.match(html, /id="discardTodoCreationDraft"/);
   assert.match(html, /await clearTodoCreationDraft\(\);\s*\$\("todoDialog"\)\.close\(\);/);
 });

@@ -7915,6 +7915,7 @@
         await openTodoFromLink();
         await openWorkerDailyDigestFromLink();
         await openQuickCreateFromLink();
+        await openRecoveredTodoCreationDraftAtStartup();
         finishStartupInBackground();
       } catch (error) {
         const openedOffline = isNetworkError(error) ? await activateOfflineSnapshot().catch(() => false) : false;
@@ -14509,7 +14510,7 @@
       }, 300);
     }
 
-    async function loadTodoCreationDraft(requestedMode = "task") {
+    async function loadTodoCreationDraft(requestedMode = "") {
       const key = todoCreationDraftKey();
       if (!key) return null;
       let localRecord = null;
@@ -14525,7 +14526,7 @@
         return null;
       }
       const mode = String(record.draft._creationMode || "task");
-      if (mode !== requestedMode) return null;
+      if (requestedMode && mode !== requestedMode) return null;
       return {
         ...record.draft,
         _standaloneHours: mode === "hours",
@@ -14533,6 +14534,14 @@
         _noteEntry: mode === "note",
         _mealEntry: mode === "meal"
       };
+    }
+
+    async function openRecoveredTodoCreationDraftAtStartup() {
+      if (!state.user || state.quickCreateMode || $("todoDialog").open) return false;
+      const draft = await loadTodoCreationDraft();
+      if (!draft) return false;
+      await openTodoDialog({ ...draft, _restoredCreationDraft: true, _skipPersistedDraft: true });
+      return true;
     }
 
     function syncTodoFormFooterActions() {
@@ -17781,7 +17790,15 @@
         if (!source.disabled && !source.classList.contains("hidden")) source.click();
       });
     });
-    $("closeTodoDialog").addEventListener("click", () => $("todoDialog").close());
+    $("closeTodoDialog").addEventListener("click", () => {
+      // X is an explicit discard action for a new, unsaved form.  It must not
+      // leave a local draft behind that would unexpectedly reappear later.
+      if (isNewTodoCreationDialog()) {
+        state.todoCreationDraftCommitted = true;
+        clearTodoCreationDraft().catch(() => {});
+      }
+      $("todoDialog").close();
+    });
     $("discardTodoCreationDraft").addEventListener("click", async () => {
       if (!await showAppConfirm("Zavržem nedokončan osnutek in odprem prazen obrazec?", {
         title: "Zavrzi osnutek",
@@ -18027,6 +18044,19 @@
     $("todoDialog").addEventListener("click", (event) => {
       if (event.target !== event.currentTarget) return;
       event.preventDefault();
+      const isNew = isNewTodoCreationDialog();
+      const hasContent = isNew && todoCreationDraftHasContent(todoCreationDraftFromForm());
+      // An accidental tap outside a filled-in form must never discard it.
+      // stopImmediatePropagation also prevents the generic dialog backdrop
+      // handler registered by initializeModalBackNavigation from closing it.
+      if (!isNew || hasContent || todoDialogSaveInFlight) {
+        event.stopImmediatePropagation();
+        return;
+      }
+      // An empty new form can be dismissed by touching the backdrop.
+      state.todoCreationDraftCommitted = true;
+      clearTodoCreationDraft().catch(() => {});
+      event.currentTarget.close();
     });
     $("todoDialog").addEventListener("cancel", (event) => {
       if (todoDialogSaveInFlight) event.preventDefault();
