@@ -829,6 +829,23 @@ test("nova forma samodejno obnovi osnutek po osvežitvi, X pa ga izrecno zavrže
   assert.match(html, /await clearTodoCreationDraft\(\);\s*\$\("todoDialog"\)\.close\(\);/);
 });
 
+test("zgodovina opravila je šefovski pogled z navigacijo po dejanskih prejšnjih stanjih", async () => {
+  const [html, server] = await Promise.all([
+    fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8"),
+    fs.readFile(path.join(__dirname, "..", "outputs", "server.js"), "utf8")
+  ]);
+  assert.match(server, /const TODO_REVISION_HISTORY_LIMIT = 12/);
+  assert.match(server, /function appendTodoRevision\(previousTodo, nextTodo, user, action/);
+  assert.match(server, /user\.role === "boss" \? \{ history, revisionHistory \} : \{\}/);
+  assert.match(server, /updatedTodo\.revisionHistory = appendTodoRevision\(existing, updatedTodo, user, action, now\)/);
+  assert.match(html, /if \(!todo\.id \|\| state\.user\?\.role !== "boss"\)/);
+  assert.match(html, /data-todo-history-nav="-1"/);
+  assert.match(html, /data-todo-history-nav="1"/);
+  assert.match(html, /function navigateTodoHistory\(offset\)/);
+  assert.match(html, /#todoDialog\.is-history-preview \.modal-body/);
+  assert.match(html, /Gledaš prejšnjo različico/);
+});
+
 test("todo polish persists client report sorting and closes the daily view after explicit save", async () => {
   const [html, server] = await Promise.all([
     fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8"),

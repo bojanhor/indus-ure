@@ -3795,6 +3795,17 @@
     .todo-form-activity-summary { color: var(--muted); font-size: 12px; font-weight: 700; text-align: right; }
     .todo-form-activity-content { display: grid; gap: 8px; margin-top: 11px; }
     .todo-form-activity-events { display: grid; gap: 4px; padding-top: 8px; border-top: 1px solid var(--line); }
+    .todo-history-navigation { display: flex; align-items: center; gap: 7px; margin: 11px 0 0; padding-top: 10px; border-top: 1px solid var(--line); }
+    .todo-history-navigation button { min-width: 36px; min-height: 34px; padding: 4px 9px; font-size: 20px; line-height: 1; }
+    .todo-history-navigation strong { flex: 1; min-width: 0; color: var(--ink); font-size: 12px; text-align: center; }
+    .todo-history-preview { margin-top: 9px; padding: 11px; border: 1px solid #9ab8b1; border-left: 4px solid var(--accent); border-radius: 8px; background: #edf6f3; color: var(--ink); }
+    .todo-history-preview h4 { margin: 0 0 6px; font-size: 14px; }
+    .todo-history-preview p { margin: 6px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .todo-history-preview-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px 10px; margin-top: 9px; color: var(--muted); font-size: 12px; }
+    .todo-history-preview-grid b { color: var(--ink); }
+    #todoDialog.is-history-preview .modal-body > :not(#todoFormAudit) { opacity: .46; filter: saturate(.72); pointer-events: none; user-select: none; }
+    #todoDialog.is-history-preview .modal-head-actions > :not(#closeTodoDialog) { opacity: .38; pointer-events: none; }
+    #todoDialog.is-history-preview #todoFormAudit { position: relative; z-index: 2; box-shadow: 0 0 0 4px rgba(45, 112, 104, .10); }
 
     .profile-preview {
       display: flex;
@@ -5115,6 +5126,7 @@
       .server-status-values { grid-template-columns: 1fr; }
       .audit-log-event { grid-template-columns: 1fr; gap: 6px; padding: 10px; }
       .audit-log-dialog { width: min(100vw - 18px, 820px); }
+      .todo-history-preview-grid { grid-template-columns: 1fr; }
       .photo-actions {
         grid-column: 2;
       }
@@ -6552,6 +6564,9 @@
       todoCreationDraftCommitted: true,
       todoCreationDraftRestored: false,
       todoCreationDraftModeAtOpen: "task",
+      todoHistoryLiveTodo: null,
+      todoHistoryPreviewIndex: -1,
+      todoHistoryPreviewActive: false,
       todoHoursSourceOriginal: null,
       todoDraftSourceProjectTodoId: "",
       todoDraftSourceProjectTitle: "",
@@ -14067,15 +14082,44 @@
 
     function renderTodoFormAudit(todo) {
       const audit = $("todoFormAudit");
-      if (!todo.id) {
+      const dialog = $("todoDialog");
+      if (!todo.id || state.user?.role !== "boss") {
         audit.classList.add("hidden");
         audit.textContent = "";
+        dialog.classList.remove("is-history-preview");
         return;
       }
+      const revisions = Array.isArray(todo.revisionHistory) ? todo.revisionHistory : [];
+      const previewIndex = Number(state.todoHistoryPreviewIndex);
+      const revision = previewIndex >= 0 ? revisions[previewIndex] : null;
+      const previewing = Boolean(revision?.snapshot);
+      state.todoHistoryPreviewActive = previewing;
+      dialog.classList.toggle("is-history-preview", previewing);
       const historyItems = (todo.history || [])
         .slice(-5)
         .map((item) => `${escapeHtml(item.action)}: ${escapeHtml(item.byName || item.by)} (${formatDateTime(item.at)})`)
         .join("<br>");
+      const snapshot = revision?.snapshot || {};
+      const snapshotDate = [snapshot.date || "", snapshot.start && snapshot.end ? `${snapshot.start}–${snapshot.end}` : ""].filter(Boolean).join(" · ");
+      const snapshotDetails = previewing ? `
+        <section class="todo-history-preview" aria-live="polite">
+          <h4>Prejšnje stanje pred spremembo</h4>
+          <p><strong>${escapeHtml(snapshot.title || "Brez naziva")}</strong></p>
+          <div class="todo-history-preview-grid">
+            <span>Stranka: <b>${escapeHtml(snapshot.client || "—")}</b></span>
+            <span>Datum in ura: <b>${escapeHtml(snapshotDate || "—")}</b></span>
+            <span>Status: <b>${escapeHtml(todoStatus(snapshot.status).label)}</b></span>
+            <span>Priloge: <b>${Number(snapshot.photos?.length || 0) + Number(snapshot.driveFiles?.length || 0)}</b></span>
+          </div>
+          ${snapshot.notes ? `<p><strong>Opis del</strong><br>${escapeHtml(snapshot.notes)}</p>` : ""}
+          ${snapshot.material ? `<p><strong>Material</strong><br>${escapeHtml(snapshot.material)}</p>` : ""}
+        </section>` : "";
+      const navigation = revisions.length ? `
+        <div class="todo-history-navigation">
+          <button class="secondary" type="button" data-todo-history-nav="-1" aria-label="Starejši zapis" title="Starejši zapis" ${previewIndex === 0 ? "disabled" : ""}>&lsaquo;</button>
+          <strong>${previewing ? `Zapis ${previewIndex + 1} od ${revisions.length}` : "Trenutno stanje"}</strong>
+          <button class="secondary" type="button" data-todo-history-nav="1" aria-label="Novejši zapis" title="Novejši zapis" ${!previewing ? "disabled" : ""}>&rsaquo;</button>
+        </div>` : '<p class="todo-meta">Prejšnje različice se začnejo hraniti ob naslednjem shranjevanju.</p>';
       audit.classList.remove("hidden");
       audit.innerHTML = `
         <details class="todo-form-activity-history">
@@ -14087,9 +14131,23 @@
             <div>Dodal: <strong>${escapeHtml(todo.createdByName || "-")}</strong> (${formatDateTime(todo.createdAt)})</div>
             <div>Zadnja sprememba: <strong>${escapeHtml(todo.updatedByName || todo.createdByName || "-")}</strong> (${formatDateTime(todo.updatedAt || todo.createdAt)})</div>
             ${historyItems ? `<div class="todo-form-activity-events">${historyItems}</div>` : ""}
+            ${navigation}
+            ${snapshotDetails}
           </div>
         </details>
       `;
+    }
+
+    function navigateTodoHistory(offset) {
+      const todo = state.todoHistoryLiveTodo;
+      const revisions = Array.isArray(todo?.revisionHistory) ? todo.revisionHistory : [];
+      if (!revisions.length) return;
+      const current = Number(state.todoHistoryPreviewIndex);
+      let next = current;
+      if (offset < 0) next = current < 0 ? revisions.length - 1 : Math.max(0, current - 1);
+      else if (offset > 0) next = current < 0 ? -1 : current >= revisions.length - 1 ? -1 : current + 1;
+      state.todoHistoryPreviewIndex = next;
+      renderTodoFormAudit(todo);
     }
 
     function sourceProjectDetailsForTodo(todo = {}) {
@@ -14610,6 +14668,10 @@
       state.todoCreationDraftCommitted = editing;
       state.todoCreationDraftRestored = Boolean(todo._restoredCreationDraft);
       state.todoCreationDraftModeAtOpen = todoCreationDraftMode(todo);
+      state.todoHistoryLiveTodo = editing && state.user?.role === "boss" ? todo : null;
+      state.todoHistoryPreviewIndex = -1;
+      state.todoHistoryPreviewActive = false;
+      $("todoDialog").classList.remove("is-history-preview");
       state.todoTimePickerTarget = "start";
       state.todoTimePickerMode = "hour";
       state.todoTimePickerOpen = false;
@@ -14756,6 +14818,10 @@
     }
 
     async function saveTodoFromDialog() {
+      if (state.todoHistoryPreviewActive) {
+        showNotice("Gledaš prejšnjo različico. Z desno puščico se vrni na trenutno stanje, nato lahko urejaš.");
+        return;
+      }
       if (state.todoDialogPhotos.some((photo) => photo.uploading)) {
         return showFormValidationError($("todoForm"), "Počakaj, da se nalaganje videa konča, nato shrani opravilo.", $("todoFormAttachments"));
       }
@@ -18060,6 +18126,11 @@
     });
     $("todoDialog").addEventListener("cancel", (event) => {
       if (todoDialogSaveInFlight) event.preventDefault();
+    });
+    $("todoFormAudit").addEventListener("click", (event) => {
+      const button = event.target.closest("[data-todo-history-nav]");
+      if (!button || button.disabled) return;
+      navigateTodoHistory(Number(button.dataset.todoHistoryNav || 0));
     });
     $("deleteTodoFromDialog").addEventListener("click", () => deleteTodoFromDialog().catch((error) => showNotice(error.message)));
     $("duplicateTodoFromDialog").addEventListener("click", () => duplicateTodoFromCurrent().catch((error) => showNotice(error.message)));

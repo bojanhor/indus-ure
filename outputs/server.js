@@ -96,6 +96,10 @@ const AUDIT_LOG_MAX_EVENTS = 10_000;
 const UNDO_JOURNAL_LIMIT = 20;
 const UNDO_JOURNAL_SCHEMA_VERSION = 2;
 const UNDO_MAX_PATCH_BYTES = 512 * 1024;
+// A per-event version view is intentionally compact and separate from Undo.
+// It lets the boss inspect prior form content without retaining file payloads.
+const TODO_REVISION_HISTORY_LIMIT = 12;
+const TODO_REVISION_TEXT_LIMIT = 12_000;
 const UNDO_ARRAY_SNAPSHOT_KEYS = [
   "todos", "entries", "debts", "advances", "personalPurchases",
   "clients", "billingLocks", "payrolls", "clientBills", "settlementCorrections"
@@ -2227,6 +2231,11 @@ function normalizeDb(db = {}) {
 
   db.todos = db.todos.map((todo, index) => {
     const next = { ...todo };
+    const revisionHistory = normalizeTodoRevisionHistory(next.revisionHistory);
+    if (JSON.stringify(next.revisionHistory || []) !== JSON.stringify(revisionHistory)) {
+      next.revisionHistory = revisionHistory;
+      changed = true;
+    }
     const assignmentGroupId = String(next.assignmentGroupId || next.id || crypto.randomUUID()).trim();
     if (next.assignmentGroupId !== assignmentGroupId) {
       next.assignmentGroupId = assignmentGroupId;
@@ -3210,10 +3219,11 @@ function visibleTodosForUser(db, user) {
       ...todo,
       assigneeIds: todoAssignmentAssigneeIds(db, todo)
     });
-    const { completionRequests, ...publicTodo } = hydrated;
+    const { completionRequests, history, revisionHistory, ...publicTodo } = hydrated;
     const corrections = pendingCorrectionsForTodo(db, todo);
     return {
       ...publicTodo,
+      ...(user.role === "boss" ? { history, revisionHistory } : {}),
       clientSettlement: clientSettlementForTodo(db, todo),
       settlement: corrections.length ? {
         pending: true,
@@ -3235,9 +3245,14 @@ function visibleTodoForUser(db, user, id) {
     ...todo,
     assigneeIds: todoAssignmentAssigneeIds(db, todo)
   });
-  const { completionRequests, ...publicTodo } = hydrated;
+  const { completionRequests, history, revisionHistory, ...publicTodo } = hydrated;
   const corrections = pendingCorrectionsForTodo(db, todo);
-  return { ...publicTodo, clientSettlement: clientSettlementForTodo(db, todo), settlement: corrections.length ? { pending: true, worker: corrections.filter((item) => item.type === "worker").map((item) => ({ id: item.id, delta: item.delta, effectiveDate: item.effectiveDate })), client: corrections.filter((item) => item.type === "client").map((item) => ({ id: item.id, delta: item.delta, effectiveDate: item.effectiveDate })) } : { pending: false, worker: [], client: [] } };
+  return {
+    ...publicTodo,
+    ...(user.role === "boss" ? { history, revisionHistory } : {}),
+    clientSettlement: clientSettlementForTodo(db, todo),
+    settlement: corrections.length ? { pending: true, worker: corrections.filter((item) => item.type === "worker").map((item) => ({ id: item.id, delta: item.delta, effectiveDate: item.effectiveDate })), client: corrections.filter((item) => item.type === "client").map((item) => ({ id: item.id, delta: item.delta, effectiveDate: item.effectiveDate })) } : { pending: false, worker: [], client: [] }
+  };
 }
 
 function hydrateDebtAttachments(db, debt) {
@@ -5621,6 +5636,69 @@ function audit(user, action) {
     byName: user.name,
     at: new Date().toISOString()
   };
+}
+
+function todoRevisionSnapshot(todo = {}) {
+  const text = (value, limit = TODO_REVISION_TEXT_LIMIT) => String(value || "").slice(0, limit);
+  return {
+    client: text(todo.client, 300),
+    clientId: text(todo.clientId, 160),
+    status: text(todo.status, 80),
+    title: text(todo.title, 500),
+    notes: text(todo.notes),
+    material: text(todo.material),
+    date: text(todo.date, 16),
+    endDate: text(todo.endDate, 16),
+    start: text(todo.start, 12),
+    end: text(todo.end, 12),
+    urgent: Boolean(todo.urgent),
+    warranty: Boolean(todo.warranty),
+    clientBillableMinutes: Number.isFinite(Number(todo.clientBillableMinutes)) ? Number(todo.clientBillableMinutes) : null,
+    billingKm: Number(todo.billingKm || 0),
+    clientKm: Number(todo.clientKm || 0),
+    clientVehicle: text(todo.clientVehicle, 24),
+    photos: (Array.isArray(todo.photos) ? todo.photos : []).map((photo) => ({
+      id: text(photo?.id || photo?.attachmentId, 160),
+      name: text(photo?.name || photo?.displayName, 500),
+      comment: text(photo?.comment, 1_000),
+      mimeType: text(photo?.mimeType, 160)
+    })),
+    driveFiles: (Array.isArray(todo.driveFiles) ? todo.driveFiles : []).map((file) => ({
+      fileId: text(file?.fileId, 160),
+      name: text(file?.name, 500),
+      kind: text(file?.kind, 80)
+    }))
+  };
+}
+
+function normalizeTodoRevisionHistory(raw) {
+  return (Array.isArray(raw) ? raw : [])
+    .filter((record) => record && typeof record === "object" && record.snapshot && typeof record.snapshot === "object")
+    .map((record) => ({
+      id: /^[a-f0-9-]{16,80}$/i.test(String(record.id || "")) ? String(record.id) : crypto.randomUUID(),
+      at: Number.isFinite(Date.parse(record.at)) ? String(record.at) : new Date().toISOString(),
+      by: cleanUserId(record.by) || "system",
+      byName: cleanAuditActorName(record.byName, "Sistem"),
+      action: cleanAuditLogText(record.action || "spremenjeno opravilo", 220),
+      snapshot: todoRevisionSnapshot(record.snapshot)
+    }))
+    .sort((left, right) => Date.parse(left.at) - Date.parse(right.at))
+    .slice(-TODO_REVISION_HISTORY_LIMIT);
+}
+
+function appendTodoRevision(previousTodo, nextTodo, user, action, at = new Date().toISOString()) {
+  const before = todoRevisionSnapshot(previousTodo);
+  const after = todoRevisionSnapshot(nextTodo);
+  const existing = normalizeTodoRevisionHistory(previousTodo?.revisionHistory);
+  if (JSON.stringify(before) === JSON.stringify(after)) return existing;
+  return normalizeTodoRevisionHistory([...existing, {
+    id: crypto.randomUUID(),
+    at,
+    by: user?.id,
+    byName: user?.name,
+    action,
+    snapshot: before
+  }]);
 }
 
 function roundTimeToQuarterHour(value) {
@@ -10229,7 +10307,7 @@ async function handleApi(req, res) {
         const operation = operationByAssignmentId.get(String(item.id || ""));
         if (!operation) return item;
         const action = operation.date === item.date ? "prestavljen v časovnici" : `prestavljen na ${operation.date} v časovnici`;
-        return {
+        const updatedTodo = {
           ...item,
           start: operation.start,
           end: operation.end,
@@ -10241,6 +10319,8 @@ async function handleApi(req, res) {
           updatedAt: now,
           history: [...(item.history || []), audit(user, action)]
         };
+        updatedTodo.revisionHistory = appendTodoRevision(item, updatedTodo, user, action, now);
+        return updatedTodo;
       });
       const settlementChanges = operations.map((operation) => upsertSettlementCorrections(
         db,
@@ -10306,18 +10386,24 @@ async function handleApi(req, res) {
       const assignmentItems = todoAssignmentItems(db, previousTodo);
       const now = new Date().toISOString();
       const assignmentIds = new Set(assignmentItems.map((item) => item.id));
-      db.todos = db.todos.map((item) => assignmentIds.has(item.id) ? {
-        ...item,
-        start,
-        end,
-        date,
-        endDate,
-        hoursNeedsReview: false,
-        updatedBy: user.id,
-        updatedByName: user.name,
-        updatedAt: now,
-        history: [...(item.history || []), audit(user, date === previousTodo.date ? "prestavljen v časovnici" : `prestavljen na ${date} v časovnici`)]
-      } : item);
+      db.todos = db.todos.map((item) => {
+        if (!assignmentIds.has(item.id)) return item;
+        const action = date === previousTodo.date ? "prestavljen v časovnici" : `prestavljen na ${date} v časovnici`;
+        const updatedTodo = {
+          ...item,
+          start,
+          end,
+          date,
+          endDate,
+          hoursNeedsReview: false,
+          updatedBy: user.id,
+          updatedByName: user.name,
+          updatedAt: now,
+          history: [...(item.history || []), audit(user, action)]
+        };
+        updatedTodo.revisionHistory = appendTodoRevision(item, updatedTodo, user, action, now);
+        return updatedTodo;
+      });
       const settlementChange = upsertSettlementCorrections(
         db,
         assignmentItems.map((item) => ({ ...item })),
@@ -10386,7 +10472,11 @@ async function handleApi(req, res) {
           ...source,
           assigneeIds: focused.assigneeIds
         });
-        const { completionRequests, ...todo } = hydrated;
+        const { completionRequests, history, revisionHistory, ...publicTodo } = hydrated;
+        const todo = {
+          ...publicTodo,
+          ...(user.role === "boss" ? { history, revisionHistory } : {})
+        };
         sendJson(res, 200, { todo });
         return;
       }
@@ -10540,7 +10630,10 @@ releaseTodoAssignmentEditLock(db, previousTodo, user, editLockToken);
             billingHourlyRate: isOpenedTodo ? todo.billingHourlyRate : existing.billingHourlyRate,
             billingKm: isOpenedTodo ? todo.billingKm : existing.billingKm
           });
-          updatedGroup.push({
+          const action = assignmentsChanged
+            ? `dodelitev spremenjena: ${assigneeNames}`
+            : todo.done ? "označeno opravljeno" : "spremenjeno opravilo";
+          const updatedTodo = {
             ...existing,
             ...adjusted,
             assignmentGroupId,
@@ -10552,10 +10645,10 @@ releaseTodoAssignmentEditLock(db, previousTodo, user, editLockToken);
             updatedBy: user.id,
             updatedByName: user.name,
             updatedAt: now,
-            history: [...(existing.history || []), audit(user, assignmentsChanged
-              ? `dodelitev spremenjena: ${assigneeNames}`
-              : todo.done ? "označeno opravljeno" : "spremenjeno opravilo")]
-          });
+            history: [...(existing.history || []), audit(user, action)]
+          };
+          updatedTodo.revisionHistory = appendTodoRevision(existing, updatedTodo, user, action, now);
+          updatedGroup.push(updatedTodo);
           continue;
         }
 
