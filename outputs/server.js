@@ -7964,7 +7964,14 @@ async function handleApi(req, res) {
         pendingGoogleLogins.delete(token);
         const startedAt = typeof pendingLogin === "number" ? pendingLogin : Number(pendingLogin?.startedAt || 0);
         if (!startedAt || Date.now() - startedAt > 10 * 60 * 1000) {
-          sendText(res, 401, "Prijava je potekla. Vrni se na INDUS URE in poskusi znova.", "text/plain");
+          // Mobile browsers can restore or replay a consumed OAuth callback
+          // from their navigation history.  Do not strand an already signed-in
+          // user on a plain 401 page; a fresh app load will retain a valid
+          // session cookie and otherwise show the normal login screen.
+          const destination = new URL("/", absoluteBaseUrl(req));
+          destination.searchParams.set("login", "expired");
+          res.writeHead(303, securityHeaders({ Location: destination.toString(), "Cache-Control": "no-store" }));
+          res.end();
           return;
         }
         const auth = googleClient(req);
