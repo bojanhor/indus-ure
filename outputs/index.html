@@ -5491,7 +5491,7 @@
           <p class="todo-meta hidden" id="billingNoteRead"></p>
         </div>
         <div class="billing-actions" id="billingActions">
-          <div class="billing-entry-actions"><button class="secondary" id="billingAddAdvance" type="button">Zalo&#382;il denar</button><button class="secondary" id="billingAddPurchase" type="button">Osebni nakup</button></div>
+          <div class="billing-entry-actions"><button class="secondary" id="billingDownloadXlsx" type="button">Prenesi Excel (XLSX)</button><button class="secondary" id="billingAddAdvance" type="button">Zalo&#382;il denar</button><button class="secondary" id="billingAddPurchase" type="button">Osebni nakup</button></div>
           <button class="primary hidden" id="billingConfirm" type="button">Potrdi obra&#269;un</button>
         </div>
         <p class="billing-period-hint hidden" id="billingPeriodHint"></p>
@@ -11873,6 +11873,8 @@
       $("billingAddPayment").classList.toggle("hidden", !admin || !payroll || !["confirmed", "paid"].includes(payroll.status) || remainingAmount <= 0.005);
       $("billingAddAdvance").classList.toggle("hidden", Boolean(payroll && ["confirmed", "paid"].includes(payroll.status)));
       $("billingAddPurchase").classList.toggle("hidden", Boolean(payroll && ["confirmed", "paid"].includes(payroll.status)));
+      $("billingDownloadXlsx").classList.toggle("hidden", allWorkers);
+      $("billingDownloadXlsx").disabled = !range?.from || !range?.to;
 
       const list = $("billingDayList");
       const activities = billingDisplayActivities(workerId, range, lines);
@@ -11921,7 +11923,22 @@
         list.querySelectorAll(".delete-billing-payment").forEach((button) => button.addEventListener("click", () => deletePayrollPaymentFromBilling(button.dataset.payrollId, button.dataset.paymentId).catch((error) => showNotice(error.message))));
       }
       renderBillingExplorer();
-    }    async function confirmPayroll() {
+    }
+
+    function downloadWorkerPayrollXlsx() {
+      const workerId = billingWorkerId();
+      const range = billingRange();
+      if (!workerId || workerId === allBillingWorkersId || !range?.from || !range?.to) return;
+      const query = new URLSearchParams({ workerId, from: range.from, to: range.to });
+      const anchor = document.createElement("a");
+      anchor.href = `/api/payroll-export.xlsx?${query.toString()}`;
+      anchor.download = "";
+      document.body.append(anchor);
+      anchor.click();
+      anchor.remove();
+    }
+
+    async function confirmPayroll() {
       const workerId = billingWorkerId();
       const range = billingRange();
       if (!payrollPeriodEnded(range)) throw new Error(payrollConfirmationHint(range));
@@ -17752,6 +17769,7 @@
     $("billingNote").addEventListener("input", () => localStorage.setItem(billingNoteStorageKey(billingWorkerId(), billingRange()), $("billingNote").value));
     $("billingWorker").addEventListener("change", () => { state.billingWorkerId = $("billingWorker").value; localStorage.setItem(billingWorkerKey, state.billingWorkerId); renderBillingView(); });
     $("billingConfirm").addEventListener("click", () => confirmPayroll().catch((error) => showNotice(error.message)));
+    $("billingDownloadXlsx").addEventListener("click", downloadWorkerPayrollXlsx);
     $("billingMarkPaid").addEventListener("click", () => changePayroll("paid").catch((error) => showNotice(error.message)));
     $("billingAddPayment").addEventListener("click", openPaymentDialog);
     $("billingAddAdvance").addEventListener("click", openAdvanceDialog);

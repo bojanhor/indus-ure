@@ -9,6 +9,7 @@ const { pipeline } = require("stream/promises");
 const { execFile } = require("child_process");
 const { promisify } = require("util");
 const PDFDocument = require("pdfkit");
+const archiver = require("archiver");
 const { PostgresStore } = require("./postgres-store");
 const {
   isUsableTaxId,
@@ -3556,6 +3557,143 @@ function auditLogCsv(events = []) {
     event.context || {}
   ]);
   return "\uFEFF" + [header, ...rows].map((row) => row.map(auditLogCsvCell).join(",")).join("\r\n") + "\r\n";
+}
+
+function xlsxXml(value) {
+  return String(value ?? "").replace(/[&<>\"']/g, (character) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&apos;"
+  })[character]);
+}
+
+function xlsxColumnName(index) {
+  let value = "";
+  for (let number = index; number > 0; number = Math.floor((number - 1) / 26)) value = String.fromCharCode(65 + ((number - 1) % 26)) + value;
+  return value;
+}
+
+function xlsxDateSerial(value) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || ""));
+  if (!match) return "";
+  return Math.round((Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])) - Date.UTC(1899, 11, 30)) / 86400000);
+}
+
+function xlsxTimeSerial(value) {
+  const match = /^(\d{2}):(\d{2})$/.exec(String(value || ""));
+  if (!match) return "";
+  return (Number(match[1]) * 60 + Number(match[2])) / 1440;
+}
+
+function xlsxCell(reference, value, style = 0, formula = "") {
+  const styleAttribute = style ? ` s="${style}"` : "";
+  if (formula) return `<c r="${reference}"${styleAttribute}><f>${xlsxXml(formula)}</f></c>`;
+  if (typeof value === "number" && Number.isFinite(value)) return `<c r="${reference}"${styleAttribute}><v>${value}</v></c>`;
+  if (value === null || value === undefined || value === "") return `<c r="${reference}"${styleAttribute}/>`;
+  return `<c r="${reference}" t="inlineStr"${styleAttribute}><is><t${/^\s|\s$/.test(String(value)) ? " xml:space=\"preserve\"" : ""}>${xlsxXml(value)}</t></is></c>`;
+}
+
+function xlsxSheetXml(rows = [], columns = []) {
+  const dimension = `A1:${xlsxColumnName(Math.max(1, columns.length))}${Math.max(1, rows.length)}`;
+  const columnXml = columns.map((width, index) => `<col min="${index + 1}" max="${index + 1}" width="${width}" customWidth="1"/>`).join("");
+  const rowXml = rows.map((row, rowIndex) => `<row r="${rowIndex + 1}">${row.map((cell, columnIndex) => xlsxCell(`${xlsxColumnName(columnIndex + 1)}${rowIndex + 1}`, cell.value, cell.style, cell.formula)).join("")}</row>`).join("");
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><dimension ref="${dimension}"/><sheetViews><sheetView workbookViewId="0" showGridLines="0"><selection activeCell="A1" sqref="A1"/></sheetView></sheetViews><sheetFormatPr defaultRowHeight="18"/><cols>${columnXml}</cols><sheetData>${rowXml}</sheetData><autoFilter ref="A5:${xlsxColumnName(Math.max(1, columns.length))}${Math.max(5, rows.length)}"/></worksheet>`;
+}
+
+function workerPayrollXlsxReport(db, workerId, rangeInput) {
+  const range = payrollRange(rangeInput);
+  if (!range || !db.users?.[workerId]) return null;
+  const stored = (db.payrolls || []).find((payroll) => payroll.workerId === workerId && payroll.from === range.from && payroll.to === range.to);
+  const payroll = stored && ["archiving", "confirmed", "paid"].includes(stored.status)
+    ? normalizePayroll(stored, db)
+    : buildPayrollSnapshot(db, workerId, range);
+  if (!payroll) return null;
+  const byId = (items = []) => new Map(items.map((item) => [String(item.id || ""), item]));
+  const debts = byId(db.debts || []);
+  const advances = (payroll.advanceIds || []).map((id) => debts.get(String(id))).filter(Boolean);
+  const receipts = (payroll.clientReceiptIds || []).map((id) => debts.get(String(id))).filter(Boolean);
+  const purchases = (payroll.personalPurchaseIds || []).map((id) => debts.get(String(id))).filter(Boolean);
+  return { payroll, worker: db.users[workerId], range, advances, receipts, purchases };
+}
+
+function workerPayrollXlsxEntries(report) {
+  const detailRows = (report.payroll.lines || []).map((line) => ({
+    date: xlsxDateSerial(line.date), start: xlsxTimeSerial(line.start), end: xlsxTimeSerial(line.end),
+    hourlyRate: Number(line.hourlyRate || 0), workerKm: Number(line.workerKm || 0), kmRate: Number(line.kmRate || 0), commuteKm: Number(line.commuteKm || 0),
+    client: line.client || "", title: line.title || "", status: line.status || ""
+  }));
+  const financialRows = [
+    ...report.advances.map((item) => ({ date: item.date, type: "Založeno", reason: item.reason || "", amount: Number(item.amount || 0), impact: Number(item.amount || 0) })),
+    ...report.receipts.map((item) => ({ date: item.date, type: "Prejeta sredstva", reason: item.reason || "", amount: Number(item.amount || 0), impact: Number(item.amount || 0) })),
+    ...report.purchases.map((item) => ({ date: item.date, type: "Osebni nakup", reason: item.reason || "", amount: Number(item.amount || 0), impact: -Number(item.amount || 0) })),
+    ...(report.payroll.payments || []).map((item) => ({ date: String(item.createdAt || "").slice(0, 10), type: "Že izplačano", reason: item.note || "", amount: Number(item.amount || 0), impact: -Number(item.amount || 0) }))
+  ].sort((left, right) => String(left.date).localeCompare(String(right.date)) || left.type.localeCompare(right.type, "sl"));
+  const entryLastRow = Math.max(2, detailRows.length + 1);
+  const financialLastRow = Math.max(2, financialRows.length + 1);
+  const summary = [
+    [{ value: "OBRAČUN DELAVCA", style: 1 }, { value: "", style: 1 }, { value: "", style: 1 }],
+    [{ value: "Delavec", style: 2 }, { value: report.worker.billing?.exportTitle || report.worker.name || report.worker.id, style: 3 }],
+    [{ value: "Obdobje", style: 2 }, { value: `${report.range.from} – ${report.range.to}`, style: 3 }],
+    [{ value: "Stanje", style: 2 }, { value: report.payroll.status === "paid" ? "Plačano" : report.payroll.status === "confirmed" ? "Potrjeno" : "V pripravi", style: 3 }],
+    [{ value: "Ure", style: 4 }, { value: "", style: 6, formula: `SUM('Vnosi'!D2:D${entryLastRow})` }, { value: "Delo", style: 4 }, { value: "", style: 7, formula: `SUM('Vnosi'!F2:F${entryLastRow})` }],
+    [{ value: "Kilometrina", style: 4 }, { value: "", style: 6, formula: `SUM('Vnosi'!G2:G${entryLastRow})+SUM('Vnosi'!J2:J${entryLastRow})` }, { value: "Kilometrina", style: 4 }, { value: "", style: 7, formula: `SUM('Vnosi'!K2:K${entryLastRow})` }],
+    [{ value: "Znesek skupaj", style: 8 }, { value: "", style: 9, formula: "D5+D6" }],
+    [{ value: "Založeno", style: 4 }, { value: "", style: 7, formula: `SUMIF('Finančni vnosi'!B2:B${financialLastRow},"Založeno",'Finančni vnosi'!D2:D${financialLastRow})` }],
+    [{ value: "Prejeta sredstva", style: 4 }, { value: "", style: 7, formula: `SUMIF('Finančni vnosi'!B2:B${financialLastRow},"Prejeta sredstva",'Finančni vnosi'!D2:D${financialLastRow})` }],
+    [{ value: "Osebni nakupi", style: 4 }, { value: "", style: 7, formula: `SUMIF('Finančni vnosi'!B2:B${financialLastRow},"Osebni nakup",'Finančni vnosi'!D2:D${financialLastRow})` }],
+    [{ value: "Že izplačano", style: 4 }, { value: "", style: 7, formula: `SUMIF('Finančni vnosi'!B2:B${financialLastRow},"Že izplačano",'Finančni vnosi'!D2:D${financialLastRow})` }],
+    [{ value: "Razlika", style: 8 }, { value: "", style: 9, formula: "B8+B9-B10-B11" }],
+    [{ value: "Za izplačilo", style: 10 }, { value: "", style: 11, formula: "B7+B12" }]
+  ];
+  const details = [["Datum", "Od", "Do", "Ure", "EUR/h", "Delo", "Km delavca", "EUR/km", "Vožnja", "Pot v službo", "Kilometrina", "Skupaj", "Stranka", "Ime opravila", "Status"]]
+    .concat(detailRows.map((line, index) => {
+      const row = index + 2;
+      return [line.date, line.start, line.end, { formula: `IF(OR(B${row}=\"\",C${row}=\"\"),0,(C${row}-B${row})*24)` }, line.hourlyRate, { formula: `D${row}*E${row}` }, line.workerKm, line.kmRate, { formula: `G${row}*H${row}` }, line.commuteKm, { formula: `(G${row}+J${row})*H${row}` }, { formula: `F${row}+K${row}` }, line.client, line.title, line.status];
+    }));
+  const finances = [["Datum", "Vrsta", "Opis", "Znesek", "Vpliv na izplačilo"]]
+    .concat(financialRows.map((line) => [xlsxDateSerial(line.date), line.type, line.reason, line.amount, line.impact]));
+  return { summary, details, finances };
+}
+
+async function sendWorkerPayrollXlsx(res, report) {
+  const sheets = workerPayrollXlsxEntries(report);
+  const rows = (matrix) => matrix.map((row) => row.map((value) => typeof value === "object" && value ? { value: value.value ?? "", formula: value.formula || "" } : { value }));
+  const detailSheetRows = rows(sheets.details).map((row, rowIndex) => row.map((cell, columnIndex) => {
+    const style = rowIndex === 0 ? 1
+      : columnIndex === 0 ? 12
+        : [1, 2].includes(columnIndex) ? 13
+          : [3, 4, 6, 7, 9].includes(columnIndex) ? 14
+            : [5, 8, 10, 11].includes(columnIndex) ? 15 : 3;
+    return { ...cell, style };
+  }));
+  const financialSheetRows = rows(sheets.finances).map((row, rowIndex) => row.map((cell, columnIndex) => ({
+    ...cell,
+    style: rowIndex === 0 ? 1 : columnIndex === 0 ? 12 : [3, 4].includes(columnIndex) ? 15 : 3
+  })));
+  const xml = {
+    "[Content_Types].xml": `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/worksheets/sheet3.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/><Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/><Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/></Types>`,
+    "_rels/.rels": `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/></Relationships>`,
+    "xl/workbook.xml": `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><workbookPr date1904="0"/><sheets><sheet name="Povzetek" sheetId="1" r:id="rId1"/><sheet name="Vnosi" sheetId="2" r:id="rId2"/><sheet name="Finančni vnosi" sheetId="3" r:id="rId3"/></sheets><calcPr calcId="191029" fullCalcOnLoad="1" forceFullCalc="1"/></workbook>`,
+    "xl/_rels/workbook.xml.rels": `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet3.xml"/><Relationship Id="rId4" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`,
+    "xl/styles.xml": `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="4"><numFmt numFmtId="164" formatCode="dd.mm.yyyy"/><numFmt numFmtId="165" formatCode="hh:mm"/><numFmt numFmtId="166" formatCode="0.00"/><numFmt numFmtId="167" formatCode="# ##0.00 &quot;EUR&quot;"/></numFmts><fonts count="3"><font><sz val="10"/><name val="Aptos"/></font><font><b/><sz val="10"/><name val="Aptos Display"/></font><font><b/><color rgb="FFFFFFFF"/><sz val="10"/><name val="Aptos Display"/></font></fonts><fills count="5"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF1E6172"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFE6F2EF"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FF173F4C"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border><border><left style="thin"><color rgb="FFD7E0DD"/></left><right style="thin"><color rgb="FFD7E0DD"/></right><top style="thin"><color rgb="FFD7E0DD"/></top><bottom style="thin"><color rgb="FFD7E0DD"/></bottom><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="16"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/><xf numFmtId="0" fontId="2" fillId="2" borderId="0" applyFont="1" applyFill="1"/><xf numFmtId="0" fontId="1" fillId="3" borderId="1" applyFont="1" applyFill="1" applyBorder="1"/><xf numFmtId="0" fontId="0" fillId="0" borderId="1" applyBorder="1"/><xf numFmtId="0" fontId="1" fillId="0" borderId="1" applyFont="1" applyBorder="1"/><xf numFmtId="166" fontId="0" fillId="0" borderId="1" applyNumberFormat="1" applyBorder="1"/><xf numFmtId="166" fontId="1" fillId="3" borderId="1" applyNumberFormat="1" applyFont="1" applyFill="1" applyBorder="1"/><xf numFmtId="167" fontId="1" fillId="3" borderId="1" applyNumberFormat="1" applyFont="1" applyFill="1" applyBorder="1"/><xf numFmtId="0" fontId="1" fillId="3" borderId="1" applyFont="1" applyFill="1" applyBorder="1"/><xf numFmtId="167" fontId="1" fillId="3" borderId="1" applyNumberFormat="1" applyFont="1" applyFill="1" applyBorder="1"/><xf numFmtId="0" fontId="2" fillId="4" borderId="1" applyFont="1" applyFill="1" applyBorder="1"/><xf numFmtId="167" fontId="2" fillId="4" borderId="1" applyNumberFormat="1" applyFont="1" applyFill="1" applyBorder="1"/><xf numFmtId="164" fontId="0" fillId="0" borderId="1" applyNumberFormat="1" applyBorder="1"/><xf numFmtId="165" fontId="0" fillId="0" borderId="1" applyNumberFormat="1" applyBorder="1"/><xf numFmtId="166" fontId="0" fillId="0" borderId="1" applyNumberFormat="1" applyBorder="1"/><xf numFmtId="167" fontId="0" fillId="0" borderId="1" applyNumberFormat="1" applyBorder="1"/></cellXfs></styleSheet>`,
+    "xl/worksheets/sheet1.xml": xlsxSheetXml(rows(sheets.summary), [28, 26, 20, 22]),
+    "xl/worksheets/sheet2.xml": xlsxSheetXml(detailSheetRows, [13, 9, 9, 10, 11, 14, 14, 11, 14, 14, 15, 15, 28, 45, 16]),
+    "xl/worksheets/sheet3.xml": xlsxSheetXml(financialSheetRows, [13, 20, 50, 16, 22]),
+    "docProps/core.xml": `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:creator>INDUS URE</dc:creator><dc:title>Obračun delavca</dc:title><dcterms:created xsi:type="dcterms:W3CDTF">${new Date().toISOString()}</dcterms:created></cp:coreProperties>`,
+    "docProps/app.xml": `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes"><Application>INDUS URE</Application><TitlesOfParts><vt:vector size="3" baseType="lpstr"><vt:lpstr>Povzetek</vt:lpstr><vt:lpstr>Vnosi</vt:lpstr><vt:lpstr>Finančni vnosi</vt:lpstr></vt:vector></TitlesOfParts></Properties>`
+  };
+  const safeWorker = String(report.worker.name || report.worker.id || "delavec").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-|-$/g, "").toLowerCase() || "delavec";
+  res.writeHead(200, securityHeaders({
+    "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "Content-Disposition": attachmentContentDisposition(`indus-ure-obracun-${safeWorker}-${report.range.from}-${report.range.to}.xlsx`),
+    "Cache-Control": "no-store"
+  }));
+  await new Promise((resolve, reject) => {
+    const archive = archiver("zip", { zlib: { level: 9 } });
+    archive.on("error", reject);
+    res.on("finish", resolve);
+    archive.pipe(res);
+    for (const [filename, content] of Object.entries(xml)) archive.append(content, { name: filename });
+    archive.finalize().catch(reject);
+  });
 }
 
 function dailyReportBossEmail(db) {
@@ -8401,6 +8539,36 @@ async function handleApi(req, res) {
       sendJson(res, 200, { report });
       return;
     }
+    if (url.pathname === "/api/payroll-export.xlsx" && req.method === "GET") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      const requestedWorkerId = cleanUserId(url.searchParams.get("workerId") || user.id);
+      const workerId = user.role === "boss" ? requestedWorkerId : user.id;
+      if (!workerId || (user.role !== "boss" && requestedWorkerId !== user.id)) {
+        sendJson(res, 403, { error: "Izvoz obračuna drugega delavca lahko pripravi samo šef." });
+        return;
+      }
+      const range = payrollRange({ from: url.searchParams.get("from"), to: url.searchParams.get("to") });
+      if (!range) {
+        sendJson(res, 400, { error: "Za izvoz izberi veljavno obračunsko obdobje." });
+        return;
+      }
+      const db = await readDbAsync();
+      const report = workerPayrollXlsxReport(db, workerId, range);
+      if (!report) {
+        sendJson(res, 404, { error: "Obračun za izbranega delavca ni na voljo." });
+        return;
+      }
+      try {
+        await sendWorkerPayrollXlsx(res, report);
+      } catch (error) {
+        console.error("Worker payroll XLSX export failed", error);
+        if (!res.headersSent) sendJson(res, 500, { error: "Izvoz XLSX ni uspel." });
+        else res.destroy(error);
+      }
+      return;
+    }
+
     if (url.pathname === "/api/payrolls" && req.method === "GET") {
       const user = await requireUser(req, res);
       if (!user) return;
@@ -11074,6 +11242,9 @@ module.exports = {
   timeEntryConflictForWorker,
   timeEntryConflictMessage,
   auditLogCsv,
+  workerPayrollXlsxEntries,
+  workerPayrollXlsxReport,
+  sendWorkerPayrollXlsx,
   visibleDebtsForUser,
   visibleEntriesForUser,
   visibleTodosForUser,
