@@ -797,6 +797,7 @@ test("boss can create a task for workers directly from admin view", async () => 
   assert.doesNotMatch(html, /Dodaj opravilo za delavca/);
   assert.match(html, /function openStandaloneHoursDialog\(date = dateKey\(new Date\(\)\), \{ adminCreate = false, draft = \{\} \} = \{\}\)/);
   assert.match(html, /\$\("writeHoursButton"\)\.addEventListener\("click", \(\) => openStandaloneHoursDialog\(\)\.catch/);
+  assert.match(html, /function suggestedTimeRange\(todo = \{\}\)[\s\S]*?timeEntryStatusIds\.has\(todoStatus\(item\.status\)\.id\)[\s\S]*?dayTimelineMinutes\(item\.end\)[\s\S]*?const startMinutes = latestEndMinutes/);
 });
 
 test("nova forma opravila ohrani osnutek med vrstama vnosa in ne podeduje stranke iz obra\u010duna", async () => {

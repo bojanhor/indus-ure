@@ -14622,9 +14622,18 @@
     function suggestedTimeRange(todo = {}) {
       const date = String(todo.date || dateKey(new Date()));
       const assignee = String(todo.syncUser || todo._hoursAssigneeIds?.[0] || activeWorkerId() || "");
-      const recent = state.todos.filter((item) => item.date === date && item.start && (!assignee || todoAssigneeIds(item).includes(assignee)))
-        .sort((left, right) => String(right.start).localeCompare(String(left.start)))[0];
-      const startMinutes = dayTimelineMinutes(rememberedTodoStartTime()) ?? dayTimelineMinutes(recent?.start) ?? (8 * 60);
+      // A new hours entry continues after the latest existing hours entry for
+      // this worker and day.  Calendar tasks must not influence payroll time.
+      const latestEndMinutes = state.todos
+        .filter((item) => item.date === date
+          && item.start
+          && item.end
+          && timeEntryStatusIds.has(todoStatus(item.status).id)
+          && (!assignee || todoAssigneeIds(item).includes(assignee)))
+        .map((item) => dayTimelineMinutes(item.end))
+        .filter((minutes) => minutes !== null)
+        .reduce((latest, minutes) => Math.max(latest, minutes), null);
+      const startMinutes = latestEndMinutes ?? dayTimelineMinutes(rememberedTodoStartTime()) ?? (8 * 60);
       return { start: dayTimelineTime(startMinutes), end: dayTimelineTime(Math.min(23 * 60 + 45, startMinutes + 60)) };
     }
 
