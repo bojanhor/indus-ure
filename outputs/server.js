@@ -3799,9 +3799,9 @@ function payrollNextDate(key) {
   return [date.getFullYear(), String(date.getMonth() + 1).padStart(2, "0"), String(date.getDate()).padStart(2, "0")].join("-");
 }
 
-// A worker's payroll periods form a contiguous timeline. The shared boundary
-// day is intentional: the next payroll may begin on the previous payroll's
-// final day, while its already locked lines and finance rows are excluded.
+// A worker's payroll periods form an inclusive, contiguous timeline. Each
+// calendar day therefore belongs to exactly one payroll: the next period must
+// begin on the day after the previous one ends.
 function payrollSequenceError(db, workerId, rangeInput, excludeId = "") {
   const range = payrollRange(rangeInput);
   if (!range) return "Obračunsko obdobje ni pravilno.";
@@ -3818,10 +3818,9 @@ function payrollSequenceError(db, workerId, rangeInput, excludeId = "") {
   for (let index = 1; index < records.length; index += 1) {
     const previous = records[index - 1];
     const current = records[index];
-    const sharedBoundary = previous.to;
     const nextDay = payrollNextDate(previous.to);
-    if (current.from < sharedBoundary) return "Obra\u010dunski obdobji se prekrivata ve\u010d kot na skupnem mejnem dnevu.";
-    if (current.from > nextDay) return "Za\u010detek obra\u010duna mora biti " + sharedBoundary + " (skupni mejni dan) ali " + nextDay + ".";
+    if (current.from <= previous.to) return "Obra\u010dunski obdobji se prekrivata.";
+    if (current.from > nextDay) return "Za\u010detek obra\u010duna mora biti " + nextDay + ".";
   }
   return "";
 }

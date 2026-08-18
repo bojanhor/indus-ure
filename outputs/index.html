@@ -11434,8 +11434,7 @@
         .sort((left, right) => String(left.from).localeCompare(String(right.from)) || String(left.to).localeCompare(String(right.to)))[0] || null;
     }
     // The newest open period begins immediately after the last confirmed one.
-    // The API still accepts a shared boundary for old data, while a new range
-    // avoids showing a false overlap and may always be browsed through today.
+    // Both dates are inclusive, so no calendar day may appear in two periods.
     function latestBillingPeriod(workerId, now = new Date()) {
       const today = billingTodayKey(now);
       const previous = latestCompletedPayroll(workerId);
@@ -11497,6 +11496,14 @@
       if (!/^\d{4}-\d{2}-\d{2}$/.test(fromInput.value)) fromInput.value = fallback.from;
       if (!/^\d{4}-\d{2}-\d{2}$/.test(toInput.value) || toInput.value < fromInput.value) toInput.value = fallback.to;
       const selectedPayroll = billingPayrollsForWorker(workerId).find((payroll) => payroll.from === fromInput.value && payroll.to === toInput.value);
+      // Older browsers may still have the former shared-boundary selection in
+      // local storage. A stored payroll itself remains readable, but a new
+      // range beginning on the already settled final day must start tomorrow.
+      const previousConfirmed = latestCompletedPayroll(workerId);
+      if (!selectedPayroll && previousConfirmed && fromInput.value === previousConfirmed.to) {
+        fromInput.value = billingDateAfter(previousConfirmed.to);
+        if (toInput.value < fromInput.value) toInput.value = fromInput.value;
+      }
       const maxDate = billingMaximumSelectableDate();
       if (!selectedPayroll && (fromInput.value > maxDate || toInput.value > maxDate)) {
         fromInput.value = fallback.from;

@@ -766,29 +766,24 @@ test("obračunska obdobja delavca morajo biti neprekinjena", () => {
     ]
   };
   assert.equal(payrollSequenceError(payrollDb, "ibro", { from: "2026-07-01", to: "2026-07-31" }), "");
-  assert.match(payrollSequenceError(payrollDb, "ibro", { from: "2026-08-01", to: "2026-08-31" }), /2026-06-30.*2026-07-01/);
+  assert.match(payrollSequenceError(payrollDb, "ibro", { from: "2026-08-01", to: "2026-08-31" }), /2026-07-01/);
   assert.match(payrollSequenceError(payrollDb, "ibro", { from: "2026-05-01", to: "2026-05-31" }), /Starejšega obračuna/);
   assert.match(payrollSequenceError(payrollDb, "ibro", { from: "2026-06-15", to: "2026-07-15" }), /prekrivata/);
 });
 
 
-test("obračun lahko vključuje današnje ure in podpira oba neprekinjena robova", () => {
+test("obračun lahko vključuje današnje ure, obdobja pa se ne prekrivajo", () => {
   const today = new Date("2026-07-22T12:00:00+02:00");
   assert.equal(payrollPeriodEnded({ from: "2026-07-01", to: "2026-07-22" }, today), true);
   assert.equal(payrollPeriodEnded({ from: "2026-07-01", to: "2026-07-23" }, today), false);
   const base = { payrolls: [{ id: "june", workerId: "ibro", from: "2026-06-01", to: "2026-06-30", status: "confirmed" }] };
-  assert.equal(payrollSequenceError(base, "ibro", { from: "2026-06-30", to: "2026-07-10" }), "");
   assert.equal(payrollSequenceError(base, "ibro", { from: "2026-07-01", to: "2026-07-10" }), "");
+  assert.match(payrollSequenceError(base, "ibro", { from: "2026-06-30", to: "2026-07-10" }), /prekrivata/);
   assert.match(payrollSequenceError(base, "ibro", { from: "2026-06-29", to: "2026-07-10" }), /prekrivata/);
-  assert.match(payrollSequenceError(base, "ibro", { from: "2026-07-02", to: "2026-07-10" }), /2026-06-30.*2026-07-01/);
-  const mixed = { payrolls: [
-    { id: "june", workerId: "ibro", from: "2026-06-01", to: "2026-06-30", status: "confirmed" },
-    { id: "shared", workerId: "ibro", from: "2026-06-30", to: "2026-07-10", status: "confirmed" }
-  ] };
-  assert.equal(payrollSequenceError(mixed, "ibro", { from: "2026-07-11", to: "2026-07-31" }), "");
+  assert.match(payrollSequenceError(base, "ibro", { from: "2026-07-02", to: "2026-07-10" }), /2026-07-01/);
 });
 
-test("skupni mejni dan ne podvoji ur, zalozitev ali osebnih nakupov", () => {
+test("naslednji obračun se začne po zaključenem dnevu brez podvajanja ur ali finančnih vnosov", () => {
   const db = {
     users: { ibro: { id: "ibro", billing: { hourlyRate: 20 } } },
     settings: { billing: { workerOwnVehicleKmRate: 0.22 } },
@@ -808,12 +803,12 @@ test("skupni mejni dan ne podvoji ur, zalozitev ali osebnih nakupov", () => {
       lines: [{ todoId: "locked-work" }], advanceIds: ["locked-advance"], personalPurchaseIds: ["locked-purchase"]
     }]
   };
-  const snapshot = buildPayrollSnapshot(db, "ibro", { from: "2026-07-20", to: "2026-07-21" }, { id: "second", status: "draft" });
-  assert.deepEqual(snapshot.lines.map((line) => line.todoId), ["fresh-boundary", "fresh-next"]);
-  assert.deepEqual(snapshot.advanceIds, ["fresh-advance"]);
-  assert.deepEqual(snapshot.personalPurchaseIds, ["fresh-purchase"]);
-  assert.equal(snapshot.advanceAmount, 7);
-  assert.equal(snapshot.personalPurchaseAmount, 3);
+  const snapshot = buildPayrollSnapshot(db, "ibro", { from: "2026-07-21", to: "2026-07-21" }, { id: "second", status: "draft" });
+  assert.deepEqual(snapshot.lines.map((line) => line.todoId), ["fresh-next"]);
+  assert.deepEqual(snapshot.advanceIds, []);
+  assert.deepEqual(snapshot.personalPurchaseIds, []);
+  assert.equal(snapshot.advanceAmount, 0);
+  assert.equal(snapshot.personalPurchaseAmount, 0);
 });
 
 test("delavec lahko založeni znesek ali osebni nakup ureja samo na dan vnosa, šef pa vedno", () => {
