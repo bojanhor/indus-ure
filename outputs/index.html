@@ -7898,7 +7898,6 @@
           initializeWorkContext();
           const restoredSessionUi = restoreSessionRecoveryUiState();
           showApp();
-          if (restoredSessionUi) showNotice("Obnovljen je prejĹˇnji pogled.");
           await openTodoFromLink({ render: false });
           refreshBootstrapAfterTodoLink();
           finishStartupInBackground();
@@ -7920,7 +7919,6 @@
         setStartupHydrating(true);
         showApp();
         render();
-        if (restoredSessionUi) showNotice("Obnovljen je prejšnji pogled.");
         const snapshot = await bootstrapPromise;
         applyBootstrapSnapshot(snapshot);
         initializeWorkContext();
