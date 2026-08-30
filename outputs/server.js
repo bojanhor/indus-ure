@@ -2284,6 +2284,11 @@ function normalizeDb(db = {}) {
       next.completionRequests = completionRequests;
       changed = true;
     }
+    const changeNotices = cleanTodoChangeNotices(next.changeNotices, db.users);
+    if (JSON.stringify(next.changeNotices || {}) !== JSON.stringify(changeNotices)) {
+      next.changeNotices = changeNotices;
+      changed = true;
+    }
     if (typeof next.urgent !== "boolean") {
       next.urgent = false;
       changed = true;
@@ -2939,6 +2944,115 @@ function todoAssignmentAssigneeIds(db, todo) {
     .filter(Boolean))];
 }
 
+// A change marker belongs to the recipient, not to the task globally.  This
+// keeps a co-worker's unread change visible even after another user reorders
+// the task or opens their own assignment copy.
+const TODO_CHANGE_NOTICE_FIELDS = new Set([
+  "created", "manual", "client", "assignment", "title", "notes", "material",
+  "status", "schedule", "attachments", "worker-billing", "client-billing"
+]);
+
+function cleanTodoChangeNotice(input, users = {}) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return null;
+  const by = cleanUserId(input.by);
+  const at = String(input.at || "");
+  if (!by || !users?.[by] || !Number.isFinite(Date.parse(at))) return null;
+  const fields = [...new Set((Array.isArray(input.fields) ? input.fields : [])
+    .map((field) => String(field || "").trim())
+    .filter((field) => TODO_CHANGE_NOTICE_FIELDS.has(field)))].slice(0, 16);
+  if (!fields.length) return null;
+  return {
+    at: new Date(at).toISOString(),
+    by,
+    byName: String(input.byName || users[by]?.name || by).trim().slice(0, 120),
+    kind: ["created", "manual", "updated"].includes(input.kind) ? input.kind : "updated",
+    fields
+  };
+}
+
+function cleanTodoChangeNotices(input, users = {}) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return {};
+  const notices = {};
+  for (const [userId, raw] of Object.entries(input)) {
+    const id = cleanUserId(userId);
+    if (!id || !users?.[id] || users[id].active === false) continue;
+    const notice = cleanTodoChangeNotice(raw, users);
+    if (notice) notices[id] = notice;
+  }
+  return notices;
+}
+
+function todoChangeNoticeForUser(todo, user) {
+  if (!todo || !user) return null;
+  return cleanTodoChangeNotice(todo.changeNotices?.[user.id], { [user.id]: user, [todo.changeNotices?.[user.id]?.by]: { name: todo.changeNotices?.[user.id]?.byName || "" } });
+}
+
+function todoChangeNoticeFields(previous = {}, next = {}, { created = false, manual = false, assignmentsChanged = false } = {}) {
+  if (created) return ["created"];
+  if (manual) return ["manual"];
+  const equal = (fields) => JSON.stringify(fields.map((field) => previous?.[field] ?? null))
+    === JSON.stringify(fields.map((field) => next?.[field] ?? null));
+  const fields = [];
+  if (!equal(["clientId", "client", "clientContactIds", "clientContacts"])) fields.push("client");
+  if (!equal(["title"])) fields.push("title");
+  if (!equal(["notes"])) fields.push("notes");
+  if (!equal(["material", "materialAmount", "externalDelivery"])) fields.push("material");
+  if (!equal(["status", "urgent", "ordered", "warranty", "imported", "calendarOnly", "workFromHome", "commuteEligible"])) fields.push("status");
+  if (!equal(["date", "endDate", "start", "end"])) fields.push("schedule");
+  if (!equal(["photos", "driveFiles"])) fields.push("attachments");
+  if (!equal(["billingHourlyRate", "billingKm"])) fields.push("worker-billing");
+  if (!equal(["clientBillableMinutes", "clientKm", "clientVehicle"])) fields.push("client-billing");
+  if (assignmentsChanged) fields.push("assignment");
+  return fields;
+}
+
+function todoChangeNoticeRecipientIds(db, todos, actor) {
+  const recipients = new Set();
+  for (const todo of todos || []) {
+    const id = cleanUserId(todo?.syncUser || todo?.createdBy);
+    if (id && db.users?.[id]?.active !== false) recipients.add(id);
+  }
+  for (const user of Object.values(db.users || {})) {
+    if (user?.role === "boss" && user.active !== false) recipients.add(user.id);
+  }
+  recipients.delete(cleanUserId(actor?.id));
+  return [...recipients];
+}
+
+function recordTodoChangeNotices(db, todos, actor, fields, kind = "updated", at = new Date().toISOString()) {
+  const normalizedFields = [...new Set((Array.isArray(fields) ? fields : [])
+    .map((field) => String(field || "").trim())
+    .filter((field) => TODO_CHANGE_NOTICE_FIELDS.has(field)))];
+  if (!normalizedFields.length) return [];
+  const recipients = todoChangeNoticeRecipientIds(db, todos, actor);
+  if (!recipients.length) return [];
+  const notice = {
+    at: new Date(at).toISOString(),
+    by: cleanUserId(actor?.id) || "system",
+    byName: String(actor?.name || actor?.id || "Sistem").slice(0, 120),
+    kind: ["created", "manual"].includes(kind) ? kind : "updated",
+    fields: normalizedFields
+  };
+  for (const todo of todos || []) {
+    todo.changeNotices = cleanTodoChangeNotices(todo.changeNotices, db.users);
+    for (const recipientId of recipients) todo.changeNotices[recipientId] = { ...notice, fields: [...notice.fields] };
+  }
+  return recipients;
+}
+
+function clearTodoChangeNoticesForUser(db, todo, user) {
+  let changed = false;
+  for (const assignmentTodo of todoAssignmentItems(db, todo)) {
+    const notices = cleanTodoChangeNotices(assignmentTodo.changeNotices, db.users);
+    if (notices[user.id]) {
+      delete notices[user.id];
+      changed = true;
+    }
+    assignmentTodo.changeNotices = notices;
+  }
+  return changed;
+}
+
 function todoSharedManualOrder(todo) {
   const value = Number(todo?.sharedManualOrder);
   return Number.isFinite(value) ? value : Number(todo?.order || 0);
@@ -3205,7 +3319,7 @@ function visibleTrashedTodosForUser(db, user) {
     .sort((left, right) => String(right.trashedAt || "").localeCompare(String(left.trashedAt || "")))
     .map((todo) => {
       const hydrated = hydrateTodoAttachments(db, { ...todo, assigneeIds: todoAssignmentAssigneeIds(db, todo) });
-      const { completionRequests, ...publicTodo } = hydrated;
+      const { completionRequests, changeNotices, ...publicTodo } = hydrated;
       return { ...publicTodo, restoreUntil: trashedTodoExpiresAt(todo) };
     });
 }
@@ -3220,10 +3334,11 @@ function visibleTodosForUser(db, user) {
       ...todo,
       assigneeIds: todoAssignmentAssigneeIds(db, todo)
     });
-    const { completionRequests, history, revisionHistory, ...publicTodo } = hydrated;
+    const { completionRequests, history, revisionHistory, changeNotices, ...publicTodo } = hydrated;
     const corrections = pendingCorrectionsForTodo(db, todo);
     return {
       ...publicTodo,
+      changeNotice: todoChangeNoticeForUser(todo, user),
       ...(user.role === "boss" ? { history, revisionHistory } : {}),
       clientSettlement: clientSettlementForTodo(db, todo),
       settlement: corrections.length ? {
@@ -3246,10 +3361,11 @@ function visibleTodoForUser(db, user, id) {
     ...todo,
     assigneeIds: todoAssignmentAssigneeIds(db, todo)
   });
-  const { completionRequests, history, revisionHistory, ...publicTodo } = hydrated;
+  const { completionRequests, history, revisionHistory, changeNotices, ...publicTodo } = hydrated;
   const corrections = pendingCorrectionsForTodo(db, todo);
   return {
     ...publicTodo,
+    changeNotice: todoChangeNoticeForUser(todo, user),
     ...(user.role === "boss" ? { history, revisionHistory } : {}),
     clientSettlement: clientSettlementForTodo(db, todo),
     settlement: corrections.length ? { pending: true, worker: corrections.filter((item) => item.type === "worker").map((item) => ({ id: item.id, delta: item.delta, effectiveDate: item.effectiveDate })), client: corrections.filter((item) => item.type === "client").map((item) => ({ id: item.id, delta: item.delta, effectiveDate: item.effectiveDate })) } : { pending: false, worker: [], client: [] }
@@ -9283,6 +9399,10 @@ async function handleApi(req, res) {
         updatedByName: user.name,
         history: [...(todo.history || []), audit(user, `stranka zamenjana na ${client.name}`)]
       });
+      for (const groupTodos of groups.values()) {
+        const updated = db.todos.find((todo) => todo.id === groupTodos[0]?.id);
+        if (updated) recordTodoChangeNotices(db, todoAssignmentItems(db, updated), user, ["client"], "updated", now);
+      }
       pruneUnusedAdHocClients(db);
       await writeDbAsync(db);
       sendJson(res, 200, {
@@ -9827,6 +9947,14 @@ async function handleApi(req, res) {
         });
         createdTodoIds.push(assignedTodoId);
       });
+      recordTodoChangeNotices(
+        db,
+        db.todos.filter((item) => createdTodoIds.includes(item.id)),
+        user,
+        todoChangeNoticeFields({}, {}, { created: true }),
+        "created",
+        now
+      );
       if (receiptKey) {
         db.todoCreateReceipts[receiptKey] = {
           userId: user.id,
@@ -10496,6 +10624,15 @@ async function handleApi(req, res) {
         updatedTodo.revisionHistory = appendTodoRevision(item, updatedTodo, user, action, now);
         return updatedTodo;
       });
+      for (const operation of operations) {
+        const changedSchedule = operation.previousTodo.date !== operation.date
+          || operation.previousTodo.endDate !== operation.endDate
+          || operation.previousTodo.start !== operation.start
+          || operation.previousTodo.end !== operation.end;
+        if (!changedSchedule) continue;
+        const updated = db.todos.find((item) => item.id === operation.previousTodo.id);
+        if (updated) recordTodoChangeNotices(db, todoAssignmentItems(db, updated), user, ["schedule"], "updated", now);
+      }
       const settlementChanges = operations.map((operation) => upsertSettlementCorrections(
         db,
         todoAssignmentItems(db, operation.previousTodo).map((item) => ({ ...item, start: operation.previousTodo.start, end: operation.previousTodo.end, date: operation.previousTodo.date, endDate: operation.previousTodo.endDate })),
@@ -10578,6 +10715,14 @@ async function handleApi(req, res) {
         updatedTodo.revisionHistory = appendTodoRevision(item, updatedTodo, user, action, now);
         return updatedTodo;
       });
+      const changedSchedule = previousTodo.date !== date
+        || previousTodo.endDate !== endDate
+        || previousTodo.start !== start
+        || previousTodo.end !== end;
+      const updatedTodoForNotice = db.todos.find((item) => item.id === previousTodo.id);
+      if (changedSchedule && updatedTodoForNotice) {
+        recordTodoChangeNotices(db, todoAssignmentItems(db, updatedTodoForNotice), user, ["schedule"], "updated", now);
+      }
       const settlementChange = upsertSettlementCorrections(
         db,
         assignmentItems.map((item) => ({ ...item })),
@@ -10630,6 +10775,38 @@ async function handleApi(req, res) {
       sendJson(res, 200, { todos: visibleTodosForUser(db, user), deletedTodos: visibleTrashedTodosForUser(db, user), lateTimeEntryReportsQueued: lateTimeEntryReport ? 1 : 0 });
       return;
     }
+    const todoChangeNoticeMatch = url.pathname.match(/^\/api\/todos\/([^/]+)\/change-notice(\/seen)?$/);
+    if (todoChangeNoticeMatch && req.method === "POST") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      const id = decodeURIComponent(todoChangeNoticeMatch[1]);
+      const markingSeen = Boolean(todoChangeNoticeMatch[2]);
+      const body = markingSeen ? {} : await readBody(req);
+      const db = await readDbAsync();
+      const todo = (db.todos || []).find((item) => item.id === id);
+      if (!todo || isTrashedTodo(todo) || !canManageTodo(user, todo)) {
+        sendJson(res, 404, { error: "Opravilo ne obstaja ali ni na voljo." });
+        return;
+      }
+      const assignmentItems = todoAssignmentItems(db, todo);
+      let changed = false;
+      if (markingSeen) {
+        changed = clearTodoChangeNoticesForUser(db, todo, user);
+      } else {
+        const lock = todoAssignmentEditLockConflict(db, todo, user, String(body.editLockToken || ""));
+        if (lock) {
+          sendJson(res, 409, { error: `Opravilo trenutno ureja ${lock.lockedByName || lock.lockedById}.`, lock });
+          return;
+        }
+        for (const assignmentTodo of assignmentItems) {
+          assignmentTodo.history = [...(assignmentTodo.history || []), audit(user, "označeno za pregled drugim udeležencem")];
+        }
+        changed = recordTodoChangeNotices(db, assignmentItems, user, ["manual"], "manual").length > 0;
+      }
+      if (changed) await writeDbAsync(db);
+      sendJson(res, 200, { changed, todos: visibleTodosForUser(db, user) });
+      return;
+    }
     const todoMatch = url.pathname.match(/^\/api\/todos\/([^/]+)$/);
     if (todoMatch && req.method === "GET") {
       const id = decodeURIComponent(todoMatch[1]);
@@ -10646,9 +10823,10 @@ async function handleApi(req, res) {
           ...source,
           assigneeIds: focused.assigneeIds
         });
-        const { completionRequests, history, revisionHistory, ...publicTodo } = hydrated;
+        const { completionRequests, history, revisionHistory, changeNotices, ...publicTodo } = hydrated;
         const todo = {
           ...publicTodo,
+          changeNotice: todoChangeNoticeForUser(source, user),
           ...(user.role === "boss" ? { history, revisionHistory } : {})
         };
         sendJson(res, 200, { todo });
@@ -10859,6 +11037,8 @@ releaseTodoAssignmentEditLock(db, previousTodo, user, editLockToken);
         || updatedGroup.find((item) => item.syncUser === previousTodo.syncUser)
         || updatedGroup[0]
         || null;
+      const changeNoticeFields = todoChangeNoticeFields(previousTodo, updatedOpenedTodo || {}, { assignmentsChanged });
+      recordTodoChangeNotices(db, updatedGroup, user, changeNoticeFields, "updated", now);
       const clientBillableHoursWarningForUpdate = clientBillableHoursWarning(assignmentItems, updatedGroup);
       const settlementChange = upsertSettlementCorrections(db, assignmentItems, updatedGroup, user, now);
       if (settlementChange.error) {
@@ -11123,6 +11303,12 @@ module.exports = {
   activeEntryEditLock,
   activeTodoEditLock,
   todoAssignmentAssigneeIds,
+  cleanTodoChangeNotices,
+  todoChangeNoticeForUser,
+  todoChangeNoticeFields,
+  todoChangeNoticeRecipientIds,
+  recordTodoChangeNotices,
+  clearTodoChangeNoticesForUser,
   todoAssignmentEditLockConflict,
   ownsTodoAssignmentEditLock,
   todoAssignmentItems,

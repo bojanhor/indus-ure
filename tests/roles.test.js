@@ -60,6 +60,11 @@ const {
   releaseTodoEditLock,
   releaseTodoAssignmentEditLock,
   todoAssignmentAssigneeIds,
+  cleanTodoChangeNotices,
+  todoChangeNoticeForUser,
+  todoChangeNoticeFields,
+  recordTodoChangeNotices,
+  clearTodoChangeNoticesForUser,
   todoAssignmentEditLockConflict,
   ownsTodoAssignmentEditLock,
   todoAssignmentItems,
@@ -97,6 +102,32 @@ const db = {
     { id: "d2", person: "bojan" }
   ]
 };
+
+test("per-user task change markers survive shared assignments and clear only for the reader", () => {
+  const users = {
+    bojan: { id: "bojan", name: "Bojan", role: "boss", active: true },
+    ibro: { id: "ibro", name: "Ibro", role: "worker", active: true },
+    tina: { id: "tina", name: "Tina", role: "worker", active: true }
+  };
+  const noticeDb = {
+    users,
+    todos: [
+      { id: "shared-ibro", assignmentGroupId: "shared", syncUser: "ibro", title: "Projekt" },
+      { id: "shared-tina", assignmentGroupId: "shared", syncUser: "tina", title: "Projekt" }
+    ]
+  };
+  const changed = todoChangeNoticeFields({ title: "Projekt" }, { title: "Popravljen projekt" });
+  assert.deepEqual(changed, ["title"]);
+  const recipients = recordTodoChangeNotices(noticeDb, noticeDb.todos, users.ibro, changed, "updated", "2026-08-30T10:00:00.000Z");
+  assert.deepEqual(recipients.sort(), ["bojan", "tina"]);
+  assert.equal(todoChangeNoticeForUser(noticeDb.todos[0], users.ibro), null);
+  assert.equal(todoChangeNoticeForUser(noticeDb.todos[0], users.bojan)?.fields[0], "title");
+  assert.equal(todoChangeNoticeForUser(noticeDb.todos[1], users.tina)?.byName, "Ibro");
+  assert.equal(clearTodoChangeNoticesForUser(noticeDb, noticeDb.todos[0], users.tina), true);
+  assert.equal(todoChangeNoticeForUser(noticeDb.todos[0], users.tina), null);
+  assert.equal(todoChangeNoticeForUser(noticeDb.todos[0], users.bojan)?.fields[0], "title");
+  assert.deepEqual(cleanTodoChangeNotices({ invalid: { fields: ["title"] } }, users), {});
+});
 
 test("šef vidi vse, delavec pa samo svoje podatke", () => {
   assert.equal(visibleEntriesForUser(db, boss).length, 2);

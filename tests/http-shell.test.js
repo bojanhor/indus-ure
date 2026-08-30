@@ -100,6 +100,28 @@ test("front-end naročila in foto urejevalnik ohranita dogovorjeni mobilni prika
   assert.match(server, /url\.pathname === "\/api\/todos\/image" && req\.method === "POST"/);
   assert.match(server, /\["thumbnail", inputPath, `\$\{outputPath\}\[Q=\$\{quality\},strip\]`, String\(maxSide\)\]/);
 });
+
+test("oznaka spremembe je zasebna po prejemniku, vidna v vseh pogledih in se potrdi ob odprtju", async () => {
+  const [html, server] = await Promise.all([
+    fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8"),
+    fs.readFile(path.join(__dirname, "..", "outputs", "server.js"), "utf8")
+  ]);
+  assert.match(server, /function recordTodoChangeNotices\(db, todos, actor, fields/);
+  assert.match(server, /function clearTodoChangeNoticesForUser\(db, todo, user\)/);
+  assert.match(server, /changeNotice: todoChangeNoticeForUser\(todo, user\)/);
+  assert.match(server, /todoChangeNoticeMatch/);
+  assert.match(html, /id="markTodoChangedForOthers"/);
+  assert.match(html, /function clearTodoChangeNoticeAfterOpen\(todo\)/);
+  assert.match(html, /todo-item[\s\S]*?has-change-notice/);
+  assert.match(html, /day-todo[\s\S]*?has-change-notice/);
+  assert.match(html, /day-timeline-event[\s\S]*?has-change-notice/);
+});
+
+test("prehod iz novega dogodka v vpis ur počaka na zaprtje modala", async () => {
+  const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  assert.match(html, /\$\("todoCreationTabs"\)\.addEventListener\("click", async \(event\) => \{/);
+  assert.match(html, /\$\("todoDialog"\)\.close\(\);[\s\S]{0,600}await new Promise\(\(resolve\) => setTimeout\(resolve, 0\)\);[\s\S]{0,1000}openStandaloneHoursDialog/);
+});
 test("ročni filter loči in omogoča razvrščanje nujnih opravil", async () => {
   const [html, server] = await Promise.all([
     fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8"),
@@ -251,7 +273,7 @@ test("večdnevno opravilo dobi povezani mesečni trak in varne kontrole vnosa", 
   assert.match(html, /day-multiday-event-title/);
   assert.match(html, /is-span-continuation/);
   assert.match(html, /const startsNewWeek = parseDate\(key\)\?\.getDay\(\) === 1/);
-  assert.match(html, /if \(actualStart \|\| startsNewWeek\)/);
+  assert.match(html, /if \(actualStart \|\| \(startsNewWeek && !actualEnd\)\)/);
   assert.match(html, /!multiDayLayout\.todoIds\.has\(todo\.id\)/);
   assert.match(html, /function syncTodoFormDateRangeControls\(\)/);
   assert.match(html, /field\.disabled = multiDay \|\| isMaterialEntry;/);

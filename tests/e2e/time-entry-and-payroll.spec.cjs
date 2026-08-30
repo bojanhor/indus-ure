@@ -877,7 +877,7 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
       // that survives forever without a way to resolve it.
       await page.evaluate(async () => {
         const database = await new Promise((resolve, reject) => {
-          const request = indexedDB.open("indus-ure-offline", 3);
+          const request = indexedDB.open("indus-ure-offline", 4);
           request.onupgradeneeded = () => {
             const db = request.result;
             if (!db.objectStoreNames.contains("todoOps")) db.createObjectStore("todoOps", { keyPath: "id", autoIncrement: true });

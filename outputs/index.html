@@ -1698,6 +1698,27 @@
 
     .todo-item.urgent { border-left: 4px solid #d93025; }
     .todo-urgent-chip { background: #d93025; color: #fff; white-space: nowrap; }
+    .todo-item.has-change-notice {
+      border-left: 4px solid #2f9a57;
+      background: linear-gradient(90deg, #eef9f0 0, #fff 42%);
+    }
+    .todo-change-chip { background: #2f9a57; color: #fff; white-space: nowrap; }
+    .todo-change-highlight {
+      outline: 2px solid #2f9a57;
+      outline-offset: 2px;
+      border-radius: 8px;
+      background: #f0faf2;
+    }
+    .todo-form-change-notice {
+      margin: 0;
+      padding: 8px 10px;
+      border: 1px solid #82c999;
+      border-radius: 8px;
+      background: #eef9f0;
+      color: #155c30;
+      font-weight: 750;
+      line-height: 1.35;
+    }
     .todo-status-chip { min-width: max-content !important; width: max-content !important; white-space: nowrap !important; }
     .calendar-feed-actions { display: grid; gap: 8px; }
 
@@ -2680,6 +2701,16 @@
     .day-todo.urgent {
       border-left-color: #d93025 !important;
     }
+    .day-todo.has-change-notice,
+    .day-multiday-event.has-change-notice {
+      box-shadow: inset 4px 0 0 #176e37, 0 0 0 2px rgba(47, 154, 87, 0.35);
+    }
+    .day-todo-change-mark {
+      margin-left: 4px;
+      color: #176e37;
+      font-size: 12px;
+      font-weight: 900;
+    }
 
     /* Večdnevni dogodki dobijo skupno, po vrsticah poravnano stezo. Posamezna
        nadaljevanja se stikajo čez rob dneva, naslov pa ostane le na začetku. */
@@ -3069,6 +3100,7 @@
     .day-timeline-event.is-day-moving { outline: 3px solid rgba(23, 114, 145, 0.9); outline-offset: 2px; box-shadow: 0 8px 18px rgba(23, 114, 145, 0.28); }
     .day-timeline-event.is-day-moving::after { content: attr(data-day-target); position: absolute; right: 6px; top: 5px; max-width: calc(100% - 12px); overflow: hidden; padding: 2px 5px; border-radius: 999px; color: #fff; background: rgba(17, 38, 46, 0.78); font-size: 10px; font-weight: 900; text-overflow: ellipsis; white-space: nowrap; }
     .day-timeline-event.is-drag-ready { outline: 2px dashed var(--accent); outline-offset: 2px; }
+    .day-timeline-event.has-change-notice { box-shadow: inset 4px 0 0 #176e37, 0 0 0 2px rgba(47, 154, 87, 0.45); }
     .day-hours-warning { display: inline-grid; place-items: center; width: 18px; height: 18px; margin-left: 5px; border-radius: 50%; background: #c93131; color: #fff; font-weight: 900; line-height: 1; }
     .day-timeline-event-title { display: block; font-size: 13px; line-height: 1.2; overflow-wrap: anywhere; }
     .day-timeline-event-meta { display: block; min-width: 0; margin-top: 2px; font-size: 11px; line-height: 1.15; overflow-wrap: anywhere; word-break: break-word; opacity: 0.86; }
@@ -5738,6 +5770,7 @@
           <button class="todo-modal-action danger hidden" id="deleteTodoFromDialog" type="button" title="Izbriši opravilo" aria-label="Izbriši opravilo">&#128465;</button>
           <button class="todo-modal-action secondary hidden" id="duplicateTodoFromDialog" type="button" title="Podvoji opravilo" aria-label="Podvoji opravilo">&#10697;</button>
           <button class="todo-modal-action secondary hidden" id="writeHoursFromTodo" type="button" title="Piši ure na ta projekt" aria-label="Piši ure na ta projekt">&#9201;</button>
+          <button class="todo-modal-action secondary hidden" id="markTodoChangedForOthers" type="button" title="Označi spremembo za druge" aria-label="Označi spremembo za druge">&#9679;</button>
           <button class="todo-modal-action primary" id="saveTodoDialog" type="submit" title="Shrani" aria-label="Shrani">&#10003;</button>
           <button class="icon-btn" id="closeTodoDialog" type="button" title="Zapri brez shranjevanja" aria-label="Zapri brez shranjevanja">&times;</button>
         </div>
@@ -5751,6 +5784,7 @@
       <div class="modal-body">
         <input type="hidden" id="todoFormId">
         <p class="todo-meta hidden" id="todoFormDraftNotice">Obnovljen je nedokončan osnutek s te naprave. <button class="secondary" id="discardTodoCreationDraft" type="button">Začni prazno</button></p>
+        <p class="todo-form-change-notice hidden" id="todoFormChangeNotice"></p>
         <div class="modal-grid">
           <div class="todo-client-field" id="todoFormClientField">
             <label for="todoFormClient">Stranka</label>
@@ -6479,6 +6513,45 @@
     }
     function todoStatusClass(status) {
       return `todo-status-${todoStatus(status).id}`;
+    }
+
+    const todoChangeNoticeFieldLabels = {
+      created: "novo opravilo",
+      manual: "pregled dogodka",
+      client: "stranka",
+      assignment: "izvajalci",
+      title: "ime opravila",
+      notes: "opis del",
+      material: "material",
+      status: "status",
+      schedule: "datum ali ura",
+      attachments: "priloge",
+      "worker-billing": "obračun delavca",
+      "client-billing": "obračun stranke"
+    };
+
+    function todoChangeNotice(todo) {
+      const notice = todo?.changeNotice;
+      return notice && typeof notice === "object" && Array.isArray(notice.fields) && notice.fields.length ? notice : null;
+    }
+
+    function todoChangeNoticeText(todo) {
+      const notice = todoChangeNotice(todo);
+      if (!notice) return "";
+      if (notice.kind === "created") return `${notice.byName || "Sodelavec"} je dodal novo opravilo.`;
+      if (notice.kind === "manual") return `${notice.byName || "Sodelavec"} je označil dogodek za pregled.`;
+      const fields = notice.fields.map((field) => todoChangeNoticeFieldLabels[field] || field).join(", ");
+      return `${notice.byName || "Sodelavec"} je spremenil: ${fields}.`;
+    }
+
+    function todoCanMarkChangedForOthers(todo) {
+      if (!todo?.id || !state.user) return false;
+      const recipients = new Set([
+        ...todoAssigneeIds(todo),
+        ...state.users.filter((user) => user.role === "boss").map((user) => user.id)
+      ]);
+      recipients.delete(state.user.id);
+      return recipients.size > 0;
     }
 
     function renderTodoStatusChoices(selected) {
@@ -9778,13 +9851,13 @@
           const actualEnd = todoEndDate(todo) === key;
           const item = document.createElement('button');
           item.type = 'button';
-          item.className = `day-multiday-event todo-status-color ${todoStatusClass(todo.status)} ${todo.urgent ? 'urgent' : ''} ${actualStart ? 'is-span-start' : 'is-span-continuation'} ${actualEnd ? 'is-span-end' : ''}`;
+          item.className = `day-multiday-event todo-status-color ${todoStatusClass(todo.status)} ${todo.urgent ? 'urgent' : ''} ${todoChangeNotice(todo) ? 'has-change-notice' : ''} ${actualStart ? 'is-span-start' : 'is-span-continuation'} ${actualEnd ? 'is-span-end' : ''}`;
           const title = `${todo.urgent ? `NUJNO ${String.fromCharCode(183)} ` : ''}${todo.title || 'Brez naslova'}`;
           item.setAttribute('aria-label', `${title}; ${todoDateTimeLabel(todo)}`);
           // A span crosses the grid's weekly rows on Monday. Repeat its title
           // there so the pale continuation has meaning on its own.
           const startsNewWeek = parseDate(key)?.getDay() === 1;
-          if (actualStart || startsNewWeek) {
+          if (actualStart || (startsNewWeek && !actualEnd)) {
             const titleElement = document.createElement('span');
             titleElement.className = 'day-multiday-event-title';
             titleElement.textContent = title;
@@ -10066,11 +10139,13 @@
             const item = document.createElement('button');
             item.type = 'button';
             const settlementIndicators = dayTodoSettlementIndicators(todo);
-            item.className = `day-todo todo-status-color ${todoStatusClass(todo.status)} ${todo.done ? 'done' : ''} ${todo.urgent ? 'urgent' : ''} ${settlementIndicators ? 'has-settlements' : ''}`;
+            const changeNotice = todoChangeNotice(todo);
+            item.className = `day-todo todo-status-color ${todoStatusClass(todo.status)} ${todo.done ? 'done' : ''} ${todo.urgent ? 'urgent' : ''} ${changeNotice ? 'has-change-notice' : ''} ${settlementIndicators ? 'has-settlements' : ''}`;
             const time = todo.start && todo.end ? `${escapeHtml(todo.start)}&ndash;${escapeHtml(todo.end)}` : 'Brez ure';
             const client = todoClientCalendarName(todo, 'Brez stranke');
             const title = `${todo.urgent ? `NUJNO ${String.fromCharCode(183)} ` : ''}${todo.title || 'Brez naslova'}`;
-            item.innerHTML = `<span class="day-todo-topline"><span class="day-todo-time">${time}</span>${settlementIndicators}</span><span class="day-todo-client">${escapeHtml(client)}</span><span class="day-todo-title">${escapeHtml(title)}</span>`;
+            if (changeNotice) item.title = todoChangeNoticeText(todo);
+            item.innerHTML = `<span class="day-todo-topline"><span class="day-todo-time">${time}</span>${settlementIndicators}${changeNotice ? '<span class="day-todo-change-mark" aria-label="Spremenjeno">&#9679;</span>' : ''}</span><span class="day-todo-client">${escapeHtml(client)}</span><span class="day-todo-title">${escapeHtml(title)}</span>`;
             item.addEventListener('pointerdown', (event) => beginMonthTodoPointerDrag(event, item, todo, key));
             item.addEventListener('lostpointercapture', cancelMonthTodoPointerDrag);
             item.addEventListener('click', (event) => {
@@ -10715,13 +10790,14 @@
         const { todo, startMinute, endMinute, lane, laneCount } = layout;
         const client = todoClientCalendarName(todo);
         const event = document.createElement("div");
-        event.className = "day-timeline-event todo-status-color " + todoStatusClass(todo.status);
+        event.className = "day-timeline-event todo-status-color " + todoStatusClass(todo.status) + (todoChangeNotice(todo) ? " has-change-notice" : "");
         event.dataset.todoId = todo.id;
         event.dataset.start = dayTimelineTime(startMinute);
         event.dataset.end = dayTimelineTime(endMinute);
         event.tabIndex = 0;
         event.setAttribute("role", "button");
-        event.setAttribute("aria-label", todo.title + ", " + dayTimelineTime(startMinute) + " do " + dayTimelineTime(endMinute));
+        event.setAttribute("aria-label", todo.title + ", " + dayTimelineTime(startMinute) + " do " + dayTimelineTime(endMinute) + (todoChangeNotice(todo) ? ". Spremenjeno." : ""));
+        if (todoChangeNotice(todo)) event.title = todoChangeNoticeText(todo);
         // Small vertical gap keeps touching events visually separate and easier to grab.
         event.style.top = (Math.round(startMinute * minuteHeight) + 1) + "px";
         event.style.height = Math.max(18, Math.round((endMinute - startMinute) * minuteHeight) - 2) + "px";
@@ -11805,6 +11881,7 @@
       [period, quickRanges].forEach((element) => element?.classList.toggle("hidden", allWorkers));
       if (allWorkers) {
         $("billingViewTitle").textContent = "Vsi obračuni";
+        $("billingSubtitle").hidden = false;
         $("billingSubtitle").textContent = "Pregled zadnjega leta";
         $("billingState").textContent = "";
         $("billingState").className = "billing-state hidden";
@@ -11846,7 +11923,8 @@
       const remainingAmount = Number((payoutAmount - paidAmount).toFixed(2));
       const stateLabel = payrollStateLabel(payroll, admin);
       $("billingViewTitle").textContent = `Obračun ur · ${worker?.name || "Delavec"}`;
-      $("billingSubtitle").textContent = billingRangeLabel(range);
+      $("billingSubtitle").textContent = "";
+      $("billingSubtitle").hidden = true;
       const status = $("billingState"); status.textContent = stateLabel; status.className = `billing-state ${payroll?.status || ""}`;
       const noteInput = $("billingNote");
       const noteText = billingNoteValue(workerId, range, payroll);
@@ -12733,7 +12811,8 @@
         item.dataset.todoId = todo.id;
         const completedPresentation = ["execution", "material", "note"].includes(todo.status) && (state.todoSortMode === "completed" || showManualSections);
         const orderedPresentation = todoUsesOrderConfirmation(todo) && Boolean(todo.ordered);
-        item.className = `todo-item ${todo.done ? "done" : ""} ${completedPresentation ? "completed-view-item" : ""} ${orderedPresentation ? "ordered-confirmed" : ""} ${todo.urgent ? "urgent" : ""} ${detailsExpanded ? "details-expanded" : ""}`;
+        const changeNotice = todoChangeNotice(todo);
+        item.className = `todo-item ${todo.done ? "done" : ""} ${completedPresentation ? "completed-view-item" : ""} ${orderedPresentation ? "ordered-confirmed" : ""} ${todo.urgent ? "urgent" : ""} ${changeNotice ? "has-change-notice" : ""} ${detailsExpanded ? "details-expanded" : ""}`;
         item.innerHTML = `
           <div class="todo-summary" role="button" tabindex="0" aria-label="Uredi opravilo: ${escapeHtml(todo.title)}">
             <div class="todo-title-row">
@@ -12742,6 +12821,7 @@
                 <div class="todo-card-badges">
                   ${todoUsesOrderConfirmation(todo) ? `<button class="todo-ordered-toggle" type="button" aria-pressed="${Boolean(todo.ordered)}" title="${todo.ordered ? "Ozna&#269;eno kot naro&#269;eno" : "Ozna&#269;i kot naro&#269;eno"}" aria-label="${todo.ordered ? "Ozna&#269;eno kot naro&#269;eno" : "Ozna&#269;i kot naro&#269;eno"}"><span aria-hidden="true">&#10003;</span></button>` : ""}
                   <span class="todo-chip todo-status-chip todo-status-color ${todoStatusClass(todo.status)}">${todoStatus(todo.status).label}</span>
+                  ${changeNotice ? `<span class="todo-chip todo-change-chip" title="${escapeHtml(todoChangeNoticeText(todo))}">SPREMEMBA</span>` : ""}
                   ${isImportedTodo(todo) ? '<span class="todo-chip todo-imported-chip">Uvo&#382;eno</span>' : ""}
                   ${todoUsesTextOrdering(todo) && !manualOrderingStatusIds.has(todo.status) ? '<span class="todo-chip todo-ordering-chip">naro&#269;i</span>' : ""}
                 </div>
@@ -14160,6 +14240,70 @@
       `;
     }
 
+    function applyTodoChangeNoticeToForm(todo) {
+      const form = $("todoForm");
+      form.querySelectorAll(".todo-change-highlight").forEach((element) => element.classList.remove("todo-change-highlight"));
+      const noticeBox = $("todoFormChangeNotice");
+      const notice = todoChangeNotice(todo);
+      noticeBox.classList.toggle("hidden", !notice);
+      noticeBox.textContent = notice ? todoChangeNoticeText(todo) : "";
+      if (!notice) return;
+      const mark = (...ids) => ids.forEach((id) => $(id)?.classList.add("todo-change-highlight"));
+      const fields = new Set(notice.fields || []);
+      if (fields.has("created")) {
+        mark("todoFormClientField", "todoFormClientContactsField", "todoFormStatusField", "todoFormAssigneeField", "todoFormTaskField", "todoFormMaterialField", "todoFormDateTimeSection", "todoFormAttachments");
+        $("todoFormNotes")?.closest("label")?.classList.add("todo-change-highlight");
+        return;
+      }
+      if (fields.has("client")) mark("todoFormClientField", "todoFormClientContactsField");
+      if (fields.has("assignment")) mark("todoFormAssigneeField");
+      if (fields.has("title")) mark("todoFormTaskField");
+      if (fields.has("notes")) $("todoFormNotes")?.closest("label")?.classList.add("todo-change-highlight");
+      if (fields.has("material")) mark("todoFormMaterialField");
+      if (fields.has("status")) mark("todoFormStatusField", "todoFormUrgentField", "todoFormOrderedField", "todoFormWarrantyField", "todoFormImportedField", "todoFormWorkFromHomeField");
+      if (fields.has("schedule")) mark("todoFormDateTimeSection");
+      if (fields.has("attachments")) mark("todoFormAttachments");
+      if (fields.has("worker-billing")) mark("todoFormBilling");
+      if (fields.has("client-billing")) mark("todoFormClientBilling");
+    }
+
+    async function markTodoChangedForOthers() {
+      const id = $("todoFormId").value;
+      const todo = state.todos.find((item) => item.id === id);
+      if (!todo || !todoCanMarkChangedForOthers(todo)) return;
+      const button = $("markTodoChangedForOthers");
+      button.disabled = true;
+      try {
+        const editLockToken = state.todoEditLock?.todoId === id ? state.todoEditLock.token : "";
+        const data = await api(`/api/todos/${encodeURIComponent(id)}/change-notice`, {
+          method: "POST",
+          body: JSON.stringify({ editLockToken })
+        });
+        if (Array.isArray(data.todos)) {
+          state.todos = data.todos;
+          refreshClientList();
+          render();
+        }
+        showNotice(data.changed ? "Dogodek je označen za druge udeležence." : "Za ta dogodek ni drugega upravičenega prejemnika.");
+      } finally {
+        button.disabled = false;
+      }
+    }
+
+    function clearTodoChangeNoticeAfterOpen(todo) {
+      if (!todoChangeNotice(todo) || !todo?.id) return;
+      api(`/api/todos/${encodeURIComponent(todo.id)}/change-notice/seen`, { method: "POST", body: "{}" })
+        .then((data) => {
+          if (!Array.isArray(data.todos)) return;
+          state.todos = data.todos;
+          refreshClientList();
+          render();
+          const current = state.todos.find((item) => item.id === todo.id);
+          if (current && $("todoDialog").open && $("todoFormId").value === todo.id) applyTodoChangeNoticeToForm(current);
+        })
+        .catch((error) => console.warn("Oznake spremembe ni bilo mogoče potrditi:", error));
+    }
+
     function navigateTodoHistory(offset) {
       const todo = state.todoHistoryLiveTodo;
       const revisions = Array.isArray(todo?.revisionHistory) ? todo.revisionHistory : [];
@@ -14811,6 +14955,7 @@
       $("deleteTodoFromDialog").classList.toggle("hidden", !editing);
       $("duplicateTodoFromDialog").classList.toggle("hidden", !editing || Boolean(state.todoHoursSourceId));
       $("writeHoursFromTodo").classList.toggle("hidden", !editing || Boolean(state.todoHoursSourceId) || !projectHoursSourceStatuses.has(todoStatus(todo.status).id));
+      $("markTodoChangedForOthers").classList.toggle("hidden", !editing || !todoCanMarkChangedForOthers(todo));
       const isExistingTimeEntry = editing && timeEntryStatusIds.has(todoStatus(todo.status).id);
       // Bojan can still work in a worker view.  His authority to ask for a
       // correction must follow his account role, not the currently selected
@@ -14820,6 +14965,7 @@
       $("requestTodoCompletion").setAttribute("aria-label", isExistingTimeEntry ? "Zahtevaj dopolnitev vnosa ur" : "Zahtevaj dopolnitev opravila");
       $("requestTodoCompletion").classList.toggle("hidden", !showCompletionRequest);
       syncTodoFormFooterActions();
+      applyTodoChangeNoticeToForm(todo);
       renderTodoFormAudit(todo);
       renderTodoFormSourceProject(todo);
       $("todoFormAttachmentInput").value = "";
@@ -14832,6 +14978,7 @@
       if (editing && !(await acquireTodoEditLockForDialog(todo.id))) return false;
       $("todoDialog").showModal();
       autosizeTodoNarrativeFieldsAfterLayout();
+      clearTodoChangeNoticeAfterOpen(todo);
       if (state.todoCreationDraftRestored) showNotice("Nedokončan osnutek je obnovljen.");
       requestAnimationFrame(() => $("todoDialog").focus({ preventScroll: true }));
       return true;
@@ -17660,7 +17807,7 @@
       if (typeof form.requestSubmit === "function") form.requestSubmit(submit);
       else submit.click();
     });
-    $("todoCreationTabs").addEventListener("click", (event) => {
+    $("todoCreationTabs").addEventListener("click", async (event) => {
       const tab = event.target.closest("[data-create-mode]");
       if (!tab) return;
       const draft = todoCreationDraftFromForm();
@@ -17673,21 +17820,30 @@
       const quickTransition = Boolean(state.quickCreateMode);
       if (quickTransition) state.quickCreateTransitioning = true;
       $("todoDialog").close();
-      (wantsHours
-        ? openStandaloneHoursDialog(date, { adminCreate: isAdminView(), draft })
-        : wantsMaterial
-          ? openMaterialEntryDialog(date, { draft })
-          : wantsNote
-            ? openNoteEntryDialog({ draft })
-          : openTodoDialog({ ...draft, date, status: draft._taskStatus || "open", _adminCreate: isAdminView() })
-      ).then(() => {
+      // A dialog remains in its closing phase until the next task. Opening a
+      // second modal immediately could leave the day view's top half blank on
+      // Android. Let the browser finish that transition first.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      try {
+        await (wantsHours
+          ? openStandaloneHoursDialog(date, { adminCreate: isAdminView(), draft })
+          : wantsMaterial
+            ? openMaterialEntryDialog(date, { draft })
+            : wantsNote
+              ? openNoteEntryDialog({ draft })
+            : openTodoDialog({ ...draft, date, status: draft._taskStatus || "open", _adminCreate: isAdminView() })
+        );
         if (!quickTransition) return;
         const nextMode = wantsHours ? "hours" : wantsMaterial ? "material" : wantsNote ? "note" : "task";
         state.quickCreateMode = nextMode;
         const current = new URL(location.href);
         current.searchParams.set("quick", nextMode);
         history.replaceState(history.state, "", current.pathname + current.search + current.hash);
-      }).catch((error) => showNotice(error.message)).finally(() => { state.quickCreateTransitioning = false; });
+      } catch (error) {
+        showNotice(error.message);
+      } finally {
+        state.quickCreateTransitioning = false;
+      }
     });
 
     document.querySelectorAll(".debt-stat").forEach((button) => {
@@ -18179,6 +18335,7 @@
       await openTodoDialog(source);
     });
     $("writeHoursFromTodo").addEventListener("click", () => openHoursTodoFromCurrent().catch((error) => showNotice(error.message)));
+    $("markTodoChangedForOthers").addEventListener("click", () => markTodoChangedForOthers().catch((error) => showNotice(error.message)));
     $("requestTodoCompletion").addEventListener("click", () => {
       try { openCompletionRequestDialog($("todoFormId").value); } catch (error) { showNotice(error.message); }
     });
