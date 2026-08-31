@@ -11,6 +11,17 @@ test("Postgres store singleton is initialized before database startup", async ()
   assert.match(serverSource, /let pgStore = null;/);
 });
 
+test("opravilo sprejme do 40 prilog v obrazcu in na strežniku", async () => {
+  const [html, server] = await Promise.all([
+    fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8"),
+    fs.readFile(path.join(__dirname, "..", "outputs", "server.js"), "utf8")
+  ]);
+  assert.match(html, /const maxTodoAttachments = 40;/);
+  assert.match(html, /maxTodoAttachments - state\.todoDialogPhotos\.length/);
+  assert.match(server, /const MAX_TODO_ATTACHMENTS = 40;/);
+  assert.match(server, /filter\(Boolean\)\.slice\(0, MAX_TODO_ATTACHMENTS\)/);
+});
+
 test("nepooblaščena Google prijava ima splošno zavrnitev in trajni zapis", async () => {
   const [server, store] = await Promise.all([
     fs.readFile(path.join(__dirname, "..", "outputs", "server.js"), "utf8"),

@@ -7753,6 +7753,9 @@
 
     const apiRequestTimeoutMs = 15_000;
     const apiAttachmentRequestTimeoutMs = 180_000;
+    // Mirrors MAX_TODO_ATTACHMENTS in server.js. Photos and videos live in
+    // private media storage, not in the normal task payload.
+    const maxTodoAttachments = 40;
 
     function apiTimeoutForRequest(path, requestOptions = {}) {
       const method = String(requestOptions.method || "GET").toUpperCase();
@@ -13949,7 +13952,7 @@
       const maxBytes = 200 * 1024 * 1024;
       try {
         for (const [index, file] of selectedFiles.entries()) {
-          if (state.todoDialogPhotos.length >= 8) throw new Error("Največ je 8 prilog na opravilo.");
+          if (state.todoDialogPhotos.length >= maxTodoAttachments) throw new Error(`Največ je ${maxTodoAttachments} prilog na opravilo.`);
           if (!file.size) throw new Error("Praznega videa ni mogoče dodati.");
           if (file.size > maxBytes) throw new Error("Video je prevelik. Največja dovoljena velikost je 200 MB.");
           const draft = {
@@ -14062,7 +14065,7 @@
       const selectedFiles = [...(files || [])];
       const maxBytes = 25 * 1024 * 1024;
       for (const file of selectedFiles) {
-        if (state.todoDialogPhotos.length >= 8) throw new Error("Največ je 8 prilog na opravilo.");
+        if (state.todoDialogPhotos.length >= maxTodoAttachments) throw new Error(`Največ je ${maxTodoAttachments} prilog na opravilo.`);
         if (!file.size) throw new Error("Prazne slike ni mogoče dodati.");
         if (file.size > maxBytes) throw new Error("Slika je prevelika. Največja dovoljena velikost je 25 MB.");
         const draft = {
@@ -18410,7 +18413,7 @@
     }
     async function handleTodoAttachmentsFromInput(event) {
       try {
-        const remaining = Math.max(0, 8 - state.todoDialogPhotos.length);
+        const remaining = Math.max(0, maxTodoAttachments - state.todoDialogPhotos.length);
         const files = [...event.target.files].slice(0, remaining);
         const videoFiles = files.filter(isTodoVideoFile);
         const imageFiles = files.filter((file) => !isTodoVideoFile(file) && isTodoImageFile(file));

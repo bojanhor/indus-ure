@@ -184,6 +184,10 @@ const IMAGE_SIGNATURES = {
 const MAX_TODO_IMAGE_DATA_LENGTH = 700_000;
 const MAX_TODO_PDF_DATA_LENGTH = 2_100_000;
 const MAX_TODO_ATTACHMENTS_DATA_LENGTH = 5_000_000;
+// Server-stored image/video attachments contain only metadata in the task
+// record, so a field visit can safely keep a substantial photo set. Keep
+// this in sync with the form limit in index.html.
+const MAX_TODO_ATTACHMENTS = 40;
 const MAX_TODO_THUMBNAIL_DATA_LENGTH = 100_000;
 // Video is streamed to the application's private media storage. Keep a finite
 // limit so a slow or malicious upload cannot exhaust the server disk.
@@ -379,7 +383,7 @@ function storeTodoAttachments(db, todo, user = {}) {
       createdByName: photo.createdByName || user.name || "",
       createdAt: photo.createdAt || new Date().toISOString()
     };
-  }).filter(Boolean).slice(0, 8);
+  }).filter(Boolean).slice(0, MAX_TODO_ATTACHMENTS);
   return { ...todo, photos };
 }
 
@@ -6191,7 +6195,7 @@ function cleanTodo(input) {
         createdAt: photo.createdAt || new Date().toISOString()
       }))
       .filter((photo) => validTodoAttachmentDataUrl(photo.data) || validTodoAttachmentId(photo.attachmentId))
-      .slice(0, 8))
+      .slice(0, MAX_TODO_ATTACHMENTS))
   };
 }
 function reconcileClientContacts(inputContacts, existingContacts = []) {
