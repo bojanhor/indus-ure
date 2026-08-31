@@ -1718,7 +1718,12 @@
       color: #155c30;
       font-weight: 750;
       line-height: 1.35;
+      display: flex;
+      align-items: center;
+      gap: 10px;
     }
+    .todo-form-change-notice > span { flex: 1 1 auto; }
+    .todo-form-change-notice > button { flex: 0 0 auto; }
     .todo-status-chip { min-width: max-content !important; width: max-content !important; white-space: nowrap !important; }
     .calendar-feed-actions { display: grid; gap: 8px; }
 
@@ -5771,7 +5776,8 @@
           <button class="todo-modal-action secondary hidden" id="duplicateTodoFromDialog" type="button" title="Podvoji opravilo" aria-label="Podvoji opravilo">&#10697;</button>
           <button class="todo-modal-action secondary hidden" id="writeHoursFromTodo" type="button" title="Piši ure na ta projekt" aria-label="Piši ure na ta projekt">&#9201;</button>
           <button class="todo-modal-action secondary hidden" id="markTodoChangedForOthers" type="button" title="Označi spremembo za druge" aria-label="Označi spremembo za druge">&#9679;</button>
-          <button class="todo-modal-action primary" id="saveTodoDialog" type="submit" title="Shrani" aria-label="Shrani">&#10003;</button>
+          <button class="todo-modal-action secondary" id="saveTodoWithoutClosing" type="button" title="Shrani brez zapiranja" aria-label="Shrani brez zapiranja">&#128190;</button>
+          <button class="todo-modal-action primary" id="saveTodoDialog" type="submit" title="Shrani in zapri" aria-label="Shrani in zapri">&#10003;</button>
           <button class="icon-btn" id="closeTodoDialog" type="button" title="Zapri brez shranjevanja" aria-label="Zapri brez shranjevanja">&times;</button>
         </div>
       </div>
@@ -5784,7 +5790,10 @@
       <div class="modal-body">
         <input type="hidden" id="todoFormId">
         <p class="todo-meta hidden" id="todoFormDraftNotice">Obnovljen je nedokončan osnutek s te naprave. <button class="secondary" id="discardTodoCreationDraft" type="button">Začni prazno</button></p>
-        <p class="todo-form-change-notice hidden" id="todoFormChangeNotice"></p>
+        <div class="todo-form-change-notice hidden" id="todoFormChangeNotice" role="status">
+          <span id="todoFormChangeNoticeText"></span>
+          <button class="secondary" id="acknowledgeTodoChangeNotice" type="button">Prebrano</button>
+        </div>
         <div class="modal-grid">
           <div class="todo-client-field" id="todoFormClientField">
             <label for="todoFormClient">Stranka</label>
@@ -9644,7 +9653,10 @@
 
     function todoManualCategory(todo) {
       if (todo?.urgent) return "urgent";
-      if (todoNeedsOrdering(todo)) return "ordering";
+      // A status such as "Naroči" belongs to that section.  A plain word
+      // "naroči" in the text is only an additional ordering reference: the
+      // real card keeps the manual bucket where the user already put it.
+      if (manualOrderingStatusIds.has(todo?.status)) return "ordering";
       return todoManualBucketForCurrentUser(todo);
     }
 
@@ -12654,6 +12666,7 @@
       const reorderBucket = ["sorted", "unsorted"].includes(bucket);
       const collapsible = bucket === "ordering";
       section.className = "todo-order-section" + (reorderBucket ? " todo-order-drop-zone" : "");
+      section.dataset.todoSection = bucket;
       if (reorderBucket) {
         section.dataset.todoDropBucket = bucket;
         section.dataset.todoDropPlacement = "before";
@@ -12676,6 +12689,17 @@
         section.innerHTML = "<span>" + escapeHtml(label) + "</span>" + (detail ? "<small>" + escapeHtml(detail) + "</small>" : "");
       }
       items.appendChild(section);
+    }
+
+    function todoManualDisplayEntries(todos) {
+      const entries = todos.map((todo) => ({ todo, bucket: todoManualCategory(todo), orderingReference: false }));
+      const orderingReferences = todos
+        .filter((todo) => todoUsesTextOrdering(todo) && !manualOrderingStatusIds.has(todo.status))
+        .map((todo) => ({ todo, bucket: "ordering", orderingReference: true }));
+      if (!orderingReferences.length) return entries;
+      const firstNonOrdering = entries.findIndex((entry) => !["urgent", "ordering"].includes(entry.bucket));
+      entries.splice(firstNonOrdering < 0 ? entries.length : firstNonOrdering, 0, ...orderingReferences);
+      return entries;
     }
 
     function appendTodoOrderTailDropZone(items, bucket, targetId) {
@@ -12771,19 +12795,19 @@
       }
 
       const showManualSections = state.todoSortMode === "manual";
+      const todoDisplayEntries = showManualSections ? todoManualDisplayEntries(todos) : todos.map((todo) => ({ todo, bucket: "", orderingReference: false }));
       let completedGroupKey = "";
       let currentManualCategory = "";
       let manualTailTargetId = "";
       const collapsedManualSections = collapsedTodoSections();
       const manualCategoryCounts = new Map();
       if (showManualSections) {
-        todos.forEach((todo) => {
-          const bucket = todoManualCategory(todo);
+        todoDisplayEntries.forEach(({ bucket }) => {
           manualCategoryCounts.set(bucket, (manualCategoryCounts.get(bucket) || 0) + 1);
         });
       }
 
-      todos.forEach((todo) => {
+      todoDisplayEntries.forEach(({ todo, bucket, orderingReference }) => {
         const groupKey = todo.clientId || normalizeText(todo.client) || "__brez_stranke__";
         if (state.todoSortMode === "completed" && groupKey !== completedGroupKey) {
           completedGroupKey = groupKey;
@@ -12795,7 +12819,7 @@
         }
         let manualCategory = "";
         if (showManualSections) {
-          manualCategory = todoManualCategory(todo);
+          manualCategory = bucket;
           if (manualCategory !== currentManualCategory) {
             appendTodoOrderTailDropZone(items, currentManualCategory, manualTailTargetId);
             appendTodoOrderSection(items, manualCategory, manualCategoryCounts.get(manualCategory) || 0);
@@ -12805,13 +12829,14 @@
           if (manualCategory === "ordering" && collapsedManualSections.has("ordering")) return;
         }
         const item = document.createElement("div");
-        const reorderable = state.todoSortMode === "manual" && todoCanManualReorder(todo);
+        const reorderable = state.todoSortMode === "manual" && !orderingReference && todoCanManualReorder(todo);
         if (showManualSections && reorderable) manualTailTargetId = todo.id;
         const hasExpandedDetails = todoHasExpandedDetails(todo);
         const detailsExpanded = state.expandedTodoIds.has(todo.id);
         const attachmentCount = todoAttachmentCount(todo);
         const assigneeCount = todoAssigneeIds(todo).length;
         item.dataset.todoId = todo.id;
+        if (orderingReference) item.dataset.todoOrderingReference = "true";
         const completedPresentation = ["execution", "material", "note"].includes(todo.status) && (state.todoSortMode === "completed" || showManualSections);
         const orderedPresentation = todoUsesOrderConfirmation(todo) && Boolean(todo.ordered);
         const changeNotice = todoChangeNotice(todo);
@@ -14253,7 +14278,7 @@
       const noticeBox = $("todoFormChangeNotice");
       const notice = todoChangeNotice(todo);
       noticeBox.classList.toggle("hidden", !notice);
-      noticeBox.textContent = notice ? todoChangeNoticeText(todo) : "";
+      $("todoFormChangeNoticeText").textContent = notice ? todoChangeNoticeText(todo) : "";
       if (!notice) return;
       const mark = (...ids) => ids.forEach((id) => $(id)?.classList.add("todo-change-highlight"));
       const fields = new Set(notice.fields || []);
@@ -14297,18 +14322,15 @@
       }
     }
 
-    function clearTodoChangeNoticeAfterOpen(todo) {
+    async function clearTodoChangeNoticeAfterOpen(todo) {
       if (!todoChangeNotice(todo) || !todo?.id) return;
-      api(`/api/todos/${encodeURIComponent(todo.id)}/change-notice/seen`, { method: "POST", body: "{}" })
-        .then((data) => {
-          if (!Array.isArray(data.todos)) return;
-          state.todos = data.todos;
-          refreshClientList();
-          render();
-          const current = state.todos.find((item) => item.id === todo.id);
-          if (current && $("todoDialog").open && $("todoFormId").value === todo.id) applyTodoChangeNoticeToForm(current);
-        })
-        .catch((error) => console.warn("Oznake spremembe ni bilo mogoče potrditi:", error));
+      const data = await api(`/api/todos/${encodeURIComponent(todo.id)}/change-notice/seen`, { method: "POST", body: "{}" });
+      if (!Array.isArray(data.todos)) return;
+      state.todos = data.todos;
+      refreshClientList();
+      render();
+      const current = state.todos.find((item) => item.id === todo.id);
+      if (current && $("todoDialog").open && $("todoFormId").value === todo.id) applyTodoChangeNoticeToForm(current);
     }
 
     function navigateTodoHistory(offset) {
@@ -14959,19 +14981,7 @@
       if (hasManualClientBillableMinutes) clientBillableHoursInput.value = formatClientBillableHours(manualClientMinutes);
       syncTodoFormClientBillableHours();
       $("todoFormClientVehicle").value = editing ? (todo.clientVehicle === "van" ? "van" : "personal") : (todo.clientVehicle === "van" ? "van" : preferredClientVehicle());
-      $("deleteTodoFromDialog").classList.toggle("hidden", !editing);
-      $("duplicateTodoFromDialog").classList.toggle("hidden", !editing || Boolean(state.todoHoursSourceId));
-      $("writeHoursFromTodo").classList.toggle("hidden", !editing || Boolean(state.todoHoursSourceId) || !projectHoursSourceStatuses.has(todoStatus(todo.status).id));
-      $("markTodoChangedForOthers").classList.toggle("hidden", !editing || !todoCanMarkChangedForOthers(todo));
-      const isExistingTimeEntry = editing && timeEntryStatusIds.has(todoStatus(todo.status).id);
-      // Bojan can still work in a worker view.  His authority to ask for a
-      // correction must follow his account role, not the currently selected
-      // presentation mode.
-      const showCompletionRequest = editing && state.user?.role === "boss";
-      $("requestTodoCompletion").textContent = isExistingTimeEntry ? "Zahtevaj dopolnitev vnosa ur" : "Zahtevaj dopolnitev";
-      $("requestTodoCompletion").setAttribute("aria-label", isExistingTimeEntry ? "Zahtevaj dopolnitev vnosa ur" : "Zahtevaj dopolnitev opravila");
-      $("requestTodoCompletion").classList.toggle("hidden", !showCompletionRequest);
-      syncTodoFormFooterActions();
+      syncTodoDialogEditActions(todo, editing);
       applyTodoChangeNoticeToForm(todo);
       renderTodoFormAudit(todo);
       renderTodoFormSourceProject(todo);
@@ -14985,7 +14995,6 @@
       if (editing && !(await acquireTodoEditLockForDialog(todo.id))) return false;
       $("todoDialog").showModal();
       autosizeTodoNarrativeFieldsAfterLayout();
-      clearTodoChangeNoticeAfterOpen(todo);
       if (state.todoCreationDraftRestored) showNotice("Nedokončan osnutek je obnovljen.");
       requestAnimationFrame(() => $("todoDialog").focus({ preventScroll: true }));
       return true;
@@ -15002,7 +15011,46 @@
       await openTodoDialog(target, { reportNavigationIds: state.reportTodoNavigationIds });
     }
 
-    async function saveTodoFromDialog() {
+    function savedTodoFromDialogResponse(data, todo) {
+      const candidates = Array.isArray(data?.todos) ? data.todos : state.todos;
+      if (todo.id) return candidates.find((item) => item.id === todo.id) || null;
+      return candidates
+        .filter((item) => item.title === todo.title
+          && item.client === todo.client
+          && item.status === todo.status
+          && item.date === todo.date
+          && item.start === todo.start
+          && item.end === todo.end
+          && todoAssigneeIds(item).includes(todo.syncUser))
+        .sort((left, right) => String(right.updatedAt || "").localeCompare(String(left.updatedAt || "")))[0] || null;
+    }
+
+    async function keepTodoDialogOpenAfterSave(data, todo, wasCreating) {
+      const saved = savedTodoFromDialogResponse(data, todo);
+      if (!saved) {
+        showNotice("Opravilo je shranjeno. Za nadaljnje urejanje ga ponovno odpri.");
+        return;
+      }
+      $("todoFormId").value = saved.id;
+      state.todoCreationDraftCommitted = true;
+      state.todoCreationDraftRestored = false;
+      $("todoCreationTabs").classList.add("hidden");
+      state.todoHistoryLiveTodo = state.user?.role === "boss" ? saved : null;
+      state.todoHistoryPreviewIndex = -1;
+      state.todoHistoryPreviewActive = false;
+      $("todoDialog").classList.remove("is-history-preview");
+      updateTodoFormStatus();
+      syncTodoDialogEditActions(saved, true);
+      applyTodoChangeNoticeToForm(saved);
+      renderTodoFormAudit(saved);
+      renderTodoFormSourceProject(saved);
+      if (wasCreating && !String(saved.id).startsWith("offline-") && !(await acquireTodoEditLockForDialog(saved.id))) {
+        showNotice("Opravilo je shranjeno, vendar ga je pred nadaljnjim urejanjem treba znova odpreti.");
+      }
+      showNotice("Shranjeno.");
+    }
+
+    async function saveTodoFromDialog({ closeAfterSave = true } = {}) {
       if (state.todoHistoryPreviewActive) {
         showNotice("Gledaš prejšnjo različico. Z desno puščico se vrni na trenutno stanje, nato lahko urejaš.");
         return;
@@ -15159,7 +15207,7 @@
           && !await showAppConfirm("Odstranil si sebe iz opravila. Po shranjevanju ga v svojem delavskem pogledu ne boš več videl ali mogel odpreti. Vseeno shranim?")) {
         return;
       }
-      await saveTodoToServer(todo);
+      const data = await saveTodoToServer(todo);
       markTodoDialogAttachmentsSaved();
       if (todo.status === "execution" && !meal) rememberClientVehicle(clientVehicle);
       if (state.todoHoursSourceId) state.todoHoursSavedSourceId = state.todoHoursSourceId;
@@ -15167,13 +15215,18 @@
         state.todoCreationDraftCommitted = true;
         await clearTodoCreationDraft();
       }
-      $("todoDialog").close();
+      if (closeAfterSave) {
+        $("todoDialog").close();
+        return;
+      }
+      await keepTodoDialogOpenAfterSave(data, todo, !id);
     }
 
     let todoDialogSaveInFlight = false;
     function setTodoDialogSaving(saving) {
       const form = $("todoForm");
       const save = $("saveTodoDialog");
+      const saveWithoutClosing = $("saveTodoWithoutClosing");
       const status = $("todoFormActionStatus");
       form.classList.toggle("is-saving", Boolean(saving));
       form.setAttribute("aria-busy", String(Boolean(saving)));
@@ -15190,12 +15243,16 @@
       });
       save.classList.toggle("is-saving", Boolean(saving));
       save.setAttribute("aria-busy", String(Boolean(saving)));
-      save.title = saving ? "Shranjujem opravilo" : "Shrani";
-      save.setAttribute("aria-label", saving ? "Shranjujem opravilo" : "Shrani");
+      save.title = saving ? "Shranjujem opravilo" : "Shrani in zapri";
+      save.setAttribute("aria-label", saving ? "Shranjujem opravilo" : "Shrani in zapri");
+      saveWithoutClosing.classList.toggle("is-saving", Boolean(saving));
+      saveWithoutClosing.setAttribute("aria-busy", String(Boolean(saving)));
+      saveWithoutClosing.title = saving ? "Shranjujem opravilo" : "Shrani brez zapiranja";
+      saveWithoutClosing.setAttribute("aria-label", saving ? "Shranjujem opravilo" : "Shrani brez zapiranja");
       status.textContent = saving ? "Shranjujem opravilo." : "";
       syncTodoFormFooterActions();
     }
-    async function submitTodoDialog() {
+    async function submitTodoDialog({ closeAfterSave = true } = {}) {
       if (todoDialogSaveInFlight) return;
       const form = $("todoForm");
       const invalidField = [...form.elements].find((control) => control.willValidate && !control.validity.valid);
@@ -15206,7 +15263,7 @@
       todoDialogSaveInFlight = true;
       setTodoDialogSaving(true);
       try {
-        await saveTodoFromDialog();
+        await saveTodoFromDialog({ closeAfterSave });
       } catch (error) {
         showFormValidationError(form, error.message || "Opravila ni bilo mogoče shraniti.");
       } finally {
@@ -15379,6 +15436,19 @@
         materialAmount: draft.materialAmount ?? 0,
         externalDelivery: draft.externalDelivery ?? true
       });
+    }
+
+    function syncTodoDialogEditActions(todo, editing = Boolean(todo?.id)) {
+      $("deleteTodoFromDialog").classList.toggle("hidden", !editing);
+      $("duplicateTodoFromDialog").classList.toggle("hidden", !editing || Boolean(state.todoHoursSourceId));
+      $("writeHoursFromTodo").classList.toggle("hidden", !editing || Boolean(state.todoHoursSourceId) || !projectHoursSourceStatuses.has(todoStatus(todo.status).id));
+      $("markTodoChangedForOthers").classList.toggle("hidden", !editing || !todoCanMarkChangedForOthers(todo));
+      const isExistingTimeEntry = editing && timeEntryStatusIds.has(todoStatus(todo.status).id);
+      const showCompletionRequest = editing && state.user?.role === "boss";
+      $("requestTodoCompletion").textContent = isExistingTimeEntry ? "Zahtevaj dopolnitev vnosa ur" : "Zahtevaj dopolnitev";
+      $("requestTodoCompletion").setAttribute("aria-label", isExistingTimeEntry ? "Zahtevaj dopolnitev vnosa ur" : "Zahtevaj dopolnitev opravila");
+      $("requestTodoCompletion").classList.toggle("hidden", !showCompletionRequest);
+      syncTodoFormFooterActions();
     }
 
     async function openNoteEntryDialog({ draft = {} } = {}) {
@@ -16151,7 +16221,7 @@
     function todoManualOrderDomain(todo) {
       if (!todo || todo.done || timeEntryStatusIds.has(todo.status)) return "";
       if (todo.urgent) return "urgent";
-      if (todoNeedsOrdering(todo)) return "ordering";
+      if (manualOrderingStatusIds.has(todo.status)) return "ordering";
       return "active";
     }
 
@@ -18291,6 +18361,9 @@
       event.preventDefault();
       submitTodoDialog();
     });
+    $("saveTodoWithoutClosing").addEventListener("click", () => {
+      submitTodoDialog({ closeAfterSave: false });
+    });
     ["input", "change"].forEach((eventName) => {
       $("todoForm").addEventListener(eventName, scheduleTodoCreationDraftSave);
     });
@@ -18345,6 +18418,10 @@
     });
     $("writeHoursFromTodo").addEventListener("click", () => openHoursTodoFromCurrent().catch((error) => showNotice(error.message)));
     $("markTodoChangedForOthers").addEventListener("click", () => markTodoChangedForOthers().catch((error) => showNotice(error.message)));
+    $("acknowledgeTodoChangeNotice").addEventListener("click", () => {
+      const todo = state.todos.find((item) => item.id === $("todoFormId").value);
+      if (todo) clearTodoChangeNoticeAfterOpen(todo).catch((error) => showNotice(error.message));
+    });
     $("requestTodoCompletion").addEventListener("click", () => {
       try { openCompletionRequestDialog($("todoFormId").value); } catch (error) { showNotice(error.message); }
     });

@@ -4,6 +4,7 @@ const { TEST_PASSWORD, startIsolatedTestApp } = require("./test-app.cjs");
 const CLIENT_ALIAS = "PW stranka";
 const ENTRY_TITLE = "PW vpis ur";
 const ENTRY_DATE = "2025-06-15";
+const DISK_ENTRY_DATE = "2032-01-12";
 
 let app;
 
@@ -163,6 +164,129 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
       await expect(page.locator("#todoFormPhotoList .todo-form-photo-row")).toHaveCount(10);
       await expect(page.locator("#todoFormPhotoList")).toContainText("testna-fotografija-10.png");
       expect(serverImageUploads).toBe(10);
+    } finally {
+      await context.close();
+    }
+  });
+
+  test("a text ordering marker remains in its manual bucket and is also shown under ordering", async ({ browser }) => {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    try {
+      await localLogin(page, "ibro");
+      const buckets = await page.evaluate(() => {
+        const todos = [
+          { id: "pw-order-unsorted", title: "Naroči kabel za test", client: "PW stranka", status: "open", syncUser: "ibro", assigneeIds: ["ibro"], sharedManualBucket: "unsorted", order: -900 },
+          { id: "pw-order-sorted", title: "Še naroči stikalo", client: "PW stranka", status: "open", syncUser: "ibro", assigneeIds: ["ibro"], sharedManualBucket: "sorted", order: -899 }
+        ];
+        state.todos.push(...todos);
+        state.todoSortMode = "manual";
+        document.querySelector("#todoSortMode").value = "manual";
+        renderTodos();
+        const sectionFor = (item) => {
+          let previous = item.previousElementSibling;
+          while (previous && !previous.dataset.todoSection) previous = previous.previousElementSibling;
+          return previous?.dataset.todoSection || "";
+        };
+        return Object.fromEntries(todos.map((todo) => [
+          todo.id,
+          [...document.querySelectorAll(`[data-todo-id="${todo.id}"]`)].map(sectionFor)
+        ]));
+      });
+      expect(buckets["pw-order-unsorted"]).toEqual(["ordering", "unsorted"]);
+      expect(buckets["pw-order-sorted"]).toEqual(["ordering", "sorted"]);
+      await expect(page.locator('[data-todo-id="pw-order-unsorted"][data-todo-ordering-reference="true"] .drag-handle')).toBeDisabled();
+    } finally {
+      await context.close();
+    }
+  });
+
+  test("manual change marker stays visible to the boss until it is explicitly acknowledged", async ({ browser }) => {
+    const ibroContext = await browser.newContext();
+    const ibroPage = await ibroContext.newPage();
+    const title = "PW oznaka spremembe za potrditev";
+    let todoId = "";
+    try {
+      await localLogin(ibroPage, "ibro");
+      await ibroPage.locator("#newTodoButton").click();
+      await ibroPage.locator("#todoFormTask").fill(title);
+      await ibroPage.locator("#todoFormClient").fill(CLIENT_ALIAS);
+      await ibroPage.locator("#saveTodoDialog").click();
+      await expect(ibroPage.locator("#todoDialog")).toBeHidden();
+      todoId = await ibroPage.evaluate(async (taskTitle) => {
+        const response = await fetch("/api/todos");
+        const data = await response.json();
+        return data.todos.find((todo) => todo.title === taskTitle)?.id || "";
+      }, title);
+      expect(todoId).toBeTruthy();
+      await ibroPage.locator(`[data-todo-id="${todoId}"] .edit-todo`).click();
+      await expect(ibroPage.locator("#markTodoChangedForOthers")).toBeVisible();
+      const marked = ibroPage.waitForResponse((response) => response.request().method() === "POST"
+        && new URL(response.url()).pathname === `/api/todos/${todoId}/change-notice`);
+      await ibroPage.locator("#markTodoChangedForOthers").click();
+      expect((await marked).ok()).toBeTruthy();
+      await ibroPage.locator("#closeTodoDialog").click();
+      await expect(ibroPage.locator("#todoDialog")).toBeHidden();
+    } finally {
+      await ibroContext.close();
+    }
+
+    const bossContext = await browser.newContext();
+    const bossPage = await bossContext.newPage();
+    try {
+      await localLogin(bossPage, "bojan");
+      const card = bossPage.locator(`[data-todo-id="${todoId}"]`).first();
+      await expect(card).toHaveClass(/has-change-notice/);
+      await card.locator(".edit-todo").click();
+      await expect(bossPage.locator("#todoFormChangeNotice")).toBeVisible();
+      await expect(bossPage.locator("#todoFormChangeNotice")).toContainText("Ibro je označil dogodek za pregled");
+      await bossPage.waitForTimeout(300);
+      await expect(bossPage.locator("#todoFormChangeNotice")).toBeVisible();
+      await bossPage.locator("#acknowledgeTodoChangeNotice").click();
+      await expect(bossPage.locator("#todoFormChangeNotice")).toBeHidden();
+      await expect(card).not.toHaveClass(/has-change-notice/);
+    } finally {
+      await bossContext.close();
+    }
+  });
+
+  test("disk save keeps new task, time entry and material entry open for further editing", async ({ browser }) => {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    try {
+      await localLogin(page, "ibro");
+
+      await page.locator("#newTodoButton").click();
+      await page.locator("#todoFormTask").fill("PW disk opravilo");
+      await page.locator("#todoFormClient").fill(CLIENT_ALIAS);
+      await page.locator("#saveTodoWithoutClosing").click();
+      await expect(page.locator("#todoDialog")).toBeVisible();
+      await expect(page.locator("#todoFormId")).not.toHaveValue("");
+      await expect(page.locator("#deleteTodoFromDialog")).toBeVisible();
+      await expect(page.locator("#todoCreationTabs")).toBeHidden();
+      await page.locator("#closeTodoDialog").click();
+
+      await page.locator("#writeHoursButton").click();
+      await page.locator("#todoFormTask").fill("PW disk ure");
+      await page.locator("#todoFormClient").fill(CLIENT_ALIAS);
+      await page.locator("#todoFormDate").fill(DISK_ENTRY_DATE);
+      await page.locator("#todoFormStart").fill("08:00");
+      await page.locator("#todoFormEnd").fill("09:00");
+      await page.locator("#todoFormBillingKm").fill("1");
+      await page.locator("#todoFormClientKm").fill("1");
+      await page.locator("#saveTodoWithoutClosing").click();
+      await expect(page.locator("#todoDialog")).toBeVisible();
+      await expect(page.locator("#todoFormId")).not.toHaveValue("");
+      await expect(page.locator("#deleteTodoFromDialog")).toBeVisible();
+      await page.locator("#closeTodoDialog").click();
+
+      await page.locator("#materialEntryButton").click();
+      await page.locator("#todoFormTask").fill("PW disk material");
+      await page.locator("#todoFormClient").fill(CLIENT_ALIAS);
+      await page.locator("#saveTodoWithoutClosing").click();
+      await expect(page.locator("#todoDialog")).toBeVisible();
+      await expect(page.locator("#todoFormId")).not.toHaveValue("");
+      await expect(page.locator("#deleteTodoFromDialog")).toBeVisible();
     } finally {
       await context.close();
     }
@@ -551,7 +675,10 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
         start.setHours(12, 0, 0, 0);
         start.setDate(start.getDate() - ((start.getDay() + 6) % 7));
         const end = new Date(start);
-        end.setDate(end.getDate() + 7);
+        // The current monthly grid ends on the following Sunday, therefore
+        // keep the whole asserted span inside the visible grid even when a
+        // month starts on Monday.
+        end.setDate(end.getDate() + 6);
         const key = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
         return { start: key(start), end: key(end) };
       });

@@ -112,7 +112,7 @@ test("front-end naročila in foto urejevalnik ohranita dogovorjeni mobilni prika
   assert.match(server, /\["thumbnail", inputPath, `\$\{outputPath\}\[Q=\$\{quality\},strip\]`, String\(maxSide\)\]/);
 });
 
-test("oznaka spremembe je zasebna po prejemniku, vidna v vseh pogledih in se potrdi ob odprtju", async () => {
+test("oznaka spremembe je zasebna po prejemniku, vidna v vseh pogledih in se potrdi šele izrecno", async () => {
   const [html, server] = await Promise.all([
     fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8"),
     fs.readFile(path.join(__dirname, "..", "outputs", "server.js"), "utf8")
@@ -122,7 +122,10 @@ test("oznaka spremembe je zasebna po prejemniku, vidna v vseh pogledih in se pot
   assert.match(server, /changeNotice: todoChangeNoticeForUser\(todo, user\)/);
   assert.match(server, /todoChangeNoticeMatch/);
   assert.match(html, /id="markTodoChangedForOthers"/);
+  assert.match(html, /id="acknowledgeTodoChangeNotice"/);
   assert.match(html, /function clearTodoChangeNoticeAfterOpen\(todo\)/);
+  assert.match(html, /\$\("acknowledgeTodoChangeNotice"\)\.addEventListener\("click", \(\) => \{/);
+  assert.doesNotMatch(html, /\$\("todoDialog"\)\.showModal\(\);[\s\S]{0,180}clearTodoChangeNoticeAfterOpen\(todo\)/);
   assert.match(html, /todo-item[\s\S]*?has-change-notice/);
   assert.match(html, /day-todo[\s\S]*?has-change-notice/);
   assert.match(html, /day-timeline-event[\s\S]*?has-change-notice/);
@@ -133,17 +136,31 @@ test("prehod iz novega dogodka v vpis ur počaka na zaprtje modala", async () =>
   assert.match(html, /\$\("todoCreationTabs"\)\.addEventListener\("click", async \(event\) => \{/);
   assert.match(html, /\$\("todoDialog"\)\.close\(\);[\s\S]{0,600}await new Promise\(\(resolve\) => setTimeout\(resolve, 0\)\);[\s\S]{0,1000}openStandaloneHoursDialog/);
 });
+
+test("disketa shrani nov ali obstoječi vpis brez zapiranja modala", async () => {
+  const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  assert.match(html, /id="saveTodoWithoutClosing" type="button" title="Shrani brez zapiranja"/);
+  assert.match(html, /async function saveTodoFromDialog\(\{ closeAfterSave = true \} = \{\}\)/);
+  assert.match(html, /async function keepTodoDialogOpenAfterSave\(data, todo, wasCreating\)/);
+  assert.match(html, /submitTodoDialog\(\{ closeAfterSave: false \}\);/);
+  assert.match(html, /if \(closeAfterSave\) \{\s*\$\("todoDialog"\)\.close\(\);/);
+});
+
 test("ročni filter loči in omogoča razvrščanje nujnih opravil", async () => {
   const [html, server] = await Promise.all([
     fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8"),
     fs.readFile(path.join(__dirname, "..", "outputs", "server.js"), "utf8")
   ]);
   assert.match(html, /function todoManualCategory\(todo\) \{\s*if \(todo\?\.urgent\) return "urgent";/);
+  assert.match(html, /if \(manualOrderingStatusIds\.has\(todo\?\.status\)\) return "ordering";/);
   assert.match(html, /const positions = \{ urgent: 0, ordering: 1, unsorted: 2, sorted: 3 \}/);
   assert.match(html, /if \(state\.todoSortMode === "manual"\) \{\s*return list\.filter\(\(todo\) => !todo\.done && !timeEntryStatusIds\.has\(todo\.status\)\)\.sort\(todoManualCategorySort\);/);
   assert.match(html, /urgent: \["Nujno", "Nujna opravila"\]/);
   assert.match(html, /const collapsible = bucket === "ordering";/);
   assert.match(html, /function appendTodoOrderSection\(items, bucket, itemCount = 0\)/);
+  assert.match(html, /section\.dataset\.todoSection = bucket;/);
+  assert.match(html, /function todoManualDisplayEntries\(todos\) \{/);
+  assert.match(html, /orderingReference: true/);
   assert.match(html, /hiddenCountSuffix/);
   assert.match(html, /manualCategoryCounts/);
   assert.match(html, /function todoManualOrderDomain\(todo\) \{/);

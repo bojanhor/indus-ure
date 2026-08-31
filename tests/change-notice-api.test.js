@@ -55,7 +55,7 @@ async function stop(child) {
   if (child.exitCode === null) child.kill("SIGKILL");
 }
 
-test("sprememba opravila se označi samo drugemu uporabniku in izgine ob odprtju", { timeout: 15_000 }, async () => {
+test("sprememba opravila se označi samo drugemu uporabniku in izgine po izrecni potrditvi", { timeout: 15_000 }, async () => {
   const port = 20500 + Math.floor(Math.random() * 700);
   const dataDir = path.join(os.tmpdir(), `indus-ure-change-notice-${process.pid}-${Date.now()}`);
   const password = "test-only-local-password-123";
