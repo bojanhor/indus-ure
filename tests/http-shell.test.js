@@ -667,6 +667,15 @@ test("lastnik vidi začasno video prilogo pred shranjevanjem, drugi uporabniki n
   assert.match(server, /return pendingVisible \|\| todoVisible \|\| advanceVisible;/);
 });
 
+test("zapiranje obstoječega opravila ne odstranjuje že shranjenih videov", async () => {
+  const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  assert.match(html, /\{ \.\.\.data\.photo, temporaryUpload: true \}/);
+  assert.match(html, /function markTodoDialogAttachmentsSaved\(\)/);
+  assert.match(html, /if \(!photo\?\.temporaryUpload \|\| !isVideoAttachment\(photo\)/);
+  assert.match(html, /delete photo\.temporaryUpload;/);
+  assert.match(html, /await saveTodoToServer\(todo\);\s*markTodoDialogAttachmentsSaved\(\);/);
+});
+
 test("completion request UI and authenticated link flow are present", async () => {
   const [server, html] = await Promise.all([
     fs.readFile(path.join(__dirname, "..", "outputs", "server.js"), "utf8"),

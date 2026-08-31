@@ -13971,7 +13971,11 @@
             });
             const draftIndex = state.todoDialogPhotos.findIndex((item) => item.id === draft.id);
             if (draftIndex >= 0 && !state.todoDialogPhotos.some((item, itemIndex) => itemIndex !== draftIndex && item.attachmentId === data.photo.attachmentId)) {
-              state.todoDialogPhotos.splice(draftIndex, 1, data.photo);
+              // The server keeps a fresh video in a short-lived pending area
+              // until the whole form is saved.  This client-only marker is
+              // deliberately not copied to a saved task, so reopening an
+              // existing task never tries to delete its real video.
+              state.todoDialogPhotos.splice(draftIndex, 1, { ...data.photo, temporaryUpload: true });
             }
             renderTodoFormPhotos();
           } catch (error) {
@@ -15112,6 +15116,7 @@
         showNotice("Za vpis ur nastavi uro od in do. Dodan je prvi prost enourni termin, ki ga lahko takoj popraviš v dnevnem pogledu.");
         const slot = firstFreeDayTimelineSlot(todo.date);
         const data = await saveTodoToServer({ ...todo, ...slot, hoursNeedsReview: true });
+        markTodoDialogAttachmentsSaved();
         if (todo.status === "execution" && !meal) rememberClientVehicle(clientVehicle);
         const saved = (data.todos || []).filter((item) => {
           const sameSlot = item.date === todo.date && item.start === slot.start && item.end === slot.end && item.title === todo.title;
@@ -15152,6 +15157,7 @@
         return;
       }
       await saveTodoToServer(todo);
+      markTodoDialogAttachmentsSaved();
       if (todo.status === "execution" && !meal) rememberClientVehicle(clientVehicle);
       if (state.todoHoursSourceId) state.todoHoursSavedSourceId = state.todoHoursSourceId;
       if (!id) {
@@ -18385,8 +18391,14 @@
     });
     $("deleteCompletedProject").addEventListener("click", () => handleHoursProjectCompletion(true).catch((error) => showNotice(error.message)));
     $("rescheduleProject").addEventListener("click", () => handleHoursProjectCompletion(false).catch((error) => showNotice(error.message)));
+    function markTodoDialogAttachmentsSaved() {
+      state.todoDialogPhotos.forEach((photo) => { delete photo.temporaryUpload; });
+    }
     async function discardTemporaryTodoAttachment(photo) {
-      if (!isVideoAttachment(photo) || !/^[a-f0-9]{64}$/.test(String(photo?.attachmentId || ""))) return;
+      if (!photo?.temporaryUpload || !isVideoAttachment(photo) || !/^[a-f0-9]{64}$/.test(String(photo?.attachmentId || ""))) return;
+      // Avoid a duplicate request if this same temporary video is removed and
+      // the form is subsequently closed before the first cleanup completes.
+      delete photo.temporaryUpload;
       try {
         await api(`/api/attachments/${encodeURIComponent(photo.attachmentId)}/pending`, { method: "DELETE", body: JSON.stringify({}) });
       } catch {
