@@ -129,22 +129,22 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
     }
   });
 
-  test("a standard gallery photo can be added to a new task before it is saved", async ({ browser }) => {
+  test("file picker can add ten gallery photos to a new task before it is saved", async ({ browser }) => {
     const context = await browser.newContext();
     const page = await context.newPage();
     try {
       await localLogin(page, "ibro");
-      let serverImageUploadCalled = false;
+      let serverImageUploads = 0;
       await page.route("**/api/todos/image", async (route) => {
-        serverImageUploadCalled = true;
+        serverImageUploads += 1;
         await route.fulfill({
           status: 201,
           contentType: "application/json",
           body: JSON.stringify({
             photo: {
-              id: "pw-image-upload",
-              attachmentId: "a".repeat(64),
-              name: "testna-fotografija.png",
+              id: `pw-image-upload-${serverImageUploads}`,
+              attachmentId: `${"a".repeat(63)}${serverImageUploads.toString(16)}`,
+              name: `testna-fotografija-${serverImageUploads}.png`,
               comment: "",
               mimeType: "image/jpeg",
               url: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLk7wAAAABJRU5ErkJggg==",
@@ -154,14 +154,15 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
         });
       });
       await page.locator("#newTodoButton").click();
-      await page.locator("#todoFormAttachmentInput").setInputFiles({
-        name: "testna-fotografija.png",
+      await page.locator("#todoFormAttachmentInput").setInputFiles(Array.from({ length: 10 }, (_, index) => ({
+        name: `testna-fotografija-${index + 1}.png`,
         mimeType: "image/png",
         buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLk7wAAAABJRU5ErkJggg==", "base64")
-      });
-      await expect(page.locator("#todoFormPhotoList img")).toBeVisible();
-      await expect(page.locator("#todoFormPhotoList")).toContainText("testna-fotografija.png");
-      expect(serverImageUploadCalled).toBe(true);
+      })));
+      await expect(page.locator("#todoFormPhotoList img").first()).toBeVisible();
+      await expect(page.locator("#todoFormPhotoList .todo-form-photo-row")).toHaveCount(10);
+      await expect(page.locator("#todoFormPhotoList")).toContainText("testna-fotografija-10.png");
+      expect(serverImageUploads).toBe(10);
     } finally {
       await context.close();
     }

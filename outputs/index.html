@@ -18413,8 +18413,17 @@
     }
     async function handleTodoAttachmentsFromInput(event) {
       try {
+        const selectedFiles = [...(event.target.files || [])];
+        if (!selectedFiles.length) return;
         const remaining = Math.max(0, maxTodoAttachments - state.todoDialogPhotos.length);
-        const files = [...event.target.files].slice(0, remaining);
+        if (!remaining) {
+          showNotice(`Na opravilu je že največ ${maxTodoAttachments} prilog.`);
+          return;
+        }
+        const files = selectedFiles.slice(0, remaining);
+        if (selectedFiles.length > remaining) {
+          showNotice(`Izbranih je ${selectedFiles.length} prilog; dodanih bo prvih ${remaining}.`);
+        }
         const videoFiles = files.filter(isTodoVideoFile);
         const imageFiles = files.filter((file) => !isTodoVideoFile(file) && isTodoImageFile(file));
         const standardFiles = files.filter((file) => !isTodoVideoFile(file) && !isTodoImageFile(file));
