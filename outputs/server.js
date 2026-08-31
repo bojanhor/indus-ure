@@ -3343,6 +3343,11 @@ function visibleTodosForUser(db, user) {
     return {
       ...publicTodo,
       changeNotice: todoChangeNoticeForUser(todo, user),
+      // A boss can switch into an individual worker's view.  Preserve the
+      // worker's private marker for that *view* as well, otherwise a task
+      // marked for Ibro looked unmarked while Bojan was looking at Ibro's
+      // manual list.  The client never receives this map for a worker.
+      ...(user.role === "boss" ? { changeNoticesByUser: cleanTodoChangeNotices(todo.changeNotices, db.users) } : {}),
       ...(user.role === "boss" ? { history, revisionHistory } : {}),
       clientSettlement: clientSettlementForTodo(db, todo),
       settlement: corrections.length ? {
@@ -3370,6 +3375,7 @@ function visibleTodoForUser(db, user, id) {
   return {
     ...publicTodo,
     changeNotice: todoChangeNoticeForUser(todo, user),
+    ...(user.role === "boss" ? { changeNoticesByUser: cleanTodoChangeNotices(todo.changeNotices, db.users) } : {}),
     ...(user.role === "boss" ? { history, revisionHistory } : {}),
     clientSettlement: clientSettlementForTodo(db, todo),
     settlement: corrections.length ? { pending: true, worker: corrections.filter((item) => item.type === "worker").map((item) => ({ id: item.id, delta: item.delta, effectiveDate: item.effectiveDate })), client: corrections.filter((item) => item.type === "client").map((item) => ({ id: item.id, delta: item.delta, effectiveDate: item.effectiveDate })) } : { pending: false, worker: [], client: [] }

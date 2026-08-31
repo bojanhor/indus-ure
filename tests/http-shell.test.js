@@ -120,9 +120,12 @@ test("oznaka spremembe je zasebna po prejemniku, vidna v vseh pogledih in se pot
   assert.match(server, /function recordTodoChangeNotices\(db, todos, actor, fields/);
   assert.match(server, /function clearTodoChangeNoticesForUser\(db, todo, user\)/);
   assert.match(server, /changeNotice: todoChangeNoticeForUser\(todo, user\)/);
+  assert.match(server, /changeNoticesByUser: cleanTodoChangeNotices\(todo\.changeNotices, db\.users\)/);
   assert.match(server, /todoChangeNoticeMatch/);
   assert.match(html, /id="markTodoChangedForOthers"/);
   assert.match(html, /id="acknowledgeTodoChangeNotice"/);
+  assert.match(html, /function todoChangeNoticeRecipientId\(\)/);
+  assert.match(html, /function todoChangeNoticeCanBeAcknowledged\(todo\)/);
   assert.match(html, /function clearTodoChangeNoticeAfterOpen\(todo\)/);
   assert.match(html, /\$\("acknowledgeTodoChangeNotice"\)\.addEventListener\("click", \(\) => \{/);
   assert.doesNotMatch(html, /\$\("todoDialog"\)\.showModal\(\);[\s\S]{0,180}clearTodoChangeNoticeAfterOpen\(todo\)/);

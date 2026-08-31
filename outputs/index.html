@@ -6539,8 +6539,21 @@
       "client-billing": "obračun stranke"
     };
 
+    function todoChangeNoticeRecipientId() {
+      const context = String(state?.workContext || "");
+      if (state?.user?.role === "boss" && context.startsWith("worker:")) return context.slice("worker:".length);
+      return String(state?.user?.id || "");
+    }
+
+    function todoChangeNoticeCanBeAcknowledged(todo) {
+      return Boolean(todo?.changeNotice && todoChangeNoticeRecipientId() === String(state?.user?.id || ""));
+    }
+
     function todoChangeNotice(todo) {
-      const notice = todo?.changeNotice;
+      const recipientId = todoChangeNoticeRecipientId();
+      const notice = recipientId === String(state?.user?.id || "")
+        ? todo?.changeNotice
+        : todo?.changeNoticesByUser?.[recipientId];
       return notice && typeof notice === "object" && Array.isArray(notice.fields) && notice.fields.length ? notice : null;
     }
 
@@ -14278,7 +14291,12 @@
       const noticeBox = $("todoFormChangeNotice");
       const notice = todoChangeNotice(todo);
       noticeBox.classList.toggle("hidden", !notice);
-      $("todoFormChangeNoticeText").textContent = notice ? todoChangeNoticeText(todo) : "";
+      const canAcknowledge = todoChangeNoticeCanBeAcknowledged(todo);
+      $("acknowledgeTodoChangeNotice").classList.toggle("hidden", !notice || !canAcknowledge);
+      const recipient = state.users.find((user) => user.id === todoChangeNoticeRecipientId());
+      $("todoFormChangeNoticeText").textContent = notice
+        ? `${todoChangeNoticeText(todo)}${canAcknowledge ? "" : ` Oznaka čaka na ${recipient?.name || "delavca"}.`}`
+        : "";
       if (!notice) return;
       const mark = (...ids) => ids.forEach((id) => $(id)?.classList.add("todo-change-highlight"));
       const fields = new Set(notice.fields || []);
@@ -14323,7 +14341,7 @@
     }
 
     async function clearTodoChangeNoticeAfterOpen(todo) {
-      if (!todoChangeNotice(todo) || !todo?.id) return;
+      if (!todoChangeNoticeCanBeAcknowledged(todo) || !todo?.id) return;
       const data = await api(`/api/todos/${encodeURIComponent(todo.id)}/change-notice/seen`, { method: "POST", body: "{}" });
       if (!Array.isArray(data.todos)) return;
       state.todos = data.todos;

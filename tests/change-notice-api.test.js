@@ -98,6 +98,12 @@ test("sprememba opravila se označi samo drugemu uporabniku in izgine po izrecni
     const createdForIbro = JSON.parse(ibroList.body).todos.find((todo) => todo.id === id);
     assert.equal(createdForIbro.changeNotice?.kind, "created");
     assert.equal(createdForIbro.changeNotice?.by, "bojan");
+    assert.equal(createdForIbro.changeNoticesByUser, undefined, "Delavec ne sme dobiti oznak drugih prejemnikov.");
+
+    const bossAfterCreate = await request(port, "/api/todos", { headers: bojan });
+    const createdForBoss = JSON.parse(bossAfterCreate.body).todos.find((todo) => todo.id === id);
+    assert.equal(createdForBoss.changeNotice, null, "Avtor oznake je ne prejme sam.");
+    assert.equal(createdForBoss.changeNoticesByUser?.ibro?.kind, "created", "Šef potrebuje oznako za Ibrov delavski pogled.");
 
     const seen = await request(port, `/api/todos/${encodeURIComponent(id)}/change-notice/seen`, {
       method: "POST", headers: ibro, body: "{}"
