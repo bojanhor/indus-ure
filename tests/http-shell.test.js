@@ -745,10 +745,11 @@ test("e-poštna povezava odpre ciljno opravilo pred celotnim nalaganjem", async 
   assert.match(server, /function visibleTodoForUser\(db, user, id\) \{/);
   assert.match(server, /const todo = visibleTodoForUser\(db, user, id\);/);
   assert.match(server, /async function requireUserForFocusedTodo\(req, res\) \{/);
-  assert.match(server, /const focused = await getPgStore\(\)\.focusedTodo\(id\);/);
+  assert.match(server, /const focused = await getPgStore\(\)\.focusedTodoForLock\(id\);/);
   assert.match(server, /completionRequestGroup\(id, tokenHash\)/);
   assert.match(server, /function acquireTodoEditLockGroup\(todoId, assignmentIds, user, lockToken = "", now = Date\.now\(\)\) \{/);
-  assert.match(store, /async focusedTodo\(id\) \{/);
+  assert.match(store, /async focusedTodo\(id, \{ includeAttachments = true \} = \{\}\) \{/);
+  assert.match(store, /async focusedTodoForLock\(id\) \{\s*return this\.focusedTodo\(id, \{ includeAttachments: false \}\);\s*\}/);
   assert.match(store, /async completionRequestGroup\(requestedAssignmentId, tokenHash\) \{/);
   assert.match(html, /function hasTodoLink\(\) \{/);
   assert.match(html, /async function openTodoFromLink\(\{ render = true \} = \{\}\)/);

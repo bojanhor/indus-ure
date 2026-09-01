@@ -420,7 +420,7 @@ class PostgresStore {
   // A link from e-mail opens one assignment, not the whole task list.  Keep
   // this query deliberately narrow so it stays quick even when the calendar
   // history and attachment table have grown large.
-  async focusedTodo(id) {
+  async focusedTodo(id, { includeAttachments = true } = {}) {
     const todoId = String(id || "");
     if (!todoId) return null;
     const target = await this.pool.query(
@@ -442,31 +442,41 @@ class PostgresStore {
       taskId: row.task_id,
       syncUser: row.assignment_data?.syncUser || row.worker_id || ""
     });
-    const attachmentIds = [...new Set((todo.photos || [])
-      .map((photo) => String(photo?.attachmentId || "").trim())
-      .filter((attachmentId) => /^[a-f0-9]{64}$/i.test(attachmentId)))];
-    const attachmentRows = attachmentIds.length
-      ? await this.pool.query(
-        "select id, mime_type, byte_size, storage_key, thumbnail_key, data from indus_attachments where id = any($1::text[])",
-        [attachmentIds]
-      )
-      : { rows: [] };
     const attachments = {};
-    for (const attachment of attachmentRows.rows) {
-      attachments[attachment.id] = {
-        ...(attachment.data || {}),
-        id: attachment.id,
-        mimeType: attachment.mime_type,
-        byteSize: Number(attachment.byte_size || 0),
-        storageKey: attachment.storage_key,
-        thumbnailKey: attachment.thumbnail_key
-      };
+    if (includeAttachments) {
+      const attachmentIds = [...new Set((todo.photos || [])
+        .map((photo) => String(photo?.attachmentId || "").trim())
+        .filter((attachmentId) => /^[a-f0-9]{64}$/i.test(attachmentId)))];
+      const attachmentRows = attachmentIds.length
+        ? await this.pool.query(
+          "select id, mime_type, byte_size, storage_key, thumbnail_key, data from indus_attachments where id = any($1::text[])",
+          [attachmentIds]
+        )
+        : { rows: [] };
+      for (const attachment of attachmentRows.rows) {
+        attachments[attachment.id] = {
+          ...(attachment.data || {}),
+          id: attachment.id,
+          mimeType: attachment.mime_type,
+          byteSize: Number(attachment.byte_size || 0),
+          storageKey: attachment.storage_key,
+          thumbnailKey: attachment.thumbnail_key
+        };
+      }
     }
     const assigneeIds = [...new Set(assignments.rows
       .map((assignment) => String(assignment.data?.syncUser || assignment.worker_id || "").trim())
       .filter(Boolean))];
     const assignmentIds = assignments.rows.map((assignment) => String(assignment.id || "")).filter(Boolean);
     return { todo, assigneeIds, assignmentIds, attachments };
+  }
+
+  // Acquiring an edit lock needs only the task and all of its assignment IDs.
+  // In particular, never hydrate image/video attachment metadata here: doing
+  // so makes every calendar click wait for unrelated, potentially very large
+  // attachment rows before the form can become editable.
+  async focusedTodoForLock(id) {
+    return this.focusedTodo(id, { includeAttachments: false });
   }
 
   // Completion-request links are sent by e-mail and must work even if their

@@ -10266,7 +10266,7 @@ async function handleApi(req, res) {
       if (!user) return;
       const body = await readBody(req);
       if (DATABASE_URL) {
-        const focused = await getPgStore().focusedTodo(id);
+        const focused = await getPgStore().focusedTodoForLock(id);
         const todo = focused?.todo;
         if (!todo) {
           sendJson(res, 404, { code: "todo_not_found", error: "Opravilo ne obstaja več." });
