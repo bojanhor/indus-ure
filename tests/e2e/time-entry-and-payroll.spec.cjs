@@ -211,7 +211,10 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
       await ibroPage.locator("#newTodoButton").click();
       await ibroPage.locator("#todoFormTask").fill(title);
       await ibroPage.locator("#todoFormClient").fill(CLIENT_ALIAS);
+      const created = ibroPage.waitForResponse((response) => response.request().method() === "POST"
+        && new URL(response.url()).pathname === "/api/todos");
       await ibroPage.locator("#saveTodoDialog").click();
+      expect((await created).ok()).toBeTruthy();
       await expect(ibroPage.locator("#todoDialog")).toBeHidden();
       todoId = await ibroPage.evaluate(async (taskTitle) => {
         const response = await fetch("/api/todos");
@@ -220,10 +223,11 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
       }, title);
       expect(todoId).toBeTruthy();
       await ibroPage.locator(`[data-todo-id="${todoId}"] .edit-todo`).click();
-      await expect(ibroPage.locator("#markTodoChangedForOthers")).toBeVisible();
-      const marked = ibroPage.waitForResponse((response) => response.request().method() === "POST"
-        && new URL(response.url()).pathname === `/api/todos/${todoId}/change-notice`);
-      await ibroPage.locator("#markTodoChangedForOthers").click();
+      await expect(ibroPage.locator("#todoFormNotifyOthers")).toBeVisible();
+      await ibroPage.locator("#todoFormNotifyOthers").check();
+      const marked = ibroPage.waitForResponse((response) => response.request().method() === "PUT"
+        && new URL(response.url()).pathname === `/api/todos/${todoId}`);
+      await ibroPage.locator("#saveTodoWithoutClosing").click();
       expect((await marked).ok()).toBeTruthy();
       await ibroPage.locator("#closeTodoDialog").click();
       await expect(ibroPage.locator("#todoDialog")).toBeHidden();
@@ -239,11 +243,14 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
       await expect(card).toHaveClass(/has-change-notice/);
       await card.locator(".edit-todo").click();
       await expect(bossPage.locator("#todoFormChangeNotice")).toBeVisible();
-      await expect(bossPage.locator("#todoFormChangeNotice")).toContainText("Ibro je poudaril dogodek");
+      await expect(bossPage.locator("#todoFormChangeNotice")).toContainText("Ibro je označil dogodek za pregled");
       await bossPage.waitForTimeout(300);
       await expect(bossPage.locator("#todoFormChangeNotice")).toBeVisible();
-      await bossPage.locator("#acknowledgeTodoChangeNotice").click();
-      await expect(bossPage.locator("#todoFormChangeNotice")).toBeHidden();
+      const acknowledged = bossPage.waitForResponse((response) => response.request().method() === "PUT"
+        && new URL(response.url()).pathname === `/api/todos/${todoId}`);
+      await bossPage.locator("#saveTodoDialog").click();
+      expect((await acknowledged).ok()).toBeTruthy();
+      await expect(bossPage.locator("#todoDialog")).toBeHidden();
       await expect(card).not.toHaveClass(/has-change-notice/);
     } finally {
       await bossContext.close();

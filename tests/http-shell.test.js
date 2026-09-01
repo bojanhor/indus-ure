@@ -116,7 +116,7 @@ test("front-end naročila in foto urejevalnik ohranita dogovorjeni mobilni prika
   assert.match(server, /\["thumbnail", inputPath, `\$\{outputPath\}\[Q=\$\{quality\},strip\]`, String\(maxSide\)\]/);
 });
 
-test("oznaka spremembe je zasebna po prejemniku, vidna v vseh pogledih in se porabi ob shranjevanju", async () => {
+test("oznaka spremembe je zasebna po prejemniku, vidna v vseh pogledih in nastane le ob shranjeni kljukici", async () => {
   const [html, server] = await Promise.all([
     fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8"),
     fs.readFile(path.join(__dirname, "..", "outputs", "server.js"), "utf8")
@@ -129,26 +129,26 @@ test("oznaka spremembe je zasebna po prejemniku, vidna v vseh pogledih in se por
   assert.match(server, /todoChangeNoticeMatch/);
   assert.match(server, /requestedRecipientId/);
   assert.match(server, /requestedRecipientId !== user\.id && user\.role !== "boss"/);
-  assert.match(html, /id="markTodoChangedForOthers"/);
+  assert.match(server, /const notifyOthers = body\.notifyOthers === true;/);
+  assert.match(server, /notifyOthers\s*\? recordTodoChangeNotices\(db, updatedGroup, user, \["manual"\], "manual", now\)/);
   assert.match(html, /Opozori druge o spremembi/);
-  assert.match(html, /button\.classList\.add\("is-sent"\)/);
-  assert.match(html, /button\.textContent = "✓ Opozorilo poslano"/);
+  assert.match(html, /id="todoFormNotifyOthers" type="checkbox"/);
+  assert.match(html, /notifyOthers: Boolean\(existing && \$\("todoFormNotifyOthers"\)\.checked\)/);
   assert.doesNotMatch(html, /showNotice\("Opozorilo o spremembi je poslano drugim udeležencem\."\)/);
-  assert.match(html, /notice\.kind === "manual"[\s\S]*?je poudaril dogodek/);
-  assert.match(html, /id="acknowledgeTodoChangeNotice"/);
+  assert.match(html, /notice\.kind === "manual"[\s\S]*?je označil dogodek za pregled/);
+  assert.match(html, /function todoChangeNoticeLabel\(todo\)/);
   assert.match(html, /function todoChangeNoticeRecipientId\(\)/);
   assert.match(html, /function todoChangeNoticeCanBeAcknowledged\(todo\)/);
   assert.match(html, /function clearTodoChangeNoticeAfterOpen\(todo\)/);
   assert.match(html, /recipientQuery/);
-  assert.match(html, /\$\("acknowledgeTodoChangeNotice"\)\.addEventListener\("click", \(\) => \{/);
   assert.match(html, /todo-change-ack/);
-  assert.match(html, /SPREMEMBA · PREBRANO/);
+  assert.match(html, /todoChangeNoticeLabel\(todo\).*?· PREBRANO/);
   assert.doesNotMatch(html, /\$\("todoDialog"\)\.showModal\(\);[\s\S]{0,180}clearTodoChangeNoticeAfterOpen\(todo\)/);
   assert.match(html, /todo-item[\s\S]*?has-change-notice/);
   assert.match(html, /day-todo[\s\S]*?has-change-notice/);
   assert.match(html, /day-timeline-event[\s\S]*?has-change-notice/);
   const serviceWorker = await fs.readFile(path.join(__dirname, "..", "outputs", "service-worker.js"), "utf8");
-  assert.match(serviceWorker, /indus-ure-shell-v8/);
+  assert.match(serviceWorker, /indus-ure-shell-v10/);
 });
 
 test("prehod iz novega dogodka v vpis ur počaka na zaprtje modala", async () => {
@@ -163,7 +163,7 @@ test("disketa shrani nov ali obstoječi vpis brez zapiranja modala", async () =>
   assert.match(html, /async function saveTodoFromDialog\(\{ closeAfterSave = true \} = \{\}\)/);
   assert.match(html, /async function keepTodoDialogOpenAfterSave\(data, todo, wasCreating\)/);
   assert.match(html, /submitTodoDialog\(\{ closeAfterSave: false \}\);/);
-  assert.match(html, /if \(closeAfterSave\) \{\s*\$\("todoDialog"\)\.close\(\);/);
+  assert.match(html, /const backgroundSave = Boolean\(closeAfterSave && !state\.todoHoursSourceId && \$\("todoDialog"\)\.open\);[\s\S]*?if \(closeAfterSave\) \{\s*if \(!backgroundSave\) \$\("todoDialog"\)\.close\(\);/);
 });
 
 test("ročni filter loči in omogoča razvrščanje nujnih opravil", async () => {
@@ -202,6 +202,8 @@ test("zahtevek za dopolnitev uporabnika jasno vodi od pošiljanja do potrditve",
 test("večdnevno opravilo ima ločen datum do in se prikaže skozi cel razpon", async () => {
   const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
   assert.match(html, /id="todoFormEndDate"/);
+  assert.match(html, /id="setTodoFormEndDateTomorrow"/);
+  assert.match(html, /id="advanceTodoFormEndDate"/);
   assert.match(html, /function todoEndDate\(todo\)/);
   assert.match(html, /function todoOccursOnDate\(todo, date\)/);
   assert.match(html, /todoOccursOnDate\(todo, key\)/);
@@ -325,7 +327,7 @@ test("večdnevno opravilo dobi povezani mesečni trak in varne kontrole vnosa", 
   assert.match(html, /!multiDayLayout\.todoIds\.has\(todo\.id\)/);
   assert.match(html, /function syncTodoFormDateRangeControls\(\)/);
   assert.match(html, /field\.disabled = multiDay \|\| isMaterialEntry;/);
-  assert.match(html, /endDate\.disabled = Boolean\(lockedToOneDay && date\)/);
+  assert.match(html, /const endDateLocked = Boolean\(lockedToOneDay && date\);[\s\S]*?endDate\.disabled = endDateLocked;/);
   assert.match(html, /function todoPointerDragScrollBounds\(\)/);
   assert.match(html, /hasDropTarget: false/);
   assert.match(html, /if \(!active \|\| !hasDropTarget\) return;/);
@@ -721,7 +723,7 @@ test("zapiranje obstoječega opravila ne odstranjuje že shranjenih videov", asy
   assert.match(html, /function markTodoDialogAttachmentsSaved\(\)/);
   assert.match(html, /if \(!photo\?\.temporaryUpload \|\| !isVideoAttachment\(photo\)/);
   assert.match(html, /delete photo\.temporaryUpload;/);
-  assert.match(html, /await saveTodoToServer\(todo\);\s*markTodoDialogAttachmentsSaved\(\);/);
+  assert.match(html, /data = await saveTodoToServer\(todo\);[\s\S]*?markTodoDialogAttachmentsSaved\(\);/);
 });
 
 test("completion request UI and authenticated link flow are present", async () => {
@@ -771,7 +773,7 @@ test("e-poštna povezava odpre ciljno opravilo pred celotnim nalaganjem", async 
   assert.match(html, /function hasTodoLink\(\) \{/);
   assert.match(html, /async function openTodoFromLink\(\{ render = true \} = \{\}\)/);
   const bootSource = html.slice(html.indexOf("async function boot()"), html.indexOf("async function reconnectAfterOffline()"));
-  assert.match(bootSource, /const bootstrapPromise = api\("\/api\/bootstrap", \{ recoverSession: false \}\);[\s\S]*?applyLightweightSession\(me, directory\.users \|\| \[\]\);[\s\S]*?const snapshot = await bootstrapPromise;[\s\S]*?applyBootstrapSnapshot\(snapshot\);[\s\S]*?await openTodoFromLink\(\);/);
+  assert.match(bootSource, /const bootstrapPromise = api\("\/api\/bootstrap\?initial=1", \{ recoverSession: false \}\);[\s\S]*?const me = await api\("\/api\/me", \{ recoverSession: false \}\);[\s\S]*?applyLightweightSession\(me, \[me\.user\]\.filter\(Boolean\)\);[\s\S]*?const snapshot = await bootstrapPromise;[\s\S]*?applyBootstrapSnapshot\(snapshot\);[\s\S]*?refreshBootstrapAfterTodoLink\(\);[\s\S]*?await openTodoFromLink\(\);/);
   assert.doesNotMatch(bootSource, /await loadAll\(\);/);
   assert.match(html, /if \(render\) \{\s*renderTodos\(\);\s*renderMonth\(\);\s*\}/);
 });
@@ -787,10 +789,11 @@ test("zagonska identiteta in imenik v PostgreSQL ostaneta ozka", async () => {
   assert.ok(bootstrapStart >= 0 && bootstrapEnd > bootstrapStart);
   assert.match(bootstrap, /await requireUserForLightweightSession\(req, res\)/);
   assert.equal((bootstrap.match(/readDbAsync\(/g) || []).length, 1);
-  assert.match(bootstrap, /entries: visibleEntriesForUser\(db, user\)/);
+  assert.match(bootstrap, /const initialOnly = url\.searchParams\.get\("initial"\) === "1";/);
+  assert.match(bootstrap, /snapshot\.entries = visibleEntriesForUser\(db, user\)/);
   assert.match(bootstrap, /todos: visibleTodosForUser\(db, user\)/);
-  assert.match(bootstrap, /payrolls: payrollForUser\(db, user\)/);
-  assert.match(bootstrap, /clientBills: user\.role === "boss"/);
+  assert.match(bootstrap, /snapshot\.payrolls = payrollForUser\(db, user\)/);
+  assert.match(bootstrap, /snapshot\.clientBills = user\.role === "boss"/);
   assert.match(server, /if \(url\.pathname === "\/api\/me"\) \{[\s\S]*?await requireUserForLightweightSession\(req, res\)/);
   assert.match(server, /if \(url\.pathname === "\/api\/users" && req\.method === "GET"\) \{[\s\S]*?await requireUserForLightweightSession\(req, res\);[\s\S]*?getPgStore\(\)\.publicUserDirectory\(\)/);
   assert.match(store, /async sessionWithRevision\(tokenHash\) \{[\s\S]*?jsonb_build_object\(/);
@@ -807,7 +810,7 @@ test("initial application shell waits for one snapshot and renders only the acti
   assert.match(html, /<body class="booting">/);
   assert.match(html, /body\.booting #loginScreen,[\s\S]*?body\.booting #app/);
   assert.match(html, /body\.login-ready \.login-screen[\s\S]*?url\("assets\/indus-hero-electro\.png"\)/);
-  assert.match(bootSource, /const bootstrapPromise = api\("\/api\/bootstrap", \{ recoverSession: false \}\);/);
+  assert.match(bootSource, /const bootstrapPromise = api\("\/api\/bootstrap\?initial=1", \{ recoverSession: false \}\);/);
   assert.match(bootSource, /finishStartupInBackground\(\);/);
   assert.match(renderSource, /if \(state\.view === "calendar"\) renderMonth\(\);/);
   assert.match(renderSource, /if \(state\.view === "todos"\) renderTodos\(\);/);
@@ -823,7 +826,7 @@ test("spletni zagon ne pokaže zastarele oznake spremembe iz lokalnega predpomni
   assert.match(cachedSnapshot, /state\.todos = \(snapshot\.todos \|\| \[\]\)\.map\(\(todo\) => \{/);
   assert.match(cachedSnapshot, /delete cached\.changeNotice;/);
   assert.match(cachedSnapshot, /delete cached\.changeNoticesByUser;/);
-  assert.match(worker, /const CACHE_NAME = "indus-ure-shell-v8";/);
+  assert.match(worker, /const CACHE_NAME = "indus-ure-shell-v10";/);
 });
 
 test("hitre bližnjice odprejo pravo formo in filter zaključenih opravil ostane ločen po uporabniku", async () => {
@@ -1087,7 +1090,7 @@ test("prijavljen uporabnik dobi neblokirajoč zagonski okvir in PostgreSQL indek
   ]);
   assert.match(html, /id="appStartupStatus"/);
   assert.match(html, /function applyOnlineCachedSnapshot\(snapshot\)/);
-  assert.match(html, /const bootstrapPromise = api\("\/api\/bootstrap", \{ recoverSession: false \}\);/);
+  assert.match(html, /const bootstrapPromise = api\("\/api\/bootstrap\?initial=1", \{ recoverSession: false \}\);/);
   assert.match(html, /get\("lan_support"\) === "1"/);
   assert.match(html, /lanSupportRequested\)\s*\? loadLocalTestMode\(\)/);
   assert.match(html, /const cachedSnapshotPromise = usableOfflineSnapshot\(\)\.catch\(\(\) => null\);/);

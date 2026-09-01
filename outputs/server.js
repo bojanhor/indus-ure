@@ -8449,6 +8449,7 @@ async function handleApi(req, res) {
     if (url.pathname === "/api/bootstrap" && req.method === "GET") {
       const user = await requireUserForLightweightSession(req, res);
       if (!user) return;
+      const initialOnly = url.searchParams.get("initial") === "1";
       const db = await readDbAsync();
       req.indusDb = db;
       const activeUsers = Object.values(db.users || {}).filter((worker) => worker.active !== false);
@@ -8462,24 +8463,30 @@ async function handleApi(req, res) {
           exportTitle: String(worker.billing?.exportTitle || ""),
           commuteKmOneWay: commuteKmOneWayForUser(db, worker.id)
         }));
-      sendJson(res, 200, {
+      const snapshot = {
         user: publicUser(user),
         csrfToken: req.indusSession?.csrfToken || "",
         sessionExpiresAt: req.indusSession?.expiresAt || 0,
         syncRevision: Number(db.syncRevision || 0),
         users: activeUsers.map(publicDirectoryUser),
-        entries: visibleEntriesForUser(db, user),
         todos: visibleTodosForUser(db, user),
-        debts: visibleDebtsForUser(db, user),
-        advances: visibleAdvancesForUser(db, user),
-        purchases: visiblePersonalPurchasesForUser(db, user),
         clients: db.clients || [],
         settings: db.settings || {},
-        billingLocks: db.billingLocks || [],
-        workers,
-        payrolls: payrollForUser(db, user),
-        clientBills: user.role === "boss" ? (db.clientBills || []) : []
-      });
+        workers
+      };
+      // The default screen only needs tasks, clients and workers. Financial
+      // collections are hydrated immediately afterwards, without keeping the
+      // first usable list behind their JSON serialization and download.
+      if (!initialOnly) {
+        snapshot.entries = visibleEntriesForUser(db, user);
+        snapshot.debts = visibleDebtsForUser(db, user);
+        snapshot.advances = visibleAdvancesForUser(db, user);
+        snapshot.purchases = visiblePersonalPurchasesForUser(db, user);
+        snapshot.billingLocks = db.billingLocks || [];
+        snapshot.payrolls = payrollForUser(db, user);
+        snapshot.clientBills = user.role === "boss" ? (db.clientBills || []) : [];
+      }
+      sendJson(res, 200, snapshot);
       return;
     }
 
@@ -9531,10 +9538,6 @@ async function handleApi(req, res) {
         updatedByName: user.name,
         history: [...(todo.history || []), audit(user, `stranka zamenjana na ${client.name}`)]
       });
-      for (const groupTodos of groups.values()) {
-        const updated = db.todos.find((todo) => todo.id === groupTodos[0]?.id);
-        if (updated) recordTodoChangeNotices(db, todoAssignmentItems(db, updated), user, ["client"], "updated", now);
-      }
       pruneUnusedAdHocClients(db);
       await writeDbAsync(db);
       sendJson(res, 200, {
@@ -10767,15 +10770,6 @@ async function handleApi(req, res) {
         updatedTodo.revisionHistory = appendTodoRevision(item, updatedTodo, user, action, now);
         return updatedTodo;
       });
-      for (const operation of operations) {
-        const changedSchedule = operation.previousTodo.date !== operation.date
-          || operation.previousTodo.endDate !== operation.endDate
-          || operation.previousTodo.start !== operation.start
-          || operation.previousTodo.end !== operation.end;
-        if (!changedSchedule) continue;
-        const updated = db.todos.find((item) => item.id === operation.previousTodo.id);
-        if (updated) recordTodoChangeNotices(db, todoAssignmentItems(db, updated), user, ["schedule"], "updated", now);
-      }
       const settlementChanges = operations.map((operation) => upsertSettlementCorrections(
         db,
         todoAssignmentItems(db, operation.previousTodo).map((item) => ({ ...item, start: operation.previousTodo.start, end: operation.previousTodo.end, date: operation.previousTodo.date, endDate: operation.previousTodo.endDate })),
@@ -10858,14 +10852,6 @@ async function handleApi(req, res) {
         updatedTodo.revisionHistory = appendTodoRevision(item, updatedTodo, user, action, now);
         return updatedTodo;
       });
-      const changedSchedule = previousTodo.date !== date
-        || previousTodo.endDate !== endDate
-        || previousTodo.start !== start
-        || previousTodo.end !== end;
-      const updatedTodoForNotice = db.todos.find((item) => item.id === previousTodo.id);
-      if (changedSchedule && updatedTodoForNotice) {
-        recordTodoChangeNotices(db, todoAssignmentItems(db, updatedTodoForNotice), user, ["schedule"], "updated", now);
-      }
       const settlementChange = upsertSettlementCorrections(
         db,
         assignmentItems.map((item) => ({ ...item })),
@@ -10995,6 +10981,7 @@ async function handleApi(req, res) {
       if (!user) return;
       const id = decodeURIComponent(todoMatch[1]);
       const body = await readBody(req);
+      const notifyOthers = body.notifyOthers === true;
       const editorWorkContext = String(body.editorWorkContext || "");
       const editLockToken = String(body.editLockToken || "");
       let todo = cleanTodo(body);
@@ -11186,8 +11173,14 @@ releaseTodoAssignmentEditLock(db, previousTodo, user, editLockToken);
         || updatedGroup.find((item) => item.syncUser === previousTodo.syncUser)
         || updatedGroup[0]
         || null;
-      const changeNoticeFields = todoChangeNoticeFields(previousTodo, updatedOpenedTodo || {}, { assignmentsChanged });
-      recordTodoChangeNotices(db, updatedGroup, user, changeNoticeFields, "updated", now);
+      const notifiedRecipients = notifyOthers
+        ? recordTodoChangeNotices(db, updatedGroup, user, ["manual"], "manual", now)
+        : [];
+      if (notifiedRecipients.length) {
+        for (const assignmentTodo of updatedGroup) {
+          assignmentTodo.history = [...(assignmentTodo.history || []), audit(user, "označeno za pregled drugim udeležencem")];
+        }
+      }
       // A personal change marker is an inbox item, not a warning about the
       // data itself.  Keep it while the recipient only opens the form, then
       // consume it after that same person has successfully saved the event.

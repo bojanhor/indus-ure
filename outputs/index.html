@@ -1730,19 +1730,12 @@
       gap: 10px;
     }
     .todo-form-change-notice > span { flex: 1 1 auto; }
-    .todo-form-change-notice > button { flex: 0 0 auto; }
     .todo-form-change-actions {
       display: flex;
       justify-content: flex-start;
       margin: 0 0 10px;
     }
-    .todo-form-change-actions button { min-height: 38px; }
-    .todo-form-change-actions button.is-sent {
-      background: #2f9a57;
-      border-color: #237a46;
-      color: #fff;
-    }
-    .todo-form-change-actions button.is-sent:disabled { opacity: 1; cursor: default; }
+    .todo-form-change-actions .todo-form-option { margin: 0; }
     .todo-status-chip { min-width: max-content !important; width: max-content !important; white-space: nowrap !important; }
     .calendar-feed-actions { display: grid; gap: 8px; }
 
@@ -3192,11 +3185,44 @@
     .search-panel {
       display: none;
       padding: 14px;
-      max-height: 360px;
+      max-height: min(52vh, 440px);
       overflow: auto;
     }
 
-    .search-panel.active { display: block; }
+    .search-panel.active {
+      display: block;
+      position: sticky;
+      top: var(--indus-search-sticky-top, 88px);
+      z-index: 14;
+      box-shadow: 0 8px 22px rgba(30, 52, 45, 0.18);
+    }
+
+    .search-filter-bar {
+      position: sticky;
+      top: -14px;
+      z-index: 1;
+      display: flex;
+      align-items: center;
+      gap: 8px 14px;
+      flex-wrap: wrap;
+      margin: -14px -14px 10px;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--line);
+      background: var(--panel);
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .search-filter-bar label {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+    }
+
+    .search-filter-bar input { width: 16px; height: 16px; accent-color: var(--accent); }
+    .search-filter-count { margin-left: auto; }
 
     .result {
       width: 100%;
@@ -5822,10 +5848,13 @@
         <p class="todo-meta hidden" id="todoFormDraftNotice">Obnovljen je nedokončan osnutek s te naprave. <button class="secondary" id="discardTodoCreationDraft" type="button">Začni prazno</button></p>
         <div class="todo-form-change-notice hidden" id="todoFormChangeNotice" role="status">
           <span id="todoFormChangeNoticeText"></span>
-          <button class="secondary" id="acknowledgeTodoChangeNotice" type="button">Prebrano</button>
         </div>
         <div class="todo-form-change-actions hidden" id="todoFormChangeActions">
-          <button class="secondary" id="markTodoChangedForOthers" type="button" title="Ustvari zeleno oznako za druge udeležence; ne odstrani oznake iz tega pogleda.">&#9873; Opozori druge o spremembi</button>
+          <label class="todo-form-option" for="todoFormNotifyOthers">
+            <input id="todoFormNotifyOthers" type="checkbox">
+            <span>Opozori druge o spremembi</span>
+            <small>Ko shraniš, drugi udeleženci dobijo oznako za pregled.</small>
+          </label>
         </div>
         <div class="modal-grid">
           <div class="todo-client-field" id="todoFormClientField">
@@ -5948,7 +5977,11 @@
                 </span>
               </label>
               <label id="todoFormEndDateField">Datum do
-                <input id="todoFormEndDate" type="date">
+                <span class="date-input-with-clear">
+                  <input id="todoFormEndDate" type="date">
+                  <button class="secondary date-jump-button" id="setTodoFormEndDateTomorrow" type="button">Jutri</button>
+                  <button class="secondary date-jump-button" id="advanceTodoFormEndDate" type="button" title="Naslednji dan" aria-label="Naslednji dan">+1</button>
+                </span>
                 <small class="sr-only" id="todoFormEndDateHint">Privzeto isti dan. Spremeni samo za večdnevno opravilo.</small>
               </label>
             </div>
@@ -6599,9 +6632,17 @@
       const notice = todoChangeNotice(todo);
       if (!notice) return "";
       if (notice.kind === "created") return `${notice.byName || "Sodelavec"} je dodal novo opravilo.`;
-      if (notice.kind === "manual" || notice.fields.every((field) => field === "manual")) return `${notice.byName || "Sodelavec"} je poudaril dogodek.`;
+      if (notice.kind === "manual" || notice.fields.every((field) => field === "manual")) return `${notice.byName || "Sodelavec"} je označil dogodek za pregled.`;
       const fields = notice.fields.map((field) => todoChangeNoticeFieldLabels[field] || field).join(", ");
       return `${notice.byName || "Sodelavec"} je spremenil: ${fields}.`;
+    }
+
+    function todoChangeNoticeLabel(todo) {
+      const notice = todoChangeNotice(todo);
+      if (!notice) return "";
+      if (notice.kind === "created" || notice.fields.every((field) => field === "created")) return "NOVO";
+      if (notice.kind === "manual" || notice.fields.every((field) => field === "manual")) return "OZNAČENO";
+      return "SPREMEMBA";
     }
 
     function todoCanMarkChangedForOthers(todo) {
@@ -6765,12 +6806,15 @@
       showUnbilledCompletedTodos: true,
       showCompletedCalendarTodos: false,
       searchReturnState: null,
+      searchIncludeCompleted: false,
+      searchIncludeOther: true,
       todoSearchHighlightTimer: null,
       sharedDataRefreshing: false,
       todoEditLock: null,
       todoLockHeartbeat: null,
       todoLockRenewPromise: null,
       todoLockPending: false,
+      todoDialogBackgroundSave: false,
       todoClientSuggestions: [],
       billingRangeDraft: null,
       todoClientSuggestionIndex: -1,
@@ -7952,20 +7996,20 @@
       state.offlineMode = false;
       state.user = data.user;
       state.users = [...new Map([...(data.users || []), state.user].map((user) => [user.id, user])).values()];
-      state.entries = data.entries || [];
       if (!preserveTodoMutations || canApplyTodoSnapshot(todoRevision, todoSnapshotWasStable)) {
         state.todos = data.todos || [];
         state.todoSnapshotLoaded = true;
       }
-      state.debts = data.debts || [];
-      state.advances = data.advances || [];
-      state.personalPurchases = data.purchases || [];
+      if (Array.isArray(data.entries)) state.entries = data.entries;
+      if (Array.isArray(data.debts)) state.debts = data.debts;
+      if (Array.isArray(data.advances)) state.advances = data.advances;
+      if (Array.isArray(data.purchases)) state.personalPurchases = data.purchases;
       state.clients = data.clients || [];
       state.settings = data.settings || state.settings;
-      state.billingLocks = data.billingLocks || [];
+      if (Array.isArray(data.billingLocks)) state.billingLocks = data.billingLocks;
       state.workerBilling = data.workers || [];
-      state.payrolls = data.payrolls || [];
-      state.clientBills = data.clientBills || [];
+      if (Array.isArray(data.payrolls)) state.payrolls = data.payrolls;
+      if (Array.isArray(data.clientBills)) state.clientBills = data.clientBills;
       setStartupHydrating(false);
       localStorage.setItem(googleEmailKey, state.user.email || "");
       localStorage.setItem("indus-ure-offline-user", state.user.id || "");
@@ -8026,11 +8070,8 @@
         // behind the editor. This keeps the link quick even for a large
         // history while ordinary launches still use exactly one data request.
         if (hasTodoLink()) {
-          const [me, directory] = await Promise.all([
-            api("/api/me", { recoverSession: false }),
-            api("/api/users", { recoverSession: false })
-          ]);
-          applyLightweightSession(me, directory.users || []);
+          const me = await api("/api/me", { recoverSession: false });
+          applyLightweightSession(me, [me.user].filter(Boolean));
           initializeWorkContext();
           const restoredSessionUi = restoreSessionRecoveryUiState();
           showApp();
@@ -8039,15 +8080,12 @@
           finishStartupInBackground();
           return;
         }
-        // Start the full snapshot immediately, but do not make a signed-in
-        // person stare at the login screen while a large history arrives.
-        const bootstrapPromise = api("/api/bootstrap", { recoverSession: false });
+        // Show the task screen from a lean snapshot first. Financial history
+        // does not affect that first paint and hydrates in the background.
+        const bootstrapPromise = api("/api/bootstrap?initial=1", { recoverSession: false });
         const cachedSnapshotPromise = usableOfflineSnapshot().catch(() => null);
-        const [me, directory] = await Promise.all([
-          api("/api/me", { recoverSession: false }),
-          api("/api/users", { recoverSession: false })
-        ]);
-        applyLightweightSession(me, directory.users || []);
+        const me = await api("/api/me", { recoverSession: false });
+        applyLightweightSession(me, [me.user].filter(Boolean));
         const cachedSnapshot = await cachedSnapshotPromise;
         applyOnlineCachedSnapshot(cachedSnapshot);
         initializeWorkContext();
@@ -8060,7 +8098,7 @@
         initializeWorkContext();
         showApp();
         render();
-        saveOfflineSnapshotSoon();
+        refreshBootstrapAfterTodoLink();
         await openTodoFromLink();
         await openWorkerDailyDigestFromLink();
         await openQuickCreateFromLink();
@@ -10221,7 +10259,7 @@
             const client = todoClientCalendarName(todo, 'Brez stranke');
             const title = `${todo.urgent ? `NUJNO ${String.fromCharCode(183)} ` : ''}${todo.title || 'Brez naslova'}`;
             if (changeNotice) item.title = todoChangeNoticeText(todo);
-            item.innerHTML = `<span class="day-todo-topline"><span class="day-todo-time">${time}</span>${settlementIndicators}${changeNotice ? '<span class="day-todo-change-mark" aria-label="Spremenjeno">&#9679;</span>' : ''}</span><span class="day-todo-client">${escapeHtml(client)}</span><span class="day-todo-title">${escapeHtml(title)}</span>`;
+            item.innerHTML = `<span class="day-todo-topline"><span class="day-todo-time">${time}</span>${settlementIndicators}${changeNotice ? `<span class="day-todo-change-mark" aria-label="${escapeHtml(todoChangeNoticeLabel(todo))}">&#9679;</span>` : ''}</span><span class="day-todo-client">${escapeHtml(client)}</span><span class="day-todo-title">${escapeHtml(title)}</span>`;
             item.addEventListener('pointerdown', (event) => beginMonthTodoPointerDrag(event, item, todo, key));
             item.addEventListener('lostpointercapture', cancelMonthTodoPointerDrag);
             item.addEventListener('click', (event) => {
@@ -12912,8 +12950,8 @@
                   <span class="todo-chip todo-status-chip todo-status-color ${todoStatusClass(todo.status)}">${todoStatus(todo.status).label}</span>
                   ${changeNotice
                     ? todoChangeNoticeCanBeAcknowledged(todo)
-                      ? `<button class="todo-chip todo-change-chip todo-change-ack" type="button" title="${escapeHtml(todoChangeNoticeText(todo))}. Označi kot prebrano.">SPREMEMBA · PREBRANO</button>`
-                      : `<span class="todo-chip todo-change-chip" title="${escapeHtml(todoChangeNoticeText(todo))}">SPREMEMBA</span>`
+                      ? `<button class="todo-chip todo-change-chip todo-change-ack" type="button" title="${escapeHtml(todoChangeNoticeText(todo))}. Označi kot prebrano.">${escapeHtml(todoChangeNoticeLabel(todo))} · PREBRANO</button>`
+                      : `<span class="todo-chip todo-change-chip" title="${escapeHtml(todoChangeNoticeText(todo))}">${escapeHtml(todoChangeNoticeLabel(todo))}</span>`
                     : ""}
                   ${isImportedTodo(todo) ? '<span class="todo-chip todo-imported-chip">Uvo&#382;eno</span>' : ""}
                   ${todoUsesTextOrdering(todo) && !manualOrderingStatusIds.has(todo.status) ? '<span class="todo-chip todo-ordering-chip">naro&#269;i</span>' : ""}
@@ -14374,7 +14412,6 @@
       const notice = todoChangeNotice(todo);
       noticeBox.classList.toggle("hidden", !notice);
       const canAcknowledge = todoChangeNoticeCanBeAcknowledged(todo);
-      $("acknowledgeTodoChangeNotice").classList.toggle("hidden", !notice || !canAcknowledge);
       const recipient = state.users.find((user) => user.id === todoChangeNoticeRecipientId());
       $("todoFormChangeNoticeText").textContent = notice
         ? `${todoChangeNoticeText(todo)}${canAcknowledge ? "" : ` Oznaka čaka na ${recipient?.name || "delavca"}.`}`
@@ -14397,32 +14434,6 @@
       if (fields.has("attachments")) mark("todoFormAttachments");
       if (fields.has("worker-billing")) mark("todoFormBilling");
       if (fields.has("client-billing")) mark("todoFormClientBilling");
-    }
-
-    async function markTodoChangedForOthers() {
-      const id = $("todoFormId").value;
-      const todo = state.todos.find((item) => item.id === id);
-      if (!todo || !todoCanMarkChangedForOthers(todo)) return;
-      const button = $("markTodoChangedForOthers");
-      button.disabled = true;
-      let sent = false;
-      try {
-        const editLockToken = state.todoEditLock?.todoId === id ? state.todoEditLock.token : "";
-        const data = await api(`/api/todos/${encodeURIComponent(id)}/change-notice`, {
-          method: "POST",
-          body: JSON.stringify({ editLockToken })
-        });
-        if (Array.isArray(data.todos)) {
-          state.todos = data.todos;
-          refreshClientList();
-          render();
-        }
-        sent = true;
-        button.classList.add("is-sent");
-        button.textContent = "✓ Opozorilo poslano";
-      } finally {
-        button.disabled = sent;
-      }
     }
 
     async function clearTodoChangeNoticeAfterOpen(todo) {
@@ -14515,9 +14526,12 @@
       });
       $('todoFormTimeFields').classList.toggle('hidden', isMaterialEntry);
       const endDateField = $('todoFormEndDateField');
-      endDate.disabled = Boolean(lockedToOneDay && date);
+      const endDateLocked = Boolean(lockedToOneDay && date);
+      endDate.disabled = endDateLocked;
+      $('setTodoFormEndDateTomorrow').disabled = endDateLocked;
+      $('advanceTodoFormEndDate').disabled = endDateLocked;
       endDateField.classList.toggle('hidden', isMaterialEntry);
-      endDateField.classList.toggle('date-range-locked', Boolean(lockedToOneDay && date));
+      endDateField.classList.toggle('date-range-locked', endDateLocked);
       $('todoFormEndDateHint').textContent = isTimeEntry
         ? 'Vpis ur je vedno isti dan.'
         : 'Privzeto isti dan. Spremeni samo za ve\u010ddnevno opravilo.';
@@ -14982,10 +14996,7 @@
       state.todoHistoryPreviewIndex = -1;
       state.todoHistoryPreviewActive = false;
       $("todoDialog").classList.remove("is-history-preview");
-      const changeNoticeButton = $("markTodoChangedForOthers");
-      changeNoticeButton.classList.remove("is-sent");
-      changeNoticeButton.textContent = "⚑ Opozori druge o spremembi";
-      changeNoticeButton.disabled = false;
+      $("todoFormNotifyOthers").checked = false;
       state.todoTimePickerTarget = "start";
       state.todoTimePickerMode = "hour";
       state.todoTimePickerOpen = false;
@@ -15256,6 +15267,7 @@
         materialAmount: materialEntry ? materialAmount : 0,
         externalDelivery: materialEntry,
         calendarOnly: Boolean(!timeEntryStatusIds.has(selectedStatus) && !materialEntry && !noteEntry && $("todoFormDate").value && $("todoFormCalendarOnly").checked),
+        notifyOthers: Boolean(existing && $("todoFormNotifyOthers").checked),
         driveFiles: state.todoDialogDriveFiles,
         photos: state.todoDialogPhotos
       };
@@ -15340,7 +15352,27 @@
           && !await showAppConfirm("Odstranil si sebe iz opravila. Po shranjevanju ga v svojem delavskem pogledu ne boš več videl ali mogel odpreti. Vseeno shranim?")) {
         return;
       }
-      const data = await saveTodoToServer(todo);
+      // The primary checkmark is deliberately optimistic: validation and all
+      // confirmations have already finished, so the editor can disappear
+      // while the small write completes in the background. Project-hour
+      // flows retain their completion hand-off until their write is finished.
+      const backgroundSave = Boolean(closeAfterSave && !state.todoHoursSourceId && $("todoDialog").open);
+      if (backgroundSave) {
+        state.todoDialogBackgroundSave = true;
+        $("todoDialog").close();
+      }
+      let data;
+      try {
+        data = await saveTodoToServer(todo);
+      } catch (error) {
+        if (backgroundSave) await releaseTodoEditLockForDialog();
+        throw error;
+      } finally {
+        if (backgroundSave) {
+          state.todoDialogBackgroundSave = false;
+          clearTodoEditLockState();
+        }
+      }
       markTodoDialogAttachmentsSaved();
       if (todo.status === "execution" && !meal) rememberClientVehicle(clientVehicle);
       if (state.todoHoursSourceId) state.todoHoursSavedSourceId = state.todoHoursSourceId;
@@ -15349,7 +15381,7 @@
         await clearTodoCreationDraft();
       }
       if (closeAfterSave) {
-        $("todoDialog").close();
+        if (!backgroundSave) $("todoDialog").close();
         return;
       }
       await keepTodoDialogOpenAfterSave(data, todo, !id);
@@ -15416,7 +15448,9 @@
       try {
         await saveTodoFromDialog({ closeAfterSave });
       } catch (error) {
-        showFormValidationError(form, error.message || "Opravila ni bilo mogoče shraniti.");
+        const message = error.message || "Opravila ni bilo mogoče shraniti.";
+        if ($("todoDialog").open) showFormValidationError(form, message);
+        else showNotice(message);
       } finally {
         todoDialogSaveInFlight = false;
         setTodoDialogSaving(false);
@@ -16894,6 +16928,13 @@
       setView(previous.view);
     }
 
+    function syncSearchPanelStickyOffset() {
+      const topbar = document.querySelector(".topbar");
+      const mobile = window.matchMedia("(max-width: 760px)").matches;
+      const offset = mobile ? 8 : Math.ceil(topbar?.getBoundingClientRect().height || 76) + 8;
+      document.documentElement.style.setProperty("--indus-search-sticky-top", `${offset}px`);
+    }
+
     function renderSearch() {
       const panel = $("searchPanel");
       const query = $("clientSearch").value.trim();
@@ -16902,12 +16943,30 @@
         panel.classList.remove("active");
         return;
       }
-      const results = contextTodos()
+      syncSearchPanelStickyOffset();
+      const matches = contextTodos()
         .filter((todo) => normalizeText([todoClientSearchText(todo), todo.title, todo.notes, todo.createdByName].join(" ")).includes(normalizeText(query)))
         .sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")) || todoSort(a, b));
+      const results = matches.filter((todo) => reportTodoIsCompleted(todo)
+        ? state.searchIncludeCompleted
+        : state.searchIncludeOther);
       panel.classList.add("active");
+      panel.innerHTML = `
+        <div class="search-filter-bar" role="group" aria-label="Prikaz zadetkov iskanja">
+          <label><input type="checkbox" data-search-filter="completed" ${state.searchIncludeCompleted ? "checked" : ""}> Zaključeno</label>
+          <label><input type="checkbox" data-search-filter="other" ${state.searchIncludeOther ? "checked" : ""}> Ostali dogodki</label>
+          <span class="search-filter-count">${results.length} / ${matches.length} zadetkov</span>
+        </div>
+      `;
+      panel.querySelectorAll("[data-search-filter]").forEach((input) => input.addEventListener("change", () => {
+        if (input.dataset.searchFilter === "completed") state.searchIncludeCompleted = input.checked;
+        if (input.dataset.searchFilter === "other") state.searchIncludeOther = input.checked;
+        renderSearch();
+      }));
       if (!results.length) {
-        panel.innerHTML = "<p>Ni dogodkov za to iskanje.</p>";
+        const empty = document.createElement("p");
+        empty.textContent = matches.length ? "Za izbrane filtre ni dogodkov." : "Ni dogodkov za to iskanje.";
+        panel.appendChild(empty);
         return;
       }
       results.forEach((todo) => {
@@ -16929,6 +16988,10 @@
         panel.appendChild(item);
       });
     }
+
+    window.addEventListener("resize", () => {
+      if ($("clientSearch")?.value.trim()) syncSearchPanelStickyOffset();
+    });
 
     function revealTodoFromSearch(todo) {
       if (!todo?.id) return;
@@ -18504,6 +18567,22 @@
       updateTodoFormLateTimeEntryNotice();
       $("todoFormDate").focus();
     });
+    $("setTodoFormEndDateTomorrow").addEventListener("click", () => {
+      const startDate = $("todoFormDate").value || dateKey(new Date());
+      $("todoFormEndDate").value = shiftDateKey(startDate, 1);
+      $("todoFormEndDate").dataset.auto = "false";
+      syncTodoFormDateRangeControls();
+      $("todoFormEndDate").focus();
+    });
+    $("advanceTodoFormEndDate").addEventListener("click", () => {
+      const startDate = $("todoFormDate").value || dateKey(new Date());
+      const current = $("todoFormEndDate").value || startDate;
+      const next = shiftDateKey(current, 1);
+      $("todoFormEndDate").value = next < startDate ? startDate : next;
+      $("todoFormEndDate").dataset.auto = "false";
+      syncTodoFormDateRangeControls();
+      $("todoFormEndDate").focus();
+    });
     $("todoFormEndDate").addEventListener("change", () => {
       const date = $("todoFormDate").value;
       const endDate = $("todoFormEndDate");
@@ -18673,12 +18752,7 @@
       await openTodoDialog(source);
     });
     $("writeHoursFromTodo").addEventListener("click", () => openHoursTodoFromCurrent().catch((error) => showNotice(error.message)));
-    $("markTodoChangedForOthers").addEventListener("click", () => markTodoChangedForOthers().catch((error) => showNotice(error.message)));
     $("shareTodoPdf").addEventListener("click", () => shareTodoPdf().catch((error) => showNotice(error.message)));
-    $("acknowledgeTodoChangeNotice").addEventListener("click", () => {
-      const todo = state.todos.find((item) => item.id === $("todoFormId").value);
-      if (todo) clearTodoChangeNoticeAfterOpen(todo).catch((error) => showNotice(error.message));
-    });
     $("requestTodoCompletion").addEventListener("click", () => {
       try { openCompletionRequestDialog($("todoFormId").value); } catch (error) { showNotice(error.message); }
     });
@@ -19054,7 +19128,9 @@
       restoreBackupFromFile(file).catch((error) => showNotice(error.message));
     });
     $("todoDialog").addEventListener("close", finishQuickCreateLink);
-    $("todoDialog").addEventListener("close", releaseTodoEditLockForDialog);
+    $("todoDialog").addEventListener("close", () => {
+      if (!state.todoDialogBackgroundSave) releaseTodoEditLockForDialog();
+    });
     $("todoDialog").addEventListener("close", () => { if ($("completionRequestDialog").open) $("completionRequestDialog").close(); });
     $("todoDialog").addEventListener("close", () => {
       const returnDayDate = state.todoDialogReturnDayDate;

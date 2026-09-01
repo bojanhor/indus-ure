@@ -156,14 +156,15 @@ test("sprememba opravila ostane ob odprtju, izgine pa šele po uspešnem shranje
     const update = await request(port, `/api/todos/${encodeURIComponent(id)}`, {
       method: "PUT",
       headers: ibro,
-      body: JSON.stringify({ ...markedForSave, title: "Opravilo po popravku", baseUpdatedAt: markedForSave.updatedAt })
+      body: JSON.stringify({ ...markedForSave, title: "Opravilo po popravku", notifyOthers: true, baseUpdatedAt: markedForSave.updatedAt })
     });
     assert.equal(update.status, 200, update.body);
     const ibroAfterSave = await request(port, "/api/todos", { headers: ibro });
     assert.equal(JSON.parse(ibroAfterSave.body).todos.find((todo) => todo.id === id).changeNotice, null, "Samo uspešno shranjevanje prejemnika porabi njegovo oznako.");
     const bossList = await request(port, "/api/todos", { headers: bojan });
     const changedForBoss = JSON.parse(bossList.body).todos.find((todo) => todo.id === id);
-    assert.deepEqual(changedForBoss.changeNotice?.fields, ["title"]);
+    assert.equal(changedForBoss.changeNotice?.kind, "manual");
+    assert.deepEqual(changedForBoss.changeNotice?.fields, ["manual"]);
     assert.equal(changedForBoss.changeNotice?.by, "ibro");
   } finally {
     await stop(child);
