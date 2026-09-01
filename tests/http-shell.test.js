@@ -62,6 +62,10 @@ test("front-end naročila in foto urejevalnik ohranita dogovorjeni mobilni prika
   assert.match(html, /request\.open\("POST", "\/api\/todos\/image", true\)/);
   assert.match(html, /Predogled se prikaže takoj po strežniški obdelavi/);
   assert.match(html, /attachmentThumbnailSource\(photo\)/);
+  assert.match(html, /function scheduleTodoFormPhotoPreviews\(\)/);
+  assert.match(html, /loading="lazy" decoding="async"/);
+  assert.match(html, /function setTodoDialogOpening\(opening\)/);
+  assert.match(html, /\$\("todoDialog"\)\.showModal\(\);[\s\S]{0,700}setTodoDialogOpening\(true\);[\s\S]{0,700}await acquireTodoEditLockForDialog\(todo\.id\)/);
   assert.match(html, /id="todoFormCameraInput"[^>]*capture="environment"/);
   assert.match(html, /id="todoFormVideoInput"[^>]*accept="video\/\*"/);
   assert.match(html, /id="showTodoDriveLink"/);

@@ -3291,6 +3291,16 @@
       font-size: 20px;
     }
 
+    .todo-form-opening-status {
+      margin-left: auto;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    #todoDialog form.is-opening .modal-body { opacity: .62; }
+
     .modal-head-actions { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
 
     .modal-head-actions .icon-btn,
@@ -5768,6 +5778,7 @@
     <form method="dialog" id="todoForm">
       <div class="modal-head">
         <h3 id="todoFormTitle">Opravilo</h3>
+        <span class="todo-form-opening-status hidden" id="todoFormOpeningStatus" role="status" aria-live="polite">Odpiram opravilo …</span>
         <span class="sr-only" id="todoFormActionStatus" role="status" aria-live="polite"></span>
         <div class="modal-head-actions" aria-label="Dejanja opravila">
           <button class="todo-modal-action secondary hidden" id="previousReportTodo" type="button" title="Prej&#353;nji vpis v poro&#269;ilu" aria-label="Prej&#353;nji vpis v poro&#269;ilu">&lsaquo;</button>
@@ -12942,7 +12953,13 @@
     }
 
     function attachmentThumbnailSource(photo) {
-      return String(photo?.thumbnailData || photo?.thumbnailUrl || attachmentSource(photo));
+      const thumbnail = String(photo?.thumbnailData || photo?.thumbnailUrl || "");
+      if (thumbnail) return thumbnail;
+      // Old attachments can lack a generated thumbnail.  Do not download the
+      // original multi-megabyte photograph merely to fill a tiny list preview;
+      // the user can still open the attachment explicitly.
+      const source = attachmentSource(photo);
+      return /^data:image\//i.test(source) ? source : "";
     }
 
     function isPdfAttachment(photo) {
@@ -14170,7 +14187,19 @@
       renderTodoFormDriveFiles();
     }
 
-    function renderTodoFormPhotos() {
+    let todoDialogPhotoPreviewTimer = 0;
+
+    function scheduleTodoFormPhotoPreviews() {
+      if (todoDialogPhotoPreviewTimer) clearTimeout(todoDialogPhotoPreviewTimer);
+      // Let the dialog paint first.  A busy event can contain many images and
+      // previously all thumbnail requests started before the editor appeared.
+      todoDialogPhotoPreviewTimer = window.setTimeout(() => {
+        todoDialogPhotoPreviewTimer = 0;
+        if ($("todoDialog").open) renderTodoFormPhotos({ imagePreviews: true });
+      }, 180);
+    }
+
+    function renderTodoFormPhotos({ imagePreviews = true } = {}) {
       const list = $("todoFormPhotoList");
       list.innerHTML = state.todoDialogPhotos.map((photo) => {
         const video = isVideoAttachment(photo);
@@ -14179,9 +14208,9 @@
         const uploadLabel = photo.uploadKind === "image" ? "Slika se obdeluje" : "Video se nalaga";
         const label = uploading ? uploadLabel : attachmentLabel(photo);
         const displayName = uploading ? label : attachmentDisplayName(photo);
-        const imageThumbnail = !video && !isPdfAttachment(photo) && attachmentThumbnailSource(photo);
+        const imageThumbnail = imagePreviews && !video && !isPdfAttachment(photo) && attachmentThumbnailSource(photo);
         const thumb = imageThumbnail
-          ? `<span class="todo-form-attachment-thumb"><img src="${escapeHtml(imageThumbnail)}" alt=""></span>`
+          ? `<span class="todo-form-attachment-thumb"><img src="${escapeHtml(imageThumbnail)}" alt="" loading="lazy" decoding="async"></span>`
           : attachmentSymbolMarkup(photo);
         const preview = uploading || uploadError
           ? `<div class="todo-form-attachment-preview" aria-live="polite">${attachmentSymbolMarkup(photo)}<span>${escapeHtml(displayName)}</span></div>`
@@ -14981,7 +15010,10 @@
       renderTodoFormAssignees(selectedAssignees, permittedAssigneeIds, { disabled: state.todoMealEntry || state.todoMaterialEntry || state.todoNoteEntry, single: isTimeEntryForm });
       state.todoDialogPhotos = (todo.photos || []).map((photo) => ({ ...photo }));
       state.todoDialogDriveFiles = (todo.driveFiles || []).map((file) => ({ ...file }));
-      renderTodoFormPhotos();
+      // Render the attachment list immediately but defer image previews.  On
+      // mobile a large event otherwise blocks the first dialog paint while its
+      // image decoder and network queue are started.
+      renderTodoFormPhotos({ imagePreviews: false });
       renderTodoFormDriveFiles();
       const rateWorkerId = todo.syncUser || selectedAssignees[0] || activeWorkerId();
       const requestedHourlyRate = Number(todo.billingHourlyRate);
@@ -15010,8 +15042,28 @@
       setTodoVideoUploadStatus("");
       $("todoFormDriveLink").value = "";
       $("todoFormDriveLinkPanel").classList.add("hidden");
-      if (editing && !(await acquireTodoEditLockForDialog(todo.id))) return false;
       $("todoDialog").showModal();
+      if (editing) {
+        // The edit lock protects writes, not reading the form.  Showing the
+        // read-only shell first avoids a multi-second blank wait after reload.
+        setTodoDialogOpening(true);
+        scheduleTodoFormPhotoPreviews();
+        if (!(await acquireTodoEditLockForDialog(todo.id))) {
+          setTodoDialogOpening(false);
+          $("todoDialog").close();
+          return false;
+        }
+        if (!$("todoDialog").open) {
+          // The user may close the shell while a slow first lock request is
+          // pending.  Release the late lock instead of leaving it behind.
+          await releaseTodoEditLockForDialog();
+          setTodoDialogOpening(false);
+          return false;
+        }
+        setTodoDialogOpening(false);
+      } else {
+        scheduleTodoFormPhotoPreviews();
+      }
       autosizeTodoNarrativeFieldsAfterLayout();
       if (state.todoCreationDraftRestored) showNotice("Nedokončan osnutek je obnovljen.");
       requestAnimationFrame(() => $("todoDialog").focus({ preventScroll: true }));
@@ -15241,6 +15293,24 @@
     }
 
     let todoDialogSaveInFlight = false;
+
+    function setTodoDialogOpening(opening) {
+      const form = $("todoForm");
+      const status = $("todoFormOpeningStatus");
+      form.classList.toggle("is-opening", Boolean(opening));
+      status.classList.toggle("hidden", !opening);
+      for (const control of form.querySelectorAll("input, textarea, select, button")) {
+        const canClose = control.id === "closeTodoDialog" || control.id === "todoFooterClose";
+        if (opening && !canClose && !control.disabled) {
+          control.dataset.todoDialogOpeningWasEnabled = "true";
+          control.disabled = true;
+        } else if (!opening && control.dataset.todoDialogOpeningWasEnabled === "true") {
+          control.disabled = false;
+          delete control.dataset.todoDialogOpeningWasEnabled;
+        }
+      }
+    }
+
     function setTodoDialogSaving(saving) {
       const form = $("todoForm");
       const save = $("saveTodoDialog");

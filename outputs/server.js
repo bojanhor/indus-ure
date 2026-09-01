@@ -4374,7 +4374,7 @@ function upsertSettlementCorrections(db, beforeTodos, afterTodos, actor, now = n
     // A reassignment after a confirmed payroll is two separate facts: the
     // former worker gets a negative delta in the next account, while the new
     // worker receives the normal live entry in their still-open account.
-    const correction = { id: pending?.id || crypto.randomUUID(), type: "worker", status: "pending", todoId, eventId: todoBillingEventId(before), workerId: correctionWorkerId, sourcePayrollId: String(prior?.payroll?.id || pending?.sourcePayrollId || settled?.sourcePayrollId || ""), before: baseline, after, delta: workerCorrectionDelta(baseline, after), effectiveDate: correctionDateKey(), createdAt: pending?.createdAt || now, createdBy: pending?.createdBy || actor?.id || "system", createdByName: pending?.createdByName || actor?.name || "", updatedAt: now, updatedBy: actor?.id || "system", updatedByName: actor?.name || "" };
+    const correction = { id: pending?.id || crypto.randomUUID(), type: "worker", status: "pending", todoId, eventId: todoBillingEventId(before), workerId: correctionWorkerId, sourcePayrollId: String(prior?.payroll?.id || pending?.sourcePayrollId || settled?.sourcePayrollId || ""), before: baseline, after, delta: workerCorrectionDelta(baseline, after), effectiveDate: correctionDateKey(new Date(now)), createdAt: pending?.createdAt || now, createdBy: pending?.createdBy || actor?.id || "system", createdByName: pending?.createdByName || actor?.name || "", updatedAt: now, updatedBy: actor?.id || "system", updatedByName: actor?.name || "" };
     if (pending) Object.assign(pending, correction); else db.settlementCorrections.push(correction);
     result.push(correction);
   }

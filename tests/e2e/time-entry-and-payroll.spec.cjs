@@ -362,6 +362,41 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
       await context.close();
     }
   });
+
+  test("existing event shows its read-only shell before a delayed edit lock", async ({ browser }) => {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    const title = "PW takojšnje odpiranje";
+    let releaseLock = null;
+    const allowLock = new Promise((resolve) => { releaseLock = resolve; });
+    try {
+      await localLogin(page, "ibro");
+      await page.locator("#newTodoButton").click();
+      await page.locator("#todoFormTask").fill(title);
+      await page.locator("#todoFormClient").fill(CLIENT_ALIAS);
+      await page.locator("#saveTodoDialog").click();
+      await expect(page.locator("#todoDialog")).toBeHidden();
+
+      await page.route("**/api/todos/*/lock", async (route, request) => {
+        if (request.method() === "POST") await allowLock;
+        await route.continue();
+      });
+      const card = page.locator(".todo-item", { hasText: title }).first();
+      await card.locator(".edit-todo").click();
+      await expect(page.locator("#todoDialog")).toBeVisible();
+      await expect(page.locator("#todoFormOpeningStatus")).toBeVisible();
+      await expect(page.locator("#saveTodoDialog")).toBeDisabled();
+
+      releaseLock();
+      await expect(page.locator("#todoFormOpeningStatus")).toBeHidden();
+      await expect(page.locator("#saveTodoDialog")).toBeEnabled();
+      await page.unroute("**/api/todos/*/lock");
+    } finally {
+      releaseLock?.();
+      await context.close();
+    }
+  });
+
   test("worker enters hours through the real form", async ({ browser }) => {
     const context = await browser.newContext();
     const page = await context.newPage();
