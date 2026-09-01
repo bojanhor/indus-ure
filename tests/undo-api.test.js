@@ -5,6 +5,7 @@ const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
+const { undoArrayPatch } = require("../outputs/server");
 
 function request(port, pathname, { method = "GET", headers = {}, body = "" } = {}) {
   return new Promise((resolve, reject) => {
@@ -43,6 +44,18 @@ async function testLogin(port, userId, password) {
     csrfToken: body.csrfToken
   };
 }
+
+test("Undo ne obravnava naključnega vrstnega reda baze kot poslovne spremembe", () => {
+  const before = [{ id: "a", value: 1 }, { id: "b", value: 2 }];
+  const after = [{ id: "b", value: 2 }, { id: "a", value: 1 }];
+  assert.equal(undoArrayPatch("clientBills", before, after), null);
+
+  const changed = undoArrayPatch("clientBills", before, [{ id: "b", value: 3 }, { id: "a", value: 1 }]);
+  assert.deepEqual(changed, {
+    changes: [{ id: "b", before: { id: "b", value: 2 } }],
+    order: ["a", "b"]
+  });
+});
 
 test("Undo varno vrne zadnje poslovno dejanje in ga ne ponudi dvakrat", { timeout: 20_000 }, async () => {
   const port = 19900 + Math.floor(Math.random() * 200);

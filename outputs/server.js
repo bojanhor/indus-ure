@@ -463,7 +463,11 @@ function undoArrayPatch(key, before = [], after = []) {
   const oldOrder = oldItems.map((item) => undoItemId(key, item));
   const newOrder = newItems.map((item) => undoItemId(key, item));
   const order = JSON.stringify(oldOrder) === JSON.stringify(newOrder) ? null : oldOrder;
-  return changes.length || order ? { changes, ...(order ? { order } : {}) } : null;
+  // PostgreSQL does not guarantee the incidental order in which unrelated
+  // rows are read.  That order is not a business change and must never use
+  // up the single undo slot before the actual mutation is written.
+  if (!changes.length) return null;
+  return { changes, ...(order ? { order } : {}) };
 }
 
 function undoAttachmentPatch(before = {}, after = {}) {
@@ -492,7 +496,10 @@ function normalizeUndoArrayPatch(key, raw) {
   const order = (Array.isArray(raw.order) ? raw.order : [])
     .map((id) => String(id || "").trim())
     .filter(Boolean);
-  return changes.length || order.length ? { ...(changes.length ? { changes } : {}), ...(order.length ? { order } : {}) } : null;
+  // Older journals may contain an order-only patch produced by a database
+  // read.  It cannot restore any business data, so hide it instead of
+  // offering a misleading Undo action.
+  return changes.length ? { changes, ...(order.length ? { order } : {}) } : null;
 }
 
 function normalizeUndoAttachmentPatch(raw) {
@@ -8181,6 +8188,11 @@ async function handleApi(req, res) {
       };
       try {
         restoreUndoPatch(db, current.patch);
+        // Billing and archive flags are derived from confirmed payrolls and
+        // client bills.  Recalculate them after every undo so an entry whose
+        // client bill was restored/deleted immediately returns to the list of
+        // open client-billing items.
+        reconcileTodoArchives(db, user);
         const undoneAt = new Date().toISOString();
         db.undoJournal = normalizeUndoJournal(db.undoJournal).map((record) => record.id === current.id
           ? {
@@ -11446,6 +11458,7 @@ module.exports = {
   GOOGLE_DRIVE_SCOPE_VERSION,
   INDUS_GOOGLE_APP_ID,
   TODO_STATUS_DEFINITIONS,
+  undoArrayPatch,
   SESSION_TTL_MS,
   canRecordHoursFor,
   timeEntryTargetIds,
