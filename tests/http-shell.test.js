@@ -134,6 +134,8 @@ test("oznaka spremembe je zasebna po prejemniku, vidna v vseh pogledih in se por
   assert.match(html, /function todoChangeNoticeCanBeAcknowledged\(todo\)/);
   assert.match(html, /function clearTodoChangeNoticeAfterOpen\(todo\)/);
   assert.match(html, /\$\("acknowledgeTodoChangeNotice"\)\.addEventListener\("click", \(\) => \{/);
+  assert.match(html, /todo-change-ack/);
+  assert.match(html, /SPREMEMBA · PREBRANO/);
   assert.doesNotMatch(html, /\$\("todoDialog"\)\.showModal\(\);[\s\S]{0,180}clearTodoChangeNoticeAfterOpen\(todo\)/);
   assert.match(html, /todo-item[\s\S]*?has-change-notice/);
   assert.match(html, /day-todo[\s\S]*?has-change-notice/);

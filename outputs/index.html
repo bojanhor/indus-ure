@@ -1703,6 +1703,13 @@
       background: linear-gradient(90deg, #eef9f0 0, #fff 42%);
     }
     .todo-change-chip { background: #2f9a57; color: #fff; white-space: nowrap; }
+    button.todo-change-chip {
+      border: 1px solid #227442;
+      cursor: pointer;
+    }
+    button.todo-change-chip:hover,
+    button.todo-change-chip:focus-visible { background: #176e37; }
+    button.todo-change-chip:disabled { cursor: wait; opacity: 0.72; }
     .todo-change-highlight {
       outline: 2px solid #2f9a57;
       outline-offset: 2px;
@@ -12884,7 +12891,11 @@
                 <div class="todo-card-badges">
                   ${todoUsesOrderConfirmation(todo) ? `<button class="todo-ordered-toggle" type="button" aria-pressed="${Boolean(todo.ordered)}" title="${todo.ordered ? "Ozna&#269;eno kot naro&#269;eno" : "Ozna&#269;i kot naro&#269;eno"}" aria-label="${todo.ordered ? "Ozna&#269;eno kot naro&#269;eno" : "Ozna&#269;i kot naro&#269;eno"}"><span aria-hidden="true">&#10003;</span></button>` : ""}
                   <span class="todo-chip todo-status-chip todo-status-color ${todoStatusClass(todo.status)}">${todoStatus(todo.status).label}</span>
-                  ${changeNotice ? `<span class="todo-chip todo-change-chip" title="${escapeHtml(todoChangeNoticeText(todo))}">SPREMEMBA</span>` : ""}
+                  ${changeNotice
+                    ? todoChangeNoticeCanBeAcknowledged(todo)
+                      ? `<button class="todo-chip todo-change-chip todo-change-ack" type="button" title="${escapeHtml(todoChangeNoticeText(todo))}. Označi kot prebrano.">SPREMEMBA · PREBRANO</button>`
+                      : `<span class="todo-chip todo-change-chip" title="${escapeHtml(todoChangeNoticeText(todo))}">SPREMEMBA</span>`
+                    : ""}
                   ${isImportedTodo(todo) ? '<span class="todo-chip todo-imported-chip">Uvo&#382;eno</span>' : ""}
                   ${todoUsesTextOrdering(todo) && !manualOrderingStatusIds.has(todo.status) ? '<span class="todo-chip todo-ordering-chip">naro&#269;i</span>' : ""}
                 </div>
@@ -12920,6 +12931,18 @@
           } catch (error) {
             showNotice(error.message);
             orderedToggle.disabled = false;
+          }
+        });
+        const changeAcknowledgement = item.querySelector(".todo-change-ack");
+        changeAcknowledgement?.addEventListener("click", async (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          changeAcknowledgement.disabled = true;
+          try {
+            await clearTodoChangeNoticeAfterOpen(todo);
+          } catch (error) {
+            showNotice(error.message);
+            changeAcknowledgement.disabled = false;
           }
         });
         const todoSummary = item.querySelector(".todo-summary");

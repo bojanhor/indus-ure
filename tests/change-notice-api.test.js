@@ -100,6 +100,20 @@ test("sprememba opravila ostane ob odprtju, izgine pa šele po uspešnem shranje
     assert.equal(createdForIbro.changeNotice?.by, "bojan");
     assert.equal(createdForIbro.changeNoticesByUser, undefined, "Delavec ne sme dobiti oznak drugih prejemnikov.");
 
+    const acknowledge = await request(port, `/api/todos/${encodeURIComponent(id)}/change-notice/seen`, {
+      method: "POST", headers: ibro, body: "{}"
+    });
+    assert.equal(acknowledge.status, 200, acknowledge.body);
+    assert.equal(JSON.parse(acknowledge.body).todos.find((todo) => todo.id === id).changeNotice, null, "Prebrano takoj odstrani le prejemnikovo oznako.");
+
+    const markAgain = await request(port, `/api/todos/${encodeURIComponent(id)}/change-notice`, {
+      method: "POST", headers: bojan, body: "{}"
+    });
+    assert.equal(markAgain.status, 200, markAgain.body);
+    const ibroMarkedAgain = await request(port, "/api/todos", { headers: ibro });
+    const markedForIbro = JSON.parse(ibroMarkedAgain.body).todos.find((todo) => todo.id === id);
+    assert.equal(markedForIbro.changeNotice?.kind, "manual");
+
     const ticket = await request(port, `/api/todos/${encodeURIComponent(id)}/share-pdf-ticket`, {
       method: "POST", headers: ibro, body: "{}"
     });
@@ -116,12 +130,12 @@ test("sprememba opravila ostane ob odprtju, izgine pa šele po uspešnem shranje
     const bossAfterCreate = await request(port, "/api/todos", { headers: bojan });
     const createdForBoss = JSON.parse(bossAfterCreate.body).todos.find((todo) => todo.id === id);
     assert.equal(createdForBoss.changeNotice, null, "Avtor oznake je ne prejme sam.");
-    assert.equal(createdForBoss.changeNoticesByUser?.ibro?.kind, "created", "Šef potrebuje oznako za Ibrov delavski pogled.");
+    assert.equal(createdForBoss.changeNoticesByUser?.ibro?.kind, "manual", "Šef potrebuje trenutno oznako za Ibrov delavski pogled.");
 
     const update = await request(port, `/api/todos/${encodeURIComponent(id)}`, {
       method: "PUT",
       headers: ibro,
-      body: JSON.stringify({ ...createdForIbro, title: "Opravilo po popravku", baseUpdatedAt: createdForIbro.updatedAt })
+      body: JSON.stringify({ ...markedForIbro, title: "Opravilo po popravku", baseUpdatedAt: markedForIbro.updatedAt })
     });
     assert.equal(update.status, 200, update.body);
     const ibroAfterSave = await request(port, "/api/todos", { headers: ibro });
