@@ -1737,6 +1737,12 @@
       margin: 0 0 10px;
     }
     .todo-form-change-actions button { min-height: 38px; }
+    .todo-form-change-actions button.is-sent {
+      background: #2f9a57;
+      border-color: #237a46;
+      color: #fff;
+    }
+    .todo-form-change-actions button.is-sent:disabled { opacity: 1; cursor: default; }
     .todo-status-chip { min-width: max-content !important; width: max-content !important; white-space: nowrap !important; }
     .calendar-feed-actions { display: grid; gap: 8px; }
 
@@ -14399,6 +14405,7 @@
       if (!todo || !todoCanMarkChangedForOthers(todo)) return;
       const button = $("markTodoChangedForOthers");
       button.disabled = true;
+      let sent = false;
       try {
         const editLockToken = state.todoEditLock?.todoId === id ? state.todoEditLock.token : "";
         const data = await api(`/api/todos/${encodeURIComponent(id)}/change-notice`, {
@@ -14410,9 +14417,11 @@
           refreshClientList();
           render();
         }
-        showNotice("Opozorilo o spremembi je poslano drugim udeležencem.");
+        sent = true;
+        button.classList.add("is-sent");
+        button.textContent = "✓ Opozorilo poslano";
       } finally {
-        button.disabled = false;
+        button.disabled = sent;
       }
     }
 
@@ -14973,6 +14982,10 @@
       state.todoHistoryPreviewIndex = -1;
       state.todoHistoryPreviewActive = false;
       $("todoDialog").classList.remove("is-history-preview");
+      const changeNoticeButton = $("markTodoChangedForOthers");
+      changeNoticeButton.classList.remove("is-sent");
+      changeNoticeButton.textContent = "⚑ Opozori druge o spremembi";
+      changeNoticeButton.disabled = false;
       state.todoTimePickerTarget = "start";
       state.todoTimePickerMode = "hour";
       state.todoTimePickerOpen = false;

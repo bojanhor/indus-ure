@@ -131,7 +131,9 @@ test("oznaka spremembe je zasebna po prejemniku, vidna v vseh pogledih in se por
   assert.match(server, /requestedRecipientId !== user\.id && user\.role !== "boss"/);
   assert.match(html, /id="markTodoChangedForOthers"/);
   assert.match(html, /Opozori druge o spremembi/);
-  assert.match(html, /Opozorilo o spremembi je poslano drugim udeležencem/);
+  assert.match(html, /button\.classList\.add\("is-sent"\)/);
+  assert.match(html, /button\.textContent = "✓ Opozorilo poslano"/);
+  assert.doesNotMatch(html, /showNotice\("Opozorilo o spremembi je poslano drugim udeležencem\."\)/);
   assert.match(html, /notice\.kind === "manual"[\s\S]*?je poudaril dogodek/);
   assert.match(html, /id="acknowledgeTodoChangeNotice"/);
   assert.match(html, /function todoChangeNoticeRecipientId\(\)/);
