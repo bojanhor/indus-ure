@@ -5787,6 +5787,7 @@
           <button class="todo-modal-action secondary hidden" id="duplicateTodoFromDialog" type="button" title="Podvoji opravilo" aria-label="Podvoji opravilo">&#10697;</button>
           <button class="todo-modal-action secondary hidden" id="writeHoursFromTodo" type="button" title="Piši ure na ta projekt" aria-label="Piši ure na ta projekt">&#9201;</button>
           <button class="todo-modal-action secondary hidden" id="markTodoChangedForOthers" type="button" title="Označi spremembo za druge" aria-label="Označi spremembo za druge">&#9679;</button>
+          <button class="todo-modal-action secondary hidden" id="shareTodoPdf" type="button" title="Deli dogodek kot PDF" aria-label="Deli dogodek kot PDF">&#128228;</button>
           <button class="todo-modal-action secondary" id="saveTodoWithoutClosing" type="button" title="Shrani brez zapiranja" aria-label="Shrani brez zapiranja">&#128190;</button>
           <button class="todo-modal-action primary" id="saveTodoDialog" type="submit" title="Shrani in zapri" aria-label="Shrani in zapri">&#10003;</button>
           <button class="icon-btn" id="closeTodoDialog" type="button" title="Zapri brez shranjevanja" aria-label="Zapri brez shranjevanja">&times;</button>
@@ -6572,7 +6573,7 @@
       const notice = todoChangeNotice(todo);
       if (!notice) return "";
       if (notice.kind === "created") return `${notice.byName || "Sodelavec"} je dodal novo opravilo.`;
-      if (notice.kind === "manual") return `${notice.byName || "Sodelavec"} je označil dogodek za pregled.`;
+      if (notice.kind === "manual" || notice.fields.every((field) => field === "manual")) return `${notice.byName || "Sodelavec"} je poudaril dogodek.`;
       const fields = notice.fields.map((field) => todoChangeNoticeFieldLabels[field] || field).join(", ");
       return `${notice.byName || "Sodelavec"} je spremenil: ${fields}.`;
     }
@@ -14224,7 +14225,7 @@
             : `<div class="todo-form-attachment-detail">${video ? "<strong>Video</strong>" : ""}${comment}${metadata}</div>`;
         const actions = uploading
           ? ""
-          : `<div class="todo-form-photo-actions">${isPdfAttachment(photo) || video ? "" : `<button class="secondary edit-todo-form-photo" type="button" data-photo-id="${escapeHtml(photo.id)}">Uredi</button>`}<button class="danger remove-todo-form-photo" type="button" data-photo-id="${escapeHtml(photo.id)}">Odstrani</button></div>`;
+          : `<div class="todo-form-photo-actions"><button class="secondary share-todo-form-photo" type="button" data-photo-id="${escapeHtml(photo.id)}" title="Deli prilogo" aria-label="Deli prilogo">&#128228;</button>${isPdfAttachment(photo) || video ? "" : `<button class="secondary edit-todo-form-photo" type="button" data-photo-id="${escapeHtml(photo.id)}">Uredi</button>`}<button class="danger remove-todo-form-photo" type="button" data-photo-id="${escapeHtml(photo.id)}">Odstrani</button></div>`;
         return `<div class="todo-form-photo-row ${uploading ? "todo-form-video-uploading" : ""}">${preview}${detail}${actions}</div>`;
       }).join("");
       if ($("todoDialog").open) scheduleTodoCreationDraftSave();
@@ -14363,7 +14364,8 @@
           refreshClientList();
           render();
         }
-        showNotice(data.changed ? "Dogodek je označen za druge udeležence." : "Za ta dogodek ni drugega upravičenega prejemnika.");
+        // The dot itself is the confirmation.  Do not cover the event with a
+        // redundant toast while the user is deciding what to do next.
       } finally {
         button.disabled = false;
       }
@@ -15531,6 +15533,7 @@
       $("duplicateTodoFromDialog").classList.toggle("hidden", !editing || Boolean(state.todoHoursSourceId));
       $("writeHoursFromTodo").classList.toggle("hidden", !editing || Boolean(state.todoHoursSourceId) || !projectHoursSourceStatuses.has(todoStatus(todo.status).id));
       $("markTodoChangedForOthers").classList.toggle("hidden", !editing || !todoCanMarkChangedForOthers(todo));
+      $("shareTodoPdf").classList.toggle("hidden", !editing);
       const isExistingTimeEntry = editing && timeEntryStatusIds.has(todoStatus(todo.status).id);
       const showCompletionRequest = editing && state.user?.role === "boss";
       $("requestTodoCompletion").textContent = isExistingTimeEntry ? "Zahtevaj dopolnitev vnosa ur" : "Zahtevaj dopolnitev";
@@ -16286,6 +16289,110 @@
       document.body.append(link);
       link.click();
       link.remove();
+    }
+
+    function mobileNativeShareAvailable() {
+      return Boolean(window.matchMedia?.("(pointer: coarse)").matches && typeof navigator.share === "function");
+    }
+
+    function downloadSharedFile(downloadUrl, filename = "") {
+      const link = document.createElement("a");
+      link.href = downloadUrl;
+      link.download = filename;
+      link.style.display = "none";
+      document.body.append(link);
+      link.click();
+      link.remove();
+    }
+
+    function shareFileName(value, fallback = "priloga") {
+      const name = String(value || "").trim().replace(/[\\/:*?\"<>|\u0000-\u001f]+/g, "-").slice(0, 120);
+      return name || fallback;
+    }
+
+    async function shareFileOnMobileOrDownload(downloadUrl, { title = "", filename = "priloga" } = {}) {
+      if (!mobileNativeShareAvailable()) {
+        downloadSharedFile(downloadUrl, filename);
+        return;
+      }
+      let response;
+      try {
+        response = await fetch(downloadUrl, { credentials: "same-origin" });
+      } catch {
+        throw new Error("Datoteke za deljenje ni bilo mogoče prenesti.");
+      }
+      if (!response.ok) {
+        const failure = await response.json().catch(() => null);
+        throw new Error(failure?.error || "Datoteke za deljenje ni bilo mogoče pripraviti.");
+      }
+      const blob = await response.blob();
+      const file = new File([blob], shareFileName(filename), { type: blob.type || "application/octet-stream" });
+      if (typeof navigator.canShare === "function" && !navigator.canShare({ files: [file] })) {
+        downloadSharedFile(downloadUrl, filename);
+        return;
+      }
+      try {
+        await navigator.share({ title, files: [file] });
+      } catch (error) {
+        // Closing the native chooser is not an application failure.
+        if (error?.name !== "AbortError") throw error;
+      }
+    }
+
+    async function requestTodoSharePdfDownload(todoId, retried = false) {
+      let response;
+      try {
+        response = await fetch(`/api/todos/${encodeURIComponent(todoId)}/share-pdf-ticket`, {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json", "X-CSRF-Token": state.csrfToken || "" },
+          body: "{}"
+        });
+      } catch {
+        throw new Error("Povezava s strežnikom ni uspela.");
+      }
+      if (response.status === 403 && !retried) {
+        const failure = await response.clone().json().catch(() => null);
+        if (/varnostna potrditev seje manjka/i.test(String(failure?.error || ""))) {
+          await refreshSessionSecurityContext();
+          return requestTodoSharePdfDownload(todoId, true);
+        }
+      }
+      if (!response.ok) {
+        const failure = await response.json().catch(() => null);
+        throw new Error(failure?.error || "PDF-ja dogodka ni bilo mogoče pripraviti.");
+      }
+      const result = await response.json().catch(() => null);
+      const downloadUrl = String(result?.downloadUrl || "");
+      if (!downloadUrl.startsWith("/api/todos/share-pdf-download?ticket=")) {
+        throw new Error("Varne povezave za PDF dogodka ni bilo mogoče pripraviti.");
+      }
+      return downloadUrl;
+    }
+
+    async function shareTodoPdf() {
+      const todo = state.todos.find((item) => item.id === $("todoFormId").value);
+      if (!todo?.id) throw new Error("Dogodek ni več na voljo.");
+      const button = $("shareTodoPdf");
+      button.disabled = true;
+      try {
+        const downloadUrl = await requestTodoSharePdfDownload(todo.id);
+        await shareFileOnMobileOrDownload(downloadUrl, {
+          title: todo.title || "Dogodek",
+          filename: `${shareFileName(todo.title, "dogodek")}.pdf`
+        });
+      } finally {
+        button.disabled = false;
+      }
+    }
+
+    async function shareTodoAttachment(photo) {
+      const source = attachmentSource(photo);
+      if (!source) throw new Error("Priloga ni več na voljo.");
+      await shareFileOnMobileOrDownload(source, {
+        title: attachmentDisplayName(photo),
+        filename: attachmentDisplayName(photo)
+      });
     }
 
     async function downloadClientReportPdf() {
@@ -18506,6 +18613,7 @@
     });
     $("writeHoursFromTodo").addEventListener("click", () => openHoursTodoFromCurrent().catch((error) => showNotice(error.message)));
     $("markTodoChangedForOthers").addEventListener("click", () => markTodoChangedForOthers().catch((error) => showNotice(error.message)));
+    $("shareTodoPdf").addEventListener("click", () => shareTodoPdf().catch((error) => showNotice(error.message)));
     $("acknowledgeTodoChangeNotice").addEventListener("click", () => {
       const todo = state.todos.find((item) => item.id === $("todoFormId").value);
       if (todo) clearTodoChangeNoticeAfterOpen(todo).catch((error) => showNotice(error.message));
@@ -18611,6 +18719,12 @@
       $(id).addEventListener("change", handleTodoAttachmentsFromInput);
     });
     $("todoFormPhotoList").addEventListener("click", (event) => {
+      const share = event.target.closest(".share-todo-form-photo");
+      if (share) {
+        const photo = state.todoDialogPhotos.find((item) => item.id === share.dataset.photoId);
+        if (photo) shareTodoAttachment(photo).catch((error) => showNotice(error.message));
+        return;
+      }
       const edit = event.target.closest(".edit-todo-form-photo");
       if (edit) {
         const photo = state.todoDialogPhotos.find((item) => item.id === edit.dataset.photoId);

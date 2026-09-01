@@ -116,17 +116,19 @@ test("front-end naročila in foto urejevalnik ohranita dogovorjeni mobilni prika
   assert.match(server, /\["thumbnail", inputPath, `\$\{outputPath\}\[Q=\$\{quality\},strip\]`, String\(maxSide\)\]/);
 });
 
-test("oznaka spremembe je zasebna po prejemniku, vidna v vseh pogledih in se potrdi šele izrecno", async () => {
+test("oznaka spremembe je zasebna po prejemniku, vidna v vseh pogledih in se porabi ob shranjevanju", async () => {
   const [html, server] = await Promise.all([
     fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8"),
     fs.readFile(path.join(__dirname, "..", "outputs", "server.js"), "utf8")
   ]);
   assert.match(server, /function recordTodoChangeNotices\(db, todos, actor, fields/);
   assert.match(server, /function clearTodoChangeNoticesForUser\(db, todo, user\)/);
+  assert.match(server, /if \(updatedOpenedTodo\) clearTodoChangeNoticesForUser\(db, updatedOpenedTodo, user\);/);
   assert.match(server, /changeNotice: todoChangeNoticeForUser\(todo, user\)/);
   assert.match(server, /changeNoticesByUser: cleanTodoChangeNotices\(todo\.changeNotices, db\.users\)/);
   assert.match(server, /todoChangeNoticeMatch/);
   assert.match(html, /id="markTodoChangedForOthers"/);
+  assert.match(html, /notice\.kind === "manual"[\s\S]*?je poudaril dogodek/);
   assert.match(html, /id="acknowledgeTodoChangeNotice"/);
   assert.match(html, /function todoChangeNoticeRecipientId\(\)/);
   assert.match(html, /function todoChangeNoticeCanBeAcknowledged\(todo\)/);
@@ -750,7 +752,8 @@ test("e-poštna povezava odpre ciljno opravilo pred celotnim nalaganjem", async 
   assert.match(server, /function acquireTodoEditLockGroup\(todoId, assignmentIds, user, lockToken = "", now = Date\.now\(\)\) \{/);
   assert.match(server, /function releaseTodoEditLockGroup\(todoId, assignmentIds, user, lockToken = "", now = Date\.now\(\)\) \{/);
   assert.match(server, /const todoEditLockRequest = .*lock.*\.test\(req\.url\);/);
-  assert.match(server, /if \(streamedMediaUpload \|\| todoEditLockRequest\) \{\s*handleApi\(req, res\)/);
+  assert.match(server, /const todoSharePdfTicketRequest = .*share-pdf-ticket.*\.test\(req\.url\);/);
+  assert.match(server, /if \(streamedMediaUpload \|\| todoEditLockRequest \|\| todoSharePdfTicketRequest\) \{\s*handleApi\(req, res\)/);
   assert.match(store, /async focusedTodo\(id, \{ includeAttachments = true \} = \{\}\) \{/);
   assert.match(store, /async focusedTodoForLock\(id\) \{\s*return this\.focusedTodo\(id, \{ includeAttachments: false \}\);\s*\}/);
   assert.match(store, /async completionRequestGroup\(requestedAssignmentId, tokenHash\) \{/);
@@ -1072,6 +1075,27 @@ test("prijavljen uporabnik dobi neblokirajoč zagonski okvir in PostgreSQL indek
   assert.match(store, /indus_task_assignments_worker_order_idx/);
   assert.match(store, /indus_entries_worker_date_idx/);
   assert.match(store, /indus_client_bills_status_updated_idx/);
+});
+
+test("dogodek in vsaka priloga imata varno deljenje brez dodatnega zavihka", async () => {
+  const [html, server] = await Promise.all([
+    fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8"),
+    fs.readFile(path.join(__dirname, "..", "outputs", "server.js"), "utf8")
+  ]);
+  assert.match(html, /id="shareTodoPdf"/);
+  assert.match(html, /share-todo-form-photo/);
+  assert.match(html, /function shareFileOnMobileOrDownload\(/);
+  assert.match(html, /navigator\.share\(\{ title, files: \[file\] \}\)/);
+  assert.match(html, /function requestTodoSharePdfDownload\(todoId, retried = false\)/);
+  assert.match(html, /\/api\/todos\/\$\{encodeURIComponent\(todoId\)\}\/share-pdf-ticket/);
+  assert.doesNotMatch(html.slice(html.indexOf("function shareFileOnMobileOrDownload"), html.indexOf("async function downloadClientReportPdf")), /window\.open/);
+  assert.match(server, /const todoSharePdfDownloadTickets = new Map\(\);/);
+  assert.match(server, /function createTodoSharePdfDownloadTicket\(/);
+  assert.match(server, /function todoSharePdfDownloadTicketForRequest\(/);
+  assert.match(server, /async function sendTodoSharePdf\(/);
+  assert.match(server, /share-pdf-ticket/);
+  assert.match(server, /url\.pathname === "\/api\/todos\/share-pdf-download"/);
+  assert.match(server, /const todoSharePdfTicketRequest =/);
 });
 
 test("produkcijska lokalna podporna prijava zahteva zaupanja vreden LAN proxy", { timeout: 15_000 }, async () => {

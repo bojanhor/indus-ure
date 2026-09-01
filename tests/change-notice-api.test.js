@@ -55,7 +55,7 @@ async function stop(child) {
   if (child.exitCode === null) child.kill("SIGKILL");
 }
 
-test("sprememba opravila se označi samo drugemu uporabniku in izgine po izrecni potrditvi", { timeout: 15_000 }, async () => {
+test("sprememba opravila ostane ob odprtju, izgine pa šele po uspešnem shranjevanju prejemnika", { timeout: 15_000 }, async () => {
   const port = 20500 + Math.floor(Math.random() * 700);
   const dataDir = path.join(os.tmpdir(), `indus-ure-change-notice-${process.pid}-${Date.now()}`);
   const password = "test-only-local-password-123";
@@ -100,16 +100,23 @@ test("sprememba opravila se označi samo drugemu uporabniku in izgine po izrecni
     assert.equal(createdForIbro.changeNotice?.by, "bojan");
     assert.equal(createdForIbro.changeNoticesByUser, undefined, "Delavec ne sme dobiti oznak drugih prejemnikov.");
 
+    const ticket = await request(port, `/api/todos/${encodeURIComponent(id)}/share-pdf-ticket`, {
+      method: "POST", headers: ibro, body: "{}"
+    });
+    assert.equal(ticket.status, 201, ticket.body);
+    const downloadUrl = JSON.parse(ticket.body).downloadUrl;
+    assert.match(downloadUrl, /^\/api\/todos\/share-pdf-download\?ticket=/);
+    const wrongSessionDownload = await request(port, downloadUrl, { headers: bojan });
+    assert.equal(wrongSessionDownload.status, 410, wrongSessionDownload.body);
+    const pdf = await request(port, downloadUrl, { headers: ibro });
+    assert.equal(pdf.status, 200, pdf.body);
+    assert.match(String(pdf.headers["content-type"] || ""), /^application\/pdf/);
+    assert.match(pdf.body, /^%PDF-/);
+
     const bossAfterCreate = await request(port, "/api/todos", { headers: bojan });
     const createdForBoss = JSON.parse(bossAfterCreate.body).todos.find((todo) => todo.id === id);
     assert.equal(createdForBoss.changeNotice, null, "Avtor oznake je ne prejme sam.");
     assert.equal(createdForBoss.changeNoticesByUser?.ibro?.kind, "created", "Šef potrebuje oznako za Ibrov delavski pogled.");
-
-    const seen = await request(port, `/api/todos/${encodeURIComponent(id)}/change-notice/seen`, {
-      method: "POST", headers: ibro, body: "{}"
-    });
-    assert.equal(seen.status, 200, seen.body);
-    assert.equal(JSON.parse(seen.body).todos.find((todo) => todo.id === id).changeNotice, null);
 
     const update = await request(port, `/api/todos/${encodeURIComponent(id)}`, {
       method: "PUT",
@@ -117,6 +124,8 @@ test("sprememba opravila se označi samo drugemu uporabniku in izgine po izrecni
       body: JSON.stringify({ ...createdForIbro, title: "Opravilo po popravku", baseUpdatedAt: createdForIbro.updatedAt })
     });
     assert.equal(update.status, 200, update.body);
+    const ibroAfterSave = await request(port, "/api/todos", { headers: ibro });
+    assert.equal(JSON.parse(ibroAfterSave.body).todos.find((todo) => todo.id === id).changeNotice, null, "Samo uspešno shranjevanje prejemnika porabi njegovo oznako.");
     const bossList = await request(port, "/api/todos", { headers: bojan });
     const changedForBoss = JSON.parse(bossList.body).todos.find((todo) => todo.id === id);
     assert.deepEqual(changedForBoss.changeNotice?.fields, ["title"]);

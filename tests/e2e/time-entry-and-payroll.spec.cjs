@@ -239,7 +239,7 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
       await expect(card).toHaveClass(/has-change-notice/);
       await card.locator(".edit-todo").click();
       await expect(bossPage.locator("#todoFormChangeNotice")).toBeVisible();
-      await expect(bossPage.locator("#todoFormChangeNotice")).toContainText("Ibro je označil dogodek za pregled");
+      await expect(bossPage.locator("#todoFormChangeNotice")).toContainText("Ibro je poudaril dogodek");
       await bossPage.waitForTimeout(300);
       await expect(bossPage.locator("#todoFormChangeNotice")).toBeVisible();
       await bossPage.locator("#acknowledgeTodoChangeNotice").click();
@@ -509,6 +509,38 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
       const downloadPromise = popup.waitForEvent("download");
       const download = await downloadPromise;
       expect(download.suggestedFilename()).toMatch(/^obračun-.*\.pdf$/i);
+      const stream = await download.createReadStream();
+      const chunks = [];
+      for await (const chunk of stream) chunks.push(chunk);
+      expect(Buffer.concat(chunks).subarray(0, 4).toString()).toBe("%PDF");
+    } finally {
+      await context.close();
+    }
+  });
+
+  test("worker shares an individual event as a direct PDF download on desktop", async ({ browser }) => {
+    const context = await browser.newContext({ acceptDownloads: true, viewport: { width: 1280, height: 900 } });
+    const page = await context.newPage();
+    const title = "PW deljenje posameznega dogodka";
+    try {
+      await localLogin(page, "ibro");
+      await page.locator("#newTodoButton").click();
+      await page.locator("#todoFormTask").fill(title);
+      await page.locator("#todoFormClient").fill(CLIENT_ALIAS);
+      await page.locator("#saveTodoDialog").click();
+      await expect(page.locator("#todoDialog")).toBeHidden();
+      const todoId = await page.evaluate(async (taskTitle) => {
+        const response = await fetch("/api/todos");
+        const data = await response.json();
+        return data.todos.find((todo) => todo.title === taskTitle)?.id || "";
+      }, title);
+      expect(todoId).toBeTruthy();
+      await page.locator(`[data-todo-id="${todoId}"] .edit-todo`).click();
+      await expect(page.locator("#shareTodoPdf")).toBeVisible();
+      const downloadPromise = page.waitForEvent("download");
+      await page.locator("#shareTodoPdf").click();
+      const download = await downloadPromise;
+      expect(download.suggestedFilename()).toMatch(/^dogodek-.*\.pdf$/i);
       const stream = await download.createReadStream();
       const chunks = [];
       for await (const chunk of stream) chunks.push(chunk);

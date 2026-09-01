@@ -138,6 +138,7 @@ const monitorAlertCooldowns = new Map();
 const testLoginFailures = new Map();
 const auditLogCooldowns = new Map();
 const clientReportDownloadTickets = new Map();
+const todoSharePdfDownloadTickets = new Map();
 let archiveRetentionCleanupLastAt = 0;
 let archiveRetentionCleanupPromise = null;
 let lateTimeEntryReportDeliveryScheduled = false;
@@ -647,7 +648,7 @@ function undoActionLabel({ req, actor, beforeState, afterState }) {
 function undoEligibleRequest(req) {
   if (!isUnsafeRequest(req)) return false;
   const pathname = new URL(req.url, "http://undo.local").pathname;
-  if (/^\/api\/todos\/(?:video|drive-files|[^/]+\/(?:lock|completion-request))/.test(pathname)) return false;
+  if (/^\/api\/todos\/(?:video|drive-files|[^/]+\/(?:lock|completion-request|share-pdf-ticket))/.test(pathname)) return false;
   if (/^\/api\/(?:attachments|notifications|auth|google|login|logout|password|profile|billing-locks|undo-journal|backup)\b/.test(pathname)) return false;
   return /^\/api\/(?:todos(?:\/|$)|entries(?:\/|$)|clients(?:\/|$)|client-bills(?:\/|$)|payrolls(?:\/|$)|advances(?:\/|$)|personal-purchases(?:\/|$)|debts(?:\/|$)|settings\/billing$)/.test(pathname);
 }
@@ -4709,6 +4710,38 @@ function clientReportDownloadTicketForRequest(req, user, token) {
   return sameUser && sameSession ? ticket : null;
 }
 
+function pruneTodoSharePdfDownloadTickets(now = Date.now()) {
+  for (const [token, ticket] of todoSharePdfDownloadTickets) {
+    if (Number(ticket?.expiresAt || 0) <= now) todoSharePdfDownloadTickets.delete(token);
+  }
+  while (todoSharePdfDownloadTickets.size > MAX_CLIENT_REPORT_DOWNLOAD_TICKETS) {
+    const oldest = todoSharePdfDownloadTickets.keys().next().value;
+    if (!oldest) break;
+    todoSharePdfDownloadTickets.delete(oldest);
+  }
+}
+
+function createTodoSharePdfDownloadTicket(req, user, todoId) {
+  pruneTodoSharePdfDownloadTickets();
+  const token = crypto.randomBytes(32).toString("base64url");
+  todoSharePdfDownloadTickets.set(token, {
+    userId: String(user?.id || ""),
+    sessionHash: sessionTokenHash(sessionTokenFromRequest(req)),
+    todoId: String(todoId || ""),
+    expiresAt: Date.now() + CLIENT_REPORT_DOWNLOAD_TICKET_TTL_MS
+  });
+  return token;
+}
+
+function todoSharePdfDownloadTicketForRequest(req, user, token) {
+  pruneTodoSharePdfDownloadTickets();
+  const ticket = todoSharePdfDownloadTickets.get(String(token || ""));
+  if (!ticket) return null;
+  const sameUser = ticket.userId && ticket.userId === String(user?.id || "");
+  const sameSession = ticket.sessionHash && ticket.sessionHash === sessionTokenHash(sessionTokenFromRequest(req));
+  return sameUser && sameSession ? ticket : null;
+}
+
 function safeReportFileName(value, fallback = "priloga") {
   const cleaned = String(value || "").trim()
     .replace(/[\/:*?"<>|\u0000-\u001f]+/g, "-")
@@ -4814,7 +4847,8 @@ function clientReportExportOptions(input = {}) {
   const hoursMode = ["client_billable", "worker_total", "worker_time"].includes(String(input?.hoursMode || ""))
     ? String(input.hoursMode)
     : "client_billable";
-  return { hoursMode };
+  const heading = String(input?.heading || "").trim().slice(0, 120);
+  return { hoursMode, heading };
 }
 
 function reportPdfAssigneeTitle(db, todo) {
@@ -4919,19 +4953,20 @@ function reportPdfAttachmentPreviews(doc, attachments = []) {
 
 function buildClientReportPdf(db, report, attachments = [], exportOptions = {}) {
   const options = clientReportExportOptions(exportOptions);
-  const title = `Obra\u010dun - ${safeReportFileName(report.client?.name || 'stranka')}`;
+  const heading = options.heading || 'Obra\u010dun opravljenih storitev';
+  const title = `${heading} - ${safeReportFileName(report.client?.name || 'stranka')}`;
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({
       size: 'A4',
       margin: 46,
-      info: { Title: title, Author: 'INDUS URE', Subject: 'Obra\u010dun opravljenih storitev' }
+      info: { Title: title, Author: 'INDUS URE', Subject: heading }
     });
     const chunks = [];
     doc.on('data', (chunk) => chunks.push(chunk));
     doc.once('error', reject);
     doc.once('end', () => resolve(Buffer.concat(chunks)));
     try {
-      doc.font(reportPdfFontPath('bold')).fontSize(21).fillColor('#0d536b').text('Obra\u010dun opravljenih storitev');
+      doc.font(reportPdfFontPath('bold')).fontSize(21).fillColor('#0d536b').text(heading);
       doc.moveDown(0.3);
       doc.font(reportPdfFontPath()).fontSize(11).fillColor('#263634');
       reportPdfLine(doc, 'Stranka', report.client?.name || '');
@@ -5059,6 +5094,53 @@ async function sendClientReportPdf(res, db, body) {
   }));
   res.end(pdf);
   return true;
+}
+
+function todoShareReport(db, todo) {
+  const todos = todoAssignmentItems(db, todo).filter((item) => !isTrashedTodo(item));
+  if (!todos.length) return null;
+  const first = todos[0];
+  const client = clientForBilling(db, { clientId: first.clientId, clientName: first.client }) || {
+    clientId: String(first.clientId || ""),
+    name: String(first.client || "Brez stranke"),
+    email: ""
+  };
+  return {
+    client,
+    from: String(first.date || ""),
+    to: String(first.endDate || first.date || ""),
+    groups: [{ eventId: todoBillingEventId(first), todos }]
+  };
+}
+
+function todoSharePdfFilename(todo) {
+  const date = isDateKey(todo?.date) ? String(todo.date) : "brez-datuma";
+  const title = safeReportFileName(todo?.title || "dogodek").replace(/\s+/g, "-");
+  return `dogodek-${date}-${title || "brez-naslova"}.pdf`;
+}
+
+async function sendTodoSharePdf(res, db, todo) {
+  const report = todoShareReport(db, todo);
+  if (!report) {
+    sendJson(res, 404, { error: "Dogodek ni več na voljo." });
+    return false;
+  }
+  try {
+    const attachments = await loadClientReportAttachments(db, clientReportAttachmentSelection(report), { destination: "PDF" });
+    const pdf = await buildClientReportPdf(db, report, attachments, { hoursMode: "worker_time", heading: "Dogodek" });
+    res.writeHead(200, securityHeaders({
+      "Content-Type": "application/pdf",
+      "Content-Length": pdf.length,
+      "Content-Disposition": attachmentContentDisposition(todoSharePdfFilename(todo)),
+      "Cache-Control": "no-store"
+    }));
+    res.end(pdf);
+    return true;
+  } catch (error) {
+    console.error("PDF dogodka ni bilo mogoče ustvariti:", error?.message || error);
+    sendJson(res, 500, { error: "PDF dogodka ni bilo mogoče pripraviti. Poskusi znova." });
+    return false;
+  }
 }
 
 function workerDigestBaseUrl() {
@@ -8708,6 +8790,40 @@ async function handleApi(req, res) {
       return;
     }
 
+    const todoSharePdfTicketMatch = url.pathname.match(/^\/api\/todos\/([^/]+)\/share-pdf-ticket$/);
+    if (todoSharePdfTicketMatch && req.method === "POST") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      const id = decodeURIComponent(todoSharePdfTicketMatch[1]);
+      const db = await readDbAsync();
+      const todo = (db.todos || []).find((item) => item.id === id);
+      if (!todo || isTrashedTodo(todo) || !canManageTodo(user, todo) || !todoShareReport(db, todo)) {
+        sendJson(res, 404, { error: "Dogodek ni več na voljo." });
+        return;
+      }
+      const token = createTodoSharePdfDownloadTicket(req, user, id);
+      sendJson(res, 201, { downloadUrl: `/api/todos/share-pdf-download?ticket=${encodeURIComponent(token)}` });
+      return;
+    }
+
+    if (url.pathname === "/api/todos/share-pdf-download" && req.method === "GET") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      const ticket = todoSharePdfDownloadTicketForRequest(req, user, url.searchParams.get("ticket"));
+      if (!ticket) {
+        sendJson(res, 410, { error: "Povezava za prenos PDF-ja je potekla. Ponovno odpri deljenje dogodka." });
+        return;
+      }
+      const db = await readDbAsync();
+      const todo = (db.todos || []).find((item) => item.id === ticket.todoId);
+      if (!todo || isTrashedTodo(todo) || !canManageTodo(user, todo)) {
+        sendJson(res, 404, { error: "Dogodek ni več na voljo." });
+        return;
+      }
+      await sendTodoSharePdf(res, db, todo);
+      return;
+    }
+
     if (url.pathname === "/api/client-report/pdf-ticket" && req.method === "POST") {
       const user = await requireUser(req, res);
       if (!user) return;
@@ -11066,6 +11182,12 @@ releaseTodoAssignmentEditLock(db, previousTodo, user, editLockToken);
         || null;
       const changeNoticeFields = todoChangeNoticeFields(previousTodo, updatedOpenedTodo || {}, { assignmentsChanged });
       recordTodoChangeNotices(db, updatedGroup, user, changeNoticeFields, "updated", now);
+      // A personal change marker is an inbox item, not a warning about the
+      // data itself.  Keep it while the recipient only opens the form, then
+      // consume it after that same person has successfully saved the event.
+      // A boss merely viewing another worker's context must not clear the
+      // worker's private marker.
+      if (updatedOpenedTodo) clearTodoChangeNoticesForUser(db, updatedOpenedTodo, user);
       const clientBillableHoursWarningForUpdate = clientBillableHoursWarning(assignmentItems, updatedGroup);
       const settlementChange = upsertSettlementCorrections(db, assignmentItems, updatedGroup, user, now);
       if (settlementChange.error) {
@@ -11274,7 +11396,11 @@ async function start() {
       // not an undoable business change and must never wait behind a slow
       // save, image processing, backup or another serialized mutation.
       const todoEditLockRequest = /^\/api\/todos\/[^/?]+\/lock(?:[/?]|$)/.test(req.url);
-      if (streamedMediaUpload || todoEditLockRequest) {
+      // This endpoint only creates a short-lived session-bound download ticket;
+      // it does not mutate the database and must not wait behind an unrelated
+      // long-running save before the user can share an event.
+      const todoSharePdfTicketRequest = /^\/api\/todos\/[^/?]+\/share-pdf-ticket(?:[/?]|$)/.test(req.url);
+      if (streamedMediaUpload || todoEditLockRequest || todoSharePdfTicketRequest) {
         handleApi(req, res).catch((error) => handleUnexpectedRequestError(error, res));
       } else if (req.method !== "GET" || req.url.startsWith("/api/google/callback")) {
         runSerializedMutation(req, res);
