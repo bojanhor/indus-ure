@@ -803,6 +803,18 @@ test("initial application shell waits for one snapshot and renders only the acti
   assert.match(renderSource, /if \(state\.view === "billing"\) renderBillingView\(\);/);
 });
 
+test("spletni zagon ne pokaže zastarele oznake spremembe iz lokalnega predpomnilnika", async () => {
+  const [html, worker] = await Promise.all([
+    fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8"),
+    fs.readFile(path.join(__dirname, "..", "outputs", "service-worker.js"), "utf8")
+  ]);
+  const cachedSnapshot = html.slice(html.indexOf("function applyOnlineCachedSnapshot"), html.indexOf("function showLoginScreen"));
+  assert.match(cachedSnapshot, /state\.todos = \(snapshot\.todos \|\| \[\]\)\.map\(\(todo\) => \{/);
+  assert.match(cachedSnapshot, /delete cached\.changeNotice;/);
+  assert.match(cachedSnapshot, /delete cached\.changeNoticesByUser;/);
+  assert.match(worker, /const CACHE_NAME = "indus-ure-shell-v6";/);
+});
+
 test("hitre bližnjice odprejo pravo formo in filter zaključenih opravil ostane ločen po uporabniku", async () => {
   const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
   assert.match(html, /href="\?quick=task"/);

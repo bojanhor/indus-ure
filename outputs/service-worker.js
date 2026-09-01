@@ -1,6 +1,6 @@
 "use strict";
 
-const CACHE_NAME = "indus-ure-shell-v5";
+const CACHE_NAME = "indus-ure-shell-v6";
 const SHELL = ["/", "/index.html", "/manifest.webmanifest", "/assets/indus-icon.svg"];
 
 self.addEventListener("install", (event) => {

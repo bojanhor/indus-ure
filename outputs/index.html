@@ -8473,7 +8473,17 @@
     function applyOnlineCachedSnapshot(snapshot) {
       if (!snapshot || String(snapshot.userId || "") !== String(state.user?.id || "")) return false;
       state.entries = snapshot.entries || [];
-      state.todos = snapshot.todos || [];
+      // A change marker is an inbox signal from the server, not durable task
+      // data.  Showing it from an IndexedDB snapshot can leave a green border
+      // visible even after the recipient already saved the task elsewhere.
+      // The fresh bootstrap immediately restores any marker that still exists
+      // on the server; a genuinely offline launch keeps its saved markers.
+      state.todos = (snapshot.todos || []).map((todo) => {
+        const cached = { ...todo };
+        delete cached.changeNotice;
+        delete cached.changeNoticesByUser;
+        return cached;
+      });
       state.todoSnapshotLoaded = true;
       state.debts = snapshot.debts || [];
       state.advances = snapshot.advances || [];
