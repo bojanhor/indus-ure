@@ -748,6 +748,9 @@ test("e-poštna povezava odpre ciljno opravilo pred celotnim nalaganjem", async 
   assert.match(server, /const focused = await getPgStore\(\)\.focusedTodoForLock\(id\);/);
   assert.match(server, /completionRequestGroup\(id, tokenHash\)/);
   assert.match(server, /function acquireTodoEditLockGroup\(todoId, assignmentIds, user, lockToken = "", now = Date\.now\(\)\) \{/);
+  assert.match(server, /function releaseTodoEditLockGroup\(todoId, assignmentIds, user, lockToken = "", now = Date\.now\(\)\) \{/);
+  assert.match(server, /const todoEditLockRequest = .*lock.*\.test\(req\.url\);/);
+  assert.match(server, /if \(streamedMediaUpload \|\| todoEditLockRequest\) \{\s*handleApi\(req, res\)/);
   assert.match(store, /async focusedTodo\(id, \{ includeAttachments = true \} = \{\}\) \{/);
   assert.match(store, /async focusedTodoForLock\(id\) \{\s*return this\.focusedTodo\(id, \{ includeAttachments: false \}\);\s*\}/);
   assert.match(store, /async completionRequestGroup\(requestedAssignmentId, tokenHash\) \{/);

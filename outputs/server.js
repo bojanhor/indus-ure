@@ -3557,6 +3557,13 @@ function acquireTodoEditLockGroup(todoId, assignmentIds, user, lockToken = "", n
   return { ok: true, token, lock: publicTodoEditLock(lock) };
 }
 
+function releaseTodoEditLockGroup(todoId, assignmentIds, user, lockToken = "", now = Date.now()) {
+  const ids = [...new Set((assignmentIds || []).map((id) => String(id || "")).filter(Boolean))];
+  const targetId = String(todoId || "");
+  if (targetId && !ids.includes(targetId)) ids.push(targetId);
+  return ids.map((id) => releaseTodoEditLock(id, user, lockToken, now)).every(Boolean);
+}
+
 function acquireTodoAssignmentEditLock(db, todo, user, lockToken = "", now = Date.now()) {
   const items = todoAssignmentItems(db, todo);
   const conflict = todoAssignmentEditLockConflict(db, todo, user, lockToken, now);
@@ -3565,8 +3572,7 @@ function acquireTodoAssignmentEditLock(db, todo, user, lockToken = "", now = Dat
 }
 
 function releaseTodoAssignmentEditLock(db, todo, user, lockToken = "", now = Date.now()) {
-  return todoAssignmentItems(db, todo)
-    .map((item) => releaseTodoEditLock(item.id, user, lockToken, now)).every(Boolean);
+  return releaseTodoEditLockGroup(todo.id, todoAssignmentItems(db, todo).map((item) => item.id), user, lockToken, now);
 }
 
 function canManageTodo(user, todo) {
@@ -10311,16 +10317,27 @@ async function handleApi(req, res) {
     }
 
     if (todoLockMatch && req.method === "DELETE") {
-      const user = await requireUser(req, res);
+      const user = DATABASE_URL
+        ? await requireUserForFocusedTodo(req, res)
+        : await requireUser(req, res);
       if (!user) return;
       const id = decodeURIComponent(todoLockMatch[1]);
       const body = await readBody(req);
-      const db = await readDbAsync();
-      const todo = db.todos.find((item) => item.id === id);
-      if (todo) {
-        releaseTodoAssignmentEditLock(db, todo, user, body.lockToken);
+      if (DATABASE_URL) {
+        const focused = await getPgStore().focusedTodoForLock(id);
+        if (focused?.todo && canManageTodo(user, focused.todo)) {
+          releaseTodoEditLockGroup(id, focused.assignmentIds, user, body.lockToken);
+        } else {
+          releaseTodoEditLock(id, user, body.lockToken);
+        }
       } else {
-        releaseTodoEditLock(id, user, body.lockToken);
+        const db = await readDbAsync();
+        const todo = db.todos.find((item) => item.id === id);
+        if (todo) {
+          releaseTodoAssignmentEditLock(db, todo, user, body.lockToken);
+        } else {
+          releaseTodoEditLock(id, user, body.lockToken);
+        }
       }
       sendJson(res, 200, { ok: true });
       return;
@@ -11253,7 +11270,11 @@ async function start() {
       // event until its form is saved. Do not hold the global mutation queue
       // while a large body is streaming or while an image is being converted.
       const streamedMediaUpload = req.method === "POST" && (/^\/api\/todos\/(?:video|image)(?:[/?]|$)/).test(req.url);
-      if (streamedMediaUpload) {
+      // An edit lock changes only the short-lived in-memory lock map.  It is
+      // not an undoable business change and must never wait behind a slow
+      // save, image processing, backup or another serialized mutation.
+      const todoEditLockRequest = /^\/api\/todos\/[^/?]+\/lock(?:[/?]|$)/.test(req.url);
+      if (streamedMediaUpload || todoEditLockRequest) {
         handleApi(req, res).catch((error) => handleUnexpectedRequestError(error, res));
       } else if (req.method !== "GET" || req.url.startsWith("/api/google/callback")) {
         runSerializedMutation(req, res);
