@@ -130,6 +130,8 @@ test("oznaka spremembe je zasebna po prejemniku, vidna v vseh pogledih in se por
   assert.match(server, /requestedRecipientId/);
   assert.match(server, /requestedRecipientId !== user\.id && user\.role !== "boss"/);
   assert.match(html, /id="markTodoChangedForOthers"/);
+  assert.match(html, /Opozori druge o spremembi/);
+  assert.match(html, /Opozorilo o spremembi je poslano drugim udeležencem/);
   assert.match(html, /notice\.kind === "manual"[\s\S]*?je poudaril dogodek/);
   assert.match(html, /id="acknowledgeTodoChangeNotice"/);
   assert.match(html, /function todoChangeNoticeRecipientId\(\)/);
@@ -144,7 +146,7 @@ test("oznaka spremembe je zasebna po prejemniku, vidna v vseh pogledih in se por
   assert.match(html, /day-todo[\s\S]*?has-change-notice/);
   assert.match(html, /day-timeline-event[\s\S]*?has-change-notice/);
   const serviceWorker = await fs.readFile(path.join(__dirname, "..", "outputs", "service-worker.js"), "utf8");
-  assert.match(serviceWorker, /indus-ure-shell-v7/);
+  assert.match(serviceWorker, /indus-ure-shell-v8/);
 });
 
 test("prehod iz novega dogodka v vpis ur počaka na zaprtje modala", async () => {
@@ -819,7 +821,7 @@ test("spletni zagon ne pokaže zastarele oznake spremembe iz lokalnega predpomni
   assert.match(cachedSnapshot, /state\.todos = \(snapshot\.todos \|\| \[\]\)\.map\(\(todo\) => \{/);
   assert.match(cachedSnapshot, /delete cached\.changeNotice;/);
   assert.match(cachedSnapshot, /delete cached\.changeNoticesByUser;/);
-  assert.match(worker, /const CACHE_NAME = "indus-ure-shell-v7";/);
+  assert.match(worker, /const CACHE_NAME = "indus-ure-shell-v8";/);
 });
 
 test("hitre bližnjice odprejo pravo formo in filter zaključenih opravil ostane ločen po uporabniku", async () => {

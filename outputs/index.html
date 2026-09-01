@@ -1731,6 +1731,12 @@
     }
     .todo-form-change-notice > span { flex: 1 1 auto; }
     .todo-form-change-notice > button { flex: 0 0 auto; }
+    .todo-form-change-actions {
+      display: flex;
+      justify-content: flex-start;
+      margin: 0 0 10px;
+    }
+    .todo-form-change-actions button { min-height: 38px; }
     .todo-status-chip { min-width: max-content !important; width: max-content !important; white-space: nowrap !important; }
     .calendar-feed-actions { display: grid; gap: 8px; }
 
@@ -5793,7 +5799,6 @@
           <button class="todo-modal-action danger hidden" id="deleteTodoFromDialog" type="button" title="Izbriši opravilo" aria-label="Izbriši opravilo">&#128465;</button>
           <button class="todo-modal-action secondary hidden" id="duplicateTodoFromDialog" type="button" title="Podvoji opravilo" aria-label="Podvoji opravilo">&#10697;</button>
           <button class="todo-modal-action secondary hidden" id="writeHoursFromTodo" type="button" title="Piši ure na ta projekt" aria-label="Piši ure na ta projekt">&#9201;</button>
-          <button class="todo-modal-action secondary hidden" id="markTodoChangedForOthers" type="button" title="Označi spremembo za druge" aria-label="Označi spremembo za druge">&#9679;</button>
           <button class="todo-modal-action secondary hidden" id="shareTodoPdf" type="button" title="Deli dogodek kot PDF" aria-label="Deli dogodek kot PDF">&#128228;</button>
           <button class="todo-modal-action secondary" id="saveTodoWithoutClosing" type="button" title="Shrani brez zapiranja" aria-label="Shrani brez zapiranja">&#128190;</button>
           <button class="todo-modal-action primary" id="saveTodoDialog" type="submit" title="Shrani in zapri" aria-label="Shrani in zapri">&#10003;</button>
@@ -5812,6 +5817,9 @@
         <div class="todo-form-change-notice hidden" id="todoFormChangeNotice" role="status">
           <span id="todoFormChangeNoticeText"></span>
           <button class="secondary" id="acknowledgeTodoChangeNotice" type="button">Prebrano</button>
+        </div>
+        <div class="todo-form-change-actions hidden" id="todoFormChangeActions">
+          <button class="secondary" id="markTodoChangedForOthers" type="button" title="Ustvari zeleno oznako za druge udeležence; ne odstrani oznake iz tega pogleda.">&#9873; Opozori druge o spremembi</button>
         </div>
         <div class="modal-grid">
           <div class="todo-client-field" id="todoFormClientField">
@@ -14402,8 +14410,7 @@
           refreshClientList();
           render();
         }
-        // The dot itself is the confirmation.  Do not cover the event with a
-        // redundant toast while the user is deciding what to do next.
+        showNotice("Opozorilo o spremembi je poslano drugim udeležencem.");
       } finally {
         button.disabled = false;
       }
@@ -15573,7 +15580,7 @@
       $("deleteTodoFromDialog").classList.toggle("hidden", !editing);
       $("duplicateTodoFromDialog").classList.toggle("hidden", !editing || Boolean(state.todoHoursSourceId));
       $("writeHoursFromTodo").classList.toggle("hidden", !editing || Boolean(state.todoHoursSourceId) || !projectHoursSourceStatuses.has(todoStatus(todo.status).id));
-      $("markTodoChangedForOthers").classList.toggle("hidden", !editing || !todoCanMarkChangedForOthers(todo));
+      $("todoFormChangeActions").classList.toggle("hidden", !editing || !todoCanMarkChangedForOthers(todo));
       $("shareTodoPdf").classList.toggle("hidden", !editing);
       const isExistingTimeEntry = editing && timeEntryStatusIds.has(todoStatus(todo.status).id);
       const showCompletionRequest = editing && state.user?.role === "boss";
