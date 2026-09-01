@@ -132,10 +132,31 @@ test("sprememba opravila ostane ob odprtju, izgine pa šele po uspešnem shranje
     assert.equal(createdForBoss.changeNotice, null, "Avtor oznake je ne prejme sam.");
     assert.equal(createdForBoss.changeNoticesByUser?.ibro?.kind, "manual", "Šef potrebuje trenutno oznako za Ibrov delavski pogled.");
 
+    const bossAcknowledgesIbro = await request(port, `/api/todos/${encodeURIComponent(id)}/change-notice/seen?recipient=ibro`, {
+      method: "POST", headers: bojan, body: "{}"
+    });
+    assert.equal(bossAcknowledgesIbro.status, 200, bossAcknowledgesIbro.body);
+    assert.equal(JSON.parse(bossAcknowledgesIbro.body).todos.find((todo) => todo.id === id).changeNoticesByUser?.ibro, undefined, "Šef lahko v Ibrovem pogledu odstrani Ibrovo oznako.");
+    const ibroAfterBossAcknowledgement = await request(port, "/api/todos", { headers: ibro });
+    assert.equal(JSON.parse(ibroAfterBossAcknowledgement.body).todos.find((todo) => todo.id === id).changeNotice, null, "Šefovo Prebrano odstrani oznako tudi iz delavčevega pogleda.");
+
+    const workerCannotAcknowledgeBoss = await request(port, `/api/todos/${encodeURIComponent(id)}/change-notice/seen?recipient=bojan`, {
+      method: "POST", headers: ibro, body: "{}"
+    });
+    assert.equal(workerCannotAcknowledgeBoss.status, 403, workerCannotAcknowledgeBoss.body);
+
+    const markForSave = await request(port, `/api/todos/${encodeURIComponent(id)}/change-notice`, {
+      method: "POST", headers: bojan, body: "{}"
+    });
+    assert.equal(markForSave.status, 200, markForSave.body);
+    const ibroBeforeSave = await request(port, "/api/todos", { headers: ibro });
+    const markedForSave = JSON.parse(ibroBeforeSave.body).todos.find((todo) => todo.id === id);
+    assert.equal(markedForSave.changeNotice?.kind, "manual");
+
     const update = await request(port, `/api/todos/${encodeURIComponent(id)}`, {
       method: "PUT",
       headers: ibro,
-      body: JSON.stringify({ ...markedForIbro, title: "Opravilo po popravku", baseUpdatedAt: markedForIbro.updatedAt })
+      body: JSON.stringify({ ...markedForSave, title: "Opravilo po popravku", baseUpdatedAt: markedForSave.updatedAt })
     });
     assert.equal(update.status, 200, update.body);
     const ibroAfterSave = await request(port, "/api/todos", { headers: ibro });

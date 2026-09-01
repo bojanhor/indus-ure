@@ -6565,7 +6565,12 @@
     }
 
     function todoChangeNoticeCanBeAcknowledged(todo) {
-      return Boolean(todo?.changeNotice && todoChangeNoticeRecipientId() === String(state?.user?.id || ""));
+      const recipientId = todoChangeNoticeRecipientId();
+      const isOwnNotice = recipientId === String(state?.user?.id || "");
+      // In the selected worker view the boss is explicitly looking at that
+      // worker's inbox.  Let the boss acknowledge it there, instead of
+      // leaving an otherwise permanent marker which only the worker can hide.
+      return Boolean(todoChangeNotice(todo) && (isOwnNotice || state?.user?.role === "boss"));
     }
 
     function todoChangeNotice(todo) {
@@ -14406,7 +14411,10 @@
 
     async function clearTodoChangeNoticeAfterOpen(todo) {
       if (!todoChangeNoticeCanBeAcknowledged(todo) || !todo?.id) return;
-      const data = await api(`/api/todos/${encodeURIComponent(todo.id)}/change-notice/seen`, { method: "POST", body: "{}" });
+      const recipientId = todoChangeNoticeRecipientId();
+      const ownId = String(state?.user?.id || "");
+      const recipientQuery = recipientId && recipientId !== ownId ? `?recipient=${encodeURIComponent(recipientId)}` : "";
+      const data = await api(`/api/todos/${encodeURIComponent(todo.id)}/change-notice/seen${recipientQuery}`, { method: "POST", body: "{}" });
       if (!Array.isArray(data.todos)) return;
       state.todos = data.todos;
       refreshClientList();

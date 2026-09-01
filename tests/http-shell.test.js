@@ -127,12 +127,15 @@ test("oznaka spremembe je zasebna po prejemniku, vidna v vseh pogledih in se por
   assert.match(server, /changeNotice: todoChangeNoticeForUser\(todo, user\)/);
   assert.match(server, /changeNoticesByUser: cleanTodoChangeNotices\(todo\.changeNotices, db\.users\)/);
   assert.match(server, /todoChangeNoticeMatch/);
+  assert.match(server, /requestedRecipientId/);
+  assert.match(server, /requestedRecipientId !== user\.id && user\.role !== "boss"/);
   assert.match(html, /id="markTodoChangedForOthers"/);
   assert.match(html, /notice\.kind === "manual"[\s\S]*?je poudaril dogodek/);
   assert.match(html, /id="acknowledgeTodoChangeNotice"/);
   assert.match(html, /function todoChangeNoticeRecipientId\(\)/);
   assert.match(html, /function todoChangeNoticeCanBeAcknowledged\(todo\)/);
   assert.match(html, /function clearTodoChangeNoticeAfterOpen\(todo\)/);
+  assert.match(html, /recipientQuery/);
   assert.match(html, /\$\("acknowledgeTodoChangeNotice"\)\.addEventListener\("click", \(\) => \{/);
   assert.match(html, /todo-change-ack/);
   assert.match(html, /SPREMEMBA · PREBRANO/);
@@ -140,6 +143,8 @@ test("oznaka spremembe je zasebna po prejemniku, vidna v vseh pogledih in se por
   assert.match(html, /todo-item[\s\S]*?has-change-notice/);
   assert.match(html, /day-todo[\s\S]*?has-change-notice/);
   assert.match(html, /day-timeline-event[\s\S]*?has-change-notice/);
+  const serviceWorker = await fs.readFile(path.join(__dirname, "..", "outputs", "service-worker.js"), "utf8");
+  assert.match(serviceWorker, /indus-ure-shell-v7/);
 });
 
 test("prehod iz novega dogodka v vpis ur počaka na zaprtje modala", async () => {
@@ -814,7 +819,7 @@ test("spletni zagon ne pokaže zastarele oznake spremembe iz lokalnega predpomni
   assert.match(cachedSnapshot, /state\.todos = \(snapshot\.todos \|\| \[\]\)\.map\(\(todo\) => \{/);
   assert.match(cachedSnapshot, /delete cached\.changeNotice;/);
   assert.match(cachedSnapshot, /delete cached\.changeNoticesByUser;/);
-  assert.match(worker, /const CACHE_NAME = "indus-ure-shell-v6";/);
+  assert.match(worker, /const CACHE_NAME = "indus-ure-shell-v7";/);
 });
 
 test("hitre bližnjice odprejo pravo formo in filter zaključenih opravil ostane ločen po uporabniku", async () => {

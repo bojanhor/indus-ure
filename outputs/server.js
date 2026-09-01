@@ -10934,7 +10934,13 @@ async function handleApi(req, res) {
       const assignmentItems = todoAssignmentItems(db, todo);
       let changed = false;
       if (markingSeen) {
-        changed = clearTodoChangeNoticesForUser(db, todo, user);
+        const requestedRecipientId = cleanUserId(url.searchParams.get("recipient") || user.id);
+        const recipient = db.users?.[requestedRecipientId];
+        if (!recipient || recipient.active === false || (requestedRecipientId !== user.id && user.role !== "boss")) {
+          sendJson(res, 403, { error: "Oznako lahko kot prebrano potrdi prejemnik ali šef v njegovem pogledu." });
+          return;
+        }
+        changed = clearTodoChangeNoticesForUser(db, todo, recipient);
       } else {
         const lock = todoAssignmentEditLockConflict(db, todo, user, String(body.editLockToken || ""));
         if (lock) {
