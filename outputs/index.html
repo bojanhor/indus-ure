@@ -5382,24 +5382,28 @@
       .app-settings-section { display: grid; gap: 9px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: #f8faf7; }
       .app-settings-section h4 { margin: 0; }
     }
-    .workers-dialog { width: min(920px, calc(100vw - 24px)); }
+    .workers-dialog { width: min(980px, calc(100vw - 24px)); max-height: min(900px, calc(100dvh - 24px)); padding: 0; }
+    .workers-dialog > form { display: grid; grid-template-rows: auto minmax(0, 1fr); max-height: inherit; }
     .workers-dialog .modal-head { align-items: flex-start; }
     .workers-dialog .modal-head h3 { margin: 0 0 3px; }
-    .worker-create-panel { padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: #f5faf8; }
-    .worker-create-panel h4 { margin: 0 0 10px; }
+    .workers-dialog .modal-body { min-height: 0; overflow: auto; display: grid; align-content: start; gap: 14px; }
+    .worker-create-panel { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px 14px; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: #f5faf8; }
+    .worker-create-panel h4 { grid-column: 1 / -1; margin: 0; }
     .worker-create-grid { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(220px, 1fr) minmax(150px, .7fr); gap: 10px; }
-    .worker-management-list { display: grid; gap: 12px; margin-top: 16px; }
+    .worker-create-panel .actions { align-self: end; margin: 0; }
+    .worker-management-list { display: grid; gap: 12px; margin: 0; }
     .worker-management-card { border: 1px solid var(--line); border-radius: 12px; padding: 14px; background: #fff; }
     .worker-management-card.inactive { opacity: .68; background: #f7f8f8; }
-    .worker-management-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+    .worker-management-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
     .worker-management-head h4 { margin: 0; }
-    .worker-management-status { color: var(--muted); font-size: 13px; font-weight: 750; }
+    .worker-management-status { display: inline-flex; margin-top: 3px; color: var(--muted); font-size: 12px; font-weight: 800; }
     .worker-management-grid { display: grid; grid-template-columns: minmax(170px, 1fr) minmax(220px, 1.2fr) minmax(150px, .75fr); gap: 10px; }
-    .worker-permissions { margin: 13px 0 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 9px; }
+    .worker-management-details { display: grid; grid-template-columns: minmax(230px, .9fr) minmax(300px, 1.25fr); gap: 10px; margin-top: 12px; }
+    .worker-permissions { margin: 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 9px; }
     .worker-permissions legend { padding: 0 4px; font-weight: 800; }
-    .worker-permissions-list { display: flex; flex-wrap: wrap; gap: 7px 14px; }
+    .worker-permissions-list { display: grid; gap: 7px; }
     .worker-permissions-list label { display: inline-flex; align-items: center; gap: 6px; margin: 0; }
-    .worker-report-delivery { margin: 13px 0 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 9px; background: #f8faf7; }
+    .worker-report-delivery { margin: 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 9px; background: #f8faf7; }
     .worker-report-delivery legend { padding: 0 4px; font-weight: 800; }
     .worker-report-delivery-grid { display: grid; grid-template-columns: minmax(240px, 1fr) minmax(220px, 1fr); gap: 9px 12px; align-items: end; }
     .worker-report-delivery-grid .worker-report-check { display: inline-flex; align-items: center; gap: 7px; margin: 0; }
@@ -5408,8 +5412,19 @@
     .worker-management-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 13px; }
     .worker-management-actions .danger { color: #a82d35; border-color: #e1b8bc; background: #fff7f7; }
     .worker-active-field { display: inline-flex; align-items: center; gap: 7px; margin: 0; }
+    @media (max-width: 780px) {
+      .workers-dialog { width: min(720px, calc(100vw - 20px)); }
+      .worker-create-panel { grid-template-columns: 1fr; }
+      .worker-create-panel .actions { justify-content: stretch; }
+      .worker-create-panel .actions button { width: 100%; }
+      .worker-create-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .worker-management-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .worker-management-grid > :last-child { grid-column: 1 / -1; }
+      .worker-management-details { grid-template-columns: 1fr; }
+    }
     @media (max-width: 620px) {
       .worker-create-grid, .worker-management-grid, .worker-report-delivery-grid { grid-template-columns: 1fr; }
+      .worker-management-grid > :last-child { grid-column: auto; }
       .worker-management-head { align-items: flex-start; flex-direction: column; }
       .worker-management-actions { justify-content: stretch; flex-wrap: wrap; }
       .worker-management-actions button { flex: 1 1 130px; }
@@ -5982,7 +5997,6 @@
                   <button class="secondary date-jump-button" id="setTodoFormEndDateTomorrow" type="button">Jutri</button>
                   <button class="secondary date-jump-button" id="advanceTodoFormEndDate" type="button" title="Naslednji dan" aria-label="Naslednji dan">+1</button>
                 </span>
-                <small class="sr-only" id="todoFormEndDateHint">Privzeto isti dan. Spremeni samo za večdnevno opravilo.</small>
               </label>
             </div>
             <label class="todo-form-calendar-only hidden" id="todoFormCalendarOnlyField">
@@ -14532,9 +14546,6 @@
       $('advanceTodoFormEndDate').disabled = endDateLocked;
       endDateField.classList.toggle('hidden', isMaterialEntry);
       endDateField.classList.toggle('date-range-locked', endDateLocked);
-      $('todoFormEndDateHint').textContent = isTimeEntry
-        ? 'Vpis ur je vedno isti dan.'
-        : 'Privzeto isti dan. Spremeni samo za ve\u010ddnevno opravilo.';
       renderTodoFormQuickTimePicker();
     }
 
@@ -15139,6 +15150,12 @@
         scheduleTodoFormPhotoPreviews();
       }
       autosizeTodoNarrativeFieldsAfterLayout();
+      // Opening a marked task means it has been read. Do this in the
+      // background so the editor is never held up; a failed request simply
+      // leaves the marker in place for the next refresh.
+      if (editing && todoChangeNoticeCanBeAcknowledged(todo)) {
+        void clearTodoChangeNoticeAfterOpen(todo).catch((error) => console.warn("Oznake spremembe ni bilo mogoče označiti kot prebrano:", error));
+      }
       if (state.todoCreationDraftRestored) showNotice("Nedokončan osnutek je obnovljen.");
       requestAnimationFrame(() => $("todoDialog").focus({ preventScroll: true }));
       return true;
@@ -17896,16 +17913,18 @@
             <label>Google e-pošta <span class="todo-meta">(neobvezno)</span><input data-worker-email type="email" maxlength="240" value="${escapeHtml(worker.email || "")}" placeholder="Brez prijave z Googlom" ${disabled}></label>
             <label>Način obračunavanja<select data-worker-employment-type ${disabled}><option value="contractor" selected>Kooperant</option></select></label>
           </div>
-          <fieldset class="worker-permissions" ${disabled}><legend>Lahko vpisuje ure za</legend><div class="worker-permissions-list">${targets || '<span class="todo-meta">Ni aktivnih delavcev.</span>'}</div></fieldset>
-          <fieldset class="worker-report-delivery" ${disabled}>
-            <legend>Dnevna poročila po e-pošti</legend>
-            <div class="worker-report-delivery-grid">
-              <label class="worker-report-check"><input type="checkbox" data-worker-report-email-enabled ${dailyReport.emailEnabled !== false ? "checked" : ""}>Pošiljaj dnevno poročilo</label>
-              <label>Prejemnik poročila<input data-worker-report-recipient type="email" maxlength="240" value="${escapeHtml(dailyReport.recipientEmail || "")}" placeholder="bojan@indus.si"></label>
-              <label class="worker-report-check worker-report-zero"><input type="checkbox" data-worker-report-zero-hours ${dailyReport.includeZeroHours ? "checked" : ""}>Pošiljaj tudi prazno poročilo za dan z 0 urami</label>
-            </div>
-            <p class="todo-meta">Opozorilo o nepopolno vpisanih urah se pošlje tudi, kadar je skupno število ur 0.</p>
-          </fieldset>
+          <div class="worker-management-details">
+            <fieldset class="worker-permissions" ${disabled}><legend>Lahko vpisuje ure za</legend><div class="worker-permissions-list">${targets || '<span class="todo-meta">Ni aktivnih delavcev.</span>'}</div></fieldset>
+            <fieldset class="worker-report-delivery" ${disabled}>
+              <legend>Dnevna poročila po e-pošti</legend>
+              <div class="worker-report-delivery-grid">
+                <label class="worker-report-check"><input type="checkbox" data-worker-report-email-enabled ${dailyReport.emailEnabled !== false ? "checked" : ""}>Pošiljaj dnevno poročilo</label>
+                <label>Prejemnik poročila<input data-worker-report-recipient type="email" maxlength="240" value="${escapeHtml(dailyReport.recipientEmail || "")}" placeholder="bojan@indus.si"></label>
+                <label class="worker-report-check worker-report-zero"><input type="checkbox" data-worker-report-zero-hours ${dailyReport.includeZeroHours ? "checked" : ""}>Pošiljaj tudi prazno poročilo za dan z 0 urami</label>
+              </div>
+              <p class="todo-meta">Opozorilo o nepopolno vpisanih urah se pošlje tudi, kadar je skupno število ur 0.</p>
+            </fieldset>
+          </div>
           <p class="todo-meta">${worker.email ? "Google prijava je omogočena za navedeni naslov." : "Brez Google e-pošte je delavec pripravljen v evidenci, dostop pa se vključi pozneje z vpisom e-pošte."}</p>
           <div class="worker-management-actions">
             <button class="secondary" type="button" data-save-worker ${worker.active ? "" : "disabled"}>Shrani</button>

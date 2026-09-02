@@ -417,6 +417,77 @@ class PostgresStore {
     };
   }
 
+  // The first ordinary screen needs the working task board, not payroll,
+  // historic settlements, legacy entries or every attachment row.  Returning
+  // this small, internally compatible state lets the HTTP layer use its
+  // usual visibility projection while the full snapshot follows in the
+  // background.  Keep all live (not archived) assignments: an old open task
+  // must never disappear merely because the fast screen was used.
+  async initialBootstrapSeed(user) {
+    const userId = String(user?.id || "");
+    const boss = String(user?.role || "") === "boss";
+    const [meta, users, clients, assignmentRows] = await Promise.all([
+      this.pool.query("select data from indus_meta where key = $1", ["application"]),
+      this.pool.query("select id, data from indus_users"),
+      this.pool.query("select client_id, data from indus_clients order by lower(alias), lower(name)"),
+      this.pool.query(
+        `select a.id as assignment_id,
+                a.task_id,
+                a.worker_id,
+                a.data as assignment_data,
+                t.data as task_data
+           from indus_task_assignments a
+           join indus_tasks t on t.id = a.task_id
+          where t.archived_at is null
+            and ($1::boolean or a.worker_id = $2 or coalesce(t.data ->> 'createdBy', '') = $2)
+          order by t.scheduled_date desc nulls last, t.updated_at desc, a.id`,
+        [boss, userId]
+      )
+    ]);
+
+    const todos = assignmentRows.rows.map((row) => joinTodo(row.task_data || {}, {
+      ...(row.assignment_data || {}),
+      id: row.assignment_id,
+      taskId: row.task_id,
+      syncUser: row.assignment_data?.syncUser || row.worker_id || ""
+    }));
+    const attachmentIds = [...new Set(todos.flatMap((todo) => (todo.photos || [])
+      .map((photo) => String(photo?.attachmentId || "").trim())
+      .filter((attachmentId) => /^[a-f0-9]{64}$/i.test(attachmentId))))];
+    const attachmentRows = attachmentIds.length
+      ? await this.pool.query(
+        "select id, mime_type, byte_size, storage_key, thumbnail_key, data from indus_attachments where id = any($1::text[])",
+        [attachmentIds]
+      )
+      : { rows: [] };
+    const attachments = {};
+    for (const row of attachmentRows.rows) {
+      attachments[row.id] = {
+        ...(row.data || {}),
+        id: row.id,
+        mimeType: row.mime_type,
+        byteSize: Number(row.byte_size || 0),
+        storageKey: row.storage_key,
+        thumbnailKey: row.thumbnail_key
+      };
+    }
+    return {
+      ...(meta.rows[0]?.data || {}),
+      users: objectFromRows(users.rows, "id"),
+      sessions: {},
+      clients: clients.rows.map((row) => row.data),
+      todos,
+      attachments,
+      // These collections affect reports and settlement badges, not the
+      // initial task list.  The normal bootstrap replaces them immediately.
+      entries: [],
+      debts: [],
+      payrolls: [],
+      clientBills: [],
+      billingLocks: []
+    };
+  }
+
   // A link from e-mail opens one assignment, not the whole task list.  Keep
   // this query deliberately narrow so it stays quick even when the calendar
   // history and attachment table have grown large.

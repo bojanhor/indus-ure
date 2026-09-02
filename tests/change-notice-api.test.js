@@ -55,7 +55,7 @@ async function stop(child) {
   if (child.exitCode === null) child.kill("SIGKILL");
 }
 
-test("sprememba opravila ostane ob odprtju, izgine pa šele po uspešnem shranjevanju prejemnika", { timeout: 15_000 }, async () => {
+test("sprememba opravila ostane zasebna do potrditve prejemnika, sprememba z obvestilom pa navede dejanska polja", { timeout: 15_000 }, async () => {
   const port = 20500 + Math.floor(Math.random() * 700);
   const dataDir = path.join(os.tmpdir(), `indus-ure-change-notice-${process.pid}-${Date.now()}`);
   const password = "test-only-local-password-123";
@@ -163,8 +163,8 @@ test("sprememba opravila ostane ob odprtju, izgine pa šele po uspešnem shranje
     assert.equal(JSON.parse(ibroAfterSave.body).todos.find((todo) => todo.id === id).changeNotice, null, "Samo uspešno shranjevanje prejemnika porabi njegovo oznako.");
     const bossList = await request(port, "/api/todos", { headers: bojan });
     const changedForBoss = JSON.parse(bossList.body).todos.find((todo) => todo.id === id);
-    assert.equal(changedForBoss.changeNotice?.kind, "manual");
-    assert.deepEqual(changedForBoss.changeNotice?.fields, ["manual"]);
+    assert.equal(changedForBoss.changeNotice?.kind, "updated");
+    assert.deepEqual(changedForBoss.changeNotice?.fields, ["title"]);
     assert.equal(changedForBoss.changeNotice?.by, "ibro");
   } finally {
     await stop(child);

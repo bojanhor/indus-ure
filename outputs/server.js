@@ -8452,17 +8452,16 @@ async function handleApi(req, res) {
       return;
     }
 
-    // The initial application snapshot deliberately reads PostgreSQL only
-    // once.  Previously the browser requested each collection separately;
-    // each request reconstructed the complete relational state, so a normal
-    // launch could trigger more than a hundred SQL queries before anything
-    // useful was shown.  Keep this endpoint read-only and use the same
-    // per-role projections as the individual collection endpoints.
+    // The initial application snapshot deliberately avoids financial history
+    // and unrelated attachment rows. A normal background bootstrap restores
+    // the complete state immediately after the task board is usable.
     if (url.pathname === "/api/bootstrap" && req.method === "GET") {
       const user = await requireUserForLightweightSession(req, res);
       if (!user) return;
       const initialOnly = url.searchParams.get("initial") === "1";
-      const db = await readDbAsync();
+      const db = DATABASE_URL && initialOnly
+        ? await getPgStore().initialBootstrapSeed(user)
+        : await readDbAsync();
       req.indusDb = db;
       const activeUsers = Object.values(db.users || {}).filter((worker) => worker.active !== false);
       const workers = activeUsers
@@ -11185,8 +11184,19 @@ releaseTodoAssignmentEditLock(db, previousTodo, user, editLockToken);
         || updatedGroup.find((item) => item.syncUser === previousTodo.syncUser)
         || updatedGroup[0]
         || null;
+      // A normal save stays quiet. When the author explicitly selects the
+      // checkbox, send the real fields that changed; an unchanged save is a
+      // deliberate "please review" signal and remains a manual marker.
+      const notificationFields = todoChangeNoticeFields(previousTodo, updatedOpenedTodo || todo, { assignmentsChanged });
       const notifiedRecipients = notifyOthers
-        ? recordTodoChangeNotices(db, updatedGroup, user, ["manual"], "manual", now)
+        ? recordTodoChangeNotices(
+          db,
+          updatedGroup,
+          user,
+          notificationFields.length ? notificationFields : ["manual"],
+          notificationFields.length ? "updated" : "manual",
+          now
+        )
         : [];
       if (notifiedRecipients.length) {
         for (const assignmentTodo of updatedGroup) {
@@ -11194,10 +11204,9 @@ releaseTodoAssignmentEditLock(db, previousTodo, user, editLockToken);
         }
       }
       // A personal change marker is an inbox item, not a warning about the
-      // data itself.  Keep it while the recipient only opens the form, then
-      // consume it after that same person has successfully saved the event.
-      // A boss merely viewing another worker's context must not clear the
-      // worker's private marker.
+      // data itself. Saving by the same recipient also consumes it. A boss
+      // merely viewing another worker's context must not clear that worker's
+      // private marker.
       if (updatedOpenedTodo) clearTodoChangeNoticesForUser(db, updatedOpenedTodo, user);
       const clientBillableHoursWarningForUpdate = clientBillableHoursWarning(assignmentItems, updatedGroup);
       const settlementChange = upsertSettlementCorrections(db, assignmentItems, updatedGroup, user, now);

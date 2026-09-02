@@ -87,6 +87,57 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
     }
   });
 
+  test("meni delavcev ostane pregleden na telefonu in namizju", async ({ browser }) => {
+    for (const viewport of [
+      { name: "phone", width: 390, height: 844 },
+      { name: "desktop", width: 1280, height: 900 }
+    ]) {
+      const context = await browser.newContext({ viewport });
+      const page = await context.newPage();
+      try {
+        await localLogin(page, "bojan");
+        await page.locator("#toolsMenu > summary").click();
+        await page.locator("#workersMenuBtn").click();
+        await expect(page.locator("#workersDialog")).toBeVisible();
+        await expect(page.locator(".worker-management-card")).toHaveCount(2);
+        const layout = await page.locator("#workersDialog").evaluate((dialog) => {
+          const box = dialog.getBoundingClientRect();
+          const body = dialog.querySelector(".modal-body");
+          const create = dialog.querySelector(".worker-create-panel");
+          const card = dialog.querySelector(".worker-management-card");
+          const details = card.querySelector(".worker-management-details");
+          const inputs = [...dialog.querySelectorAll("input, select")].map((input) => {
+            const rect = input.getBoundingClientRect();
+            return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom };
+          });
+          const createBox = create.getBoundingClientRect();
+          const detailsBox = details.getBoundingClientRect();
+          return {
+            left: box.left, right: box.right, top: box.top, bottom: box.bottom,
+            viewportWidth: window.innerWidth, viewportHeight: window.innerHeight,
+            horizontalOverflow: Math.max(0, body.scrollWidth - body.clientWidth),
+            createWidth: createBox.width,
+            detailsWidth: detailsBox.width,
+            inputs
+          };
+        });
+        expect(layout.left).toBeGreaterThanOrEqual(0);
+        expect(layout.right).toBeLessThanOrEqual(viewport.width + 1);
+        expect(layout.top).toBeGreaterThanOrEqual(0);
+        expect(layout.bottom).toBeLessThanOrEqual(viewport.height + 1);
+        expect(layout.horizontalOverflow).toBeLessThanOrEqual(1);
+        expect(layout.createWidth).toBeGreaterThan(250);
+        expect(layout.detailsWidth).toBeGreaterThan(250);
+        for (const input of layout.inputs) {
+          expect(input.left).toBeGreaterThanOrEqual(layout.left - 1);
+          expect(input.right).toBeLessThanOrEqual(layout.right + 1);
+        }
+      } finally {
+        await context.close();
+      }
+    }
+  });
+
   test("new task draft restores itself after browser reload and X discards it", async ({ browser }) => {
     const context = await browser.newContext();
     const page = await context.newPage();
@@ -241,15 +292,13 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
       await localLogin(bossPage, "bojan");
       const card = bossPage.locator(`[data-todo-id="${todoId}"]`).first();
       await expect(card).toHaveClass(/has-change-notice/);
+      const acknowledged = bossPage.waitForResponse((response) => response.request().method() === "POST"
+        && new URL(response.url()).pathname === `/api/todos/${todoId}/change-notice/seen`);
       await card.locator(".edit-todo").click();
-      await expect(bossPage.locator("#todoFormChangeNotice")).toBeVisible();
-      await expect(bossPage.locator("#todoFormChangeNotice")).toContainText("Ibro je označil dogodek za pregled");
-      await bossPage.waitForTimeout(300);
-      await expect(bossPage.locator("#todoFormChangeNotice")).toBeVisible();
-      const acknowledged = bossPage.waitForResponse((response) => response.request().method() === "PUT"
-        && new URL(response.url()).pathname === `/api/todos/${todoId}`);
-      await bossPage.locator("#saveTodoDialog").click();
       expect((await acknowledged).ok()).toBeTruthy();
+      await expect(bossPage.locator("#todoDialog")).toBeVisible();
+      await expect(bossPage.locator("#todoFormChangeNotice")).toBeHidden();
+      await bossPage.locator("#closeTodoDialog").click();
       await expect(bossPage.locator("#todoDialog")).toBeHidden();
       await expect(card).not.toHaveClass(/has-change-notice/);
     } finally {

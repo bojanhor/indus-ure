@@ -130,7 +130,8 @@ test("oznaka spremembe je zasebna po prejemniku, vidna v vseh pogledih in nastan
   assert.match(server, /requestedRecipientId/);
   assert.match(server, /requestedRecipientId !== user\.id && user\.role !== "boss"/);
   assert.match(server, /const notifyOthers = body\.notifyOthers === true;/);
-  assert.match(server, /notifyOthers\s*\? recordTodoChangeNotices\(db, updatedGroup, user, \["manual"\], "manual", now\)/);
+  assert.match(server, /const notificationFields = todoChangeNoticeFields\(previousTodo, updatedOpenedTodo \|\| todo, \{ assignmentsChanged \}\);/);
+  assert.match(server, /notifyOthers\s*\? recordTodoChangeNotices\([\s\S]*?notificationFields\.length \? notificationFields : \["manual"\][\s\S]*?notificationFields\.length \? "updated" : "manual"/);
   assert.match(html, /Opozori druge o spremembi/);
   assert.match(html, /id="todoFormNotifyOthers" type="checkbox"/);
   assert.match(html, /notifyOthers: Boolean\(existing && \$\("todoFormNotifyOthers"\)\.checked\)/);
@@ -143,7 +144,7 @@ test("oznaka spremembe je zasebna po prejemniku, vidna v vseh pogledih in nastan
   assert.match(html, /recipientQuery/);
   assert.match(html, /todo-change-ack/);
   assert.match(html, /todoChangeNoticeLabel\(todo\).*?· PREBRANO/);
-  assert.doesNotMatch(html, /\$\("todoDialog"\)\.showModal\(\);[\s\S]{0,180}clearTodoChangeNoticeAfterOpen\(todo\)/);
+  assert.match(html, /if \(editing && todoChangeNoticeCanBeAcknowledged\(todo\)\) \{\s*void clearTodoChangeNoticeAfterOpen\(todo\)/);
   assert.match(html, /todo-item[\s\S]*?has-change-notice/);
   assert.match(html, /day-todo[\s\S]*?has-change-notice/);
   assert.match(html, /day-timeline-event[\s\S]*?has-change-notice/);
@@ -790,6 +791,7 @@ test("zagonska identiteta in imenik v PostgreSQL ostaneta ozka", async () => {
   assert.match(bootstrap, /await requireUserForLightweightSession\(req, res\)/);
   assert.equal((bootstrap.match(/readDbAsync\(/g) || []).length, 1);
   assert.match(bootstrap, /const initialOnly = url\.searchParams\.get\("initial"\) === "1";/);
+  assert.match(bootstrap, /DATABASE_URL && initialOnly\s*\? await getPgStore\(\)\.initialBootstrapSeed\(user\)\s*:\s*await readDbAsync\(\)/);
   assert.match(bootstrap, /snapshot\.entries = visibleEntriesForUser\(db, user\)/);
   assert.match(bootstrap, /todos: visibleTodosForUser\(db, user\)/);
   assert.match(bootstrap, /snapshot\.payrolls = payrollForUser\(db, user\)/);
@@ -801,6 +803,9 @@ test("zagonska identiteta in imenik v PostgreSQL ostaneta ozka", async () => {
   assert.doesNotMatch(store, /async publicUserDirectory\(\) \{[\s\S]{0,900}this\.load\(\)/);
   assert.match(store, /async quickCreateSeed\(user\) \{/);
   assert.doesNotMatch(store, /async quickCreateSeed\(user\) \{[\s\S]{0,2400}this\.load\(\)/);
+  assert.match(store, /async initialBootstrapSeed\(user\) \{/);
+  assert.match(store, /initialBootstrapSeed\(user\)[\s\S]{0,7000}t\.archived_at is null/);
+  assert.doesNotMatch(store, /async initialBootstrapSeed\(user\) \{[\s\S]{0,7000}this\.load\(\)/);
 });
 
 test("initial application shell waits for one snapshot and renders only the active view", async () => {
