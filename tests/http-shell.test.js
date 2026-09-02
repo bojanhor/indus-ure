@@ -274,6 +274,7 @@ test("client report can switch between billable and worker hours", async () => {
   assert.match(html, /function reportOverviewSnapshot\(\)/);
   assert.match(html, /function restoreReportOverviewSnapshot\(snapshot = \{\}\)/);
   assert.match(html, /history\.pushState\(reportOverviewHistoryState\(snapshot\), "", location\.href\)/);
+  assert.match(html, /currentReportState\?\.kind === "overview"[\s\S]*?history\.replaceState\(reportOverviewHistoryState\(snapshot\), "", location\.href\)/);
   assert.match(html, /history\.back\(\);/);
   assert.match(html, /value="client_billable"/);
   assert.match(html, /value="worker_total"/);

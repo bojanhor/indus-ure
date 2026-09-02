@@ -16403,8 +16403,15 @@
         state.reportOverviewFocusKey = clientDescriptor.key;
         state.reportReturnSnapshot = snapshot;
         const currentReportState = history.state?.[reportHistoryStateKey];
-        if (state.token && state.user && currentReportState?.kind !== "overview") {
-          history.pushState(reportOverviewHistoryState(snapshot), "", location.href);
+        if (state.token && state.user) {
+          if (currentReportState?.kind === "overview") {
+            // A previous detail view may have left its return target in this
+            // history entry. Replace it before opening the next client so
+            // Back always focuses the client that was most recently opened.
+            history.replaceState(reportOverviewHistoryState(snapshot), "", location.href);
+          } else {
+            history.pushState(reportOverviewHistoryState(snapshot), "", location.href);
+          }
         }
       }
       state.reportClient = client;
