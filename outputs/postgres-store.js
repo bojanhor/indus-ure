@@ -542,6 +542,24 @@ class PostgresStore {
     return { todo, assigneeIds, assignmentIds, attachments };
   }
 
+  // Used by the focused e-mail-link route.  It keeps an already billed event
+  // visibly read-only without loading every historic bill before one dialog
+  // can open.
+  async confirmedClientBillForEvent(eventId) {
+    const id = String(eventId || "").trim();
+    if (!id) return null;
+    const result = await this.pool.query(
+      `select data
+         from indus_client_bills
+        where status = 'confirmed'
+          and coalesce(data -> 'eventIds', '[]'::jsonb) @> jsonb_build_array($1::text)
+        order by coalesce(data ->> 'confirmedAt', '') desc
+        limit 1`,
+      [id]
+    );
+    return result.rows[0]?.data || null;
+  }
+
   // Acquiring an edit lock needs only the task and all of its assignment IDs.
   // In particular, never hydrate image/video attachment metadata here: doing
   // so makes every calendar click wait for unrelated, potentially very large

@@ -357,8 +357,12 @@ test("client billing supports bulk selection and safe client reassignment", asyn
   assert.match(html, /data-client-bill-event-id/);
   assert.match(html, /function setClientBillSelectionForCurrentReport\(selectAll\)/);
   assert.match(html, /function saveBulkClientFromDialog\(\)/);
+  assert.match(html, /id="todoFormClientBillingLock"/);
+  assert.match(html, /function setTodoFormClientBillingLock\(todo = \{\}\)/);
   assert.match(server, /url\.pathname === "\/api\/todos\/bulk-client"/);
   assert.match(server, /confirmedClientBillByEvent\(db\)/);
+  assert.match(server, /function clientBillEditLockMessage\(bill\)/);
+  assert.match(server, /Za dodatno delo ali popravek ustvari nov dogodek/);
   assert.match(server, /todoAssignmentEditLockConflict\(db, todos\[0\], user\)/);
   assert.match(server, /clientContactIds: \[\],[\s\S]*?clientContacts: \[\]/);
   assert.match(server, /pruneUnusedAdHocClients\(db\)/);

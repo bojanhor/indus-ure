@@ -4553,6 +4553,11 @@ function clientBillLockForTodos(db, todos = []) {
   return todos.map((todo) => bills.get(todoBillingEventId(todo))).find(Boolean) || null;
 }
 
+function clientBillEditLockMessage(bill) {
+  const clientName = String(bill?.clientName || bill?.client || "stranko").trim() || "stranko";
+  return `Dogodek je že v potrjenem obračunu stranki ${clientName} in je zaklenjen. Za dodatno delo ali popravek ustvari nov dogodek.`;
+}
+
 function clientBillCandidates(db, input = {}) {
   const client = clientForBilling(db, input);
   if (!client) return { client: null, groups: [] };
@@ -4568,8 +4573,10 @@ function clientBillCandidates(db, input = {}) {
     if (String(todo.clientId || "") !== String(client.clientId || "") && String(todo.client || "").trim().toLowerCase() !== String(client.name || "").trim().toLowerCase()) continue;
     if ((from && String(todo.date || "") < from) || (to && String(todo.date || "") > to)) continue;
     const eventId = todoBillingEventId(todo);
-    const hasPendingCorrection = (db.settlementCorrections || []).some((correction) => correction.type === "client" && correction.status === "pending" && String(correction.eventId || "") === eventId);
-    if (!eventId || (billed.has(eventId) && !hasPendingCorrection)) continue;
+    // A confirmed customer bill is immutable.  Older data can still contain
+    // pending correction markers from the former workflow, but those markers
+    // must never make the original event billable a second time.
+    if (!eventId || billed.has(eventId)) continue;
     if (requestedEventIds && !requestedEventIds.has(eventId)) continue;
     if (!groups.has(eventId)) groups.set(eventId, []);
     groups.get(eventId).push(todo);
@@ -5595,8 +5602,7 @@ function directClientSettlementForTodo(db, todo, input, actor) {
   return { clientBill, clientReceipt, settledCorrections, archive };
 }
 
-function clientSettlementForTodo(db, todo) {
-  const bill = confirmedClientBillByEvent(db).get(todoBillingEventId(todo));
+function clientSettlementFromBill(bill) {
   if (!bill) return { confirmed: false };
   return {
     confirmed: true,
@@ -5607,6 +5613,10 @@ function clientSettlementForTodo(db, todo) {
     confirmedAt: String(bill.confirmedAt || ""),
     clientBillId: String(bill.id || "")
   };
+}
+
+function clientSettlementForTodo(db, todo) {
+  return clientSettlementFromBill(confirmedClientBillByEvent(db).get(todoBillingEventId(todo)));
 }
 
 function confirmedPayrollByTodo(db) {
@@ -10746,7 +10756,7 @@ async function handleApi(req, res) {
         }
         const clientBillLock = clientBillLockForTodos(db, assignmentItems);
         if (clientBillLock) {
-          sendJson(res, 403, { error: `Opravilo je že v potrjenem obračunu stranki ${clientBillLock.clientName} in ga ni več mogoče spreminjati.` });
+          sendJson(res, 403, { error: clientBillEditLockMessage(clientBillLock) });
           return;
         }
         const assignmentIds = assignmentItems.map((item) => String(item.id || "")).filter(Boolean);
@@ -10843,6 +10853,11 @@ async function handleApi(req, res) {
         return;
       }
       const assignmentItems = todoAssignmentItems(db, previousTodo);
+      const clientBillLock = clientBillLockForTodos(db, assignmentItems);
+      if (clientBillLock) {
+        sendJson(res, 403, { error: clientBillEditLockMessage(clientBillLock) });
+        return;
+      }
       const now = new Date().toISOString();
       const assignmentIds = new Set(assignmentItems.map((item) => item.id));
       db.todos = db.todos.map((item) => {
@@ -10965,6 +10980,7 @@ async function handleApi(req, res) {
           sendJson(res, 404, { error: "Opravilo ne obstaja ali ni na voljo." });
           return;
         }
+        const clientBill = await getPgStore().confirmedClientBillForEvent(todoBillingEventId(source));
         const hydrated = hydrateTodoAttachments({ attachments: focused.attachments }, {
           ...source,
           assigneeIds: focused.assigneeIds
@@ -10973,6 +10989,7 @@ async function handleApi(req, res) {
         const todo = {
           ...publicTodo,
           changeNotice: todoChangeNoticeForUser(source, user),
+          clientSettlement: clientSettlementFromBill(clientBill),
           ...(user.role === "boss" ? { history, revisionHistory } : {})
         };
         sendJson(res, 200, { todo });
@@ -11019,6 +11036,11 @@ async function handleApi(req, res) {
       }
       if (!canManageTodo(user, previousTodo)) {
         sendJson(res, 403, { error: "Tega opravila ne moreš spreminjati." });
+        return;
+      }
+      const clientBillLock = clientBillLockForTodos(db, todoAssignmentItems(db, previousTodo));
+      if (clientBillLock) {
+        sendJson(res, 403, { error: clientBillEditLockMessage(clientBillLock) });
         return;
       }
       const sourceProject = preserveTimeEntrySourceProject(db, user, todo, previousTodo);
@@ -11270,6 +11292,11 @@ releaseTodoAssignmentEditLock(db, previousTodo, user, editLockToken);
         return;
       }
       const assignmentItems = todoAssignmentItems(db, todo);
+      const clientBillLock = clientBillLockForTodos(db, assignmentItems);
+      if (clientBillLock) {
+        sendJson(res, 403, { error: clientBillEditLockMessage(clientBillLock) });
+        return;
+      }
       releaseTodoAssignmentEditLock(db, todo, user, editLockToken);
       const lateTimeEntryReport = queueLateTimeEntryReport(db, {
         before: todo,

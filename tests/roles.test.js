@@ -878,6 +878,29 @@ test("zaključeno projektno opravilo se arhivira šele po obračunu delavca in s
   assert.equal(buildClientBillSnapshot(db, { clientId: "jerin" }, boss), null);
 });
 
+test("pending client correction never makes an already billed event billable again", () => {
+  const db = {
+    users: { bojan: { id: "bojan", name: "Bojan", role: "boss" } },
+    clients: [{ clientId: "jerin", name: "Jerin", search: "jerin" }],
+    payrolls: [],
+    clientBills: [],
+    settlementCorrections: [{
+      id: "km-correction", type: "client", status: "pending", eventId: "project-1",
+      delta: { hours: 0, clientKm: 5, materialAmount: 0 }
+    }],
+    todos: [{
+      id: "work-1", assignmentGroupId: "project-1", syncUser: "bojan", status: "execution",
+      date: "2026-07-15", start: "08:00", end: "10:00", title: "Montaža", clientId: "jerin", client: "Jerin"
+    }]
+  };
+  const original = buildClientBillSnapshot(db, { clientId: "jerin", eventIds: ["project-1"] }, boss);
+  assert.ok(original);
+  db.clientBills.push(original);
+
+  assert.equal(clientBillLockForTodos(db, db.todos)?.id, original.id);
+  assert.equal(buildClientBillSnapshot(db, { clientId: "jerin", eventIds: ["project-1"] }, boss), null);
+});
+
 test("obračun stranki vsebuje samo označene dogodke", () => {
   const db = {
     users: { bojan: { id: "bojan", name: "Bojan", role: "boss" } },
