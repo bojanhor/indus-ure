@@ -166,6 +166,45 @@ test("sprememba opravila ostane zasebna do potrditve prejemnika, sprememba z obv
     assert.equal(changedForBoss.changeNotice?.kind, "updated");
     assert.deepEqual(changedForBoss.changeNotice?.fields, ["title"]);
     assert.equal(changedForBoss.changeNotice?.by, "ibro");
+
+    const createHours = await request(port, "/api/todos", {
+      method: "POST",
+      headers: bojan,
+      body: JSON.stringify({
+        title: "Vpis ur brez oznake",
+        client: "Testna stranka",
+        status: "execution",
+        date: "2026-09-02",
+        start: "08:00",
+        end: "09:00",
+        syncUser: "ibro",
+        assigneeIds: ["ibro"],
+        clientMutationId: "911d7801-cb3c-41b1-8ef0-e12d9801c901"
+      })
+    });
+    assert.equal(createHours.status, 200, createHours.body);
+    const hoursId = JSON.parse(createHours.body).todos.find((todo) => todo.title === "Vpis ur brez oznake")?.id;
+    assert.ok(hoursId);
+    const ibroAfterHoursCreate = await request(port, "/api/todos", { headers: ibro });
+    const hoursForIbro = JSON.parse(ibroAfterHoursCreate.body).todos.find((todo) => todo.id === hoursId);
+    assert.equal(hoursForIbro.changeNotice, null, "Nov vpis ur ne ustvari oznake opravila.");
+
+    const attemptToMarkHours = await request(port, `/api/todos/${encodeURIComponent(hoursId)}/change-notice`, {
+      method: "POST", headers: bojan, body: "{}"
+    });
+    assert.equal(attemptToMarkHours.status, 409, attemptToMarkHours.body);
+    assert.match(JSON.parse(attemptToMarkHours.body).error, /Vpisov ur ni mogoče označevati/);
+
+    const updateHours = await request(port, `/api/todos/${encodeURIComponent(hoursId)}`, {
+      method: "PUT",
+      headers: ibro,
+      body: JSON.stringify({ ...hoursForIbro, notes: "Dopolnjen opis ur", notifyOthers: true, baseUpdatedAt: hoursForIbro.updatedAt })
+    });
+    assert.equal(updateHours.status, 200, updateHours.body);
+    const bossAfterHoursUpdate = await request(port, "/api/todos", { headers: bojan });
+    const updatedHoursForBoss = JSON.parse(bossAfterHoursUpdate.body).todos.find((todo) => todo.id === hoursId);
+    assert.equal(updatedHoursForBoss.changeNotice, null, "Tudi urejen vpis ur ne dobi oznake spremembe.");
+    assert.equal(updatedHoursForBoss.changeNoticesByUser, undefined, "Vpis ur nima niti skritih oznak za druge uporabnike.");
   } finally {
     await stop(child);
     await fs.rm(dataDir, { recursive: true, force: true });

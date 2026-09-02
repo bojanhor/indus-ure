@@ -131,10 +131,13 @@ test("oznaka spremembe je zasebna po prejemniku, vidna v vseh pogledih in nastan
   assert.match(server, /requestedRecipientId !== user\.id && user\.role !== "boss"/);
   assert.match(server, /const notifyOthers = body\.notifyOthers === true;/);
   assert.match(server, /const notificationFields = todoChangeNoticeFields\(previousTodo, updatedOpenedTodo \|\| todo, \{ assignmentsChanged \}\);/);
-  assert.match(server, /notifyOthers\s*\? recordTodoChangeNotices\([\s\S]*?notificationFields\.length \? notificationFields : \["manual"\][\s\S]*?notificationFields\.length \? "updated" : "manual"/);
+  assert.match(server, /notifyOthers[\s\S]{0,250}\? recordTodoChangeNotices\([\s\S]*?notificationFields\.length \? notificationFields : \["manual"\][\s\S]*?notificationFields\.length \? "updated" : "manual"/);
   assert.match(html, /Opozori druge o spremembi/);
   assert.match(html, /id="todoFormNotifyOthers" type="checkbox"/);
-  assert.match(html, /notifyOthers: Boolean\(existing && \$\("todoFormNotifyOthers"\)\.checked\)/);
+  assert.match(html, /notifyOthers: Boolean\(existing && !isHoursEntry && \$\("todoFormNotifyOthers"\)\.checked\)/);
+  assert.match(server, /TIME_ENTRY_TODO_STATUSES\.has\(String\(todo\.status \|\| ""\)\)/);
+  assert.match(server, /Vpisov ur ni mogoče označevati za pregled/);
+  assert.match(html, /timeEntryStatusIds\.has\(todoStatus\(todo\?\.status\)\.id\)\) return null/);
   assert.doesNotMatch(html, /showNotice\("Opozorilo o spremembi je poslano drugim udeležencem\."\)/);
   assert.match(html, /notice\.kind === "manual"[\s\S]*?je označil dogodek za pregled/);
   assert.match(html, /function todoChangeNoticeLabel\(todo\)/);

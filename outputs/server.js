@@ -2296,7 +2296,11 @@ function normalizeDb(db = {}) {
       next.completionRequests = completionRequests;
       changed = true;
     }
-    const changeNotices = cleanTodoChangeNotices(next.changeNotices, db.users);
+    // Older versions could assign a task-change marker to a time entry. Drop
+    // those stale markers during normalisation, so they disappear permanently.
+    const changeNotices = TIME_ENTRY_TODO_STATUSES.has(next.status)
+      ? {}
+      : cleanTodoChangeNotices(next.changeNotices, db.users);
     if (JSON.stringify(next.changeNotices || {}) !== JSON.stringify(changeNotices)) {
       next.changeNotices = changeNotices;
       changed = true;
@@ -2995,7 +2999,10 @@ function cleanTodoChangeNotices(input, users = {}) {
 }
 
 function todoChangeNoticeForUser(todo, user) {
-  if (!todo || !user) return null;
+  // A time entry is an accounting record, not a task to be marked for other
+  // participants. Its late-entry report and audit history stay available,
+  // but it must never receive the green task-change marker.
+  if (!todo || !user || TIME_ENTRY_TODO_STATUSES.has(String(todo.status || ""))) return null;
   return cleanTodoChangeNotice(todo.changeNotices?.[user.id], { [user.id]: user, [todo.changeNotices?.[user.id]?.by]: { name: todo.changeNotices?.[user.id]?.byName || "" } });
 }
 
@@ -3032,11 +3039,15 @@ function todoChangeNoticeRecipientIds(db, todos, actor) {
 }
 
 function recordTodoChangeNotices(db, todos, actor, fields, kind = "updated", at = new Date().toISOString()) {
+  const taskTodos = (todos || []).filter((todo) => !TIME_ENTRY_TODO_STATUSES.has(String(todo?.status || "")));
+  // Time entries have their own audit and late-entry paths; never add a task
+  // marker that could remain permanently visible for a worker.
+  if (!taskTodos.length) return [];
   const normalizedFields = [...new Set((Array.isArray(fields) ? fields : [])
     .map((field) => String(field || "").trim())
     .filter((field) => TODO_CHANGE_NOTICE_FIELDS.has(field)))];
   if (!normalizedFields.length) return [];
-  const recipients = todoChangeNoticeRecipientIds(db, todos, actor);
+  const recipients = todoChangeNoticeRecipientIds(db, taskTodos, actor);
   if (!recipients.length) return [];
   const notice = {
     at: new Date(at).toISOString(),
@@ -3045,7 +3056,7 @@ function recordTodoChangeNotices(db, todos, actor, fields, kind = "updated", at 
     kind: ["created", "manual"].includes(kind) ? kind : "updated",
     fields: normalizedFields
   };
-  for (const todo of todos || []) {
+  for (const todo of taskTodos) {
     todo.changeNotices = cleanTodoChangeNotices(todo.changeNotices, db.users);
     for (const recipientId of recipients) todo.changeNotices[recipientId] = { ...notice, fields: [...notice.fields] };
   }
@@ -3355,7 +3366,9 @@ function visibleTodosForUser(db, user) {
       // worker's private marker for that *view* as well, otherwise a task
       // marked for Ibro looked unmarked while Bojan was looking at Ibro's
       // manual list.  The client never receives this map for a worker.
-      ...(user.role === "boss" ? { changeNoticesByUser: cleanTodoChangeNotices(todo.changeNotices, db.users) } : {}),
+      ...(user.role === "boss" && !TIME_ENTRY_TODO_STATUSES.has(String(todo.status || ""))
+        ? { changeNoticesByUser: cleanTodoChangeNotices(todo.changeNotices, db.users) }
+        : {}),
       ...(user.role === "boss" ? { history, revisionHistory } : {}),
       clientSettlement: clientSettlementForTodo(db, todo),
       settlement: corrections.length ? {
@@ -3383,7 +3396,9 @@ function visibleTodoForUser(db, user, id) {
   return {
     ...publicTodo,
     changeNotice: todoChangeNoticeForUser(todo, user),
-    ...(user.role === "boss" ? { changeNoticesByUser: cleanTodoChangeNotices(todo.changeNotices, db.users) } : {}),
+    ...(user.role === "boss" && !TIME_ENTRY_TODO_STATUSES.has(String(todo.status || ""))
+      ? { changeNoticesByUser: cleanTodoChangeNotices(todo.changeNotices, db.users) }
+      : {}),
     ...(user.role === "boss" ? { history, revisionHistory } : {}),
     clientSettlement: clientSettlementForTodo(db, todo),
     settlement: corrections.length ? { pending: true, worker: corrections.filter((item) => item.type === "worker").map((item) => ({ id: item.id, delta: item.delta, effectiveDate: item.effectiveDate })), client: corrections.filter((item) => item.type === "client").map((item) => ({ id: item.id, delta: item.delta, effectiveDate: item.effectiveDate })) } : { pending: false, worker: [], client: [] }
@@ -10954,6 +10969,10 @@ async function handleApi(req, res) {
         }
         changed = clearTodoChangeNoticesForUser(db, todo, recipient);
       } else {
+        if (assignmentItems.some((item) => TIME_ENTRY_TODO_STATUSES.has(String(item.status || "")))) {
+          sendJson(res, 409, { error: "Vpisov ur ni mogoče označevati za pregled. Za spremembe ostaneta revizijska zgodovina in poročilo o poznem vpisu." });
+          return;
+        }
         const lock = todoAssignmentEditLockConflict(db, todo, user, String(body.editLockToken || ""));
         if (lock) {
           sendJson(res, 409, { error: `Opravilo trenutno ureja ${lock.lockedByName || lock.lockedById}.`, lock });
@@ -11211,6 +11230,8 @@ releaseTodoAssignmentEditLock(db, previousTodo, user, editLockToken);
       // deliberate "please review" signal and remains a manual marker.
       const notificationFields = todoChangeNoticeFields(previousTodo, updatedOpenedTodo || todo, { assignmentsChanged });
       const notifiedRecipients = notifyOthers
+        && !TIME_ENTRY_TODO_STATUSES.has(String(previousTodo.status || ""))
+        && !TIME_ENTRY_TODO_STATUSES.has(String((updatedOpenedTodo || todo).status || ""))
         ? recordTodoChangeNotices(
           db,
           updatedGroup,
