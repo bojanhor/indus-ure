@@ -4687,6 +4687,20 @@
     }
 
     .client-billing-title-row h3 { margin: 0; font-size: 16px; overflow-wrap: anywhere; }
+    .client-billing-edit-button {
+      flex: 0 0 auto;
+      width: 30px;
+      height: 30px;
+      padding: 0;
+      border: 1px solid #b8d2d8;
+      border-radius: 7px;
+      color: #075a70;
+      background: #edf7f8;
+      cursor: pointer;
+    }
+    .client-billing-edit-button:hover,
+    .client-billing-edit-button:focus-visible { border-color: #0d6f85; background: #dceff2; outline: 2px solid #0d6f85; outline-offset: 2px; }
+    .client-billing-edit-button svg { width: 16px; height: 16px; vertical-align: middle; }
     .client-billing-title-trigger {
       display: inline;
       margin: 0;
@@ -4743,6 +4757,67 @@
       font-size: 12px;
     }
 
+    .client-billing-inline-title {
+      box-sizing: border-box;
+      width: min(100%, 680px);
+      min-height: 34px;
+      padding: 5px 8px;
+      border: 1px solid transparent;
+      border-radius: 6px;
+      background: transparent;
+      color: inherit;
+      font: inherit;
+      font-size: 16px;
+      font-weight: 800;
+    }
+    .client-billing-inline-title:hover { border-color: #bfd7d1; background: #f7fbf9; }
+    .client-billing-inline-title:focus { border-color: #197e68; outline: 2px solid #a8d9ca; outline-offset: 1px; background: #fff; }
+    .client-billing-inline-fields {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(132px, max-content));
+      gap: 7px 10px;
+      align-items: end;
+      margin: 8px 0;
+    }
+    .client-billing-inline-fields label {
+      display: grid;
+      gap: 3px;
+      color: #365b54;
+      font-size: 11px;
+      font-weight: 850;
+    }
+    .client-billing-inline-fields input {
+      box-sizing: border-box;
+      width: 100%;
+      min-height: 32px;
+      padding: 4px 7px;
+      border: 1px solid #b9d1ca;
+      border-radius: 6px;
+      background: #f7fbfa;
+      color: var(--ink);
+      font: inherit;
+      font-weight: 750;
+    }
+    .client-billing-inline-fields input:focus { border-color: #197e68; outline: 2px solid #a8d9ca; outline-offset: 1px; background: #fff; }
+    .client-billing-inline-description {
+      box-sizing: border-box;
+      width: 100%;
+      min-height: 62px;
+      padding: 6px 8px;
+      resize: vertical;
+      border: 1px solid transparent;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--ink);
+      font: inherit;
+      line-height: 1.4;
+    }
+    .client-billing-inline-description:hover { border-color: #bfd7d1; background: #fff; }
+    .client-billing-inline-description:focus { border-color: #197e68; outline: 2px solid #a8d9ca; outline-offset: 1px; background: #fff; }
+    .client-billing-inline-title:disabled,
+    .client-billing-inline-fields input:disabled,
+    .client-billing-inline-description:disabled { cursor: wait; opacity: .68; }
+
     .client-billing-section {
       display: grid;
       gap: 4px;
@@ -4771,6 +4846,7 @@
       font-size: 13px;
       font-weight: 750;
     }
+    .client-billing-charges.client-billing-inline-fields { display: grid; }
     .client-billing-charges-trigger {
       width: 100%;
       border: 0;
@@ -9343,6 +9419,43 @@
       }
     }
 
+    async function saveClientBillingInlineField(input) {
+      const field = String(input?.dataset?.clientBillingInlineField || "");
+      const todoId = String(input?.dataset?.todoId || "");
+      const todo = state.todos.find((item) => item.id === todoId);
+      if (!todo || !["title", "notes", "clientBillableHours", "clientKm"].includes(field)) return;
+      let value = input.value;
+      if (field === "title") {
+        value = String(value || "").trim();
+        if (!value) throw new Error("Naslov dogodka ne sme biti prazen.");
+        if (value === String(todo.title || "").trim()) return;
+      } else if (field === "notes") {
+        value = String(value || "").trim();
+        if (value === String(todo.notes || "").trim()) return;
+      } else {
+        const raw = String(value || "").trim().replace(",", ".");
+        if (!raw) throw new Error(field === "clientKm" ? "Vpiši kilometre ali izrecno 0." : "Vpiši ure za obračun ali izrecno 0.");
+        value = Number(raw);
+        if (!Number.isFinite(value) || value < 0) throw new Error(field === "clientKm" ? "Strošek prevoza mora biti nič ali več kilometrov." : "Ure za obračun morajo biti nič ali več.");
+        const current = field === "clientKm"
+          ? Number(todo.clientKm || 0)
+          : Number(reportTodoLine(todo).clientBillableHours || 0);
+        if (Math.abs(current - value) < 0.0001) return;
+      }
+      input.disabled = true;
+      try {
+        const data = await api(`/api/todos/${encodeURIComponent(todo.id)}/client-billing-fields`, {
+          method: "POST",
+          body: JSON.stringify({ [field]: value, baseUpdatedAt: todo.updatedAt || "" })
+        });
+        state.todos = data.todos;
+        refreshClientList();
+        renderReport();
+      } finally {
+        input.disabled = false;
+      }
+    }
+
     async function saveTodoTimeToServer(todo, start, end, date = todo.date) {
       const editLockToken = state.todoEditLock?.todoId === todo.id ? state.todoEditLock.token : "";
       if (!editLockToken) throw new Error("Opravila pred premikom ni bilo mogoče zakleniti.");
@@ -13075,11 +13188,10 @@
     function attachmentThumbnailSource(photo) {
       const thumbnail = String(photo?.thumbnailData || photo?.thumbnailUrl || "");
       if (thumbnail) return thumbnail;
-      // Old attachments can lack a generated thumbnail.  Do not download the
-      // original multi-megabyte photograph merely to fill a tiny list preview;
-      // the user can still open the attachment explicitly.
       const source = attachmentSource(photo);
-      return /^data:image\//i.test(source) ? source : "";
+      // Legacy photographs may not have a generated thumbnail. Use their
+      // protected original URL as a lazy-loaded fallback in the report.
+      return /^data:image\//i.test(source) || /^\/api\/attachments\//.test(source) ? source : "";
     }
 
     function isPdfAttachment(photo) {
@@ -15902,6 +16014,16 @@
       return String(state.workerBilling.find((worker) => worker.id === id)?.name || todo?.updatedByName || todo?.createdByName || "Izvajalec");
     }
 
+    function reportAssigneeLabel(todo) {
+      const labels = todoAssigneeIds(todo).map((id) => {
+        const worker = state.workerBilling.find((item) => item.id === id);
+        const name = String(worker?.name || state.users.find((user) => user.id === id)?.name || id || "Izvajalec");
+        const title = String(worker?.exportTitle || "").trim() || "Izvajalec";
+        return `${title} (${name})`;
+      });
+      return labels.length ? labels.join(", ") : "Ni dodeljeno";
+    }
+
     function reportWorkerTimeSummary(todos) {
       return (todos || []).filter((todo) => todo.start && todo.end)
         .map((todo) => reportWorkerName(todo) + ": " + todo.start + "\u2013" + todo.end)
@@ -16111,6 +16233,11 @@
       return Number(value || 0).toLocaleString("sl-SI", { maximumFractionDigits });
     }
 
+    function reportInputNumber(value, maximumFractionDigits = 2) {
+      const number = Number(value || 0);
+      return Number.isFinite(number) ? String(Number(number.toFixed(maximumFractionDigits))) : "0";
+    }
+
     function reportTransportText(km) {
       return `${reportNumber(km, 1)} km`;
     }
@@ -16130,26 +16257,33 @@
           ? `<label class="client-billing-attachment-export"><input type="checkbox" data-report-export-attachment-id="${escapeHtml(attachmentId)}" ${includeInExport ? "checked" : ""}><span>Vključi v izvoz</span></label>`
           : "";
         const thumbnail = !isPdfAttachment(photo) && !video ? attachmentThumbnailSource(photo) : "";
-        const media = `<button class="client-billing-attachment report-image-preview" type="button" data-report-todo-id="${escapeHtml(todo.id)}" data-photo-id="${escapeHtml(photo.id)}" aria-label="Odpri prilogo ${title}">${thumbnail ? `<img src="${escapeHtml(thumbnail)}" alt="">` : attachmentSymbolMarkup(photo)}<span><strong>${title}</strong><small>${kind}${video ? " · povezava do videa" : ""}</small></span></button>`;
+        const media = `<button class="client-billing-attachment report-image-preview" type="button" data-report-todo-id="${escapeHtml(todo.id)}" data-photo-id="${escapeHtml(photo.id)}" aria-label="Odpri prilogo ${title}">${thumbnail ? `<img src="${escapeHtml(thumbnail)}" alt="" loading="lazy">` : attachmentSymbolMarkup(photo)}<span><strong>${title}</strong><small>${kind}${video ? " · povezava do videa" : ""}</small></span></button>`;
         return `<div class="client-billing-attachment-wrap">${media}${exportToggle}</div>`;
       }).join("");
       return `<section class="client-billing-section"><strong>Priloge in dokumenti</strong>${attachmentCards ? `<div class="client-billing-attachments">${attachmentCards}</div>` : ""}${driveFiles.length ? `<div class="todo-drive-files">${renderTodoDriveFilesHtml(driveFiles)}</div>` : ""}</section>`;
     }
     function renderClientBillingRow(line) {
-      const { todo, warranty, materialEntry, noteEntry, hours, clientKm, vehicle, clientBill, workerTimes, correction } = line;
+      const { todo, warranty, materialEntry, noteEntry, hours, clientBillableHours, clientKm, vehicle, clientBill, workerTimes, correction } = line;
       const time = materialEntry ? "Material brez vpisa ur" : noteEntry ? "Zapisek brez vpisa ur" : (reportHoursMode() === "worker_time" ? "To\u010den \u010das izvajalcev" : (todo.start && todo.end ? todo.start + "\u2013" + todo.end : "Brez vpisane ure"));
       const eventId = todoEventId(todo);
+      const inlineEditable = state.user?.role === "boss" && !clientBill && !correction;
       const selectedForClientBill = !clientBill && state.clientBillSelectedEventIds.has(eventId);
       const billSelection = clientBill
         ? `<button class="client-billing-select is-billed" type="button" data-cancel-client-bill-id="${escapeHtml(clientBill.id)}" title="Prekliči obračun stranki" aria-label="Prekliči obračun stranki"><span class="client-billing-select-icon" aria-hidden="true">&#10003;</span></button>`
         : `<label class="client-billing-select ${selectedForClientBill ? "is-selected" : ""}" title="Označi za obračun"><input type="checkbox" data-client-bill-event-id="${escapeHtml(eventId)}" ${selectedForClientBill ? "checked" : ""} aria-label="Označi vpis za obračun stranki"><span class="client-billing-select-icon" aria-hidden="true">&#10003;</span></label>`;
+      const description = inlineEditable
+        ? `<section class="client-billing-section"><strong>Opis del</strong><textarea class="client-billing-inline-description" data-client-billing-inline-field="notes" data-todo-id="${escapeHtml(todo.id)}" placeholder="Dodaj opis del">${escapeHtml(todo.notes || "")}</textarea></section>`
+        : todo.notes ? `<section class="client-billing-section"><strong>Opis del</strong><div class="report-todo-description">${linkifyText(todo.notes)}</div></section>` : "";
       const details = [
-        todo.notes ? `<section class="client-billing-section"><strong>Opis del</strong><div class="report-todo-description">${linkifyText(todo.notes)}</div></section>` : "",
+        description,
         todo.material ? `<section class="client-billing-section"><strong>Material</strong><div class="report-todo-description">${linkifyText(todo.material)}</div></section>` : "",
         renderReportAttachments(todo, { exportable: selectedForClientBill })
       ].filter(Boolean).join("");
       const hoursLabel = reportHoursMode() === "client_billable" || correction ? "Za obra\u010dun" : "Ure izvajalcev";
       const hasExplicitClientHours = !correction && manualClientBillableMinutes(todo.clientBillableMinutes) !== null;
+      const billingFields = inlineEditable && !warranty && !materialEntry && !noteEntry
+        ? `<div class="client-billing-charges client-billing-inline-fields"><label>Za obračun (h)<input type="number" min="0" max="16666.67" step="0.25" inputmode="decimal" data-client-billing-inline-field="clientBillableHours" data-todo-id="${escapeHtml(todo.id)}" value="${escapeHtml(reportInputNumber(clientBillableHours))}" aria-label="Za obračun ur"></label><label>Stroški prevoza – ${escapeHtml(reportVehicleLabel(vehicle))} (km)<input type="number" min="0" max="1000000" step="0.1" inputmode="decimal" data-client-billing-inline-field="clientKm" data-todo-id="${escapeHtml(todo.id)}" value="${escapeHtml(reportInputNumber(clientKm, 1))}" aria-label="Stroški prevoza v kilometrih"></label></div>`
+        : "";
       const charges = warranty
         ? `<span class="client-billing-warranty">Garancija \u2013 storitev se ne obra\u010duna stranki.</span>`
         : materialEntry
@@ -16161,13 +16295,17 @@
             reportHoursMode() === "worker_time" && workerTimes ? `<span>\u010cas izvajalcev: ${escapeHtml(workerTimes)}</span>` : "",
             clientKm ? `<span>Stro\u0161ki prevoza (obe smeri): ${reportVehicleLabel(vehicle)} &middot; ${reportNumber(clientKm, 1)} km</span>` : ""
           ].filter(Boolean).join("");
+      const fullEditor = `<button class="client-billing-edit-button open-report-todo" type="button" data-todo-id="${escapeHtml(todo.id)}" title="Odpri celoten obrazec" aria-label="Odpri celoten obrazec za: ${escapeHtml(todo.title || "Brez naziva")}"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25Zm17.71-10.21a1 1 0 0 0 0-1.41l-2.55-2.55a1 1 0 0 0-1.41 0l-1.99 1.99 3.75 3.75 2.2-2.2Z"/></svg></button>`;
+      const title = inlineEditable
+        ? `<input class="client-billing-inline-title" data-client-billing-inline-field="title" data-todo-id="${escapeHtml(todo.id)}" value="${escapeHtml(todo.title || "")}" aria-label="Naslov dogodka">`
+        : `<button class="client-billing-title-trigger open-report-todo" type="button" data-todo-id="${escapeHtml(todo.id)}" aria-label="Odpri vpis: ${escapeHtml(todo.title || "Brez naziva")}">${escapeHtml(todo.title || "Brez naziva")}</button>`;
       return `<article class="client-billing-row">
         <div class="client-billing-selection-slot">${billSelection}</div>
         <div class="client-billing-when"><strong>${todo.date ? formatDate(todo.date) : "Brez datuma"}</strong><span>${escapeHtml(time)}</span></div>
         <div class="client-billing-main">
-          <div class="client-billing-title-row"><h3><button class="client-billing-title-trigger open-report-todo" type="button" data-todo-id="${escapeHtml(todo.id)}" aria-label="Odpri vpis: ${escapeHtml(todo.title || "Brez naziva")}">${escapeHtml(todo.title || "Brez naziva")}</button></h3></div>
-          <div class="client-billing-meta">${materialEntry ? `<span>Dostava materiala</span>` : noteEntry ? `<span>Zapisek</span>` : `<span>Izvajalec: ${escapeHtml(todoAssigneeNames(todo))}</span>`}${clientBill ? `<span>Obra\u010dun stranki potrjen ${escapeHtml(formatDateTime(clientBill.confirmedAt))}</span>` : ""}${clientBill?.directSettlement ? `<span>Prejeto: ${money(clientBill.receivedAmount || 0)} EUR${clientBill.creditedWorkerName ? ` &middot; v dobro ${escapeHtml(clientBill.creditedWorkerName)}` : ""}</span>` : ""}</div>
-          <button class="client-billing-charges client-billing-charges-trigger open-report-todo" type="button" data-todo-id="${escapeHtml(todo.id)}" aria-label="Odpri vpis: ${escapeHtml(todo.title || "Brez naziva")}">${charges}</button>
+          <div class="client-billing-title-row">${fullEditor}<h3>${title}</h3></div>
+          <div class="client-billing-meta">${materialEntry ? `<span>Dostava materiala</span>` : noteEntry ? `<span>Zapisek</span>` : `<span>${escapeHtml(reportAssigneeLabel(todo))}</span>`}${clientBill ? `<span>Obra\u010dun stranki potrjen ${escapeHtml(formatDateTime(clientBill.confirmedAt))}</span>` : ""}${clientBill?.directSettlement ? `<span>Prejeto: ${money(clientBill.receivedAmount || 0)} EUR${clientBill.creditedWorkerName ? ` &middot; v dobro ${escapeHtml(clientBill.creditedWorkerName)}` : ""}</span>` : ""}</div>
+          ${billingFields || `<button class="client-billing-charges client-billing-charges-trigger open-report-todo" type="button" data-todo-id="${escapeHtml(todo.id)}" aria-label="Odpri vpis: ${escapeHtml(todo.title || "Brez naziva")}">${charges}</button>`}
           ${details}
         </div>
       </article>`;
@@ -19059,6 +19197,14 @@
       }
     });
     $("clientDetailList").addEventListener("change", (event) => {
+      const inlineField = event.target.closest("[data-client-billing-inline-field]");
+      if (inlineField && !inlineField.disabled) {
+        saveClientBillingInlineField(inlineField).catch((error) => {
+          renderReport();
+          showNotice(error.message);
+        });
+        return;
+      }
       const exportAttachment = event.target.closest("[data-report-export-attachment-id]");
       if (exportAttachment && !exportAttachment.disabled) {
         const attachmentId = String(exportAttachment.dataset.reportExportAttachmentId || "");
@@ -19075,6 +19221,13 @@
       if (checkbox.checked) state.clientBillSelectedEventIds.add(eventId);
       else state.clientBillSelectedEventIds.delete(eventId);
       renderReport();
+    });
+    $("clientDetailList").addEventListener("keydown", (event) => {
+      const inlineField = event.target.closest("[data-client-billing-inline-field]");
+      if (!inlineField || event.key !== "Enter") return;
+      if (inlineField.tagName === "TEXTAREA" && !event.ctrlKey && !event.metaKey) return;
+      event.preventDefault();
+      inlineField.blur();
     });
     const handleClientListClick = (event) => {
       const billingButton = event.target.closest(".open-client-billing");

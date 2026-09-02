@@ -4881,7 +4881,10 @@ function clientReportExportOptions(input = {}) {
 }
 
 function reportPdfAssigneeTitle(db, todo) {
-  return String(db.users?.[todo?.syncUser || todo?.createdBy]?.billing?.exportTitle || "").trim() || "Izvajalec";
+  const worker = db.users?.[todo?.syncUser || todo?.createdBy] || {};
+  const title = String(worker.billing?.exportTitle || "").trim() || "Izvajalec";
+  const name = String(worker.name || todo?.updatedByName || todo?.createdByName || "").trim();
+  return name ? `${title} (${name})` : title;
 }
 
 function reportPdfAssignees(db, todos) {
@@ -10945,6 +10948,102 @@ async function handleApi(req, res) {
       sendJson(res, 200, { todos: visibleTodosForUser(db, user), deletedTodos: visibleTrashedTodosForUser(db, user), lateTimeEntryReportsQueued: lateTimeEntryReport ? 1 : 0 });
       return;
     }
+    const todoClientBillingFieldsMatch = url.pathname.match(/^\/api\/todos\/([^/]+)\/client-billing-fields$/);
+    if (todoClientBillingFieldsMatch && req.method === "POST") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      if (user.role !== "boss") {
+        sendJson(res, 403, { error: "Podatke za obračun stranki lahko spreminja samo šef." });
+        return;
+      }
+      const id = decodeURIComponent(todoClientBillingFieldsMatch[1]);
+      const body = await readBody(req);
+      const editableFields = ["title", "notes", "clientBillableHours", "clientKm"];
+      const requested = editableFields.filter((field) => Object.hasOwn(body, field));
+      if (requested.length !== 1) {
+        sendJson(res, 400, { error: "Izberi natanko eno polje za hitro urejanje." });
+        return;
+      }
+      const field = requested[0];
+      const db = await readDbAsync();
+      const previousTodo = (db.todos || []).find((item) => String(item.id || "") === id);
+      if (!previousTodo || isTrashedTodo(previousTodo)) {
+        sendJson(res, 404, { error: "Opravilo ne obstaja." });
+        return;
+      }
+      const assignmentItems = todoAssignmentItems(db, previousTodo);
+      const clientBillLock = clientBillLockForTodos(db, assignmentItems);
+      if (clientBillLock) {
+        sendJson(res, 403, { error: clientBillEditLockMessage(clientBillLock) });
+        return;
+      }
+      const editLock = todoAssignmentEditLockConflict(db, previousTodo, user, "");
+      if (editLock) {
+        sendJson(res, 409, { error: `Opravilo trenutno ureja ${editLock.lockedByName || editLock.lockedById}.` });
+        return;
+      }
+      const baseUpdatedAt = String(body.baseUpdatedAt || "");
+      if (baseUpdatedAt && baseUpdatedAt !== String(previousTodo.updatedAt || "")) {
+        sendJson(res, 409, { error: "Dogodek je bil medtem spremenjen na drugi napravi." });
+        return;
+      }
+
+      const changes = {};
+      if (field === "title") {
+        const title = capitalizeTodoText(String(body.title || "").slice(0, 300));
+        if (!title) {
+          sendJson(res, 400, { error: "Naslov dogodka ne sme biti prazen." });
+          return;
+        }
+        changes.title = title;
+      } else if (field === "notes") {
+        changes.notes = capitalizeTodoText(String(body.notes || "").slice(0, 10_000));
+      } else {
+        if (String(previousTodo.status || "") !== "execution") {
+          sendJson(res, 409, { error: "Ure in strošek prevoza sta na voljo samo pri izvedeni storitvi." });
+          return;
+        }
+        const raw = String(body[field] ?? "").trim().replace(",", ".");
+        if (!raw) {
+          sendJson(res, 400, { error: field === "clientKm" ? "Vpiši kilometre ali izrecno 0." : "Vpiši ure za obračun ali izrecno 0." });
+          return;
+        }
+        const value = Number(raw);
+        if (!Number.isFinite(value) || value < 0 || value > (field === "clientKm" ? 1_000_000 : 16_666.67)) {
+          sendJson(res, 400, { error: field === "clientKm" ? "Strošek prevoza mora biti med 0 in 1.000.000 km." : "Ure za obračun niso veljavne." });
+          return;
+        }
+        if (field === "clientKm") changes.clientKm = Number(value.toFixed(2));
+        else changes.clientBillableMinutes = normalizedClientBillableMinutes(Math.round(value * 60));
+      }
+
+      const actionLabels = {
+        title: "naslov",
+        notes: "opis del",
+        clientBillableHours: "ure za obračun",
+        clientKm: "strošek prevoza"
+      };
+      const action = `spremenjeno v poročilu stranke: ${actionLabels[field]}`;
+      const now = new Date().toISOString();
+      const assignmentIds = new Set(assignmentItems.map((item) => String(item.id || "")));
+      db.todos = db.todos.map((item) => {
+        if (!assignmentIds.has(String(item.id || ""))) return item;
+        const next = {
+          ...item,
+          ...changes,
+          updatedBy: user.id,
+          updatedByName: user.name,
+          updatedAt: now,
+          history: [...(item.history || []), audit(user, action)]
+        };
+        next.revisionHistory = appendTodoRevision(item, next, user, action, now);
+        return next;
+      });
+      await writeDbAsync(db);
+      sendJson(res, 200, { todos: visibleTodosForUser(db, user) });
+      return;
+    }
+
     const todoChangeNoticeMatch = url.pathname.match(/^\/api\/todos\/([^/]+)\/change-notice(\/seen)?$/);
     if (todoChangeNoticeMatch && req.method === "POST") {
       const user = await requireUser(req, res);

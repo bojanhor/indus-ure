@@ -210,3 +210,91 @@ test("sprememba opravila ostane zasebna do potrditve prejemnika, sprememba z obv
     await fs.rm(dataDir, { recursive: true, force: true });
   }
 });
+
+test("šef lahko v poročilu neposredno spremeni obračunska polja, potrjen obračun pa jih zaklene", { timeout: 15_000 }, async () => {
+  const port = 21250 + Math.floor(Math.random() * 700);
+  const dataDir = path.join(os.tmpdir(), `indus-ure-client-billing-fields-${process.pid}-${Date.now()}`);
+  const password = "test-only-local-password-123";
+  const child = spawn(process.execPath, ["outputs/server.js"], {
+    cwd: path.join(__dirname, ".."),
+    env: {
+      ...process.env,
+      PORT: String(port),
+      DATA_DIR: dataDir,
+      MEDIA_DIR: path.join(dataDir, "media"),
+      DATABASE_URL: "",
+      NODE_ENV: "test",
+      INDUS_URE_TEST_MODE: "true",
+      TEST_LOCAL_LOGIN_PASSWORD: password,
+      DISABLE_OPERATIONAL_MONITOR: "true"
+    },
+    stdio: ["ignore", "ignore", "ignore"]
+  });
+  try {
+    await waitForHealth(port);
+    const bojan = await login(port, "bojan", password);
+    const ibro = await login(port, "ibro", password);
+    const create = await request(port, "/api/todos", {
+      method: "POST",
+      headers: bojan,
+      body: JSON.stringify({
+        title: "Hitro urejanje obračuna",
+        client: "Poročilna testna stranka",
+        status: "execution",
+        date: "2026-08-20",
+        start: "08:00",
+        end: "09:00",
+        syncUser: "ibro",
+        assigneeIds: ["ibro"],
+        clientMutationId: "1c548b70-a2bb-4b41-91c0-8e38ab588a10"
+      })
+    });
+    assert.equal(create.status, 200, create.body);
+    const created = JSON.parse(create.body).todos.find((todo) => todo.title === "Hitro urejanje obračuna");
+    assert.ok(created?.id);
+    const eventId = String(created.assignmentGroupId || created.id);
+
+    const notes = await request(port, `/api/todos/${encodeURIComponent(created.id)}/client-billing-fields`, {
+      method: "POST", headers: bojan,
+      body: JSON.stringify({ notes: "Opis iz poročila", baseUpdatedAt: created.updatedAt })
+    });
+    assert.equal(notes.status, 200, notes.body);
+    const afterNotes = JSON.parse(notes.body).todos.filter((todo) => String(todo.assignmentGroupId || todo.id) === eventId);
+    assert.equal(afterNotes.length, 1);
+    assert.ok(afterNotes.every((todo) => todo.notes === "Opis iz poročila"));
+
+    const afterNotesTodo = afterNotes.find((todo) => todo.id === created.id);
+    const hours = await request(port, `/api/todos/${encodeURIComponent(created.id)}/client-billing-fields`, {
+      method: "POST", headers: bojan,
+      body: JSON.stringify({ clientBillableHours: 2.25, baseUpdatedAt: afterNotesTodo.updatedAt })
+    });
+    assert.equal(hours.status, 200, hours.body);
+    const afterHours = JSON.parse(hours.body).todos.filter((todo) => String(todo.assignmentGroupId || todo.id) === eventId);
+    assert.ok(afterHours.every((todo) => todo.clientBillableMinutes === 135));
+
+    const forbidden = await request(port, `/api/todos/${encodeURIComponent(created.id)}/client-billing-fields`, {
+      method: "POST", headers: ibro, body: JSON.stringify({ clientKm: 12 })
+    });
+    assert.equal(forbidden.status, 403, forbidden.body);
+
+    const bill = await request(port, "/api/client-bills", {
+      method: "POST", headers: bojan,
+      body: JSON.stringify({
+        clientId: created.clientId,
+        clientName: created.client,
+        from: "2026-08-20",
+        to: "2026-08-20",
+        eventIds: [eventId]
+      })
+    });
+    assert.equal(bill.status, 201, bill.body);
+    const locked = await request(port, `/api/todos/${encodeURIComponent(created.id)}/client-billing-fields`, {
+      method: "POST", headers: bojan, body: JSON.stringify({ title: "Ne sme se spremeniti" })
+    });
+    assert.equal(locked.status, 403, locked.body);
+    assert.match(JSON.parse(locked.body).error, /zaklenjen/);
+  } finally {
+    await stop(child);
+    await fs.rm(dataDir, { recursive: true, force: true });
+  }
+});
