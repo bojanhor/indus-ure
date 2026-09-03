@@ -5491,16 +5491,62 @@
     .worker-permissions { margin: 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 9px; }
     .worker-permissions legend { padding: 0 4px; font-weight: 800; }
     .worker-permissions-list { display: grid; gap: 7px; }
-    .worker-permissions-list label { display: inline-flex; align-items: center; gap: 6px; margin: 0; }
+    .worker-permissions-list label { display: inline-flex; align-items: center; justify-content: flex-start; gap: 6px; margin: 0; }
     .worker-report-delivery { margin: 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 9px; background: #f8faf7; }
     .worker-report-delivery legend { padding: 0 4px; font-weight: 800; }
     .worker-report-delivery-grid { display: grid; grid-template-columns: minmax(240px, 1fr) minmax(220px, 1fr); gap: 9px 12px; align-items: end; }
-    .worker-report-delivery-grid .worker-report-check { display: inline-flex; align-items: center; gap: 7px; margin: 0; }
+    .worker-report-delivery-grid .worker-report-check { display: inline-flex; align-items: center; justify-content: flex-start; gap: 7px; margin: 0; }
     .worker-report-delivery-grid .worker-report-zero { grid-column: 1 / -1; }
     .worker-report-delivery .todo-meta { margin: 8px 0 0; }
     .worker-management-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 13px; }
     .worker-management-actions .danger { color: #a82d35; border-color: #e1b8bc; background: #fff7f7; }
-    .worker-active-field { display: inline-flex; align-items: center; gap: 7px; margin: 0; }
+    .worker-active-field { display: inline-flex; align-items: center; justify-content: flex-start; gap: 7px; margin: 0; }
+    .worker-permissions-list input[type="checkbox"],
+    .worker-report-delivery-grid input[type="checkbox"],
+    .worker-active-field input[type="checkbox"] {
+      box-sizing: border-box;
+      flex: 0 0 18px;
+      width: 18px;
+      min-width: 18px;
+      height: 18px;
+      min-height: 18px;
+      margin: 0;
+      padding: 0;
+    }
+    .client-bill-processing-overlay {
+      position: fixed;
+      z-index: 1200;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      padding: 20px;
+      background: rgba(13, 38, 43, .38);
+      backdrop-filter: blur(2px);
+    }
+    .client-bill-processing-overlay.hidden { display: none; }
+    .client-bill-processing-card {
+      display: grid;
+      justify-items: center;
+      gap: 8px;
+      width: min(360px, 100%);
+      padding: 24px;
+      border: 1px solid #b9d7d0;
+      border-radius: 14px;
+      background: #fff;
+      box-shadow: 0 18px 48px rgba(6, 26, 31, .26);
+      text-align: center;
+    }
+    .client-bill-processing-card strong { font-size: 17px; }
+    .client-bill-processing-card span { color: var(--muted); font-size: 13px; }
+    .client-bill-processing-spinner {
+      width: 30px;
+      height: 30px;
+      border: 4px solid #d7e9e4;
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: client-bill-processing-spin .75s linear infinite;
+    }
+    @keyframes client-bill-processing-spin { to { transform: rotate(360deg); } }
     @media (max-width: 780px) {
       .workers-dialog { width: min(720px, calc(100vw - 20px)); }
       .worker-create-panel { grid-template-columns: 1fr; }
@@ -5521,6 +5567,13 @@
 </head>
 <body class="booting">
   <section id="bootScreen" aria-live="polite" aria-label="Odpiram INDUS URE">Odpiram INDUS URE</section>
+  <section id="clientBillProcessing" class="client-bill-processing-overlay hidden" aria-live="assertive" aria-busy="true" aria-hidden="true" role="status">
+    <div class="client-bill-processing-card">
+      <div class="client-bill-processing-spinner" aria-hidden="true"></div>
+      <strong>Potrjujem obračun</strong>
+      <span>Obdelujem izbrane vpise. Počakaj, da se seznam osveži.</span>
+    </div>
+  </section>
   <noscript><style>body.booting #bootScreen{display:none}body.booting #loginScreen{display:flex}</style></noscript>
   <section class="login-screen" id="loginScreen">
     <form class="login-card" id="loginForm">
@@ -8132,16 +8185,30 @@
       ]);
     }
 
-    function refreshBootstrapAfterTodoLink() {
+    function refreshBootstrapAfterTodoLink({ defer = false } = {}) {
       const todoRevision = state.todoRevision;
       const todoSnapshotWasStable = state.todoMutationPending === 0;
-      void api("/api/bootstrap", { recoverSession: false })
-        .then((snapshot) => {
-          applyBootstrapSnapshot(snapshot, { preserveTodoMutations: true, todoRevision, todoSnapshotWasStable });
-          render();
-          saveOfflineSnapshotSoon();
-        })
-        .catch(() => {});
+      const refresh = () => {
+        void api("/api/bootstrap", { recoverSession: false })
+          .then((snapshot) => {
+            applyBootstrapSnapshot(snapshot, { preserveTodoMutations: true, todoRevision, todoSnapshotWasStable });
+            render();
+            saveOfflineSnapshotSoon();
+          })
+          .catch(() => {});
+      };
+      if (!defer) {
+        refresh();
+        return;
+      }
+      // The initial snapshot already contains the live work board. Defer the
+      // larger financial/history refresh until the first paint is idle so its
+      // JSON parsing cannot make the just-opened application feel stuck.
+      if (typeof window.requestIdleCallback === "function") {
+        window.requestIdleCallback(refresh, { timeout: 750 });
+      } else {
+        window.setTimeout(refresh, 160);
+      }
     }
 
     async function boot() {
@@ -8203,7 +8270,7 @@
         initializeWorkContext();
         showApp();
         render();
-        refreshBootstrapAfterTodoLink();
+        refreshBootstrapAfterTodoLink({ defer: true });
         await openTodoFromLink();
         await openWorkerDailyDigestFromLink();
         await openQuickCreateFromLink();
@@ -16522,17 +16589,30 @@
       const range = reportRangeLabel();
       const label = `${eventIds.length} ${eventIds.length === 1 ? "izbran vpis" : "izbranih vpisov"}`;
       if (!await showAppConfirm(`Potrdim obračun stranki ${selection.name} za ${label} (${range})?\n\nPotrjeni vnosi bodo odstranjeni s seznama »Za obračun«. Ostanejo dosegljivi prek izbire »Prikaži obračunano« in jih lahko tam tudi prekličeš.`)) return;
-      await api("/api/client-bills", {
-        method: "POST",
-        body: JSON.stringify({ clientId: selection.id, clientName: selection.name, from: $("reportFrom").value, to: $("reportTo").value, eventIds })
-      });
-      state.clientBillSelectionKey = "";
-      state.clientBillSelectedEventIds = new Set();
-      state.reportAttachmentSelectionKey = "";
-      state.reportIncludedAttachmentIds = new Set();
-      await loadAll();
-      setView("report");
-      renderReport();
+      setClientBillProcessing(true);
+      try {
+        await api("/api/client-bills", {
+          method: "POST",
+          body: JSON.stringify({ clientId: selection.id, clientName: selection.name, from: $("reportFrom").value, to: $("reportTo").value, eventIds })
+        });
+        state.clientBillSelectionKey = "";
+        state.clientBillSelectedEventIds = new Set();
+        state.reportAttachmentSelectionKey = "";
+        state.reportIncludedAttachmentIds = new Set();
+        await loadAll();
+        setView("report");
+        renderReport();
+      } finally {
+        setClientBillProcessing(false);
+      }
+    }
+
+    function setClientBillProcessing(active) {
+      const overlay = $("clientBillProcessing");
+      if (!overlay) return;
+      overlay.classList.toggle("hidden", !active);
+      overlay.setAttribute("aria-hidden", active ? "false" : "true");
+      $("confirmClientBill").disabled = Boolean(active) || !state.clientBillSelectedEventIds?.size;
     }
 
     async function requestClientReportPdfDownload(payload, retried = false) {

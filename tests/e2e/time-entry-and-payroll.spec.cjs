@@ -108,7 +108,7 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
           const details = card.querySelector(".worker-management-details");
           const inputs = [...dialog.querySelectorAll("input, select")].map((input) => {
             const rect = input.getBoundingClientRect();
-            return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom };
+            return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: rect.width, type: input.type };
           });
           const createBox = create.getBoundingClientRect();
           const detailsBox = details.getBoundingClientRect();
@@ -131,10 +131,71 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
         for (const input of layout.inputs) {
           expect(input.left).toBeGreaterThanOrEqual(layout.left - 1);
           expect(input.right).toBeLessThanOrEqual(layout.right + 1);
+          if (input.type === "checkbox") {
+            expect(input.width).toBeGreaterThanOrEqual(16);
+            expect(input.width).toBeLessThanOrEqual(22);
+          }
         }
       } finally {
         await context.close();
       }
+    }
+  });
+
+  test("potrditev obračuna stranki med shranjevanjem blokira cel pogled", async ({ browser }) => {
+    const clientName = "PW obračun z indikatorjem";
+    const workerContext = await browser.newContext();
+    const workerPage = await workerContext.newPage();
+    try {
+      await localLogin(workerPage, "ibro");
+      await workerPage.locator("#writeHoursButton").click();
+      await workerPage.locator("#todoFormClient").fill(clientName);
+      await workerPage.locator("#quickAddClientBtn").click();
+      await workerPage.locator("#quickClientName").fill(clientName);
+      await workerPage.locator("#quickClientForm button[type=submit]").click();
+      await expect(workerPage.locator("#quickClientDialog")).toBeHidden();
+      await workerPage.locator("#todoFormTask").fill("PW vpis za obračun z indikatorjem");
+      await workerPage.locator("#todoFormStart").fill("08:00");
+      await workerPage.locator("#todoFormEnd").fill("09:00");
+      await workerPage.locator("#saveTodoDialog").click();
+      await expect(workerPage.locator("#appConfirmDialog")).toBeVisible();
+      await workerPage.locator("#appConfirmAccept").click();
+      await expect(workerPage.locator("#todoDialog")).toBeHidden();
+    } finally {
+      await workerContext.close();
+    }
+
+    const bossContext = await browser.newContext();
+    const page = await bossContext.newPage();
+    let releaseClientBill = () => {};
+    const clientBillStarted = new Promise((resolve) => { releaseClientBill = resolve; });
+    let allowClientBill = () => {};
+    const allowResponse = new Promise((resolve) => { allowClientBill = resolve; });
+    try {
+      await localLogin(page, "bojan");
+      await page.locator("#toolsMenu > summary").click();
+      await page.locator("#clientBillingMenuBtn").click();
+      await page.locator("#reportClient").fill(clientName);
+      await expect(page.locator("#confirmClientBill")).toBeEnabled();
+
+      await page.route("**/api/client-bills", async (route, request) => {
+        if (request.method() === "POST") {
+          releaseClientBill();
+          await allowResponse;
+        }
+        await route.continue();
+      });
+      await page.locator("#confirmClientBill").click();
+      await page.locator("#appConfirmAccept").click();
+      await clientBillStarted;
+      await expect(page.locator("#clientBillProcessing")).toBeVisible();
+      await expect(page.locator("#confirmClientBill")).toBeDisabled();
+      allowClientBill();
+      await expect(page.locator("#clientBillProcessing")).toBeHidden();
+      await page.unroute("**/api/client-bills");
+    } finally {
+      allowClientBill();
+      await bossContext.close();
     }
   });
 

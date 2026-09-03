@@ -782,7 +782,7 @@ test("e-poštna povezava odpre ciljno opravilo pred celotnim nalaganjem", async 
   assert.match(html, /function hasTodoLink\(\) \{/);
   assert.match(html, /async function openTodoFromLink\(\{ render = true \} = \{\}\)/);
   const bootSource = html.slice(html.indexOf("async function boot()"), html.indexOf("async function reconnectAfterOffline()"));
-  assert.match(bootSource, /const bootstrapPromise = api\("\/api\/bootstrap\?initial=1", \{ recoverSession: false \}\);[\s\S]*?const me = await api\("\/api\/me", \{ recoverSession: false \}\);[\s\S]*?applyLightweightSession\(me, \[me\.user\]\.filter\(Boolean\)\);[\s\S]*?const snapshot = await bootstrapPromise;[\s\S]*?applyBootstrapSnapshot\(snapshot\);[\s\S]*?refreshBootstrapAfterTodoLink\(\);[\s\S]*?await openTodoFromLink\(\);/);
+  assert.match(bootSource, /const bootstrapPromise = api\("\/api\/bootstrap\?initial=1", \{ recoverSession: false \}\);[\s\S]*?const me = await api\("\/api\/me", \{ recoverSession: false \}\);[\s\S]*?applyLightweightSession\(me, \[me\.user\]\.filter\(Boolean\)\);[\s\S]*?const snapshot = await bootstrapPromise;[\s\S]*?applyBootstrapSnapshot\(snapshot\);[\s\S]*?refreshBootstrapAfterTodoLink\(\{ defer: true \}\);[\s\S]*?await openTodoFromLink\(\);/);
   assert.doesNotMatch(bootSource, /await loadAll\(\);/);
   assert.match(html, /if \(render\) \{\s*renderTodos\(\);\s*renderMonth\(\);\s*\}/);
 });
@@ -824,7 +824,13 @@ test("initial application shell waits for one snapshot and renders only the acti
   assert.match(html, /body\.booting #loginScreen,[\s\S]*?body\.booting #app/);
   assert.match(html, /body\.login-ready \.login-screen[\s\S]*?url\("assets\/indus-hero-electro\.png"\)/);
   assert.match(bootSource, /const bootstrapPromise = api\("\/api\/bootstrap\?initial=1", \{ recoverSession: false \}\);/);
+  assert.match(html, /function refreshBootstrapAfterTodoLink\(\{ defer = false \} = \{\}\)/);
+  assert.match(html, /window\.requestIdleCallback\(refresh, \{ timeout: 750 \}\)/);
+  assert.match(bootSource, /refreshBootstrapAfterTodoLink\(\{ defer: true \}\);/);
   assert.match(bootSource, /finishStartupInBackground\(\);/);
+  assert.match(html, /id="clientBillProcessing"/);
+  assert.match(html, /function setClientBillProcessing\(active\)/);
+  assert.match(html, /setClientBillProcessing\(true\);[\s\S]*?finally \{\s*setClientBillProcessing\(false\);/);
   assert.match(renderSource, /if \(state\.view === "calendar"\) renderMonth\(\);/);
   assert.match(renderSource, /if \(state\.view === "todos"\) renderTodos\(\);/);
   assert.match(renderSource, /if \(state\.view === "billing"\) renderBillingView\(\);/);

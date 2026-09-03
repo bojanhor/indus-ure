@@ -5,7 +5,7 @@ const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
-const { undoArrayPatch } = require("../outputs/server");
+const { normalizeDb, undoArrayPatch } = require("../outputs/server");
 
 function request(port, pathname, { method = "GET", headers = {}, body = "" } = {}) {
   return new Promise((resolve, reject) => {
@@ -55,6 +55,38 @@ test("Undo ne obravnava naključnega vrstnega reda baze kot poslovne spremembe",
     changes: [{ id: "b", before: { id: "b", value: 2 } }],
     order: ["a", "b"]
   });
+});
+
+test("stari Undo zapisi dobijo dejanski naslov dogodka in stranke", () => {
+  const todoId = "11111111-1111-4111-8111-111111111111";
+  const billId = "22222222-2222-4222-8222-222222222222";
+  const db = {
+    todos: [{ id: todoId, title: "Menjava releja", client: "Roman Studen" }],
+    clientBills: [{ id: billId, clientName: "Roman Studen" }],
+    undoJournal: [
+      {
+        id: "33333333-3333-4333-8333-333333333333",
+        createdAt: "2026-09-03T10:00:00.000Z",
+        actorId: "bojan",
+        actorName: "Bojan",
+        action: "Bojan je ustvaril dogodek »brez naslova«",
+        patch: { version: 2, arrays: { todos: { changes: [{ id: todoId, before: null }] } } }
+      },
+      {
+        id: "44444444-4444-4444-8444-444444444444",
+        createdAt: "2026-09-03T09:00:00.000Z",
+        actorId: "bojan",
+        actorName: "Bojan",
+        action: "Bojan je potrdil obračun za stranko »stranko«",
+        patch: { version: 2, arrays: { clientBills: { changes: [{ id: billId, before: null }] } } }
+      }
+    ]
+  };
+  const normalized = normalizeDb(db);
+  assert.equal(normalized.changed, true);
+  assert.match(db.undoJournal[0].action, /»Menjava releja«/);
+  assert.match(db.undoJournal[1].action, /»Roman Studen«/);
+  assert.equal(normalizeDb(db).changed, false);
 });
 
 test("Undo varno vrne zadnje poslovno dejanje in ga ne ponudi dvakrat", { timeout: 20_000 }, async () => {

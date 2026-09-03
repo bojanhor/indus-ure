@@ -555,7 +555,37 @@ function undoPatchFromSnapshots(beforeState = {}, afterState = {}) {
   });
 }
 
-function normalizeUndoJournal(raw) {
+function undoPatchPreviousItem(patch, key, context = {}) {
+  const changes = patch?.arrays?.[key]?.changes || [];
+  const change = changes.find((candidate) => candidate && typeof candidate === "object");
+  if (!change) return null;
+  if (change.before && typeof change.before === "object") return change.before;
+  const id = String(change.id || "");
+  if (!id) return null;
+  const items = Array.isArray(context?.[key]) ? context[key] : [];
+  const idKey = key === "clients" ? "clientId" : "id";
+  return items.find((item) => String(item?.[idKey] || item?.id || "") === id) || null;
+}
+
+function normalizeLegacyUndoAction(rawAction, patch, context = {}) {
+  const todo = undoPatchPreviousItem(patch, "todos", context);
+  const clientBill = undoPatchPreviousItem(patch, "clientBills", context);
+  const title = cleanAuditLogText(todo?.title || "", 100);
+  const clientName = cleanAuditLogText(clientBill?.clientName || clientBill?.client || todo?.client || "", 120);
+  let action = rawAction;
+  if (title && /\u00bbbrez naslova\u00ab/iu.test(action)) {
+    action = action.replace(/\u00bbbrez naslova\u00ab/iu, `\u00bb${title}\u00ab`);
+  }
+  // A few early client-bill actions were recorded before their customer name
+  // was attached to the log context. The bill/todo snapshot is authoritative,
+  // so repair only the known generic placeholder, never a real client name.
+  if (clientName && /\bstrank[oa]\b/iu.test(action) && /\u00bb(?:stranko|stranka)?\u00ab/iu.test(action)) {
+    action = action.replace(/\u00bb(?:stranko|stranka)?\u00ab/iu, `\u00bb${clientName}\u00ab`);
+  }
+  return action;
+}
+
+function normalizeUndoJournal(raw, context = {}) {
   const values = Array.isArray(raw) ? raw : [];
   return values
     // Version 1 stored whole database copies. They are intentionally dropped
@@ -563,13 +593,8 @@ function normalizeUndoJournal(raw) {
     .map((record) => ({ record, patch: normalizeUndoPatch(record?.patch) }))
     .filter(({ record, patch }) => record && typeof record === "object" && patch)
     .map(({ record, patch }) => {
-      const title = (patch.arrays?.todos?.changes || [])
-        .map((change) => String(change?.before?.title || "").trim())
-        .find(Boolean) || "";
       const rawAction = cleanAuditLogText(record.action || "Spremenjeni podatki", 220) || "Spremenjeni podatki";
-      const action = title && /\u00bbbrez naslova\u00ab/iu.test(rawAction)
-        ? rawAction.replace(/\u00bbbrez naslova\u00ab/iu, `\u00bb${title.slice(0, 100)}\u00ab`)
-        : rawAction;
+      const action = normalizeLegacyUndoAction(rawAction, patch, context);
       return {
         id: /^[a-f0-9-]{16,80}$/i.test(String(record.id || "")) ? String(record.id) : crypto.randomUUID(),
         createdAt: Number.isFinite(Date.parse(record.createdAt)) ? String(record.createdAt) : new Date().toISOString(),
@@ -1981,7 +2006,7 @@ function normalizeDb(db = {}) {
     db.auditLog = normalizedAuditLog;
     changed = true;
   }
-  const normalizedUndoJournal = normalizeUndoJournal(db.undoJournal);
+  const normalizedUndoJournal = normalizeUndoJournal(db.undoJournal, db);
   if (!Array.isArray(db.undoJournal) || JSON.stringify(db.undoJournal) !== JSON.stringify(normalizedUndoJournal)) {
     db.undoJournal = normalizedUndoJournal;
     changed = true;
@@ -11676,6 +11701,7 @@ module.exports = {
   lateTimeEntryReportSnapshot,
   shouldQueueLateTimeEntryReport,
   normalizeLateTimeEntryReports,
+  normalizeUndoJournal,
   queueLateTimeEntryReport,
   workerDigestRunKey,
   workerDigestRunFor,
