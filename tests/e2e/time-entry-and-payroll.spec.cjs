@@ -442,7 +442,7 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
     }
   });
 
-  test("saving an event gives immediate feedback and blocks duplicate interaction", async ({ browser }) => {
+  test("saving an event closes immediately and submits only once in the background", async ({ browser }) => {
     const context = await browser.newContext();
     const page = await context.newPage();
     let releasePost = null;
@@ -463,15 +463,15 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
       const dialog = page.locator("#todoDialog");
       const save = page.locator("#saveTodoDialog");
       await save.click();
-      await expect(save).toBeDisabled();
-      await expect(save).toHaveAttribute("aria-busy", "true");
-      await expect(page.locator("#closeTodoDialog")).toBeDisabled();
+      // The primary checkmark intentionally closes the form before the
+      // network write completes. That removes the duplicate-save surface
+      // without interrupting the user with a progress banner.
+      await expect(dialog).toBeHidden();
       await page.keyboard.press("Escape");
-      await expect(dialog).toBeVisible();
-      await dialog.evaluate((node) => node.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+      await expect(dialog).toBeHidden();
       await expect.poll(() => postCount).toBe(1);
       releasePost();
-      await expect(dialog).toBeHidden();
+      await expect.poll(() => page.locator("#todoItems").innerText()).toContain("PW vidno shranjevanje");
       expect(postCount).toBe(1);
       await page.unroute("**/api/todos");
     } finally {

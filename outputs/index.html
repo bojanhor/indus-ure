@@ -10646,10 +10646,17 @@
       normalizeTodoFormTimes();
       if (target === "start") {
         rememberTodoStartTime(input.value);
-        if (!$("todoFormEnd").value) {
+        const endInput = $("todoFormEnd");
+        // The initial end time is merely a one-hour suggestion. Until the
+        // user chooses an end time, keep that suggestion one hour after the
+        // start time they pick in the circular selector.
+        if (!endInput.value || endInput.dataset.autoSuggested === "true") {
           const start = dayTimelineMinutes(input.value);
-          $("todoFormEnd").value = dayTimelineTime(Math.min(23 * 60 + 45, start + 60));
+          endInput.value = dayTimelineTime(Math.min(23 * 60 + 45, start + 60));
+          endInput.dataset.autoSuggested = "true";
         }
+      } else {
+        $("todoFormEnd").dataset.autoSuggested = "false";
       }
       updateTodoFormLateTimeEntryNotice();
       syncTodoFormClientBillableHours();
@@ -15243,6 +15250,7 @@
       $("todoFormDraftNotice").classList.toggle("hidden", !state.todoCreationDraftRestored);
       $("todoFormStart").value = todo.start || suggestedTimes?.start || noteTimeSuggestion?.start || "";
       $("todoFormEnd").value = todo.end || suggestedTimes?.end || noteTimeSuggestion?.end || "";
+      $("todoFormEnd").dataset.autoSuggested = String(!editing && !todo.end && Boolean(suggestedTimes || noteTimeSuggestion));
       $("todoFormDate").value = todo.date || (needsTimeSuggestion ? dateKey(new Date()) : noteTimeSuggestion?.date || "");
       $("todoFormEndDate").value = todo.date ? todoEndDate(todo) : "";
       $("todoFormEndDate").dataset.auto = String(!todo.date || todoEndDate(todo) === todo.date);
@@ -18805,7 +18813,16 @@
       $(id).addEventListener("change", (event) => {
         normalizeTodoFormTimes();
         syncTodoFormClientBillableHours();
-        if (id === "todoFormStart") rememberTodoStartTime($("todoFormStart").value);
+        if (id === "todoFormStart") {
+          rememberTodoStartTime($("todoFormStart").value);
+          const endInput = $("todoFormEnd");
+          if (event.isTrusted && endInput.dataset.autoSuggested === "true" && $("todoFormStart").value) {
+            const start = dayTimelineMinutes($("todoFormStart").value);
+            endInput.value = dayTimelineTime(Math.min(23 * 60 + 45, start + 60));
+          }
+        } else if (event.isTrusted) {
+          $("todoFormEnd").dataset.autoSuggested = "false";
+        }
       renderTodoFormQuickTimePicker();
         if (id === "todoFormStart" && $("todoFormStart").value && event.isTrusted) $("todoFormEnd").focus();
       });
