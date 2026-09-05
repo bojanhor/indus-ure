@@ -15188,6 +15188,7 @@
     }
 
     async function openTodoDialog(todo = {}, { reportNavigationIds = null } = {}) {
+      const todoEditorOpenStartedAt = todo?.id ? performance.now() : 0;
       clearFormValidationError($("todoForm"));
       setTodoDialogSaving(false);
       const requestedCreationMode = todoCreationDraftMode(todo);
@@ -15330,25 +15331,45 @@
       setTodoVideoUploadStatus("");
       $("todoFormDriveLink").value = "";
       $("todoFormDriveLinkPanel").classList.add("hidden");
+      const todoEditorFormPreparedAt = editing ? performance.now() : 0;
       $("todoDialog").showModal();
       if (editing) {
         // The edit lock protects writes, not reading the form.  Showing the
         // read-only shell first avoids a multi-second blank wait after reload.
         setTodoDialogOpening(true);
         scheduleTodoFormPhotoPreviews();
-        if (!(await acquireTodoEditLockForDialog(todo.id))) {
+        const todoEditorLockStartedAt = performance.now();
+        let todoEditorOpenResult = "error";
+        try {
+          if (!(await acquireTodoEditLockForDialog(todo.id))) {
+            todoEditorOpenResult = "rejected";
+            setTodoDialogOpening(false);
+            $("todoDialog").close();
+            return false;
+          }
+          if (!$("todoDialog").open) {
+            // The user may close the shell while a slow first lock request is
+            // pending. Release the late lock instead of leaving it behind.
+            todoEditorOpenResult = "closed";
+            await releaseTodoEditLockForDialog();
+            setTodoDialogOpening(false);
+            return false;
+          }
+          todoEditorOpenResult = "ready";
           setTodoDialogOpening(false);
-          $("todoDialog").close();
-          return false;
+        } catch (error) {
+          todoEditorOpenResult = "error";
+          throw error;
+        } finally {
+          if (todoEditorOpenResult !== "ready" && $("todoDialog").open) setTodoDialogOpening(false);
+          reportTodoEditorOpenTiming(todo, {
+            result: todoEditorOpenResult,
+            formPrepareMs: todoEditorFormPreparedAt - todoEditorOpenStartedAt,
+            lockWaitMs: performance.now() - todoEditorLockStartedAt,
+            totalMs: performance.now() - todoEditorOpenStartedAt,
+            attachmentCount: (todo.photos || []).length + (todo.driveFiles || []).length
+          });
         }
-        if (!$("todoDialog").open) {
-          // The user may close the shell while a slow first lock request is
-          // pending.  Release the late lock instead of leaving it behind.
-          await releaseTodoEditLockForDialog();
-          setTodoDialogOpening(false);
-          return false;
-        }
-        setTodoDialogOpening(false);
       } else {
         scheduleTodoFormPhotoPreviews();
       }
@@ -17375,6 +17396,37 @@
       return `/api/todos/${encodeURIComponent(todoId)}/lock`;
     }
 
+    function todoEditorDiagnosticMetric(value) {
+      const duration = Number(value);
+      return Number.isFinite(duration) && duration >= 0 && duration <= 120_000 ? Math.round(duration) : null;
+    }
+
+    function reportTodoEditorOpenTiming(todo, metrics = {}) {
+      if (!todo?.id || !state.token || state.offlineMode || !navigator.onLine) return;
+      const result = ["ready", "rejected", "closed", "error", "offline"].includes(String(metrics.result || ""))
+        ? String(metrics.result)
+        : "error";
+      // This intentionally contains only timing/count values and the opaque
+      // event identifier. The server hashes the identifier and never stores
+      // title, customer, description or attachment/file names.
+      const payload = {
+        todoId: String(todo.id),
+        result,
+        formPrepareMs: todoEditorDiagnosticMetric(metrics.formPrepareMs),
+        lockWaitMs: todoEditorDiagnosticMetric(metrics.lockWaitMs),
+        totalMs: todoEditorDiagnosticMetric(metrics.totalMs),
+        attachmentCount: Math.max(0, Math.min(40, Math.round(Number(metrics.attachmentCount) || 0)))
+      };
+      void api("/api/todo-editor-diagnostics", {
+        method: "POST",
+        body: JSON.stringify(payload),
+        recoverSession: false,
+        requestTimeoutMs: 2_500
+      }).catch(() => {
+        // Diagnostics are best-effort and must never affect ordinary editing.
+      });
+    }
+
     function clearTodoEditLockState() {
       if (state.todoLockHeartbeat) clearInterval(state.todoLockHeartbeat);
       state.todoLockHeartbeat = null;
@@ -17862,6 +17914,13 @@
       return days ? days + ' d ' + hours + ' h' : hours + ' h';
     }
 
+    function formatServerDuration(value) {
+      const milliseconds = Number(value);
+      if (!Number.isFinite(milliseconds)) return '-';
+      if (milliseconds < 1_000) return Math.round(milliseconds) + ' ms';
+      return (milliseconds / 1_000).toLocaleString('sl-SI', { maximumFractionDigits: 1 }) + ' s';
+    }
+
     function renderServerStatus() {
       const dialog = $('serverStatusDialog');
       const values = $('serverStatusValues');
@@ -17876,13 +17935,19 @@
       const disk = status.disk || {};
       const backup = status.lastBackup || null;
       const attachments = status.attachments || {};
+      const editorDiagnostics = status.todoEditorDiagnostics || {};
+      const editorClient = editorDiagnostics.client || {};
+      const editorServer = editorDiagnostics.server || {};
       const cpuText = 'CPU <b>' + reportNumber(cpu.loadPercent, 0) + ' %</b> <small>(' + reportNumber(cpu.load1, 2) + ' / ' + Number(cpu.cores || 1) + ')</small>';
       const ramText = 'RAM <b>' + reportNumber(ram.usedPercent, 0) + ' %</b> <small>(' + formatServerBytes(ram.usedBytes) + ' / ' + formatServerBytes(ram.totalBytes) + ')</small>';
       const diskText = 'DISK <b>' + (disk.available ? reportNumber(disk.usedPercent, 0) + ' %' : '-') + '</b>' + (disk.available ? ' <small>(' + formatServerBytes(disk.freeBytes) + ' prosto)</small>' : '');
       const uptimeText = 'UPTIME <b>' + formatServerUptime(status.uptimeSeconds) + '</b>';
       const backupText = 'BACKUP <b>' + (backup ? formatServerBytes(backup.archiveBytes) : '-') + '</b>' + (backup?.finishedAt ? ' <small>(' + escapeHtml(formatDateTime(backup.finishedAt)) + ')</small>' : '');
       const attachmentsText = 'PRILOGE <b>' + formatServerBytes(attachments.totalBytes) + '</b> <small>(' + reportNumber(attachments.count, 0) + ')</small>';
-      values.innerHTML = [cpuText, ramText, diskText, uptimeText, backupText, attachmentsText].map((value) => '<span>' + value + '</span>').join('');
+      const editorText = editorDiagnostics.enabled
+        ? 'UREJANJE <b>' + (editorClient.samples ? (reportNumber(editorClient.samples, 0) + ' vzorcev · počasnih ' + reportNumber(editorClient.slowSamples, 0)) : 'čaka na prvi poskus') + '</b> <small>UI p95 ' + formatServerDuration(editorClient.formPrepare?.p95Ms) + '; zaklep p95 ' + formatServerDuration(editorClient.lockWait?.p95Ms) + '; strežnik p95 ' + formatServerDuration(editorServer.total?.p95Ms) + '</small>'
+        : '';
+      values.innerHTML = [cpuText, ramText, diskText, uptimeText, backupText, attachmentsText, editorText].filter(Boolean).map((value) => '<span>' + value + '</span>').join('');
     }
 
     async function refreshServerStatus() {

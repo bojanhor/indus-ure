@@ -485,6 +485,7 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
     const page = await context.newPage();
     const title = "PW takojšnje odpiranje";
     let releaseLock = null;
+    let editorTiming = null;
     const allowLock = new Promise((resolve) => { releaseLock = resolve; });
     try {
       await localLogin(page, "ibro");
@@ -498,6 +499,10 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
         if (request.method() === "POST") await allowLock;
         await route.continue();
       });
+      await page.route("**/api/todo-editor-diagnostics", async (route, request) => {
+        editorTiming = JSON.parse(request.postData() || "{}");
+        await route.continue();
+      });
       const card = page.locator(".todo-item", { hasText: title }).first();
       await card.locator(".edit-todo").click();
       await expect(page.locator("#todoDialog")).toBeVisible();
@@ -507,7 +512,12 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
       releaseLock();
       await expect(page.locator("#todoFormOpeningStatus")).toBeHidden();
       await expect(page.locator("#saveTodoDialog")).toBeEnabled();
+      await expect.poll(() => editorTiming?.result).toBe("ready");
+      expect(editorTiming).toMatchObject({ todoId: expect.any(String), attachmentCount: 0 });
+      expect(editorTiming).not.toHaveProperty("title");
+      expect(editorTiming).not.toHaveProperty("client");
       await page.unroute("**/api/todos/*/lock");
+      await page.unroute("**/api/todo-editor-diagnostics");
     } finally {
       releaseLock?.();
       await context.close();

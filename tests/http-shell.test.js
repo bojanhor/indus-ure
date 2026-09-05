@@ -615,6 +615,31 @@ test("lokalna testna instanca omogoča ločeno prijavo samo v testnem načinu", 
     });
     assert.equal(focusedLock.status, 200, focusedLock.body);
     assert.match(JSON.parse(focusedLock.body).lockToken || "", /^[a-f0-9]+$/);
+    assert.match(focusedLock.headers["server-timing"] || "", /auth;dur=.*lookup;dur=.*total;dur=/);
+
+    const editorDiagnostic = await request(port, "/api/todo-editor-diagnostics", {
+      method: "POST",
+      headers: bossTodoHeaders,
+      body: JSON.stringify({
+        todoId: createdTodo.id,
+        result: "ready",
+        formPrepareMs: 38,
+        lockWaitMs: 1240,
+        totalMs: 1281,
+        attachmentCount: 2,
+        // Sensitive/free-text fields must be ignored even if an old client
+        // ever accidentally includes them.
+        title: "Ne sme v diagnostiko",
+        notes: "Ne sme v diagnostiko"
+      })
+    });
+    assert.equal(editorDiagnostic.status, 200, editorDiagnostic.body);
+    const editorDiagnostics = await request(port, "/api/todo-editor-diagnostics", { headers: { Cookie: cookie } });
+    assert.equal(editorDiagnostics.status, 200, editorDiagnostics.body);
+    const editorDiagnosticsData = JSON.parse(editorDiagnostics.body).diagnostics;
+    assert.ok(editorDiagnosticsData.client.samples >= 1);
+    assert.ok(editorDiagnosticsData.client.lockWait.p95Ms >= 1240);
+    assert.doesNotMatch(editorDiagnostics.body, /Ne sme v diagnostiko/);
 
     const noAssignee = await request(port, "/api/todos", {
       method: "POST",
@@ -774,13 +799,19 @@ test("e-poštna povezava odpre ciljno opravilo pred celotnim nalaganjem", async 
   assert.match(server, /function acquireTodoEditLockGroup\(todoId, assignmentIds, user, lockToken = "", now = Date\.now\(\)\) \{/);
   assert.match(server, /function releaseTodoEditLockGroup\(todoId, assignmentIds, user, lockToken = "", now = Date\.now\(\)\) \{/);
   assert.match(server, /const todoEditLockRequest = .*lock.*\.test\(req\.url\);/);
+  assert.match(server, /const todoEditorDiagnosticRequest = .*todo-editor-diagnostics.*\.test\(req\.url\);/);
   assert.match(server, /const todoSharePdfTicketRequest = .*share-pdf-ticket.*\.test\(req\.url\);/);
-  assert.match(server, /if \(streamedMediaUpload \|\| todoEditLockRequest \|\| todoSharePdfTicketRequest\) \{\s*handleApi\(req, res\)/);
+  assert.match(server, /if \(streamedMediaUpload \|\| todoEditLockRequest \|\| todoEditorDiagnosticRequest \|\| todoSharePdfTicketRequest\) \{\s*handleApi\(req, res\)/);
+  assert.match(server, /TODO_EDITOR_DIAGNOSTICS_RETENTION_MS = 24 \* 60 \* 60 \* 1000/);
+  assert.match(server, /function todoEditorDiagnosticSummary\(\)/);
+  assert.match(server, /Server-Timing/);
   assert.match(store, /async focusedTodo\(id, \{ includeAttachments = true \} = \{\}\) \{/);
   assert.match(store, /async focusedTodoForLock\(id\) \{\s*return this\.focusedTodo\(id, \{ includeAttachments: false \}\);\s*\}/);
   assert.match(store, /async completionRequestGroup\(requestedAssignmentId, tokenHash\) \{/);
   assert.match(html, /function hasTodoLink\(\) \{/);
   assert.match(html, /async function openTodoFromLink\(\{ render = true \} = \{\}\)/);
+  assert.match(html, /function reportTodoEditorOpenTiming\(todo, metrics = \{\}\)/);
+  assert.match(html, /\/api\/todo-editor-diagnostics/);
   const bootSource = html.slice(html.indexOf("async function boot()"), html.indexOf("async function reconnectAfterOffline()"));
   assert.match(bootSource, /const bootstrapPromise = api\("\/api\/bootstrap\?initial=1", \{ recoverSession: false \}\);[\s\S]*?const me = await api\("\/api\/me", \{ recoverSession: false \}\);[\s\S]*?applyLightweightSession\(me, \[me\.user\]\.filter\(Boolean\)\);[\s\S]*?const snapshot = await bootstrapPromise;[\s\S]*?applyBootstrapSnapshot\(snapshot\);[\s\S]*?refreshBootstrapAfterTodoLink\(\{ defer: true \}\);[\s\S]*?await openTodoFromLink\(\);/);
   assert.doesNotMatch(bootSource, /await loadAll\(\);/);

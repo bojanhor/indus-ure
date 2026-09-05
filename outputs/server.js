@@ -123,6 +123,14 @@ const WORKER_DIGEST_RUN_RETENTION_MS = 400 * 24 * 60 * 60 * 1000;
 const LATE_TIME_ENTRY_REPORT_RETENTION_MS = 400 * 24 * 60 * 60 * 1000;
 const LATE_TIME_ENTRY_REPORT_SENDING_TIMEOUT_MS = 30 * 60 * 1000;
 const MAX_LATE_TIME_ENTRY_REPORTS = 10_000;
+// Temporary, privacy-minimised instrumentation for the slow event-editor
+// investigation. The samples remain only in process memory, automatically
+// expire after one day and never retain event titles, notes or attachment
+// names. Remove this block once the production cause has been confirmed.
+const TODO_EDITOR_DIAGNOSTICS_RETENTION_MS = 24 * 60 * 60 * 1000;
+const TODO_EDITOR_DIAGNOSTICS_MAX_SAMPLES = 600;
+const TODO_EDITOR_DIAGNOSTIC_MAX_DURATION_MS = 120_000;
+const TODO_EDITOR_DIAGNOSTIC_SLOW_MS = 1_000;
 let pgPool = null;
 let pgStore = null;
 let pgReady = null;
@@ -139,6 +147,7 @@ const testLoginFailures = new Map();
 const auditLogCooldowns = new Map();
 const clientReportDownloadTickets = new Map();
 const todoSharePdfDownloadTickets = new Map();
+const todoEditorDiagnostics = [];
 let archiveRetentionCleanupLastAt = 0;
 let archiveRetentionCleanupPromise = null;
 let lateTimeEntryReportDeliveryScheduled = false;
@@ -1446,6 +1455,127 @@ function auditRequestSource(req) {
   // HMAC keeps the same source correlatable for incident response while making
   // the database value unusable as a raw IP address or a reversible hash.
   return `source-${crypto.createHmac("sha256", AUDIT_LOG_HMAC_KEY).update(source).digest("hex").slice(0, 16)}`;
+}
+
+function todoEditorDiagnosticDuration(value) {
+  const duration = Number(value);
+  return Number.isFinite(duration) && duration >= 0 && duration <= TODO_EDITOR_DIAGNOSTIC_MAX_DURATION_MS
+    ? Math.round(duration)
+    : null;
+}
+
+function todoEditorDiagnosticTodoKey(todoId) {
+  const source = String(todoId || "").trim();
+  if (!source) return "";
+  // A stable opaque key lets us correlate a client sample with a lock request
+  // without placing the event ID, title or customer name in diagnostics.
+  return crypto.createHmac("sha256", AUDIT_LOG_HMAC_KEY)
+    .update(`todo-editor:${source}`)
+    .digest("hex")
+    .slice(0, 16);
+}
+
+function pruneTodoEditorDiagnostics(now = Date.now()) {
+  const cutoff = now - TODO_EDITOR_DIAGNOSTICS_RETENTION_MS;
+  while (todoEditorDiagnostics.length && Number(todoEditorDiagnostics[0].recordedAtMs || 0) < cutoff) todoEditorDiagnostics.shift();
+  if (todoEditorDiagnostics.length > TODO_EDITOR_DIAGNOSTICS_MAX_SAMPLES) {
+    todoEditorDiagnostics.splice(0, todoEditorDiagnostics.length - TODO_EDITOR_DIAGNOSTICS_MAX_SAMPLES);
+  }
+}
+
+function recordTodoEditorDiagnostic(sample = {}) {
+  const now = Date.now();
+  const kind = sample.kind === "client-open" ? "client-open" : sample.kind === "server-lock" ? "server-lock" : "";
+  if (!kind) return;
+  const result = ["ready", "rejected", "closed", "error", "offline", "not-found", "not-editable", "locked", "trashed"]
+    .includes(String(sample.result || "")) ? String(sample.result) : "error";
+  const normalized = {
+    kind,
+    operation: sample.operation === "renew" ? "renew" : "open",
+    result,
+    recordedAt: new Date(now).toISOString(),
+    recordedAtMs: now,
+    todoKey: todoEditorDiagnosticTodoKey(sample.todoId),
+    formPrepareMs: todoEditorDiagnosticDuration(sample.formPrepareMs),
+    lockWaitMs: todoEditorDiagnosticDuration(sample.lockWaitMs),
+    totalMs: todoEditorDiagnosticDuration(sample.totalMs),
+    authMs: todoEditorDiagnosticDuration(sample.authMs),
+    bodyMs: todoEditorDiagnosticDuration(sample.bodyMs),
+    lookupMs: todoEditorDiagnosticDuration(sample.lookupMs),
+    lockMs: todoEditorDiagnosticDuration(sample.lockMs),
+    attachmentCount: Math.max(0, Math.min(40, Math.round(Number(sample.attachmentCount) || 0))),
+    assignmentCount: Math.max(0, Math.min(40, Math.round(Number(sample.assignmentCount) || 0)))
+  };
+  todoEditorDiagnostics.push(normalized);
+  pruneTodoEditorDiagnostics(now);
+  if (Number(normalized.totalMs || 0) >= TODO_EDITOR_DIAGNOSTIC_SLOW_MS) {
+    const phases = kind === "client-open"
+      ? `priprava=${normalized.formPrepareMs ?? "-"}ms zaklep=${normalized.lockWaitMs ?? "-"}ms`
+      : `prijava=${normalized.authMs ?? "-"}ms telo=${normalized.bodyMs ?? "-"}ms poizvedba=${normalized.lookupMs ?? "-"}ms zaklep=${normalized.lockMs ?? "-"}ms`;
+    console.warn(`[todo-editor-diagnostic] ${kind} rezultat=${result} skupno=${normalized.totalMs}ms ${phases}`);
+  }
+}
+
+function todoEditorDiagnosticPercentile(values, percentile) {
+  const sorted = values.filter(Number.isFinite).sort((left, right) => left - right);
+  if (!sorted.length) return null;
+  const index = Math.min(sorted.length - 1, Math.max(0, Math.ceil(sorted.length * percentile) - 1));
+  return sorted[index];
+}
+
+function todoEditorDiagnosticTimingSummary(samples, field) {
+  const values = samples.map((sample) => Number(sample[field])).filter(Number.isFinite);
+  return {
+    count: values.length,
+    p50Ms: todoEditorDiagnosticPercentile(values, 0.5),
+    p95Ms: todoEditorDiagnosticPercentile(values, 0.95),
+    maxMs: values.length ? Math.max(...values) : null
+  };
+}
+
+function todoEditorDiagnosticSummary() {
+  pruneTodoEditorDiagnostics();
+  const client = todoEditorDiagnostics.filter((sample) => sample.kind === "client-open");
+  const server = todoEditorDiagnostics.filter((sample) => sample.kind === "server-lock" && sample.operation === "open" && sample.result === "ready");
+  return {
+    enabled: true,
+    retentionHours: Math.round(TODO_EDITOR_DIAGNOSTICS_RETENTION_MS / 3_600_000),
+    latestAt: todoEditorDiagnostics.at(-1)?.recordedAt || "",
+    client: {
+      samples: client.length,
+      slowSamples: client.filter((sample) => Number(sample.totalMs || 0) >= TODO_EDITOR_DIAGNOSTIC_SLOW_MS).length,
+      formPrepare: todoEditorDiagnosticTimingSummary(client, "formPrepareMs"),
+      lockWait: todoEditorDiagnosticTimingSummary(client, "lockWaitMs"),
+      total: todoEditorDiagnosticTimingSummary(client, "totalMs")
+    },
+    server: {
+      samples: server.length,
+      total: todoEditorDiagnosticTimingSummary(server, "totalMs"),
+      auth: todoEditorDiagnosticTimingSummary(server, "authMs"),
+      lookup: todoEditorDiagnosticTimingSummary(server, "lookupMs")
+    }
+  };
+}
+
+function todoEditorServerTimingHeader(sample) {
+  const fields = [["auth", sample.authMs], ["body", sample.bodyMs], ["lookup", sample.lookupMs], ["lock", sample.lockMs], ["total", sample.totalMs]];
+  return fields
+    .filter(([, value]) => Number.isFinite(value))
+    .map(([name, value]) => `${name};dur=${Math.max(0, Number(value)).toFixed(1)}`)
+    .join(", ");
+}
+
+function todoEditorElapsedMs(startedAt) {
+  return Number(process.hrtime.bigint() - startedAt) / 1_000_000;
+}
+
+function sendTodoEditorLockResponse(res, status, data, sample) {
+  const normalized = { ...sample, kind: "server-lock", totalMs: todoEditorDiagnosticDuration(sample.totalMs) };
+  // Heartbeats happen every 20 seconds while one form is open. They are not
+  // part of the opening problem and would otherwise crowd out actual clicks.
+  if (normalized.operation === "open") recordTodoEditorDiagnostic(normalized);
+  const serverTiming = todoEditorServerTimingHeader(normalized);
+  sendJson(res, status, data, serverTiming ? { "Server-Timing": serverTiming } : {});
 }
 
 function auditRoute(pathname) {
@@ -2891,10 +3021,11 @@ function securityHeaders(extra = {}, nonce = "") {
   };
 }
 
-function sendJson(res, status, data) {
+function sendJson(res, status, data, extraHeaders = {}) {
   res.writeHead(status, securityHeaders({
     "Content-Type": "application/json; charset=utf-8",
-    "Cache-Control": "no-store"
+    "Cache-Control": "no-store",
+    ...extraHeaders
   }));
   res.end(JSON.stringify(data));
 }
@@ -7770,7 +7901,8 @@ async function serverRuntimeStatus() {
     attachments,
     uptimeSeconds: Math.max(0, Number(os.uptime() || 0)),
     appUptimeSeconds: Math.max(0, Number(process.uptime() || 0)),
-    lastBackup
+    lastBackup,
+    todoEditorDiagnostics: todoEditorDiagnosticSummary()
   };
 }
 
@@ -8088,6 +8220,41 @@ async function handleApi(req, res) {
     if (url.pathname === "/api/health" && req.method === "GET") {
       if (DATABASE_URL) await getPgPool().query("select 1");
       sendJson(res, 200, { ok: true });
+      return;
+    }
+
+    if (url.pathname === "/api/todo-editor-diagnostics") {
+      if (req.method === "POST") {
+        // The browser sends only rounded durations and counts; it never sends
+        // an event title, notes, customer name, attachment name or file data.
+        // Use the lightweight session lookup so collecting diagnostics cannot
+        // itself make an editor opening wait for the full application state.
+        const user = await requireUserForLightweightSession(req, res);
+        if (!user) return;
+        const body = await readBody(req);
+        recordTodoEditorDiagnostic({
+          kind: "client-open",
+          todoId: body.todoId,
+          result: body.result,
+          formPrepareMs: body.formPrepareMs,
+          lockWaitMs: body.lockWaitMs,
+          totalMs: body.totalMs,
+          attachmentCount: body.attachmentCount
+        });
+        sendJson(res, 200, { ok: true });
+        return;
+      }
+      if (req.method === "GET") {
+        const user = await requireUserForLightweightSession(req, res);
+        if (!user) return;
+        if (user.role !== "boss") {
+          sendJson(res, 403, { error: "Diagnostiko urejevalnika vidi samo šef." });
+          return;
+        }
+        sendJson(res, 200, { diagnostics: todoEditorDiagnosticSummary() });
+        return;
+      }
+      sendJson(res, 405, { error: "Ta metoda ni podprta." });
       return;
     }
 
@@ -10451,51 +10618,79 @@ async function handleApi(req, res) {
     const todoLockMatch = url.pathname.match(/^\/api\/todos\/([^/]+)\/lock$/);
     if (todoLockMatch && req.method === "POST") {
       const id = decodeURIComponent(todoLockMatch[1]);
+      const requestStartedAt = process.hrtime.bigint();
       const user = await requireUserForFocusedTodo(req, res);
       if (!user) return;
+      const authMs = todoEditorElapsedMs(requestStartedAt);
+      const bodyStartedAt = process.hrtime.bigint();
       const body = await readBody(req);
+      const bodyMs = todoEditorElapsedMs(bodyStartedAt);
+      const operation = String(body.lockToken || "").trim() ? "renew" : "open";
+      const reply = (status, data, result, { lookupMs = 0, lockMs = 0, assignmentCount = 0 } = {}) => {
+        sendTodoEditorLockResponse(res, status, data, {
+          todoId: id,
+          operation,
+          result,
+          authMs,
+          bodyMs,
+          lookupMs,
+          lockMs,
+          assignmentCount,
+          totalMs: todoEditorElapsedMs(requestStartedAt)
+        });
+      };
       if (DATABASE_URL) {
+        const lookupStartedAt = process.hrtime.bigint();
         const focused = await getPgStore().focusedTodoForLock(id);
+        const lookupMs = todoEditorElapsedMs(lookupStartedAt);
         const todo = focused?.todo;
         if (!todo) {
-          sendJson(res, 404, { code: "todo_not_found", error: "Opravilo ne obstaja več." });
+          reply(404, { code: "todo_not_found", error: "Opravilo ne obstaja več." }, "not-found", { lookupMs });
           return;
         }
         if (!canManageTodo(user, todo)) {
-          sendJson(res, 403, { code: "todo_not_editable", error: "Tega opravila ne moreš urejati." });
+          reply(403, { code: "todo_not_editable", error: "Tega opravila ne moreš urejati." }, "not-editable", { lookupMs, assignmentCount: focused.assignmentIds.length });
           return;
         }
         if (isTrashedTodo(todo)) {
-          sendJson(res, 409, { error: "Opravilo je v Izbrisano. Najprej ga obnovi." });
+          reply(409, { error: "Opravilo je v Izbrisano. Najprej ga obnovi." }, "trashed", { lookupMs, assignmentCount: focused.assignmentIds.length });
           return;
         }
+        const lockStartedAt = process.hrtime.bigint();
         const result = acquireTodoEditLockGroup(id, focused.assignmentIds, user, body.lockToken);
+        const lockMs = todoEditorElapsedMs(lockStartedAt);
         if (!result.ok) {
-          sendJson(res, 409, { error: `Opravilo trenutno ureja ${result.lock.lockedByName || result.lock.lockedById}.`, lock: result.lock });
+          reply(409, { error: `Opravilo trenutno ureja ${result.lock.lockedByName || result.lock.lockedById}.`, lock: result.lock }, "locked", { lookupMs, lockMs, assignmentCount: focused.assignmentIds.length });
           return;
         }
-        sendJson(res, 200, { lockToken: result.token, lock: result.lock });
+        reply(200, { lockToken: result.token, lock: result.lock }, "ready", { lookupMs, lockMs, assignmentCount: focused.assignmentIds.length });
         return;
       }
+      const lookupStartedAt = process.hrtime.bigint();
       const db = req.indusDb || await readDbAsync();
       const todo = db.todos.find((item) => item.id === id);
+      const lookupMs = todoEditorElapsedMs(lookupStartedAt);
       if (!todo) {
-        sendJson(res, 404, { code: "todo_not_found", error: "Opravilo ne obstaja več." });
+        reply(404, { code: "todo_not_found", error: "Opravilo ne obstaja več." }, "not-found", { lookupMs });
         return;
       }
       if (!canManageTodo(user, todo)) {
-        sendJson(res, 403, { code: "todo_not_editable", error: "Tega opravila ne moreš urejati." });
+        reply(403, { code: "todo_not_editable", error: "Tega opravila ne moreš urejati." }, "not-editable", { lookupMs, assignmentCount: todoAssignmentItems(db, todo).length });
         return;
       }
       if (isTrashedTodo(todo)) {
-        sendJson(res, 409, { error: "Opravilo je v Izbrisano. Najprej ga obnovi." });
-        return;
-      }      const result = acquireTodoAssignmentEditLock(db, todo, user, body.lockToken);
-      if (!result.ok) {
-        sendJson(res, 409, { error: `Opravilo trenutno ureja ${result.lock.lockedByName || result.lock.lockedById}.`, lock: result.lock });
+        reply(409, { error: "Opravilo je v Izbrisano. Najprej ga obnovi." }, "trashed", { lookupMs, assignmentCount: todoAssignmentItems(db, todo).length });
         return;
       }
-      sendJson(res, 200, { lockToken: result.token, lock: result.lock });
+      const lockStartedAt = process.hrtime.bigint();
+      const result = acquireTodoAssignmentEditLock(db, todo, user, body.lockToken);
+      const lockMs = todoEditorElapsedMs(lockStartedAt);
+      const assignmentCount = todoAssignmentItems(db, todo).length;
+      if (!result.ok) {
+        reply(409, { error: `Opravilo trenutno ureja ${result.lock.lockedByName || result.lock.lockedById}.`, lock: result.lock }, "locked", { lookupMs, lockMs, assignmentCount });
+        return;
+      }
+      reply(200, { lockToken: result.token, lock: result.lock }, "ready", { lookupMs, lockMs, assignmentCount });
       return;
     }
 
@@ -11588,11 +11783,14 @@ async function start() {
       // not an undoable business change and must never wait behind a slow
       // save, image processing, backup or another serialized mutation.
       const todoEditLockRequest = /^\/api\/todos\/[^/?]+\/lock(?:[/?]|$)/.test(req.url);
+      // Editor timing reports are explicitly best-effort and must never wait
+      // behind a save or another mutation. They carry no business data.
+      const todoEditorDiagnosticRequest = /^\/api\/todo-editor-diagnostics(?:[/?]|$)/.test(req.url);
       // This endpoint only creates a short-lived session-bound download ticket;
       // it does not mutate the database and must not wait behind an unrelated
       // long-running save before the user can share an event.
       const todoSharePdfTicketRequest = /^\/api\/todos\/[^/?]+\/share-pdf-ticket(?:[/?]|$)/.test(req.url);
-      if (streamedMediaUpload || todoEditLockRequest || todoSharePdfTicketRequest) {
+      if (streamedMediaUpload || todoEditLockRequest || todoEditorDiagnosticRequest || todoSharePdfTicketRequest) {
         handleApi(req, res).catch((error) => handleUnexpectedRequestError(error, res));
       } else if (req.method !== "GET" || req.url.startsWith("/api/google/callback")) {
         runSerializedMutation(req, res);
