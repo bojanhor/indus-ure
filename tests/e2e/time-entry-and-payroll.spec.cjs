@@ -127,6 +127,8 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
         .toEqual({ width: 2, height: 3 });
 
       await page.locator("#photoEditorRotateRight").click();
+      await expect(page.locator("#photoEditorDialog .modal-global-notice"))
+        .toContainText("Slika je zasukana desno. Za shranitev klikni ✓.");
       await expect.poll(() => page.locator("#photoEditorCanvas").evaluate((canvas) => {
         const pixel = canvas.getContext("2d").getImageData(2, 0, 1, 1).data;
         return { width: canvas.width, height: canvas.height, redAtTopRight: pixel[0] > 240 && pixel[1] < 20 && pixel[2] < 20 };

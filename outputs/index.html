@@ -14086,6 +14086,7 @@
       editor.toolReturnMode = "draw";
       setPhotoEditorTextSelection();
       redrawPhotoEditor();
+      showNotice(`Slika je zasukana ${turn < 0 ? "levo" : "desno"}. Za shranitev klikni ✓.`);
       requestAnimationFrame(fitPhotoEditorZoom);
     }
 
