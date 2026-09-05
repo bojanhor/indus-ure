@@ -42,6 +42,10 @@ test("front-end naročila in foto urejevalnik ohranita dogovorjeni mobilni prika
   assert.match(html, /ordered-confirmed/);
   assert.match(html, /photo-editor-main-tools/);
   assert.match(html, /#photoEditorDialog \{ inset: 0; width: 100vw;/);
+  assert.match(html, /id="photoEditorRotateLeft"/);
+  assert.match(html, /id="photoEditorRotateRight"/);
+  assert.match(html, /function rotatePhotoEditor\(direction\) \{/);
+  assert.match(html, /photoEditorHistoryPush\(\{ type: "rotate", beforeImage \}\)/);
   assert.match(html, /function attachmentLabel\(photo\) \{[\s\S]*?return "Fotografija";/);
   assert.match(html, /\$\("photoEditorTitle"\)\.textContent = "Uredi fotografijo";/);
   assert.doesNotMatch(html, /\$\("photoEditorTitle"\)\.textContent = `Uredi:/);

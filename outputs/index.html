@@ -6420,6 +6420,8 @@
           <button class="photo-editor-tool is-active" id="photoEditorDraw" type="button" title="Riši" aria-label="Riši">&#9998;</button>
           <button class="photo-editor-tool" id="photoEditorPan" type="button" title="Premakni sliko" aria-label="Premakni sliko">&#9995;</button>
           <button class="photo-editor-tool" id="photoEditorCrop" type="button" title="Obreži sliko" aria-label="Obreži sliko">&#9986;</button>
+          <button class="photo-editor-tool" id="photoEditorRotateLeft" type="button" title="Zavrti sliko levo" aria-label="Zavrti sliko levo">&#8634;</button>
+          <button class="photo-editor-tool" id="photoEditorRotateRight" type="button" title="Zavrti sliko desno" aria-label="Zavrti sliko desno">&#8635;</button>
           <button class="photo-editor-tool" id="photoEditorAddText" type="button" title="Dodaj besedilo" aria-label="Dodaj besedilo">T</button>
           <button class="photo-editor-tool" id="photoEditorUndo" type="button" title="Razveljavi zadnje dejanje" aria-label="Razveljavi zadnje dejanje">&#8630;</button>
           <button class="photo-editor-tool danger" id="photoEditorClear" type="button" title="Počisti oznake" aria-label="Počisti oznake">&#9003;</button>
@@ -14042,6 +14044,51 @@
       requestAnimationFrame(fitPhotoEditorZoom);
     }
 
+    function rotatePhotoEditor(direction) {
+      const editor = state.photoEditor;
+      const canvas = $("photoEditorCanvas");
+      if (!editor) return;
+      if (photoEditorHasPendingOperation(editor)) {
+        showNotice("Najprej potrdi ali povrni trenutno spremembo slike.");
+        return;
+      }
+      // Rotation is deliberately a raster operation: the original image,
+      // annotations and captions turn together, so what the user sees is
+      // exactly what is subsequently saved as the attachment.
+      const turn = Number(direction) < 0 ? -1 : 1;
+      const returnMode = editor.mode === "pan" ? "pan" : "draw";
+      finishPhotoEditorStroke();
+      redrawPhotoEditor({ includeSelection: false });
+      const beforeImage = copyPhotoEditorCanvas(canvas);
+      const output = document.createElement("canvas");
+      output.width = beforeImage.height;
+      output.height = beforeImage.width;
+      const context = output.getContext("2d");
+      if (turn > 0) {
+        context.translate(output.width, 0);
+        context.rotate(Math.PI / 2);
+      } else {
+        context.translate(0, output.height);
+        context.rotate(-Math.PI / 2);
+      }
+      context.drawImage(beforeImage, 0, 0);
+      photoEditorHistoryPush({ type: "rotate", beforeImage });
+      canvas.width = output.width;
+      canvas.height = output.height;
+      editor.image = output;
+      editor.strokes = [];
+      editor.texts = [];
+      editor.selectedTextId = "";
+      editor.textDraftActive = false;
+      editor.cropRect = null;
+      editor.cropInteraction = null;
+      editor.mode = returnMode;
+      editor.toolReturnMode = "draw";
+      setPhotoEditorTextSelection();
+      redrawPhotoEditor();
+      requestAnimationFrame(fitPhotoEditorZoom);
+    }
+
     function undoPhotoEditorAction() {
       const editor = state.photoEditor;
       if (!editor) return;
@@ -14071,7 +14118,7 @@
         editor.texts = action.texts;
         setPhotoEditorTextSelection(action.selectedTextId);
       }
-      if (action.type === "crop") {
+      if (action.type === "crop" || action.type === "rotate") {
         const canvas = $("photoEditorCanvas");
         canvas.width = action.beforeImage.width;
         canvas.height = action.beforeImage.height;
@@ -19783,6 +19830,8 @@
       redrawPhotoEditor();
     });
     $("photoEditorCrop").addEventListener("click", enterPhotoEditorCropMode);
+    $("photoEditorRotateLeft").addEventListener("click", () => rotatePhotoEditor(-1));
+    $("photoEditorRotateRight").addEventListener("click", () => rotatePhotoEditor(1));
     $("photoEditorAddText").addEventListener("click", openPhotoEditorTextEntry);
     $("photoEditorConfirmPending").addEventListener("click", confirmPhotoEditorPendingOperation);
     $("photoEditorCancelPending").addEventListener("click", cancelPhotoEditorPendingOperation);

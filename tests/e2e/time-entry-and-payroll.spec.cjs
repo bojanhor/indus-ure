@@ -87,6 +87,52 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
     }
   });
 
+  test("urejevalnik fotografij zavrti sliko in jo varno vrne z razveljavitvijo", async ({ browser }) => {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    try {
+      await localLogin(page, "ibro");
+      await page.evaluate(() => {
+        const source = document.createElement("canvas");
+        source.width = 2;
+        source.height = 3;
+        const context = source.getContext("2d");
+        context.fillStyle = "#f00";
+        context.fillRect(0, 0, 1, 1);
+        context.fillStyle = "#0f0";
+        context.fillRect(1, 0, 1, 1);
+        context.fillStyle = "#00f";
+        context.fillRect(0, 1, 1, 1);
+        context.fillStyle = "#fff";
+        context.fillRect(1, 1, 1, 1);
+        context.fillStyle = "#000";
+        context.fillRect(0, 2, 1, 1);
+        context.fillStyle = "#ff0";
+        context.fillRect(1, 2, 1, 1);
+        window.openPhotoEditor({ id: "rotate-preview", data: source.toDataURL("image/png"), mimeType: "image/png" });
+      });
+      await expect(page.locator("#photoEditorDialog")).toBeVisible();
+      await expect(page.locator("#photoEditorRotateLeft")).toBeVisible();
+      await expect(page.locator("#photoEditorRotateRight")).toBeVisible();
+      await expect.poll(() => page.locator("#photoEditorCanvas").evaluate((canvas) => ({ width: canvas.width, height: canvas.height })))
+        .toEqual({ width: 2, height: 3 });
+
+      await page.locator("#photoEditorRotateRight").click();
+      await expect.poll(() => page.locator("#photoEditorCanvas").evaluate((canvas) => {
+        const pixel = canvas.getContext("2d").getImageData(2, 0, 1, 1).data;
+        return { width: canvas.width, height: canvas.height, redAtTopRight: pixel[0] > 240 && pixel[1] < 20 && pixel[2] < 20 };
+      })).toEqual({ width: 3, height: 2, redAtTopRight: true });
+
+      await page.locator("#photoEditorUndo").click();
+      await expect.poll(() => page.locator("#photoEditorCanvas").evaluate((canvas) => {
+        const pixel = canvas.getContext("2d").getImageData(0, 0, 1, 1).data;
+        return { width: canvas.width, height: canvas.height, redAtTopLeft: pixel[0] > 240 && pixel[1] < 20 && pixel[2] < 20 };
+      })).toEqual({ width: 2, height: 3, redAtTopLeft: true });
+    } finally {
+      await context.close();
+    }
+  });
+
   test("meni delavcev ostane pregleden na telefonu in namizju", async ({ browser }) => {
     for (const viewport of [
       { name: "phone", width: 390, height: 844 },
