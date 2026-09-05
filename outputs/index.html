@@ -14145,7 +14145,13 @@
       finishPhotoEditorStroke();
       redrawPhotoEditor({ includeSelection: false });
       const data = canvasAsLimitedJpegDataUrl($("photoEditorCanvas"));
-      const nextPhotos = state.todoDialogPhotos.map((photo) => photo.id === editor.photoId ? { ...photo, data } : photo);
+      const nextPhotos = state.todoDialogPhotos.map((photo) => photo.id === editor.photoId
+        // The old server thumbnail still points at the unedited attachment.
+        // Clear it while the form holds the new local JPEG, otherwise the
+        // photo list can appear unchanged even though the editor saved the
+        // rotated pixels correctly.
+        ? { ...photo, data, thumbnailData: "", thumbnailUrl: "" }
+        : photo);
       if (todoAttachmentsDataLength(nextPhotos) > 4_800_000) {
         redrawPhotoEditor();
         showNotice("Priloge so skupaj prevelike. Odstrani katero od njih.");

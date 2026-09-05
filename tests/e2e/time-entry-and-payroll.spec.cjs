@@ -109,7 +109,16 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
         context.fillRect(0, 2, 1, 1);
         context.fillStyle = "#ff0";
         context.fillRect(1, 2, 1, 1);
-        window.openPhotoEditor({ id: "rotate-preview", data: source.toDataURL("image/png"), mimeType: "image/png" });
+        const photo = {
+          id: "rotate-preview",
+          data: source.toDataURL("image/png"),
+          // Mimics a stored attachment: before this fix the old thumbnail
+          // continued to hide the rotated in-form preview after Save.
+          thumbnailUrl: source.toDataURL("image/png"),
+          mimeType: "image/png"
+        };
+        state.todoDialogPhotos = [photo];
+        window.openPhotoEditor(photo);
       });
       await expect(page.locator("#photoEditorDialog")).toBeVisible();
       await expect(page.locator("#photoEditorRotateLeft")).toBeVisible();
@@ -128,6 +137,14 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
         const pixel = canvas.getContext("2d").getImageData(0, 0, 1, 1).data;
         return { width: canvas.width, height: canvas.height, redAtTopLeft: pixel[0] > 240 && pixel[1] < 20 && pixel[2] < 20 };
       })).toEqual({ width: 2, height: 3, redAtTopLeft: true });
+
+      await page.locator("#photoEditorRotateRight").click();
+      await page.locator("#photoEditorSave").click();
+      await expect(page.locator("#photoEditorDialog")).toBeHidden();
+      await expect.poll(() => page.evaluate(() => ({
+        thumbnailUrl: state.todoDialogPhotos[0]?.thumbnailUrl || "",
+        hasLocalImage: /^data:image\/jpeg;base64,/.test(state.todoDialogPhotos[0]?.data || "")
+      }))).toEqual({ thumbnailUrl: "", hasLocalImage: true });
     } finally {
       await context.close();
     }
