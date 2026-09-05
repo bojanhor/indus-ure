@@ -794,7 +794,11 @@ test("e-poštna povezava odpre ciljno opravilo pred celotnim nalaganjem", async 
   assert.match(server, /function visibleTodoForUser\(db, user, id\) \{/);
   assert.match(server, /const todo = visibleTodoForUser\(db, user, id\);/);
   assert.match(server, /async function requireUserForFocusedTodo\(req, res\) \{/);
-  assert.match(server, /const focused = await getPgStore\(\)\.focusedTodoForLock\(id\);/);
+  assert.match(server, /function getFocusedPgPool\(\) \{/);
+  assert.match(server, /application_name: "indus-ure-focused-read"/);
+  assert.match(server, /max: 1,/);
+  assert.match(server, /getFocusedPgStore\(\)\.sessionWithRevision\(sessionTokenHash\(token\)\)/);
+  assert.match(server, /const focused = await getFocusedPgStore\(\)\.focusedTodoForLock\(id\);/);
   assert.match(server, /completionRequestGroup\(id, tokenHash\)/);
   assert.match(server, /function acquireTodoEditLockGroup\(todoId, assignmentIds, user, lockToken = "", now = Date\.now\(\)\) \{/);
   assert.match(server, /function releaseTodoEditLockGroup\(todoId, assignmentIds, user, lockToken = "", now = Date\.now\(\)\) \{/);

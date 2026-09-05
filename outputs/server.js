@@ -133,6 +133,13 @@ const TODO_EDITOR_DIAGNOSTIC_MAX_DURATION_MS = 120_000;
 const TODO_EDITOR_DIAGNOSTIC_SLOW_MS = 1_000;
 let pgPool = null;
 let pgStore = null;
+// A full database snapshot can legitimately occupy all three general read
+// connections for a moment.  Editing a task must never wait behind that
+// background work, so session checks and the two tiny lock lookups use one
+// separate, read-only-by-convention lane.  It adds at most one idle database
+// connection and does not participate in writes or full-state hydration.
+let pgFocusedPool = null;
+let pgFocusedStore = null;
 let pgReady = null;
 let auditLogStoreReady = null;
 let workerDigestStoreReady = null;
@@ -2759,6 +2766,25 @@ function getPgPool() {
 function getPgStore() {
   if (!pgStore) pgStore = new PostgresStore(getPgPool(), MEDIA_DIR);
   return pgStore;
+}
+
+function getFocusedPgPool() {
+  if (pgFocusedPool) return pgFocusedPool;
+  const { Pool } = require("pg");
+  const isLocal = /localhost|127\.0\.0\.1/.test(DATABASE_URL);
+  pgFocusedPool = new Pool({
+    connectionString: DATABASE_URL,
+    ssl: isLocal ? false : { rejectUnauthorized: false },
+    max: 1,
+    idleTimeoutMillis: 10_000,
+    application_name: "indus-ure-focused-read"
+  });
+  return pgFocusedPool;
+}
+
+function getFocusedPgStore() {
+  if (!pgFocusedStore) pgFocusedStore = new PostgresStore(getFocusedPgPool(), MEDIA_DIR);
+  return pgFocusedStore;
 }
 
 async function ensureAuditLogStore() {
@@ -6146,7 +6172,11 @@ async function requireUserForLightweightSession(req, res) {
   if (!DATABASE_URL) return requireUser(req, res);
   await ensurePostgresDb();
   const token = sessionTokenFromRequest(req);
-  const record = await getPgStore().sessionWithRevision(sessionTokenHash(token));
+  // Keep login/session verification independent of a simultaneous full
+  // application snapshot. A task editor calls this before it can become
+  // writable, so waiting for historic task hydration here feels like a frozen
+  // modal even though the lock itself is free.
+  const record = await getFocusedPgStore().sessionWithRevision(sessionTokenHash(token));
   if (!record) {
     sendJson(res, 401, { error: "Prijava je potekla. Prijavi se še enkrat." });
     return null;
@@ -10641,7 +10671,7 @@ async function handleApi(req, res) {
       };
       if (DATABASE_URL) {
         const lookupStartedAt = process.hrtime.bigint();
-        const focused = await getPgStore().focusedTodoForLock(id);
+        const focused = await getFocusedPgStore().focusedTodoForLock(id);
         const lookupMs = todoEditorElapsedMs(lookupStartedAt);
         const todo = focused?.todo;
         if (!todo) {
@@ -10702,7 +10732,7 @@ async function handleApi(req, res) {
       const id = decodeURIComponent(todoLockMatch[1]);
       const body = await readBody(req);
       if (DATABASE_URL) {
-        const focused = await getPgStore().focusedTodoForLock(id);
+        const focused = await getFocusedPgStore().focusedTodoForLock(id);
         if (focused?.todo && canManageTodo(user, focused.todo)) {
           releaseTodoEditLockGroup(id, focused.assignmentIds, user, body.lockToken);
         } else {
