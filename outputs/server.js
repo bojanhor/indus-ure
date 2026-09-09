@@ -1114,6 +1114,7 @@ const TODO_COMPLETION_REQUEST_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 const entryEditLocks = new Map();
 const TODO_EDIT_LOCK_TTL_MS = 90_000;
 const todoEditLocks = new Map();
+const todoHandovers = new (require("./edit-handover").EditHandover)();
 
 function allowedGoogleUsers(db) {
   return Object.values(db.users || {}).filter((user) => user.email && user.active !== false);
@@ -7288,7 +7289,10 @@ async function createTodoJpegDerivative(inputPath, outputPath, maxSide, quality)
 async function moveAttachmentFile(tempPath, targetPath) {
   await fsp.mkdir(path.dirname(targetPath), { recursive: true, mode: 0o700 });
   try {
-    await fsp.rename(tempPath, targetPath);
+    // rename() overwrites an existing target on Linux. Never claim an
+    // existing content-addressed object as a newly created upload.
+    await fsp.copyFile(tempPath, targetPath, fs.constants.COPYFILE_EXCL);
+    await fsp.rm(tempPath, { force: true });
     return true;
   } catch (error) {
     if (error.code !== "EEXIST") throw error;
@@ -7388,14 +7392,7 @@ async function receiveLocalTodoVideo(input = {}) {
     const storageKey = path.posix.join("objects", `${attachmentId}${videoStorageExtension(mimeType, input.name)}`);
     const targetPath = path.join(MEDIA_DIR, ...storageKey.split("/"));
     await fsp.mkdir(path.dirname(targetPath), { recursive: true, mode: 0o700 });
-    let createdFile = false;
-    try {
-      await fsp.rename(temporaryPath, targetPath);
-      createdFile = true;
-    } catch (error) {
-      if (error.code !== "EEXIST") throw error;
-      await fsp.rm(temporaryPath, { force: true });
-    }
+    const createdFile = await moveAttachmentFile(temporaryPath, targetPath);
     return { attachmentId, mimeType, byteSize, storageKey, targetPath, createdFile };
   } catch (error) {
     await fsp.rm(temporaryPath, { force: true }).catch(() => {});
@@ -8202,7 +8199,8 @@ async function handleApi(req, res) {
         return;
       }
       delete pending[attachmentId];
-      delete db.attachments[attachmentId];
+      // Cancel staging, not a shared attachment already used by an event.
+      pruneUnusedTodoAttachments(db);
       await writeDbAsync(db);
       sendJson(res, 200, { ok: true });
       return;
@@ -10645,6 +10643,29 @@ async function handleApi(req, res) {
       return;
     }
 
+    const handoverMatch = url.pathname.match(/^\/api\/todos\/([^/]+)\/lock\/handover$/);
+    if (handoverMatch && req.method === "POST") {
+      const user = await requireUserForFocusedTodo(req, res);
+      if (!user) return;
+      const id = decodeURIComponent(handoverMatch[1]);
+      const body = await readBody(req);
+      const focused = DATABASE_URL ? await getFocusedPgStore().focusedTodoForLock(id) : null;
+      const db = DATABASE_URL ? null : (req.indusDb || await readDbAsync());
+      const todo = DATABASE_URL ? focused?.todo : db.todos.find((item) => item.id === id);
+      if (!todo || !canManageTodo(user, todo) || isTrashedTodo(todo)) {
+        sendJson(res, 404, { error: "Opravilo ni na voljo." });
+        return;
+      }
+      const ids = DATABASE_URL ? focused.assignmentIds : todoAssignmentItems(db, todo).map((item) => item.id);
+      const lock = ids.map((item) => activeTodoEditLock(item)).find(Boolean);
+      const result = body.action === "request"
+        ? todoHandovers.request(id, lock, user, String(body.requestId || ""))
+        : body.action === "cancel" ? todoHandovers.cancel(id, user, String(body.requestId || ""))
+        : todoHandovers.owner(lock, user, String(body.lockToken || ""), body.action, body.requestId);
+      sendJson(res, 200, result);
+      return;
+    }
+
     const todoLockMatch = url.pathname.match(/^\/api\/todos\/([^/]+)\/lock$/);
     if (todoLockMatch && req.method === "POST") {
       const id = decodeURIComponent(todoLockMatch[1]);
@@ -11857,6 +11878,8 @@ if (require.main === module) {
 }
 
 module.exports = {
+  moveAttachmentFile,
+  pruneUnusedTodoAttachments,
   ENTRY_EDIT_LOCK_TTL_MS,
   TODO_EDIT_LOCK_TTL_MS,
   DELETED_TODO_RETENTION_DAYS,

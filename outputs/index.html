@@ -1702,6 +1702,21 @@
       border-left: 4px solid #2f9a57;
       background: linear-gradient(90deg, #eef9f0 0, #fff 42%);
     }
+
+    .todo-reorder-origin {
+      height: 16px;
+      margin: 5px 12px;
+      border-top: 2px dashed #88aaa5;
+      background: linear-gradient(90deg, transparent, #dcece8, transparent);
+      border-radius: 4px;
+    }
+    #todoHandoverDialog {
+      padding: 20px;
+      width: min(640px, calc(100vw - 32px));
+      max-height: calc(100dvh - 32px);
+    }
+    #todoHandoverDialog .actions { display: flex; gap: 12px; justify-content: space-between; flex-wrap: wrap; }
+    #todoHandoverDialog button { min-height: 44px; }
     .todo-change-chip { background: #2f9a57; color: #fff; white-space: nowrap; }
     button.todo-change-chip {
       border: 1px solid #227442;
@@ -5976,6 +5991,14 @@
     </form>
   </dialog>
 
+  <dialog id="todoHandoverDialog" aria-labelledby="todoHandoverTitle">
+    <h2 id="todoHandoverTitle">Želja za prevzem urejanja</h2>
+    <p id="todoHandoverMessage" role="status" aria-live="polite"></p>
+    <div class="actions">
+      <button type="button" class="primary" id="todoHandoverSave">Shrani in zapri</button>
+      <button type="button" class="secondary" id="todoHandoverDeny">Ne dovoli urejanja</button>
+    </div>
+  </dialog>
   <dialog id="todoDialog" tabindex="-1">
     <form method="dialog" id="todoForm">
       <div class="modal-head">
@@ -13254,7 +13277,7 @@
         items.appendChild(item);
       });
       if (showManualSections) appendTodoOrderTailDropZone(items, currentManualCategory, manualTailTargetId);
-
+      renderTodoReorderOrigin();
     }
 
     function attachmentSource(photo) {
@@ -14240,6 +14263,19 @@
       $("todoFormDriveFileList").innerHTML = renderTodoDriveFilesHtml(state.todoDialogDriveFiles, { removable: true });
       if ($("todoDialog").open) scheduleTodoCreationDraftSave();
     }
+    function installTodoPhotoErrorHandlers(list) {
+      list.querySelectorAll('.todo-form-attachment-thumb img').forEach((img) => {
+        img.addEventListener('error', () => {
+          const photo = state.todoDialogPhotos.find((item) => item.id === img.closest('[data-photo-id]')?.dataset.photoId);
+          const original = attachmentSource(photo);
+          if (original && img.getAttribute('src') !== original) { img.src = original; return; }
+          const warning = document.createElement('span');
+          warning.textContent = 'Datoteka ni dosegljiva';
+          warning.setAttribute('role', 'status');
+          img.replaceWith(warning);
+        });
+      });
+    }
 
     async function createTodoGoogleDriveFile(kind) {
       const title = $("todoFormTask").value.trim();
@@ -14587,6 +14623,7 @@
           : `<div class="todo-form-photo-actions"><button class="secondary share-todo-form-photo" type="button" data-photo-id="${escapeHtml(photo.id)}" title="Deli prilogo" aria-label="Deli prilogo">&#128228;</button>${isPdfAttachment(photo) || video ? "" : `<button class="secondary edit-todo-form-photo" type="button" data-photo-id="${escapeHtml(photo.id)}">Uredi</button>`}<button class="danger remove-todo-form-photo" type="button" data-photo-id="${escapeHtml(photo.id)}">Odstrani</button></div>`;
         return `<div class="todo-form-photo-row ${uploading ? "todo-form-video-uploading" : ""}">${preview}${detail}${actions}</div>`;
       }).join("");
+      installTodoPhotoErrorHandlers(list);
       if ($("todoDialog").open) scheduleTodoCreationDraftSave();
     }
     async function attachmentDataForProcessing(photo) {
@@ -15410,6 +15447,11 @@
             return false;
           }
           todoEditorOpenResult = "ready";
+          if (state.todoHandoverFreshTodo) {
+            const latest = state.todoHandoverFreshTodo;
+            state.todoHandoverFreshTodo = null;
+            return await openTodoDialog(latest, { reportNavigationIds });
+          }
           setTodoDialogOpening(false);
         } catch (error) {
           todoEditorOpenResult = "error";
@@ -15490,7 +15532,7 @@
       showNotice("Shranjeno.");
     }
 
-    async function saveTodoFromDialog({ closeAfterSave = true } = {}) {
+    async function saveTodoFromDialog({ closeAfterSave = true, handover = false } = {}) {
       if (state.todoHistoryPreviewActive) {
         showNotice("Gledaš prejšnjo različico. Z desno puščico se vrni na trenutno stanje, nato lahko urejaš.");
         return;
@@ -15572,6 +15614,7 @@
       const workerHoursChanged = Boolean(existing)
         && Math.round(duration(existing) * 60) !== Math.round(duration(todo) * 60);
       if (workerHoursChanged && Number.isFinite(previousClientBillableMinutes) && previousClientBillableMinutes >= 0 && clientBillableMinutes !== null) {
+        if (handover) return false;
         const accepted = await showAppConfirm(
           `Ure delavca se spremenijo iz ${formatClientBillableHours(Math.round(duration(existing) * 60))} h na ${formatClientBillableHours(Math.round(duration(todo) * 60))} h.\n\nUre za obra\u010dun stranki ostanejo ro\u010dno nastavljene na ${formatClientBillableHours(previousClientBillableMinutes)} h. Nadaljujem?`
         );
@@ -15582,6 +15625,7 @@
         && !existing?.clientSettlement?.confirmed
         && $("todoFormDirectClientSettled").checked);
       if (requestDirectClientSettlement) {
+        if (handover) return false;
         const rawDirectAmount = String($("todoFormDirectClientAmount").value || "").trim();
         const directAmount = Number(rawDirectAmount.replace(",", "."));
         if (!rawDirectAmount || !Number.isFinite(directAmount) || directAmount < 0) {
@@ -15602,6 +15646,7 @@
         todo.driveFiles = [];
       }
       if (isHoursEntry && (!todo.start || !todo.end)) {
+        if (handover) return false;
         if (!todo.date) {
           return invalidTodoForm("Za vpis delovnih ur izberi datum.", "todoFormDate");
         }
@@ -15633,7 +15678,7 @@
       if (todo.status === "execution" && !meal) {
         const missingClientKm = Number(todo.clientKm || 0) === 0;
         const missingWorkerKm = Number(todo.billingKm || 0) === 0;
-        if (missingClientKm || missingWorkerKm) {
+        if (!handover && (missingClientKm || missingWorkerKm)) {
           const missing = [
             missingClientKm ? "Kilometrina za stranko je 0 km." : "",
             missingWorkerKm ? "Kilometrina za delavca je 0 km." : ""
@@ -15642,6 +15687,9 @@
         }
       }
       const activeAssignee = activeWorkerId();
+      if (handover && existing && !isAdminView()
+          && todoAssigneeIds(existing).includes(activeAssignee)
+          && !assigneeIds.includes(activeAssignee)) return false;
       if (existing && !isAdminView()
           && todoAssigneeIds(existing).includes(activeAssignee)
           && !assigneeIds.includes(activeAssignee)
@@ -15681,6 +15729,7 @@
         return;
       }
       await keepTodoDialogOpenAfterSave(data, todo, !id);
+      return !data.queued;
     }
 
     let todoDialogSaveInFlight = false;
@@ -15688,6 +15737,7 @@
     function setTodoDialogOpening(opening) {
       const form = $("todoForm");
       const status = $("todoFormOpeningStatus");
+      if (opening) status.textContent = "Odpiram opravilo …";
       form.classList.toggle("is-opening", Boolean(opening));
       status.classList.toggle("hidden", !opening);
       for (const control of form.querySelectorAll("input, textarea, select, button")) {
@@ -17109,6 +17159,10 @@
       const source = todos.find((todo) => todo.id === sourceId);
       const target = todos.find((todo) => todo.id === targetId);
       if (!source || (target && !todosCanReorderTogether(sourceId, targetId))) return;
+      const sourceRow = [...document.querySelectorAll('#todoItems .todo-item[data-todo-id]')]
+        .find((row) => row.dataset.todoId === sourceId && !row.querySelector('.drag-handle:disabled'));
+      const previousId = sourceRow?.previousElementSibling?.dataset.todoId || "";
+      const nextId = sourceRow?.nextElementSibling?.dataset.todoId || "";
       const targetBucket = ["sorted", "unsorted"].includes(requestedBucket)
         ? requestedBucket
         : todoManualBucketForCurrentUser(target || source);
@@ -17129,6 +17183,7 @@
           state.todos = data.todos;
           if (Array.isArray(data.debts)) state.debts = data.debts;
           refreshClientList();
+          state.todoReorderOrigin = { previousId, nextId };
           render();
         }
       } catch (error) {
@@ -17139,6 +17194,25 @@
       } finally {
         finishTodoMutation();
       }
+    }
+
+    function renderTodoReorderOrigin() {
+          if (state.todoSortMode === "manual" && state.todoReorderOrigin) {
+            const {previousId, nextId} = state.todoReorderOrigin;
+            document.querySelectorAll('.todo-reorder-origin').forEach((marker) => marker.remove());
+            const rows = [...document.querySelectorAll('#todoItems .todo-item[data-todo-id]:not([data-todo-ordering-reference])')];
+            const before = rows.find((row) => row.dataset.todoId === nextId);
+            const after = rows.find((row) => row.dataset.todoId === previousId);
+            if (before || after) {
+              const marker = document.createElement('div');
+              marker.className = 'todo-reorder-origin';
+              marker.setAttribute('role', 'separator');
+              marker.setAttribute('aria-label', 'Prejšnje mesto premaknjenega opravila');
+              marker.title = 'Tukaj je bilo premaknjeno opravilo';
+              if (before) before.before(marker);
+              else after.after(marker);
+            }
+          }
     }
     function normalizeText(value) {
       return String(value || "")
@@ -17359,8 +17433,14 @@
             <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8.5" cy="8.5" r="4.75"></circle><path d="m12 12 4.25 4.25"></path><path d="M8.5 6.5v4M6.5 8.5h4"></path></svg>
           </button>
         `;
-        item.querySelector(".search-result-open").addEventListener("click", () => openTodoDialog(todo));
-        item.querySelector(".search-result-locate").addEventListener("click", () => revealTodoFromSearch(todo));
+        item.querySelector(".search-result-open").addEventListener("click", () => {
+          clearClientSearchAndRestoreView();
+          openTodoDialog(todo);
+        });
+        item.querySelector(".search-result-locate").addEventListener("click", () => {
+          clearClientSearchAndRestoreView();
+          revealTodoFromSearch(todo);
+        });
         panel.appendChild(item);
       });
     }
@@ -17481,7 +17561,118 @@
       });
     }
 
+    let todoHandoverWatch = null;
+    let todoHandoverCountdown = null;
+    let todoHandoverRequest = null;
+    let todoHandoverPolling = false;
+    let todoHandoverSaving = false;
+
+    function todoHandoverApi(todoId, body) {
+      return api(`${todoLockUrl(todoId)}/handover`, {
+        method: "POST", body: JSON.stringify(body), requestTimeoutMs: 8_000
+      });
+    }
+    function stopTodoHandoverWatch() {
+      clearInterval(todoHandoverWatch);
+      clearInterval(todoHandoverCountdown);
+      todoHandoverWatch = todoHandoverCountdown = null;
+      todoHandoverRequest = null;
+      if ($("todoHandoverDialog").open) $("todoHandoverDialog").close();
+    }
+    async function finishTodoHandover(allow) {
+      const request = todoHandoverRequest;
+      const lock = state.todoEditLock;
+      if (!request || !lock || todoHandoverSaving) return;
+      todoHandoverSaving = true;
+      clearInterval(todoHandoverCountdown);
+      $("todoHandoverSave").disabled = $("todoHandoverDeny").disabled = true;
+      try {
+        if (!allow) {
+          await todoHandoverApi(lock.todoId, { action: "deny", requestId: request.requestId, lockToken: lock.token });
+          showNotice("Prevzem ni dovoljen. Urejanje ostaja pri tebi.");
+        } else {
+          $("todoHandoverMessage").textContent = "Shranjujem spremembe pred predajo …";
+          if (todoDialogSaveInFlight || state.todoDialogPhotos.some((photo) => photo.uploading)) throw new Error("Počakaj na trenutno shranjevanje oziroma nalaganje prilog in ponovi prevzem.");
+          todoDialogSaveInFlight = true;
+          setTodoDialogSaving(true);
+          const saved = await saveTodoFromDialog({ closeAfterSave: false, handover: true });
+          if (!saved) throw new Error("Obrazec potrebuje tvojo potrditev ali popravek. Prevzem je preklican, neshranjena vsebina ostaja odprta.");
+          await releaseTodoEditLockForDialog();
+          $("todoDialog").close();
+          showNotice("Spremembe so shranjene. Urejanje je predano drugi napravi.");
+        }
+      } catch (error) {
+        await todoHandoverApi(lock.todoId, { action: "failed", requestId: request.requestId, lockToken: lock.token }).catch(() => {});
+        showNotice(error.message);
+      } finally {
+        todoHandoverSaving = false;
+        todoDialogSaveInFlight = false;
+        setTodoDialogSaving(false);
+        todoHandoverRequest = null;
+        $("todoHandoverDialog").close();
+        $("todoHandoverSave").disabled = $("todoHandoverDeny").disabled = false;
+      }
+    }
+    function startTodoHandoverWatch() {
+      if (todoHandoverWatch) return;
+      todoHandoverWatch = setInterval(async () => {
+        const lock = state.todoEditLock;
+        if (!lock || todoHandoverPolling || todoHandoverSaving || !$("todoDialog").open) return;
+        todoHandoverPolling = true;
+        try {
+          const request = await todoHandoverApi(lock.todoId, { action: "poll", lockToken: lock.token });
+          if (todoHandoverRequest && request.status !== "waiting") {
+            clearInterval(todoHandoverCountdown);
+            todoHandoverRequest = null;
+            $("todoHandoverDialog").close();
+          }
+          if (todoHandoverRequest) return;
+          if (request.status !== "waiting" || state.todoEditLock?.token !== lock.token) return;
+          todoHandoverRequest = request;
+          const tick = () => {
+            const seconds = Math.max(0, Math.ceil((request.deadline - Date.now()) / 1000));
+            $("todoHandoverMessage").textContent = `${request.requesterName} želi urejati ta vpis na drugi napravi. Čez ${seconds} s bom samodejno shranil in zaprl. Lahko prevzem zavrneš.`;
+            if (!seconds) void finishTodoHandover(true);
+          };
+          $("todoHandoverDialog").showModal();
+          tick();
+          todoHandoverCountdown = setInterval(tick, 250);
+        } catch { /* A failed notification never discards the open form. */ }
+        finally { todoHandoverPolling = false; }
+      }, 2_000);
+    }
+    async function waitForTodoHandover(todoId, lock) {
+      let requestId = "";
+      let accepted = false;
+      const started = Date.now();
+      try {
+      while ($("todoDialog").open && Date.now() - started < 120_000) {
+        const result = await todoHandoverApi(todoId, { action: "request", requestId });
+        requestId = result.requestId || requestId;
+        if (result.status === "ready") { accepted = true; return true; }
+        if (result.status !== "waiting") {
+          showNotice(result.status === "denied" ? "Uporabnik je prevzem zavrnil. Poskusi kasneje."
+            : result.status === "failed" ? "Na drugi napravi obrazca ni bilo mogoče varno shraniti. Vsebina tam ostaja odprta."
+            : "Prevzem trenutno ni na voljo. Poskusi znova.");
+          return false;
+        }
+        const seconds = Math.max(0, Math.ceil((result.deadline - Date.now()) / 1000));
+        $("todoFormOpeningStatus").textContent = seconds
+          ? `${lock.lockedByName} je prejel prošnjo za prevzem. Čakam odgovor (${seconds} s) …`
+          : "Čakam varno shranjevanje. Če je druga naprava nedosegljiva, počakam iztek zaklepa; neshranjene vsebine ne prepisujem.";
+        await new Promise((resolve) => setTimeout(resolve, 1_000));
+      }
+      return false;
+      } finally {
+        if (requestId && !accepted) await todoHandoverApi(todoId, { action: "cancel", requestId }).catch(() => {});
+      }
+    }
+    $("todoHandoverSave").addEventListener("click", () => void finishTodoHandover(true));
+    $("todoHandoverDeny").addEventListener("click", () => void finishTodoHandover(false));
+    $("todoHandoverDialog").addEventListener("cancel", (event) => { event.preventDefault(); void finishTodoHandover(false); });
+
     function clearTodoEditLockState() {
+      stopTodoHandoverWatch();
       if (state.todoLockHeartbeat) clearInterval(state.todoLockHeartbeat);
       state.todoLockHeartbeat = null;
       state.todoEditLock = null;
@@ -17525,7 +17716,11 @@
             return;
           }
           clearTodoEditLockState();
-          if ($("todoDialog").open) $("todoDialog").close();
+          // Never discard unsaved text when a sleeping device loses its lease.
+          if ($("todoDialog").open) {
+            setTodoDialogOpening(true);
+            $("todoFormOpeningStatus").textContent = "Urejanje je prevzela druga naprava. Tvoja neshranjena vsebina ostaja v tem obrazcu; ne bo samodejno prepisala novejšega vpisa.";
+          }
           showNotice(error.message);
         }
       })();
@@ -17546,13 +17741,35 @@
           return true;
         }
         const current = state.todoEditLock?.todoId === todoId ? state.todoEditLock : null;
-        const data = await api(todoLockUrl(todoId), {
-          method: "POST",
-          body: JSON.stringify({ lockToken: current?.token || "" })
-        });
+        let data;
+        try {
+          data = await api(todoLockUrl(todoId), {
+            method: "POST", body: JSON.stringify({ lockToken: current?.token || "" })
+          });
+        } catch (error) {
+          if (error.status !== 409 || !error.lock) throw error;
+          try {
+            if (!await waitForTodoHandover(todoId, error.lock)) return false;
+          } catch (handoverError) {
+            showNotice("Prevzem ni uspel zaradi povezave. Druga naprava obdrži urejanje; poskusi znova.");
+            return false;
+          }
+          if (!$("todoDialog").open) return false;
+          data = await api(todoLockUrl(todoId), { method: "POST", body: "{}" });
+          let fresh;
+          try { fresh = await api(`/api/todos/${encodeURIComponent(todoId)}`); }
+          catch (refreshError) {
+            await api(todoLockUrl(todoId), {method:"DELETE",body:JSON.stringify({lockToken:data.lockToken})}).catch(() => {});
+            showNotice("Prevzem je ustavljen: novejšega vpisa ni mogoče naložiti. Poskusi znova, ko bo povezava vzpostavljena.");
+            return false;
+          }
+          state.todoHandoverFreshTodo = fresh.todo;
+          state.todos = state.todos.map((todo) => todo.id === fresh.todo.id ? fresh.todo : todo);
+        }
         if (state.todoLockHeartbeat) clearInterval(state.todoLockHeartbeat);
         state.todoEditLock = { todoId, token: data.lockToken, expiresAt: data.lock?.expiresAt || "" };
         state.todoLockHeartbeat = setInterval(renewTodoEditLock, 20_000);
+        startTodoHandoverWatch();
         return true;
       } catch (error) {
         if (isNetworkError(error)) {
@@ -19563,6 +19780,11 @@
     $("clientSearch").addEventListener("input", handleClientSearchInput);
     $("clientsSearch").addEventListener("input", renderClients);
     $("clearClientSearch").addEventListener("click", clearClientSearchAndRestoreView);
+    document.addEventListener("click", (event) => {
+      if (!$("clientSearch").value.trim()) return;
+      if (event.target.closest('#searchPanel, #clientSearch, #clearClientSearch')) return;
+      clearClientSearchAndRestoreView();
+    }, true);
     $("exportCsv").addEventListener("click", exportCsv);
     $("googleDrive").addEventListener("click", () => connectGoogleDrive().catch((error) => showNotice(error.message)));
     $("driveReconnectBtn").addEventListener("click", () => connectGoogleDrive().catch((error) => showNotice(error.message)));

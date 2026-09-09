@@ -169,7 +169,7 @@ test("prehod iz novega dogodka v vpis ur počaka na zaprtje modala", async () =>
 test("disketa shrani nov ali obstoječi vpis brez zapiranja modala", async () => {
   const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
   assert.match(html, /id="saveTodoWithoutClosing" type="button" title="Shrani brez zapiranja"/);
-  assert.match(html, /async function saveTodoFromDialog\(\{ closeAfterSave = true \} = \{\}\)/);
+  assert.match(html, /async function saveTodoFromDialog\(\{ closeAfterSave = true, handover = false \} = \{\}\)/);
   assert.match(html, /async function keepTodoDialogOpenAfterSave\(data, todo, wasCreating\)/);
   assert.match(html, /submitTodoDialog\(\{ closeAfterSave: false \}\);/);
   assert.match(html, /const backgroundSave = Boolean\(closeAfterSave && !state\.todoHoursSourceId && \$\("todoDialog"\)\.open\);[\s\S]*?if \(closeAfterSave\) \{\s*if \(!backgroundSave\) \$\("todoDialog"\)\.close\(\);/);
