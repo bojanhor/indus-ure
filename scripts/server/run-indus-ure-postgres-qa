@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+set -euo pipefail
+release="${1:-}"
+[[ "$EUID" -eq 0 && "$release" =~ ^[0-9a-f]{7,40}$ ]] || { echo 'QA zahteva root in veljavno revizijo.' >&2; exit 2; }
+base=/opt/indus-ure
+candidate="$base/releases/$release"
+[[ -d "$candidate" ]] || candidate="/tmp/indus-ure-${release}-deploy"
+[[ -d "$candidate" && ! -L "$candidate" && -f "$candidate/scripts/postgres-integration.js" ]] || { echo 'Ni QA kandidata.' >&2; exit 3; }
+[[ "$(realpath "$candidate")" == "$candidate" ]] || exit 3
+chmod 0755 "$candidate"
+work="$(mktemp -d /var/tmp/indus-ure-qa-XXXXXXXX)"
+[[ "$work" == /var/tmp/indus-ure-qa-* && "$(realpath "$work")" == "$work" ]] || exit 3
+qa="indus_ure_qa_${release:0:12}_${RANDOM}"
+restore="${qa}_restore"
+recovery="${qa}_recovery"
+upgrade="${qa}_upgrade"
+password="$(openssl rand -hex 24)"
+created=()
+role_created=false
+cleanup() {
+  for db in "${created[@]}"; do sudo -u postgres dropdb --if-exists --force "$db"; done
+  if [[ "$role_created" == true ]]; then sudo -u postgres dropuser --if-exists "$qa"; fi
+  [[ "$work" == /var/tmp/indus-ure-qa-* && "$(realpath "$work")" == "$work" ]] && rm -rf -- "$work"
+}
+trap cleanup EXIT
+sudo -u postgres psql -v ON_ERROR_STOP=1 -c "create role $qa login password '$password';" >/dev/null
+role_created=true
+for db in "$qa" "$restore" "$recovery" "$upgrade"; do
+  sudo -u postgres createdb --owner="$qa" "$db"
+  created+=("$db")
+done
+chown indus-ure:indus-ure "$work"
+mkdir -m 0700 "$work/media"
+chown indus-ure:indus-ure "$work/media"
+run_check() {
+  local db="$1" mode="$2" report="$3"
+  (cd "$candidate" && runuser -u indus-ure -- env -i \
+    PATH=/usr/local/bin:/usr/bin:/bin HOME="$work" NODE_ENV=test \
+    DATABASE_URL="postgresql://$qa:$password@127.0.0.1/$db" \
+    PG_QA_DATABASE="$db" PG_QA_REPORT="$report" MEDIA_DIR="$work/media" \
+    DATA_DIR="$work/data" DISABLE_OPERATIONAL_MONITOR=true \
+    node scripts/postgres-integration.js "$mode")
+}
+# Unit/static tests are mandatory on the exact server candidate as well.
+(cd "$candidate" && npm test)
+run_check "$qa" --fresh "$work/fresh.json"
+sudo -u postgres pg_dump -Fc --no-owner --no-privileges "$qa" > "$work/qa.dump"
+sudo -u postgres pg_restore --exit-on-error --no-owner --no-privileges --role="$qa" -d "$restore" < "$work/qa.dump"
+run_check "$restore" --verify-restore "$work/fresh.json"
+sudo -u postgres pg_restore --exit-on-error --no-owner --no-privileges --role="$qa" -d "$recovery" < "$work/recovery.dump"
+sudo -u postgres psql -v ON_ERROR_STOP=1 -d "$recovery" < "$work/recovery.sql" >/dev/null
+run_check "$recovery" --verify-recovery "$work/fresh.json"
+# A consistent production dump is restored only into the private upgrade DB.
+sudo -u postgres pg_dump -Fc --no-owner --no-privileges indus_ure > "$work/production.dump"
+sudo -u postgres pg_restore --exit-on-error --no-owner --no-privileges --role="$qa" -d "$upgrade" < "$work/production.dump"
+run_check "$upgrade" --upgrade "$work/upgrade.json"
+proof_dir=/var/lib/indus-ure/qa
+install -d -o root -g root -m 0755 "$proof_dir"
+digest="$(cd "$candidate" && find outputs scripts tests package.json package-lock.json -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | awk '{print $1}')"
+install -o root -g root -m 0644 "$work/fresh.json" "$proof_dir/$release.fresh.json"
+install -o root -g root -m 0644 "$work/upgrade.json" "$proof_dir/$release.upgrade.json"
+printf '%s\n' "$digest" > "$proof_dir/$release.sha256"
+chmod 0644 "$proof_dir/$release.sha256"
+echo "PostgreSQL QA + restore + upgrade uspesni: $release"

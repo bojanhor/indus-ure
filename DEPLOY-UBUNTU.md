@@ -1,5 +1,9 @@
 # INDUS URE na Ubuntu strežniku
 
+Ta dokument opisuje prvo namestitev. Za redne objave, LAN prijavo, ločitev
+od aplikacije Fakture in obnovo velja [OPERATIONS.md](OPERATIONS.md).
+Obstoječe produkcije ne postavljaj na novo po spodnjih začetnih korakih.
+
 Produkcijska pot:
 
 ```text
@@ -48,20 +52,18 @@ zapisuj ga v Git, terminal history ali chat.
 
 ## 3. Koda in okolje
 
-Za novo izdajo uporabi mapo z imenom Git commita; prejšnja mapa ostane za
-hitri rollback kode.
+Repozitorij je `https://github.com/bojanhor/indus-ure.git`. Redne izdaje
+objavljaj iz čistega repozitorija z `scripts/deploy.ps1`: priprava kandidata,
+obvezni PostgreSQL QA/restore prehod, sveža recovery kopija, preklop in health
+preizkus. Strežniški `deploy-indus-ure` zavrne nepreverjeno vsebino.
+
+Za prvo namestitev najprej pripravi kodo in konfiguracijo; začetno izdajo
+aktiviraj šele po preverjanju na izolirani bazi. Datoteke iz `deploy/` v
+nadaljevanju so relativne na preverjeno izdajo. Okoljsko datoteko ustvari
+iz njene `.env.example`, ne prepisuj obstoječih produkcijskih skrivnosti.
 
 ```bash
-cd /tmp
-git clone https://github.com/ibrahimetemaj04-art/indus-ure.git indus-ure-release
-cd indus-ure-release
-npm ci --omit=dev
-COMMIT=$(git rev-parse --short HEAD)
-sudo mv /tmp/indus-ure-release /opt/indus-ure/releases/$COMMIT
-sudo chown -R root:root /opt/indus-ure/releases/$COMMIT
-sudo ln -sfn /opt/indus-ure/releases/$COMMIT /opt/indus-ure/current
-
-sudo install -o root -g root -m 0600 /opt/indus-ure/current/.env.example /etc/indus-ure.env
+sudo install -o root -g root -m 0600 .env.example /etc/indus-ure.env
 sudoedit /etc/indus-ure.env
 ```
 
@@ -86,16 +88,20 @@ BACKUP_DIR=/var/backups/indus-ure
 ```
 
 Google OAuth client potrebuje redirect URL natanko
-`https://ure.indus.si/api/google/callback`. Google Drive API potrebuje le backup mehanizem; Gmail API pa avtomatske osnutke obračunov.
-Google Dokumenti in Preglednice se pripnejo izključno kot zunanje povezave. Slike, PDF-ji in videi ostanejo zasebne priloge v `MEDIA_DIR`; video se pretočno zapiše neposredno na strežnik, brez Google Drive objave.
+`https://ure.indus.si/api/google/callback`. Drive omogoča recovery kopije in
+ustvarjanje Dokumentov/Preglednic (za slednje `GOOGLE_DRIVE_TASKS_FOLDER_ID`).
+Gmail omogoča poročila in osnutke obračunov. Dokumenti/Preglednice so pripeti
+kot zunanje povezave. Slike, PDF-ji in videi ostanejo zasebni v `MEDIA_DIR`.
+Servisna LAN prijava ne zahteva Google preusmeritve; omogočanje in omejitve
+so v OPERATIONS.md. Javna prijava z geslom ostaja izključena.
 
 Google Sheets in Google Calendar spremenljivk **ne dodajaj**. ICS povezava je
 samo bralni izvoz.
 
-## 4. Varno odstranjevanje starih aplikacijskih Google koledarjev
+## 4. Zgodovinski korak: odstranjevanje starih aplikacijskih Google koledarjev
 
-Ta korak izvedi **pred prvim zagonom nove verzije**, ker nova verzija zavrže
-stara Calendar dovoljenja. Skripta nikoli ne našteva ali briše osebnih
+To ni del redne objave. Izvede se le za prehod s stare Calendar različice
+in z ločenim izrecnim dovoljenjem za brisanje. Skripta nikoli ne našteva ali briše osebnih
 koledarjev: obravnava samo koledarje, ki so v stari bazi izrecno označeni kot
 ustvarjeni z INDUS URE, nato preveri še ime in opis.
 
@@ -122,6 +128,9 @@ uporabnikom `indus-ure`; skrivnosti se ne razkrivajo v ukazni vrstici.
 Ob prvem zagonu nova aplikacija samodejno prenese obstoječo vrstico
 `app_state/main` v relacijske tabele in jo pusti nedotaknjeno kot povratno
 referenco. Priloge se iz Base64 preselijo v `/var/lib/indus-ure/media`.
+Kasnejša normalizacija se izvede pred odprtjem HTTP strežnika z revision/CAS
+zaščito. Branje podatkov je brez zapisovanja. Zunanje skripte morajo uporabljati
+trenutni PostgresStore in svež `load()`; zastareli posnetki se zavrnejo.
 
 ```bash
 sudo install -o root -g root -m 0644 deploy/indus-ure.service /etc/systemd/system/indus-ure.service
@@ -189,7 +198,10 @@ Paket ne vsebuje OAuth žetona, aktivnih sej, hashov gesel, ICS povezav ali /etc
 
 ## Nocni HTML povzetki ur
 
-Vsak dan ob 01:00 (Europe/Ljubljana) `indus-ure-worker-digest.timer` pošlje Bojanu en HTML e-mail za vsakega uporabnika z vlogo šef ali delavec, tudi kadar ta dan nima vpisanih ur. Vsak mail predstavlja samo enega delavca in prejšnji koledarski dan. To niso več Gmail osnutki in PDF ni pripet.
+Vsak dan ob 01:00 (Europe/Ljubljana) `indus-ure-worker-digest.timer` pripravi
+HTML e-mail za prejšnji dan skladno z nastavitvami posameznega delavca:
+omogočeno pošiljanje, prejemnik (privzeto šef) in pošiljanje praznih poročil.
+Vsak mail predstavlja samo enega delavca. To niso Gmail osnutki in PDF ni pripet.
 
 V glavi maila je povezava **Odpri dnevni povzetek**, ki po prijavi odpre samo-za-branje porocilo v INDUS URE. Naslov vsakega vpisa v mailu je normalna povezava, ki po prijavi odpre prav ta vpis v obrazcu za urejanje. Dostop preveri aplikacija: sef vidi vse povzetke, delavec samo svojega.
 
@@ -224,23 +236,17 @@ posegu.
 
 ## Rollback
 
-Kodni rollback je možen le, če po migraciji še ni novih zapisov, ali pa po
-obnovi pred-migracijskega dumpa. Stara verzija bere `app_state`, nova pa po
-preklopu zapisuje relacijske tabele, zato slepi preklop nazaj po novih vnosih
-ni varen.
-
-```bash
-sudo systemctl stop indus-ure.service
-sudo ln -sfn /opt/indus-ure/releases/PREJSNJI_COMMIT /opt/indus-ure/current
-# po potrebi obnovi /var/backups/indus-ure/pre-v2.dump
-sudo systemctl start indus-ure.service
-```
+Pred kodnim rollbackom preveri združljivost shrambe in CAS protokola po
+OPERATIONS.md. Stara koda brez revision varovala ne sme sočasno zapisovati
+z novo kodo. Obnova dumpa je ločen destruktiven poseg z izrecnim dovoljenjem;
+ne pomeni običajnega rollbacka kode in lahko izbriše novejše poslovne vnose.
 
 ## Vzdrzevanje recovery navodil
 
 Ob vsaki spremembi postopka varnostne kopije, obnove, lokacije datotek ali zahtevanih okolijskih nastavitev je treba v isti izdaji:
 
-1. posodobiti ta dokument in `RESTORE-INDUS-URE.txt`;
+1. posodobiti ta dokument, OPERATIONS.md in generator `restoreGuide()` v
+   `scripts/backup-indus-ure.js` (iz njega nastane `RESTORE-INDUS-URE.txt`);
 2. ob naslednjem uspešnem backupu objaviti novo `RESTORE-INDUS-URE.txt` v Drive recovery mapi;
 3. lastnika posebej opozoriti, da so se navodila spremenila.
 

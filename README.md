@@ -9,8 +9,11 @@ kilometrino, material in priloge za Bojana in delavce.
   obračuni in seje so shranjeni v relacijskih tabelah.
 - **Priloge** so datoteke na strežniku v `/var/lib/indus-ure/media`; v bazi so
   le metapodatki in varnostni hash.
-- **Google** se uporablja samo za prijavo in za Google Dokumente/Preglednice v
-  Bojanovi mapi. Google Sheets in Google Calendar sinhronizacije ni več.
+- **Google** omogoča prijavo, ustvarjanje Dokumentov/Preglednic v Bojanovi mapi,
+  Gmail poročila/osnutke in Drive recovery kopije. Sinhronizacije evidence ur
+  z Google Sheets in Google Calendar ni več.
+- **LAN prijava** je ločena, izrecno omogočena servisna možnost; pogoji in
+  omejitve so opisani v [OPERATIONS.md](OPERATIONS.md).
 - **ICS** ostane bralna povezava za telefone; aplikacija nikoli ne ureja
   dogodkov v uporabnikovem Google koledarju.
 - Prijava uporablja **HttpOnly/Secure cookie**, zaščito CSRF in strogi CSP.
@@ -26,8 +29,8 @@ V meniju šef vidi dva ločena mehanizma:
   prilog. Ne vsebuje OAuth žetonov, gesel ali strežniških skrivnosti.
 - **Nočni recovery backup**: PostgreSQL, priloge, koda aplikacije in hitra navodila v preverjenem paketu na Google Drive. Paket nima OAuth žetona, sej, hashov gesel ali strežniških skrivnosti.
 
-Podrobna namestitev, migracija in obnova so v
-[DEPLOY-UBUNTU.md](DEPLOY-UBUNTU.md).
+Aktualni postopek objave, CAS zaščita, ločitev Ure/Fakture in obnova so v
+[OPERATIONS.md](OPERATIONS.md). Prva namestitev je v [DEPLOY-UBUNTU.md](DEPLOY-UBUNTU.md).
 
 ## Lokalni zagon
 
@@ -43,10 +46,14 @@ lokalno JSON datoteko; produkcija brez PostgreSQL namenoma ne zažene.
 
 ```bash
 npm test
+npm run test:e2e
 ```
 
 Testi preverijo sintakso, dostopne vloge, lokalno identiteto strank, odstranitev
 Sheets/Calendar poti, varne seje, PWA in backup poti.
 - Video priloge se pretočno shranijo zasebno na strežnik, skupaj z drugimi prilogami. Drive se za priloge ne uporablja.
 
-Ob vsaki objavi se dodatno izvede produkcijski video smoke test: prek pravega API-ja naloži vzorčno datoteko, preveri zapis v PostgreSQL in zasebni medijski shrambi, nato pa testno datoteko ter začasno sejo odstrani. Za izreden diagnostični preklop je na voljo SkipVideoSmoke.
+Vsaka upravljana objava zahteva tudi izoliran PostgreSQL prehod: sočasni seji,
+konflikt zunanje skripte, ciljne zapise, dostop do prilog, dejansko obnovo
+recovery paketa in migracijo zasebnega klona produkcije. Produkcijska baza se
+pri QA samo prebere. Brez dokazila za točno vsebino izdaje preklop ni dovoljen.

@@ -14,6 +14,22 @@ fi
 
 previous="$(readlink -f "$current" 2>/dev/null || true)"
 
+# Do not publish an untested snapshot-store implementation, even when this
+# command is called manually rather than through deploy.ps1.
+candidate="$destination"
+[[ -d "$candidate" ]] || candidate="$staging"
+proof="/var/lib/indus-ure/qa/$release.sha256"
+if [[ ! -f "$proof" || -L "$proof" || "$(stat -c %U "$proof")" != root ]]; then
+  echo "Manjka obvezno PostgreSQL QA/restore dokazilo za to izdajo." >&2
+  exit 5
+fi
+actual="$(cd "$candidate" && find outputs scripts tests package.json package-lock.json -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | awk '{print $1}')"
+[[ "$actual" == "$(cat "$proof")" ]] || { echo "QA dokazilo ne pripada vsebini kandidata." >&2; exit 5; }
+
+# Verified off-site recovery snapshot before the production switch.
+systemctl start indus-ure-backup.service
+[[ "$(systemctl show indus-ure-backup.service -p Result --value)" == success ]] || exit 6
+
 if [[ ! -d "$destination" ]]; then
   if [[ ! -d "$staging" || -L "$staging" ]]; then
     echo "Pripravljena izdaja ne obstaja." >&2
@@ -43,7 +59,8 @@ mv -Tf "$temporary_link" "$current"
 restart_ok=true
 systemctl restart indus-ure || restart_ok=false
 sleep 2
-if [[ "$restart_ok" != true ]] || ! systemctl is-active --quiet indus-ure; then
+if [[ "$restart_ok" != true ]] || ! systemctl is-active --quiet indus-ure \
+    || ! curl --fail --silent --retry 8 --retry-connrefused --retry-delay 1 http://127.0.0.1:8123/api/health >/dev/null; then
   if [[ -n "$previous" && -d "$previous" ]]; then
     ln -sfn "$previous" "$current"
     systemctl restart indus-ure

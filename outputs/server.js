@@ -32,8 +32,8 @@ const MEDIA_DIR = process.env.MEDIA_DIR ? path.resolve(process.env.MEDIA_DIR) : 
 const DATABASE_URL = process.env.DATABASE_URL || "";
 // A deliberately separate, LAN-only browser test instance may use a password
 // because Google's OAuth redirect cannot target a private-network IP address.
-// This is impossible to enable in production: both NODE_ENV=test and the
-// explicit opt-in flag are required.
+// This TEST login cannot run in production: it requires NODE_ENV=test plus
+// the test opt-in. The separate production LAN support login is defined below.
 const LOCAL_TEST_MODE = NODE_ENV === "test" && process.env.INDUS_URE_TEST_MODE === "true";
 const TEST_LOCAL_LOGIN_PASSWORD = String(process.env.TEST_LOCAL_LOGIN_PASSWORD || "");
 // A support login is deliberately narrower than the test instance: it is
@@ -3018,9 +3018,30 @@ async function ensurePostgresDb() {
 async function readDbAsync() {
   if (!DATABASE_URL) return readDb();
   await ensurePostgresDb();
-  const { db, changed } = normalizeDb(await getPgStore().load());
-  if (changed) await writeDbAsync(db);
-  return db;
+  // Normalization is an in-memory compatibility view. A GET must never save
+  // this snapshot. Persisted migrations run explicitly before HTTP startup.
+  return normalizeDb(await getPgStore().load()).db;
+}
+
+async function readRequestDb(req) {
+  if (!req.indusDb?.todos) req.indusDb = await readDbAsync();
+  return req.indusDb;
+}
+
+async function migratePostgresNormalization() {
+  await ensurePostgresDb();
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const db = await getPgStore().load();
+    const before = JSON.stringify(db);
+    normalizeDb(db);
+    if (before === JSON.stringify(db)) return;
+    try {
+      await getPgStore().save(db, { protectedAttachmentIds: [...undoProtectedAttachmentIds(db)] });
+      return;
+    } catch (error) {
+      if (error.code !== "STALE_SNAPSHOT" || attempt === 2) throw error;
+    }
+  }
 }
 
 async function writeDbAsync(db) {
@@ -6141,12 +6162,20 @@ function sessionTokenFromRequest(req) {
 async function getSessionUser(req) {
   if (req.indusSessionUser !== undefined) return req.indusSessionUser;
   const token = sessionTokenFromRequest(req);
-  const db = await readDbAsync();
-  const session = sessionForToken(db, token);
-  req.indusDb = db;
+  let session, user;
+  if (DATABASE_URL) {
+    await ensurePostgresDb();
+    const record = await getFocusedPgStore().sessionUser(sessionTokenHash(token));
+    session = record?.session || null;
+    user = record?.user || null;
+  } else {
+    const db = await readRequestDb(req);
+    session = sessionForToken(db, token);
+    user = session && db.users[session.userId]?.active !== false ? (db.users[session.userId] || null) : null;
+  }
   req.indusSession = session || null;
   req.indusSessionToken = token;
-  req.indusSessionUser = session && db.users[session.userId]?.active !== false ? (db.users[session.userId] || null) : null;
+  req.indusSessionUser = user;
   if (activeUndoCapture?.req === req && req.indusSessionUser) {
     activeUndoCapture.actor = { id: req.indusSessionUser.id, name: req.indusSessionUser.name || req.indusSessionUser.id };
   }
@@ -6167,8 +6196,8 @@ async function requireUser(req, res) {
 }
 
 // Identity/bootstrap endpoints and focused e-mail links must not load the
-// complete PostgreSQL state. The normal requireUser path intentionally still
-// does that for mutations which need an authoritative full-state snapshot.
+// complete PostgreSQL state. Other authenticated routes likewise read only
+// the session/user; business routes obtain one request-scoped snapshot later.
 async function requireUserForLightweightSession(req, res) {
   if (!DATABASE_URL) return requireUser(req, res);
   await ensurePostgresDb();
@@ -7864,26 +7893,20 @@ async function assertRestoredMediaExists(restored, stagedMediaDir) {
 async function restoreBrowserBackup(upload, currentDb) {
   if (!DATABASE_URL) throw new Error("Obnova v brskalniku je na voljo samo s PostgreSQL hrambo.");
   const stage = await fsp.mkdtemp(path.join(path.dirname(MEDIA_DIR), ".indus-ure-restore-"));
-  let rollbackMedia = "";
   try {
     const metadata = await extractBrowserRestoreZip(upload.file, stage);
     const restored = restoredBrowserState(currentDb, metadata);
     const stagedMedia = path.join(stage, "media");
     await fsp.mkdir(stagedMedia, { recursive: true, mode: 0o700 });
     await assertRestoredMediaExists(restored, stagedMedia);
-    if (fs.existsSync(MEDIA_DIR)) {
-      rollbackMedia = `${MEDIA_DIR}.before-restore-${Date.now()}`;
-      await fsp.rename(MEDIA_DIR, rollbackMedia);
-    }
-    await fsp.rename(stagedMedia, MEDIA_DIR);
-    try {
-      await writeDbAsync(restored);
-    } catch (error) {
-      await fsp.rm(MEDIA_DIR, { recursive: true, force: true }).catch(() => {});
-      if (rollbackMedia && fs.existsSync(rollbackMedia)) await fsp.rename(rollbackMedia, MEDIA_DIR).catch(() => {});
-      throw error;
-    }
-    return { restoredAt: restored.restoredAt, rollbackMedia: rollbackMedia ? path.basename(rollbackMedia) : "" };
+    // Content-addressed media is immutable. Never swap/remove the live directory:
+    // an external writer may commit while the archive is being processed.
+    await installRestoredMedia(restored, stagedMedia, MEDIA_DIR);
+    // Preserve the object carrying the original CAS revision. A parallel commit
+    // rejects this restore atomically; newly copied, unreferenced files are safe.
+    Object.assign(currentDb, restored);
+    await writeDbAsync(currentDb);
+    return { restoredAt: restored.restoredAt, rollbackMedia: "" };
   } finally {
     await fsp.rm(stage, { recursive: true, force: true }).catch(() => {});
     await fsp.rm(upload.directory, { recursive: true, force: true }).catch(() => {});
@@ -7931,6 +7954,28 @@ async function serverRuntimeStatus() {
     lastBackup,
     todoEditorDiagnostics: todoEditorDiagnosticSummary()
   };
+}
+
+async function installRestoredMedia(restored, stagedMedia, destination) {
+  const hashFile = async file => {
+    const hash = crypto.createHash("sha256");
+    for await (const chunk of fs.createReadStream(file)) hash.update(chunk);
+    return hash.digest("hex");
+  };
+  for (const attachment of Object.values(restored.attachments || {})) {
+    for (const key of [attachment.storageKey, attachment.thumbnailKey].filter(Boolean)) {
+      const relative = safeRestoreRelativePath(key);
+      if (!relative) throw new Error("Neveljavna pot priloge v varnostni kopiji.");
+      const source = path.join(stagedMedia, relative), target = path.join(destination, relative);
+      await fsp.mkdir(path.dirname(target), { recursive: true, mode: 0o700 });
+      // Publish the complete file atomically, without overwriting a live object.
+      try { await fsp.link(source, target); }
+      catch (error) {
+        if (error.code !== "EEXIST") throw error;
+        if (await hashFile(source) !== await hashFile(target)) throw new Error("Obnova ima drugačno vsebino za obstoječo prilogo; obnova je preklicana.");
+      }
+    }
+  }
 }
 
 async function backupStatus() {
@@ -8174,7 +8219,7 @@ async function handleApi(req, res) {
         sendJson(res, 401, { error: "Testno uporabniško ime ali geslo ni pravilno." });
         return;
       }
-      const db = await readDbAsync();
+      const db = await readRequestDb(req);
       const user = db.users?.[userId];
       if (!user) {
         sendJson(res, 403, { error: "Testni uporabnik ni na voljo." });
@@ -8192,7 +8237,7 @@ async function handleApi(req, res) {
       const user = await requireUser(req, res);
       if (!user) return;
       const attachmentId = pendingAttachmentMatch[1];
-      const db = await readDbAsync();
+      const db = await readRequestDb(req);
       const pending = pendingAttachmentMap(db);
       if (pending[attachmentId]?.userId !== user.id) {
         sendJson(res, 404, { error: "Začasna priloga ne obstaja." });
@@ -8210,7 +8255,9 @@ async function handleApi(req, res) {
       const user = await requireUser(req, res);
       if (!user) return;
       const attachmentId = attachmentMatch[1];
-      const db = await readDbAsync();
+      const db = DATABASE_URL
+        ? await getFocusedPgStore().attachmentAccessSeed(attachmentId)
+        : await readRequestDb(req);
       if (!attachmentVisibleToUser(db, user, attachmentId)) {
         sendJson(res, 404, { error: "Priloga ne obstaja." });
         return;
@@ -8315,7 +8362,7 @@ async function handleApi(req, res) {
         sendJson(res, 403, { error: "Varnostno kopijo lahko izvozi samo šef." });
         return;
       }
-      const db = await readDbAsync();
+      const db = await readRequestDb(req);
       await sendBrowserBackup(res, db);
       return;
     }
@@ -8400,7 +8447,7 @@ async function handleApi(req, res) {
     if (url.pathname === "/api/undo-journal" && req.method === "GET") {
       const user = await requireUser(req, res);
       if (!user) return;
-      const db = await readDbAsync();
+      const db = await readRequestDb(req);
       sendJson(res, 200, {
         actions: visibleUndoJournal(db, user),
         locked: Boolean(undoSystemLock),
@@ -8417,7 +8464,7 @@ async function handleApi(req, res) {
         sendJson(res, 400, { error: "Za razveljavitev je potrebna izrecna potrditev." });
         return;
       }
-      const db = await readDbAsync();
+      const db = await readRequestDb(req);
       const current = currentUndoRecord(db);
       const requestedId = undoMatch[1];
       if (!current || current.id !== requestedId) {
@@ -8489,7 +8536,7 @@ async function handleApi(req, res) {
     if (url.pathname === "/api/google/drive-status" && req.method === "GET") {
       const user = await requireUser(req, res);
       if (!user) return;
-      const db = await readDbAsync();
+      const db = await readRequestDb(req);
       const status = await googleDriveConnectionStatus(req, db);
       sendJson(res, 200, {
         ...status,
@@ -8592,7 +8639,7 @@ async function handleApi(req, res) {
         const oauth2 = google.oauth2({ version: "v2", auth });
         const profile = await oauth2.userinfo.get();
         const email = String(profile.data.email || "").toLowerCase();
-        const db = await readDbAsync();
+        const db = await readRequestDb(req);
         const user = userByEmail(db, email);
         if (!user) {
           await recordDeniedGoogleLogin(email, req);
@@ -8623,7 +8670,7 @@ async function handleApi(req, res) {
       }
       const auth = googleClient(req);
       const result = await auth.getToken(code);
-      const db = await readDbAsync();
+      const db = await readRequestDb(req);
       const user = db.users[pending.userId];
       if (!user) {
         sendText(res, 401, "Uporabnik ne obstaja več.", "text/plain");
@@ -8660,7 +8707,7 @@ async function handleApi(req, res) {
     if (url.pathname === "/api/calendar-url" && req.method === "GET") {
       const user = await requireUser(req, res);
       if (!user) return;
-      const db = await readDbAsync();
+      const db = await readRequestDb(req);
       const baseUrl = absoluteBaseUrl(req);
       const workerUrl = `${baseUrl}/calendar.ics?token=${encodeURIComponent(db.calendarFeeds[user.id])}`;
       sendJson(res, 200, {
@@ -8679,7 +8726,7 @@ async function handleApi(req, res) {
     if (url.pathname === "/api/logout" && req.method === "POST") {
       const user = await requireUser(req, res);
       if (!user) return;
-      const db = await readDbAsync();
+      const db = await readRequestDb(req);
       if (revokeSession(db, sessionTokenFromRequest(req))) await writeDbAsync(db);
       clearSessionCookie(req, res);
       sendJson(res, 200, { ok: true });
@@ -8804,7 +8851,7 @@ async function handleApi(req, res) {
         sendJson(res, 403, { error: "Delavce lahko upravlja samo šef." });
         return;
       }
-      const db = await readDbAsync();
+      const db = await readRequestDb(req);
       const workers = Object.values(db.users || {})
         .map((worker) => publicWorkerManagementUser(db, worker))
         .sort((left, right) => Number(right.active) - Number(left.active)
@@ -8831,7 +8878,7 @@ async function handleApi(req, res) {
         sendJson(res, 400, { error: "Google e-pošta ni pravilna." });
         return;
       }
-      const db = await readDbAsync();
+      const db = await readRequestDb(req);
       if (email && Object.values(db.users || {}).some((worker) => String(worker.email || "").toLowerCase() === email)) {
         sendJson(res, 409, { error: "Ta Google e-pošta je že dodeljena drugemu delavcu." });
         return;
@@ -8874,7 +8921,7 @@ async function handleApi(req, res) {
       }
       const id = cleanUserId(decodeURIComponent(workerMatch[1]));
       const body = await readBody(req);
-      const db = await readDbAsync();
+      const db = await readRequestDb(req);
       const worker = db.users?.[id];
       if (!worker) {
         sendJson(res, 404, { error: "Delavec ne obstaja." });
@@ -8951,7 +8998,7 @@ async function handleApi(req, res) {
       }
       const id = cleanUserId(decodeURIComponent(workerMatch[1]));
       await readBody(req);
-      const db = await readDbAsync();
+      const db = await readRequestDb(req);
       const worker = db.users?.[id];
       if (!worker) {
         sendJson(res, 404, { error: "Delavec ne obstaja." });
@@ -9005,7 +9052,7 @@ async function handleApi(req, res) {
         sendJson(res, 403, { error: "Dnevni povzetek drugega delavca vidi samo \u0161ef." });
         return;
       }
-      const db = await readDbAsync();
+      const db = await readRequestDb(req);
       if (!db.users?.[workerId]) {
         sendJson(res, 404, { error: "Delavec ne obstaja." });
         return;
@@ -9032,7 +9079,7 @@ async function handleApi(req, res) {
         sendJson(res, 400, { error: "Za izvoz izberi veljavno obračunsko obdobje." });
         return;
       }
-      const db = await readDbAsync();
+      const db = await readRequestDb(req);
       const report = workerPayrollXlsxReport(db, workerId, range);
       if (!report) {
         sendJson(res, 404, { error: "Obračun za izbranega delavca ni na voljo." });
@@ -9051,7 +9098,7 @@ async function handleApi(req, res) {
     if (url.pathname === "/api/payrolls" && req.method === "GET") {
       const user = await requireUser(req, res);
       if (!user) return;
-      const db = await readDbAsync();
+      const db = await readRequestDb(req);
       sendJson(res, 200, { payrolls: payrollForUser(db, user) });
       return;
     }
@@ -9061,7 +9108,7 @@ async function handleApi(req, res) {
       const user = await requireUser(req, res);
       if (!user) return;
       const id = decodeURIComponent(todoSharePdfTicketMatch[1]);
-      const db = await readDbAsync();
+      const db = await readRequestDb(req);
       const todo = (db.todos || []).find((item) => item.id === id);
       if (!todo || isTrashedTodo(todo) || !canManageTodo(user, todo) || !todoShareReport(db, todo)) {
         sendJson(res, 404, { error: "Dogodek ni več na voljo." });
@@ -9080,7 +9127,7 @@ async function handleApi(req, res) {
         sendJson(res, 410, { error: "Povezava za prenos PDF-ja je potekla. Ponovno odpri deljenje dogodka." });
         return;
       }
-      const db = await readDbAsync();
+      const db = await readRequestDb(req);
       const todo = (db.todos || []).find((item) => item.id === ticket.todoId);
       if (!todo || isTrashedTodo(todo) || !canManageTodo(user, todo)) {
         sendJson(res, 404, { error: "Dogodek ni več na voljo." });
@@ -9102,7 +9149,7 @@ async function handleApi(req, res) {
         sendJson(res, 400, { error: "Izbrani vpisi za poročilo niso pravilni." });
         return;
       }
-      const db = await readDbAsync();
+      const db = await readRequestDb(req);
       const report = clientReportSelection(db, body);
       if (!report) {
         sendJson(res, 409, { error: "Izbrani vpisi niso več na voljo za poročilo. Osveži pogled in preveri izbor." });
@@ -9131,7 +9178,7 @@ async function handleApi(req, res) {
         sendJson(res, 410, { error: "Povezava za prenos PDF-ja je potekla. Ponovno klikni Prenesi PDF." });
         return;
       }
-      const db = await readDbAsync();
+      const db = await readRequestDb(req);
       await sendClientReportPdf(res, db, ticket.payload);
       return;
     }
@@ -9148,7 +9195,7 @@ async function handleApi(req, res) {
         sendJson(res, 400, { error: "Izbrani vpisi za poročilo niso pravilni." });
         return;
       }
-      const db = await readDbAsync();
+      const db = await readRequestDb(req);
       const report = clientReportSelection(db, body);
       if (!report) {
         sendJson(res, 409, { error: "Izbrani vpisi niso več na voljo za poročilo. Osvezi pogled in preveri izbor." });
@@ -9180,7 +9227,7 @@ async function handleApi(req, res) {
         sendJson(res, 400, { error: "Izbrani vpisi za poročilo niso pravilni." });
         return;
       }
-      const db = await readDbAsync();
+      const db = await readRequestDb(req);
       const owner = googleDriveOwner(db);
       if (!googleReady() || !googleWorkspaceTokenAvailable(owner)) {
         sendJson(res, 409, { error: "V Nastavitvah kot Bojan najprej ponovno poveži Google Dokumente, preglednice in Gmail." });
@@ -9225,7 +9272,7 @@ async function handleApi(req, res) {
         sendJson(res, 403, { error: "Obračune strank vidi samo šef." });
         return;
       }
-      const db = await readDbAsync();
+      const db = await readRequestDb(req);
       sendJson(res, 200, { clientBills: db.clientBills || [] });
       return;
     }
@@ -9257,7 +9304,7 @@ async function handleApi(req, res) {
         sendJson(res, 400, { error: "Obdobje obračuna stranki ni pravilno." });
         return;
       }
-      const db = await readDbAsync();
+      const db = await readRequestDb(req);
       const client = clientForBilling(db, body);
       if (!client) {
         sendJson(res, 400, { error: "Stranke ni bilo mogoče prepoznati." });
@@ -9284,7 +9331,7 @@ async function handleApi(req, res) {
         sendJson(res, 403, { error: "Obračun stranki lahko prekliče samo šef." });
         return;
       }
-      const db = await readDbAsync();
+      const db = await readRequestDb(req);
       const result = cancelClientBill(db, clientBillDeleteMatch[1], user);
       if (!result) {
         sendJson(res, 404, { error: "Potrjenega obračuna stranki ni bilo mogoče najti." });
@@ -9316,7 +9363,7 @@ async function handleApi(req, res) {
         sendJson(res, 409, { error: "Obračun lahko potrdiš največ do današnjega dne." });
         return;
       }
-      const db = await readDbAsync();
+      const db = await readRequestDb(req);
       if (!db.users?.[workerId]) {
         sendJson(res, 400, { error: "Delavec ne obstaja." });
         return;
@@ -9397,7 +9444,7 @@ async function handleApi(req, res) {
         sendJson(res, 400, { error: "Vnesi znesek delnega izplačila." });
         return;
       }
-      const db = await readDbAsync();
+      const db = await readRequestDb(req);
       const index = db.payrolls.findIndex((payroll) => payroll.id === decodeURIComponent(payrollPaymentMatch[1]));
       if (index < 0) {
         sendJson(res, 404, { error: "Obračun ne obstaja." });
@@ -9436,7 +9483,7 @@ async function handleApi(req, res) {
       }
       const payrollId = decodeURIComponent(payrollPaymentDeleteMatch[1]);
       const paymentId = decodeURIComponent(payrollPaymentDeleteMatch[2]);
-      const db = await readDbAsync();
+      const db = await readRequestDb(req);
       const index = db.payrolls.findIndex((payroll) => payroll.id === payrollId);
       if (index < 0) {
         sendJson(res, 404, { error: "Obračun ne obstaja." });
@@ -9478,7 +9525,7 @@ async function handleApi(req, res) {
       }
       const body = await readBody(req);
       const action = String(body.action || "refresh");
-      const db = await readDbAsync();
+      const db = await readRequestDb(req);
       const index = db.payrolls.findIndex((payroll) => payroll.id === decodeURIComponent(payrollMatch[1]));
       if (index < 0) {
         sendJson(res, 404, { error: "Obračun ne obstaja." });
@@ -9598,7 +9645,7 @@ async function handleApi(req, res) {
         sendJson(res, 403, { error: "Samo šef lahko briše osnutek obračuna." });
         return;
       }
-      const db = await readDbAsync();
+      const db = await readRequestDb(req);
       const index = db.payrolls.findIndex((payroll) => payroll.id === decodeURIComponent(payrollMatch[1]));
       if (index < 0) {
         sendJson(res, 404, { error: "Obračun ne obstaja." });
@@ -9622,7 +9669,7 @@ async function handleApi(req, res) {
     if (url.pathname === "/api/workers/billing" && req.method === "GET") {
       const user = await requireUser(req, res);
       if (!user) return;
-      const db = await readDbAsync();
+      const db = await readRequestDb(req);
       const activeUsers = Object.values(db.users || {}).filter((worker) => worker.active !== false);
       const workers = activeUsers
         .filter((worker) => user.role === "boss" || worker.id === user.id)
@@ -9646,7 +9693,7 @@ async function handleApi(req, res) {
         return;
       }
       const body = await readBody(req);
-      const db = await readDbAsync();
+      const db = await readRequestDb(req);
       const workerId = cleanUserId(body.userId);
       const hourlyRate = nonnegativeNumber(body.hourlyRate, null, 10_000);
       const exportTitle = String(body.exportTitle || "").trim().slice(0, 120);
@@ -9673,7 +9720,7 @@ async function handleApi(req, res) {
       const user = await requireUser(req, res);
       if (!user) return;
       const body = await readBody(req);
-      const db = await readDbAsync();
+      const db = await readRequestDb(req);
       const current = db.users[user.id];
       const name = String(body.name || "").trim().slice(0, 120);
       const avatar = String(body.avatar || "");
@@ -9700,7 +9747,7 @@ async function handleApi(req, res) {
     if (url.pathname === "/api/entries" && req.method === "GET") {
       const user = await requireUser(req, res);
       if (!user) return;
-      const db = await readDbAsync();
+      const db = await readRequestDb(req);
       sendJson(res, 200, { entries: visibleEntriesForUser(db, user) });
       return;
     }
@@ -9708,7 +9755,7 @@ async function handleApi(req, res) {
     if (url.pathname === "/api/todos" && req.method === "GET") {
       const user = await requireUser(req, res);
       if (!user) return;
-      const db = await readDbAsync();
+      const db = await readRequestDb(req);
       sendJson(res, 200, { todos: visibleTodosForUser(db, user) });
       return;
     }
@@ -9716,7 +9763,7 @@ async function handleApi(req, res) {
     if (url.pathname === "/api/todos/trash" && req.method === "GET") {
       const user = await requireUser(req, res);
       if (!user) return;
-      const db = await readDbAsync();
+      const db = await readRequestDb(req);
       sendJson(res, 200, { todos: visibleTrashedTodosForUser(db, user), retentionDays: DELETED_TODO_RETENTION_DAYS });
       return;
     }
@@ -9728,7 +9775,7 @@ async function handleApi(req, res) {
         sendJson(res, 409, { error: "Ročni vrstni red se je posodobil. Osveži stran in ponovi premik." });
         return;
       }
-      const db = await readDbAsync();
+      const db = await readRequestDb(req);
       const result = applySharedManualTodoOrder(db, user, body);
       if (result.error) {
         sendJson(res, result.status || 400, { error: result.error, ...(result.lock ? { lock: result.lock } : {}) });
@@ -9753,7 +9800,7 @@ async function handleApi(req, res) {
         sendJson(res, 400, { error: "Označi od 1 do 2000 še neobračunanih vpisov." });
         return;
       }
-      const db = await readDbAsync();
+      const db = await readRequestDb(req);
       const client = clientForBilling(db, body);
       if (!client) {
         sendJson(res, 400, { error: "Izberi obstoječo stranko iz baze." });
@@ -9821,7 +9868,7 @@ async function handleApi(req, res) {
     if (url.pathname === "/api/clients" && req.method === "GET") {
       const user = await requireUser(req, res);
       if (!user) return;
-      const db = await readDbAsync();
+      const db = await readRequestDb(req);
       sendJson(res, 200, { clients: db.clients || [] });
       return;
     }
@@ -9829,7 +9876,7 @@ async function handleApi(req, res) {
     if (url.pathname === "/api/settings" && req.method === "GET") {
       const user = await requireUser(req, res);
       if (!user) return;
-      const db = await readDbAsync();
+      const db = await readRequestDb(req);
       sendJson(res, 200, { settings: db.settings || {}, billingLocks: db.billingLocks || [] });
       return;
     }
@@ -9842,7 +9889,7 @@ async function handleApi(req, res) {
         return;
       }
       const body = await readBody(req);
-      const db = await readDbAsync();
+      const db = await readRequestDb(req);
       db.settings = db.settings || {};
       const previousBilling = db.settings.billing || {};
       const legacyKmRate = nonnegativeNumber(body.kmRate, nonnegativeNumber(previousBilling.kmRate, 0.22, 1_000), 1_000);
@@ -9869,7 +9916,7 @@ async function handleApi(req, res) {
     if (url.pathname === "/api/advances" && req.method === "GET") {
       const user = await requireUser(req, res);
       if (!user) return;
-      const db = await readDbAsync();
+      const db = await readRequestDb(req);
       sendJson(res, 200, { advances: visibleAdvancesForUser(db, user) });
       return;
     }
@@ -9877,7 +9924,7 @@ async function handleApi(req, res) {
     if (url.pathname === "/api/advances" && req.method === "POST") {
       const user = await requireUser(req, res);
       if (!user) return;
-      const db = await readDbAsync();
+      const db = await readRequestDb(req);
       let advance = cleanAdvance(await readBody(req));
       if (user.role !== "boss") advance.person = user.id;
       const validation = validateAdvance(advance, db);
@@ -9913,7 +9960,7 @@ async function handleApi(req, res) {
       const user = await requireUser(req, res);
       if (!user) return;
       const id = decodeURIComponent(advanceMatch[1]);
-      const db = await readDbAsync();
+      const db = await readRequestDb(req);
       const index = db.debts.findIndex((item) => item.id === id && item.type === "advance");
       if (index < 0) { sendJson(res, 404, { error: "Založeni znesek ne obstaja." }); return; }
       const existing = db.debts[index];
@@ -9939,7 +9986,7 @@ async function handleApi(req, res) {
       const user = await requireUser(req, res);
       if (!user) return;
       const id = decodeURIComponent(advanceMatch[1]);
-      const db = await readDbAsync();
+      const db = await readRequestDb(req);
       const index = db.debts.findIndex((item) => item.id === id && item.type === "advance");
       if (index < 0) {
         sendJson(res, 404, { error: "Založeni znesek ne obstaja." });
@@ -9965,7 +10012,7 @@ async function handleApi(req, res) {
     if (url.pathname === "/api/personal-purchases" && req.method === "GET") {
       const user = await requireUser(req, res);
       if (!user) return;
-      const db = await readDbAsync();
+      const db = await readRequestDb(req);
       sendJson(res, 200, { purchases: visiblePersonalPurchasesForUser(db, user) });
       return;
     }
@@ -9973,7 +10020,7 @@ async function handleApi(req, res) {
     if (url.pathname === "/api/personal-purchases" && req.method === "POST") {
       const user = await requireUser(req, res);
       if (!user) return;
-      const db = await readDbAsync();
+      const db = await readRequestDb(req);
       let purchase = cleanPersonalPurchase(await readBody(req));
       if (user.role !== "boss") purchase.person = user.id;
       const validation = validatePersonalPurchase(purchase, db);
@@ -10003,7 +10050,7 @@ async function handleApi(req, res) {
       const user = await requireUser(req, res);
       if (!user) return;
       const id = decodeURIComponent(personalPurchaseMatch[1]);
-      const db = await readDbAsync();
+      const db = await readRequestDb(req);
       const index = db.debts.findIndex((item) => item.id === id && item.type === "personal_purchase");
       if (index < 0) { sendJson(res, 404, { error: "Osebni nakup ne obstaja." }); return; }
       const existing = db.debts[index];
@@ -10025,7 +10072,7 @@ async function handleApi(req, res) {
       const user = await requireUser(req, res);
       if (!user) return;
       const id = decodeURIComponent(personalPurchaseMatch[1]);
-      const db = await readDbAsync();
+      const db = await readRequestDb(req);
       const index = db.debts.findIndex((item) => item.id === id && item.type === "personal_purchase");
       if (index < 0) {
         sendJson(res, 404, { error: "Osebni nakup ne obstaja." });
@@ -10051,7 +10098,7 @@ async function handleApi(req, res) {
     if (url.pathname === "/api/debts" && req.method === "GET") {
       const user = await requireUser(req, res);
       if (!user) return;
-      const db = await readDbAsync();
+      const db = await readRequestDb(req);
       sendJson(res, 200, { debts: visibleDebtsForUser(db, user) });
       return;
     }
@@ -10069,7 +10116,7 @@ async function handleApi(req, res) {
         sendJson(res, 400, { error: validation });
         return;
       }
-      const db = await readDbAsync();
+      const db = await readRequestDb(req);
       const now = new Date().toISOString();
       db.debts.push({
         id: crypto.randomUUID(),
@@ -10091,7 +10138,7 @@ async function handleApi(req, res) {
       if (!user) return;
       const body = await readBody(req);
       const requested = cleanClient(body);
-      const db = await readDbAsync();
+      const db = await readRequestDb(req);
       const clientText = [requested.name, requested.search].map((value) => String(value || "").trim().toLowerCase());
       const existingIndex = db.clients.findIndex((row) => row.clientId === requested.clientId
         || (requested.registryNumber && row.registryNumber === requested.registryNumber)
@@ -10136,7 +10183,7 @@ async function handleApi(req, res) {
         sendJson(res, 403, { error: "Samo \u0161ef lahko izbri\u0161e stranko." });
         return;
       }
-      const db = await readDbAsync();
+      const db = await readRequestDb(req);
       const result = deleteClientIfSafe(db, decodeURIComponent(clientMatch[1]));
       if (!result.deleted) {
         sendJson(res, result.status || 409, {
@@ -10164,7 +10211,7 @@ async function handleApi(req, res) {
         sendJson(res, 400, { error: "Datum zaklepa ni pravilen." });
         return;
       }
-      const db = await readDbAsync();
+      const db = await readRequestDb(req);
       db.billingLocks.push({
         id: crypto.randomUUID(),
         from,
@@ -10194,7 +10241,7 @@ async function handleApi(req, res) {
         sendJson(res, 400, { error: validation });
         return;
       }
-      const db = await readDbAsync();
+      const db = await readRequestDb(req);
       const index = db.debts.findIndex((item) => item.id === id);
       if (index < 0) {
         sendJson(res, 404, { error: "Dolg ne obstaja." });
@@ -10220,7 +10267,7 @@ async function handleApi(req, res) {
         return;
       }
       const id = decodeURIComponent(debtMatch[1]);
-      const db = await readDbAsync();
+      const db = await readRequestDb(req);
       db.debts = db.debts.filter((item) => item.id !== id);
       await writeDbAsync(db);
       sendJson(res, 200, { debts: db.debts });
@@ -10233,7 +10280,7 @@ async function handleApi(req, res) {
       const body = await readBody(req);
       const clientMutationId = cleanClientMutationId(body.clientMutationId);
       const requestHash = clientMutationId ? todoCreateRequestHash(body) : "";
-      const db = await readDbAsync();
+      const db = await readRequestDb(req);
       const receiptKey = clientMutationId ? todoCreateReceiptKey(user.id, clientMutationId) : "";
       const receipt = receiptKey ? db.todoCreateReceipts?.[receiptKey] : null;
       if (receipt) {
@@ -10399,7 +10446,7 @@ async function handleApi(req, res) {
       });
       try {
         const photo = await runSerializedWork(async () => {
-          const db = await readDbAsync();
+          const db = await readRequestDb(req);
           const pending = pendingAttachmentMap(db);
           db.attachments[received.attachmentId] = {
             ...(db.attachments[received.attachmentId] || {}),
@@ -10450,7 +10497,7 @@ async function handleApi(req, res) {
       });
       try {
         const photo = await runSerializedWork(async () => {
-          const db = await readDbAsync();
+          const db = await readRequestDb(req);
           const pending = pendingAttachmentMap(db);
           db.attachments[received.attachmentId] = {
             ...(db.attachments[received.attachmentId] || {}),
@@ -10497,7 +10544,7 @@ async function handleApi(req, res) {
         return;
       }
       const now = new Date().toISOString();
-      const db = await readDbAsync();
+      const db = await readRequestDb(req);
       const sourceTodo = sourceTodoForNewEntry(db, user, entry);
       if (!sourceTodo) {
         sendJson(res, 400, { error: "Nov koledarski vnos lahko ustvariš samo iz svojega opravila z istim datumom." });
@@ -10535,7 +10582,7 @@ async function handleApi(req, res) {
       if (!user) return;
       const id = decodeURIComponent(entryLockMatch[1]);
       const body = await readBody(req);
-      const db = await readDbAsync();
+      const db = await readRequestDb(req);
       const entry = db.entries.find((item) => item.id === id);
       if (!canManageEntry(user, entry)) {
         sendJson(res, 403, { error: "Tega vnosa ne moreš urejati." });
@@ -10573,7 +10620,7 @@ async function handleApi(req, res) {
         sendJson(res, 400, { error: validation });
         return;
       }
-      const db = await readDbAsync();
+      const db = await readRequestDb(req);
       entry = attachResolvedClient(db, entry);
       const resolvedValidation = validateEntry(entry);
       if (resolvedValidation) {
@@ -10621,7 +10668,7 @@ async function handleApi(req, res) {
       const id = decodeURIComponent(match[1]);
       const body = await readBody(req);
       const editLockToken = String(body.editLockToken || "");
-      const db = await readDbAsync();
+      const db = await readRequestDb(req);
       const entry = db.entries.find((item) => item.id === id);
       if (!canManageEntry(user, entry)) {
         sendJson(res, 403, { error: "Tega vnosa ne moreš izbrisati." });
@@ -10760,7 +10807,7 @@ async function handleApi(req, res) {
           releaseTodoEditLock(id, user, body.lockToken);
         }
       } else {
-        const db = await readDbAsync();
+        const db = await readRequestDb(req);
         const todo = db.todos.find((item) => item.id === id);
         if (todo) {
           releaseTodoAssignmentEditLock(db, todo, user, body.lockToken);
@@ -10827,7 +10874,7 @@ async function handleApi(req, res) {
       }
       const user = await requireUser(req, res);
       if (!user) return;
-      const db = await readDbAsync();
+      const db = await readRequestDb(req);
       let todo = (db.todos || []).find((item) => item.id === id);
       if (req.method === "GET") {
         const token = String(url.searchParams.get("token") || "");
@@ -10999,7 +11046,7 @@ async function handleApi(req, res) {
         sendJson(res, 400, { error: "Dnevni pogled vsebuje podvojen ali neveljaven dogodek." });
         return;
       }
-      const db = await readDbAsync();
+      const db = await readRequestDb(req);
       const operations = [];
       const operationByAssignmentId = new Map();
       for (const requested of requestedItems) {
@@ -11117,7 +11164,7 @@ async function handleApi(req, res) {
       const body = await readBody(req);
       const editorWorkContext = String(body.editorWorkContext || "");
       const editLockToken = String(body.editLockToken || "");
-      const db = await readDbAsync();
+      const db = await readRequestDb(req);
       const previousTodo = db.todos.find((item) => item.id === id);
       if (!canManageTodo(user, previousTodo) || isTrashedTodo(previousTodo)) {
         sendJson(res, 403, { error: "Tega opravila ne moreš spreminjati." });
@@ -11197,7 +11244,7 @@ async function handleApi(req, res) {
       const user = await requireUser(req, res);
       if (!user) return;
       const id = decodeURIComponent(todoRestoreMatch[1]);
-      const db = await readDbAsync();
+      const db = await readRequestDb(req);
       const todo = (db.todos || []).find((item) => item.id === id);
       if (!todo || !isTrashedTodo(todo)) {
         sendJson(res, 404, { error: "Opravila v Izbrisano ni ve\u010d ali pa je bilo \u017ee obnovljeno." });
@@ -11236,7 +11283,7 @@ async function handleApi(req, res) {
         return;
       }
       const field = requested[0];
-      const db = await readDbAsync();
+      const db = await readRequestDb(req);
       const previousTodo = (db.todos || []).find((item) => String(item.id || "") === id);
       if (!previousTodo || isTrashedTodo(previousTodo)) {
         sendJson(res, 404, { error: "Opravilo ne obstaja." });
@@ -11322,7 +11369,7 @@ async function handleApi(req, res) {
       const id = decodeURIComponent(todoChangeNoticeMatch[1]);
       const markingSeen = Boolean(todoChangeNoticeMatch[2]);
       const body = markingSeen ? {} : await readBody(req);
-      const db = await readDbAsync();
+      const db = await readRequestDb(req);
       const todo = (db.todos || []).find((item) => item.id === id);
       if (!todo || isTrashedTodo(todo) || !canManageTodo(user, todo)) {
         sendJson(res, 404, { error: "Opravilo ne obstaja ali ni na voljo." });
@@ -11407,7 +11454,7 @@ async function handleApi(req, res) {
         sendJson(res, 400, { error: validation });
         return;
       }
-      const db = await readDbAsync();
+      const db = await readRequestDb(req);
       const directClientSettlement = directClientSettlementRequest(body.directClientSettlement);
       const index = db.todos.findIndex((item) => item.id === id);
       if (index < 0) {
@@ -11661,7 +11708,7 @@ releaseTodoAssignmentEditLock(db, previousTodo, user, editLockToken);
       const id = decodeURIComponent(todoMatch[1]);
       const body = await readBody(req);
       const editLockToken = String(body.editLockToken || "");
-      const db = await readDbAsync();
+      const db = await readRequestDb(req);
       const todo = db.todos.find((item) => item.id === id);
       if (!canManageTodo(user, todo)) {
         sendJson(res, 403, { error: "Tega opravila ne moreš izbrisati." });
@@ -11705,6 +11752,10 @@ releaseTodoAssignmentEditLock(db, previousTodo, user, editLockToken);
 
     sendJson(res, 404, { error: "API pot ne obstaja." });
   } catch (error) {
+    if (error.code === "STALE_SNAPSHOT") {
+      sendJson(res, 409, { code: error.code, error: error.message });
+      return;
+    }
     console.error("API napaka:", error);
     const message = NODE_ENV === "production" ? "Napaka na strežniku." : (error.message || "Napaka na strežniku.");
     sendJson(res, 500, { error: message });
@@ -11765,6 +11816,10 @@ function actionableGoogleDriveError(error) {
   return null;
 }
 function handleUnexpectedRequestError(error, res) {
+  if (error.code === "STALE_SNAPSHOT" && !res.headersSent) {
+    sendJson(res, 409, { code: error.code, error: error.message });
+    return;
+  }
   console.error("Nepricakovana napaka zahtevka:", error);
   if (!res.headersSent) {
     const actionable = actionableGoogleDriveError(error);
@@ -11803,6 +11858,7 @@ function runSerializedMutation(req, res) {
       actor: null,
       recorded: false
     };
+    req.indusDb = db;
     try {
       return await handleApi(req, res);
     } finally {
@@ -11818,6 +11874,7 @@ async function start() {
   }
   if (DATABASE_URL) {
     await ensurePostgresDb();
+    await migratePostgresNormalization();
     console.log("Shranjevanje: Postgres baza prek DATABASE_URL");
   } else {
     ensureDb();
@@ -11878,6 +11935,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+  installRestoredMedia,
   moveAttachmentFile,
   pruneUnusedTodoAttachments,
   ENTRY_EDIT_LOCK_TTL_MS,
@@ -11989,6 +12047,9 @@ module.exports = {
   entryForUserRole,
   createSession,
   normalizeDb,
+  readDbAsync,
+  migratePostgresNormalization,
+  attachmentVisibleToUser,
   normalizePayroll,
   payrollForUser,
   payrollSequenceError,

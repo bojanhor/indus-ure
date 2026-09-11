@@ -9,6 +9,36 @@
 const fs = require("fs");
 const fsp = fs.promises;
 const path = require("path");
+const { isDeepStrictEqual } = require("node:util");
+
+class StaleSnapshotError extends Error {
+  constructor(message = "Podatki so bili medtem spremenjeni. Osveži pogled in ponovi shranjevanje; tvoja sprememba ni bila zapisana.") {
+    super(message);
+    this.code = "STALE_SNAPSHOT";
+    this.status = 409;
+  }
+}
+
+function keyedRows(rows) {
+  return new Map(rows.filter(([id]) => id).map(([id, data]) => [String(id), data]));
+}
+
+function todoRows(todos) {
+  const tasks = new Map();
+  const assignments = [];
+  for (const todo of todos || []) {
+    if (!todo?.id) continue;
+    const split = splitTodo(todo);
+    const existing = tasks.get(split.taskId);
+    if (!existing) tasks.set(split.taskId, { task: split.task, allArchived: Boolean(split.assignment.archivedAt), archivedAt: String(split.assignment.archivedAt || "") });
+    else {
+      existing.allArchived = existing.allArchived && Boolean(split.assignment.archivedAt);
+      if (!existing.archivedAt && split.assignment.archivedAt) existing.archivedAt = String(split.assignment.archivedAt);
+    }
+    assignments.push(split.assignment);
+  }
+  return { tasks, assignments };
+}
 
 const STATE_TABLES = [
   ["indus_users", "id", "users", true],
@@ -93,6 +123,7 @@ function joinTodo(task, assignment) {
     billingHourlyRate: assignment.billingHourlyRate,
     billingKm: assignment.billingKm,
     billingClientKm: assignment.billingClientKm,
+    billingWorkerKm: assignment.billingWorkerKm,
     billingVehicle: assignment.billingVehicle,
     archivedAt: assignment.archivedAt || "",
     archivedPayrollId: assignment.archivedPayrollId || "",
@@ -111,6 +142,9 @@ class PostgresStore {
     this.objectsDir = path.join(mediaDir, "objects");
     this.thumbnailsDir = path.join(mediaDir, "thumbnails");
     this.ready = null;
+    // Only objects read by this store may be saved. The revision is private,
+    // never supplied by a browser or reconstructed from a newer snapshot.
+    this.snapshots = new WeakMap();
   }
 
   async ensure(initialState, normalize = null) {
@@ -247,6 +281,7 @@ class PostgresStore {
     `);
     await fsp.mkdir(this.objectsDir, { recursive: true, mode: 0o700 });
     await fsp.mkdir(this.thumbnailsDir, { recursive: true, mode: 0o700 });
+    await this.pool.query("insert into indus_meta (key, data) values ('storage_revision', '{\"revision\":0}'::jsonb) on conflict (key) do nothing");
 
     const marker = await this.pool.query("select data from indus_meta where key = $1", ["storage_version"]);
     if (marker.rowCount) return;
@@ -260,7 +295,7 @@ class PostgresStore {
     }
     const normalizedSource = clone(source || {});
     if (typeof normalize === "function") normalize(normalizedSource);
-    await this.save(normalizedSource);
+    await this.save(normalizedSource, { initialize: true });
     await this.pool.query(
       "insert into indus_meta (key, data) values ($1, $2::jsonb) on conflict (key) do update set data = excluded.data, updated_at = now()",
       ["storage_version", json({ version: 1, migratedAt: new Date().toISOString(), legacyAppStateRetained: true })]
@@ -268,20 +303,34 @@ class PostgresStore {
   }
 
   async load() {
-    const [meta, users, sessions, clients, tasks, assignments, entries, attachments, debts, payrolls, clientBills, locks] = await Promise.all([
-      this.pool.query("select data from indus_meta where key = $1", ["application"]),
-      this.pool.query("select id, data from indus_users"),
-      this.pool.query("select token_hash, data from indus_sessions where expires_at > now()"),
-      this.pool.query("select client_id, data from indus_clients order by lower(alias), lower(name)"),
-      this.pool.query("select id, data from indus_tasks"),
-      this.pool.query("select id, task_id, data from indus_task_assignments"),
-      this.pool.query("select id, data from indus_entries"),
-      this.pool.query("select id, mime_type, byte_size, storage_key, thumbnail_key, data from indus_attachments"),
-      this.pool.query("select id, data from indus_debts"),
-      this.pool.query("select id, data from indus_payrolls"),
-      this.pool.query("select id, data from indus_client_bills"),
-      this.pool.query("select id, data from indus_billing_locks")
-    ]);
+    const client = await this.pool.connect();
+    let results;
+    try {
+      // One MVCC snapshot, not twelve independently timed pool queries.
+      await client.query("begin isolation level repeatable read read only");
+      results = [];
+      for (const query of [
+        "select data from indus_meta where key = 'storage_revision'",
+        "select data from indus_meta where key = 'application'",
+        "select id, data from indus_users",
+        "select token_hash, data from indus_sessions where expires_at > now()",
+        "select client_id, data from indus_clients order by lower(alias), lower(name)",
+        "select id, data from indus_tasks",
+        "select id, task_id, data from indus_task_assignments",
+        "select id, data from indus_entries",
+        "select id, mime_type, byte_size, storage_key, thumbnail_key, data from indus_attachments",
+        "select id, data from indus_debts",
+        "select id, data from indus_payrolls",
+        "select id, data from indus_client_bills",
+        "select id, data from indus_billing_locks"
+      ]) results.push(await client.query(query));
+      await client.query("commit");
+    } catch (error) {
+      await client.query("rollback");
+      throw error;
+    } finally { client.release(); }
+    const [revision, meta, users, sessions, clients, tasks, assignments, entries, attachments, debts, payrolls, clientBills, locks] = results;
+    if (!revision.rowCount) throw new Error("Manjka migracija storage_revision.");
 
     const base = meta.rows[0]?.data || {};
     const taskById = new Map(tasks.rows.map((row) => [String(row.id), row.data]));
@@ -302,7 +351,7 @@ class PostgresStore {
         thumbnailKey: row.thumbnail_key
       };
     }
-    return {
+    const db = {
       ...base,
       users: objectFromRows(users.rows, "id"),
       sessions: objectFromRows(sessions.rows, "token_hash"),
@@ -314,6 +363,35 @@ class PostgresStore {
       payrolls: payrolls.rows.map((row) => row.data),
       clientBills: clientBills.rows.map((row) => row.data),
       billingLocks: locks.rows.map((row) => row.data)
+    };
+    this.snapshots.set(db, { revision: Number(revision.rows[0].data.revision), db: clone(db) });
+    return db;
+  }
+
+  async sessionUser(tokenHash) {
+    const result = await this.pool.query(
+      `select s.data as session, u.data as user from indus_sessions s
+       join indus_users u on u.id = s.user_id
+       where s.token_hash = $1 and s.expires_at > now()
+         and coalesce(u.data ->> 'active', 'true') <> 'false'`, [tokenHash]);
+    const row = result.rows[0];
+    return row?.session?.userId === row?.user?.id ? row : null;
+  }
+
+  async attachmentAccessSeed(attachmentId) {
+    // Fetch references to this attachment only; reuse the JS access rules.
+    const photos = json([{ attachmentId }]);
+    const [pending, todos, debts] = await Promise.all([
+      this.pool.query("select data -> 'settings' -> 'pendingAttachments' -> $1 as pending from indus_meta where key = 'application'", [attachmentId]),
+      this.pool.query(`select t.data as task, a.data as assignment from indus_tasks t
+        join indus_task_assignments a on a.task_id = t.id
+        where t.data -> 'photos' @> $1::jsonb`, [photos]),
+      this.pool.query("select data from indus_debts where data -> 'photos' @> $1::jsonb", [photos])
+    ]);
+    return {
+      settings: { pendingAttachments: pending.rows[0]?.pending ? { [attachmentId]: pending.rows[0].pending } : {} },
+      todos: todos.rows.map(row => joinTodo(row.task, row.assignment)),
+      debts: debts.rows.map(row => row.data)
     };
   }
 
@@ -613,35 +691,52 @@ class PostgresStore {
     };
   }
 
-  async save(db, { protectedAttachmentIds = [] } = {}) {
+  async save(db, { protectedAttachmentIds = [], initialize = false } = {}) {
+    const snapshot = this.snapshots.get(db);
+    if (!snapshot && !initialize) throw new StaleSnapshotError("Zapis brez izvornega posnetka ni dovoljen. Skripta mora najprej uporabiti store.load().");
+    const before = snapshot?.db || {};
     const client = await this.pool.connect();
     const filesToDelete = [];
+    let nextRevision;
     try {
       await client.query("begin");
+      const current = await client.query("select data from indus_meta where key = 'storage_revision' for update");
+      if (!current.rowCount) throw new Error("Manjka migracija storage_revision.");
+      const revision = Number(current.rows[0].data.revision);
+      if (initialize) {
+        const existing = await client.query("select 1 from indus_meta where key = 'application'");
+        if (existing.rowCount || snapshot) throw new StaleSnapshotError("Inicializacija že obstoječe baze ni dovoljena.");
+      } else if (revision !== snapshot.revision) throw new StaleSnapshotError();
+      nextRevision = revision + 1;
+      db.syncRevision = Math.max(Number(db.syncRevision) || 0, (Number(before.syncRevision) || 0) + 1);
       const meta = Object.fromEntries(Object.entries(db).filter(([key]) => !META_EXCLUDED_KEYS.has(key)));
       await client.query(
         "insert into indus_meta (key, data) values ($1, $2::jsonb) on conflict (key) do update set data = excluded.data, updated_at = now()",
         ["application", json(meta)]
       );
-
-      await this.#replaceRows(client, "indus_users", "id", Object.values(db.users || {}).map((item) => [String(item.id), item]));
-      await this.#replaceSessions(client, db.sessions || {});
-      await this.#replaceClients(client, db.clients || []);
-      await this.#replaceTodos(client, db.todos || []);
-      await this.#replaceRows(client, "indus_entries", "id", (db.entries || []).map((item) => [String(item.id), item]));
-      await this.#replaceRows(client, "indus_debts", "id", (db.debts || []).map((item) => [String(item.id), item]));
-      await this.#replacePayrolls(client, db.payrolls || []);
-      await this.#replaceClientBills(client, db.clientBills || []);
-      await this.#replaceRows(client, "indus_billing_locks", "id", (db.billingLocks || []).map((item, index) => [String(item.id || `${item.workerId || "worker"}:${item.month || index}`), item]));
-      filesToDelete.push(...await this.#replaceAttachments(client, db.attachments || {}, new Set(protectedAttachmentIds)));
+      const ids = (items) => (items || []).map(item => [String(item.id), item]);
+      const lockRows = (items) => (items || []).map((item, index) => [String(item.id || `${item.workerId || "worker"}:${item.month || index}`), item]);
+      await this.#replaceRows(client, "indus_users", "id", ids(Object.values(db.users || {})), ids(Object.values(before.users || {})));
+      await this.#replaceSessions(client, db.sessions || {}, before.sessions || {});
+      await this.#replaceClients(client, db.clients || [], before.clients || []);
+      await this.#replaceTodos(client, db.todos || [], before.todos || []);
+      await this.#replaceRows(client, "indus_entries", "id", ids(db.entries), ids(before.entries));
+      await this.#replaceRows(client, "indus_debts", "id", ids(db.debts), ids(before.debts));
+      await this.#replacePayrolls(client, db.payrolls || [], before.payrolls || []);
+      await this.#replaceClientBills(client, db.clientBills || [], before.clientBills || []);
+      await this.#replaceRows(client, "indus_billing_locks", "id", lockRows(db.billingLocks), lockRows(before.billingLocks));
+      filesToDelete.push(...await this.#replaceAttachments(client, db.attachments || {}, new Set(protectedAttachmentIds), before.attachments || {}));
+      await client.query("update indus_meta set data = $1::jsonb, updated_at = now() where key = 'storage_revision'", [json({ revision: nextRevision })]);
       await client.query("commit");
     } catch (error) {
       await client.query("rollback");
       throw error;
-    } finally {
-      client.release();
-    }
-    await Promise.all(filesToDelete.map((file) => fsp.rm(file, { force: true }).catch(() => {})));
+    } finally { client.release(); }
+    this.snapshots.set(db, { revision: nextRevision, db: clone(db) });
+    // Do not unlink after COMMIT: another writer can already have reused the
+    // same content-addressed key. Unreferenced media is retained for the safe
+    // offline garbage-collection procedure documented in OPERATIONS.md.
+    return { revision: nextRevision, retainedMediaKeys: filesToDelete.length };
   }
 
   async getAttachment(id, thumbnail = false) {
@@ -668,44 +763,50 @@ class PostgresStore {
     return candidate.startsWith(`${this.mediaDir}${path.sep}`) ? candidate : null;
   }
 
-  async #replaceRows(client, table, keyColumn, rows) {
+  async #removeAbsent(client, table, keyColumn, beforeIds, afterIds) {
+    const present = new Set(afterIds);
+    const removed = beforeIds.filter(id => !present.has(id));
+    if (removed.length) await client.query(`delete from ${table} where ${keyColumn} = any($1::text[])`, [removed]);
+  }
+
+  async #replaceRows(client, table, keyColumn, rows, previous = []) {
+    const baseline = keyedRows(previous);
     const seen = [];
     for (const [id, data] of rows.filter(([id]) => id)) {
       seen.push(id);
+      if (isDeepStrictEqual(baseline.get(id), data)) continue;
       await client.query(
         `insert into ${table} (${keyColumn}, data) values ($1, $2::jsonb)
          on conflict (${keyColumn}) do update set data = excluded.data, updated_at = now()`,
         [id, json(data)]
       );
     }
-    if (seen.length) {
-      await client.query(`delete from ${table} where not (${keyColumn} = any($1::text[]))`, [seen]);
-    } else {
-      await client.query(`delete from ${table}`);
-    }
+    await this.#removeAbsent(client, table, keyColumn, [...baseline.keys()], seen);
   }
 
-  async #replaceSessions(client, sessions) {
+  async #replaceSessions(client, sessions, previous = {}) {
     const entries = Object.entries(sessions).filter(([tokenHash, value]) => tokenHash && value && Number(value.expiresAt) > Date.now());
     const ids = [];
     for (const [tokenHash, data] of entries) {
       ids.push(tokenHash);
+      if (isDeepStrictEqual(previous[tokenHash], data)) continue;
       await client.query(
         `insert into indus_sessions (token_hash, user_id, expires_at, data) values ($1, $2, $3, $4::jsonb)
          on conflict (token_hash) do update set user_id = excluded.user_id, expires_at = excluded.expires_at, data = excluded.data, updated_at = now()`,
         [tokenHash, String(data.userId || ""), new Date(Number(data.expiresAt)), json(data)]
       );
     }
-    if (ids.length) await client.query("delete from indus_sessions where token_hash <> all($1::text[])", [ids]);
-    else await client.query("delete from indus_sessions");
+    await this.#removeAbsent(client, "indus_sessions", "token_hash", Object.keys(previous), ids);
   }
 
-  async #replaceClients(client, clients) {
+  async #replaceClients(client, clients, previous = []) {
+    const baseline = keyedRows(previous.map(item => [String(item.clientId || ""), item]));
     const ids = [];
     for (const value of clients) {
       const id = String(value.clientId || "");
       if (!id) continue;
       ids.push(id);
+      if (isDeepStrictEqual(baseline.get(id), value)) continue;
       await client.query(
         `insert into indus_clients (client_id, alias, name, tax_id, needs_review, data)
          values ($1, $2, $3, $4, $5, $6::jsonb)
@@ -714,33 +815,18 @@ class PostgresStore {
         [id, String(value.alias || value.search || ""), String(value.name || ""), String(value.taxId || ""), Boolean(value.needsReview), json(value)]
       );
     }
-    if (ids.length) await client.query("delete from indus_clients where client_id <> all($1::text[])", [ids]);
-    else await client.query("delete from indus_clients");
+    await this.#removeAbsent(client, "indus_clients", "client_id", [...baseline.keys()], ids);
   }
 
-  async #replaceTodos(client, todos) {
-    const taskMap = new Map();
-    const assignments = [];
-    for (const todo of todos) {
-      if (!todo?.id) continue;
-      const split = splitTodo(todo);
-      const existing = taskMap.get(split.taskId);
-      if (!existing) {
-        taskMap.set(split.taskId, {
-          task: split.task,
-          allArchived: Boolean(split.assignment.archivedAt),
-          archivedAt: String(split.assignment.archivedAt || "")
-        });
-      } else {
-        existing.allArchived = existing.allArchived && Boolean(split.assignment.archivedAt);
-        if (!existing.archivedAt && split.assignment.archivedAt) existing.archivedAt = String(split.assignment.archivedAt);
-      }
-      assignments.push(split.assignment);
-    }
+  async #replaceTodos(client, todos, previous = []) {
+    const { tasks: taskMap, assignments } = todoRows(todos);
+    const old = todoRows(previous);
+    const oldAssignments = keyedRows(old.assignments.map(item => [item.id, item]));
     const taskIds = [];
     for (const [id, record] of taskMap) {
       const { task } = record;
       taskIds.push(id);
+      if (isDeepStrictEqual(old.tasks.get(id), record)) continue;
       await client.query(
         `insert into indus_tasks (id, client_id, status, scheduled_date, archived_at, revision, data)
          values ($1, $2, $3, nullif($4, '')::date, nullif($5, '')::timestamptz, $6, $7::jsonb)
@@ -750,12 +836,12 @@ class PostgresStore {
         [id, String(task.clientId || ""), String(task.status || ""), String(task.date || ""), record.allArchived ? record.archivedAt : "", Number(task.revision || 1), json(task)]
       );
     }
-    if (taskIds.length) await client.query("delete from indus_tasks where id <> all($1::text[])", [taskIds]);
-    else await client.query("delete from indus_tasks");
+    await this.#removeAbsent(client, "indus_tasks", "id", [...old.tasks.keys()], taskIds);
 
     const assignmentIds = [];
     for (const assignment of assignments) {
       assignmentIds.push(assignment.id);
+      if (isDeepStrictEqual(oldAssignments.get(assignment.id), assignment)) continue;
       await client.query(
         `insert into indus_task_assignments (id, task_id, worker_id, manual_order, data)
          values ($1, $2, $3, $4, $5::jsonb)
@@ -764,49 +850,55 @@ class PostgresStore {
         [assignment.id, assignment.taskId, String(assignment.syncUser || ""), Number(assignment.order || 0), json(assignment)]
       );
     }
-    if (assignmentIds.length) await client.query("delete from indus_task_assignments where id <> all($1::text[])", [assignmentIds]);
-    else await client.query("delete from indus_task_assignments");
+    await this.#removeAbsent(client, "indus_task_assignments", "id", [...oldAssignments.keys()], assignmentIds);
   }
 
-  async #replacePayrolls(client, payrolls) {
+  async #replacePayrolls(client, payrolls, previous = []) {
+    const baseline = keyedRows(previous.map(item => [String(item.id || ""), item]));
     const ids = [];
     for (const item of payrolls) {
       const id = String(item.id || "");
       if (!id) continue;
       ids.push(id);
+      if (isDeepStrictEqual(baseline.get(id), item)) continue;
       await client.query(
         `insert into indus_payrolls (id, worker_id, month, data) values ($1, $2, $3, $4::jsonb)
          on conflict (id) do update set worker_id = excluded.worker_id, month = excluded.month, data = excluded.data, updated_at = now()`,
         [id, String(item.workerId || ""), String(item.month || ""), json(item)]
       );
     }
-    if (ids.length) await client.query("delete from indus_payrolls where id <> all($1::text[])", [ids]);
-    else await client.query("delete from indus_payrolls");
+    await this.#removeAbsent(client, "indus_payrolls", "id", [...baseline.keys()], ids);
   }
 
-  async #replaceClientBills(client, clientBills) {
+  async #replaceClientBills(client, clientBills, previous = []) {
+    const baseline = keyedRows(previous.map(item => [String(item.id || ""), item]));
     const ids = [];
     for (const item of clientBills) {
       const id = String(item.id || "");
       if (!id) continue;
       ids.push(id);
+      if (isDeepStrictEqual(baseline.get(id), item)) continue;
       await client.query(
         `insert into indus_client_bills (id, client_id, status, data) values ($1, $2, $3, $4::jsonb)
          on conflict (id) do update set client_id = excluded.client_id, status = excluded.status, data = excluded.data, updated_at = now()`,
         [id, String(item.clientId || ""), String(item.status || "confirmed"), json(item)]
       );
     }
-    if (ids.length) await client.query("delete from indus_client_bills where id <> all($1::text[])", [ids]);
-    else await client.query("delete from indus_client_bills");
+    await this.#removeAbsent(client, "indus_client_bills", "id", [...baseline.keys()], ids);
   }
 
-  async #replaceAttachments(client, attachments, protectedAttachmentIds = new Set()) {
-    const existing = await client.query("select id, storage_key, thumbnail_key, data from indus_attachments");
+  async #replaceAttachments(client, attachments, protectedAttachmentIds = new Set(), baseline = {}) {
+    const touched = [...new Set([...Object.keys(attachments), ...Object.keys(baseline)])]
+      .filter(id => !isDeepStrictEqual(attachments[id], baseline[id]));
+    const existing = touched.length
+      ? await client.query("select id, byte_size, storage_key, thumbnail_key, data from indus_attachments where id = any($1::text[])", [touched])
+      : { rows: [] };
     const existingById = new Map(existing.rows.map((row) => [String(row.id), row]));
     const ids = [];
     for (const [id, raw] of Object.entries(attachments)) {
       if (!/^[a-f0-9]{64}$/.test(id) || !raw) continue;
       ids.push(id);
+      if (isDeepStrictEqual(baseline[id], raw)) continue;
       const previous = existingById.get(id);
       const attachment = { ...raw, id };
       const file = dataUrlInfo(attachment.data);
@@ -836,8 +928,8 @@ class PostgresStore {
       attachments[id] = attachment;
     }
     // A deleted task can still be restored by the compact Undo journal. Keep only
-    // those protected media rows until that short history expires; ordinary
-    // unreferenced files are removed as before.
+    // those protected media rows until that short history expires. Removing
+    // metadata does not unlink a file after COMMIT (see save()).
     const stale = existing.rows.filter((row) => !ids.includes(String(row.id)) && !protectedAttachmentIds.has(String(row.id)));
     const staleIds = stale.map((row) => String(row.id));
     if (staleIds.length) await client.query("delete from indus_attachments where id = any($1::text[])", [staleIds]);
@@ -854,4 +946,4 @@ class PostgresStore {
   }
 }
 
-module.exports = { PostgresStore };
+module.exports = { PostgresStore, StaleSnapshotError };

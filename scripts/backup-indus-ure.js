@@ -65,13 +65,14 @@ function pgConnection() {
   };
 }
 function pgpass(value) { return String(value || "").replace(/\\/g, "\\\\").replace(/:/g, "\\:"); }
-async function dumpDatabase(workDir, destination) {
+async function dumpDatabase(workDir, destination, snapshot = "") {
   const db = pgConnection();
   const passfile = path.join(workDir, ".pgpass");
   await fsp.writeFile(passfile, `${pgpass(db.host)}:${pgpass(db.port)}:${pgpass(db.database)}:${pgpass(db.user)}:${pgpass(db.password)}\n`, { mode: 0o600 });
   const env = { ...process.env, PGPASSFILE: passfile };
   if (db.sslMode) env.PGSSLMODE = db.sslMode;
   const args = ["--format=custom", "--no-owner", "--no-acl", `--file=${destination}`, `--host=${db.host}`, `--port=${db.port}`, `--dbname=${db.database}`];
+  if (snapshot) args.push(`--snapshot=${snapshot}`);
   for (const table of ["public.indus_users", "public.indus_sessions", "public.indus_meta", "public.indus_notifications", "public.indus_backup_runs"]) args.push(`--exclude-table-data=${table}`);
   if (db.user) args.push(`--username=${db.user}`);
   await execFileAsync("pg_dump", args, { env, maxBuffer: 2 * 1024 * 1024 });
@@ -115,10 +116,8 @@ function sanitize(value) {
   return Object.fromEntries(Object.entries(value).filter(([key]) => !sensitiveKey(key)).map(([key, item]) => [key, sanitize(item)]));
 }
 async function writeSanitizedState(pool, destination) {
-  const [users, meta] = await Promise.all([
-    pool.query("select id, data from indus_users order by id"),
-    pool.query("select key, data from indus_meta where key = any($1::text[]) order by key", [["application", "storage_version"]])
-  ]);
+  const users = await pool.query("select id, data from indus_users order by id");
+  const meta = await pool.query("select key, data from indus_meta where key = any($1::text[]) order by key", [["application", "storage_version", "storage_revision"]]);
   const cleanUsers = users.rows.map((row) => ({ id: String(row.id), data: sanitize(row.data) }));
   const cleanMeta = meta.rows.map((row) => ({ key: String(row.key), data: sanitize(row.data) }));
   const json = JSON.stringify({ users: cleanUsers, meta: cleanMeta });
@@ -133,14 +132,22 @@ async function writeSanitizedState(pool, destination) {
   await fsp.writeFile(destination, sql.join("\n"), { mode: 0o600 });
 }
 
-function restoreGuideBase() {
-  return `INDUS URE - HITRA OBNOVA\n==========================\n\nPaket vsebuje PostgreSQL bazo, priloge in kodo aplikacije. Namenoma NE vsebuje OAuth žetonov, prijavnih sej, hashov gesel, ICS povezav ali /etc/indus-ure.env.\n\n1. Prenesi .tar.gz in istoimensko .sha256 datoteko. Preveri in razpakiraj:\n   sha256sum -c indus-ure-recovery-....tar.gz.sha256\n   mkdir restore && tar -xzf indus-ure-recovery-....tar.gz -C restore\n   chmod 0644 restore/database.dump restore/sanitized-state.sql\n\n2. Na ciljnem Ubuntu namesti Node 20+, PostgreSQL, nginx, git in tar. Ustvari uporabnika indus-ure in mape po application/DEPLOY-UBUNTU.md.\n\n3. Ustavi aplikacijo:\n   sudo systemctl stop indus-ure.service\n\n4. BAZA - pozor, prepiše ciljno bazo:\n   sudo -u postgres dropdb --if-exists indus_ure\n   sudo -u postgres createdb --owner=indus_ure indus_ure\n   sudo -u postgres pg_restore --no-owner --no-acl --role=indus_ure -d indus_ure restore/database.dump\n   sudo -u postgres psql -d indus_ure -f restore/sanitized-state.sql\n\n5. PRILOGE IN KODA:\n   sudo rm -rf /var/lib/indus-ure/media\n   sudo install -d -o indus-ure -g indus-ure -m 0700 /var/lib/indus-ure/media\n   sudo cp -a restore/media/. /var/lib/indus-ure/media/\n   sudo chown -R indus-ure:indus-ure /var/lib/indus-ure/media\n   sudo rm -rf /opt/indus-ure/recovery && sudo mkdir -p /opt/indus-ure/recovery\n   sudo cp -a restore/application/. /opt/indus-ure/recovery/\n   cd /opt/indus-ure/recovery && sudo npm ci --omit=dev\n   sudo ln -sfn /opt/indus-ure/recovery /opt/indus-ure/current\n\n6. Ročno ustvari /etc/indus-ure.env iz varnega zapisa (DATABASE_URL, Google OAuth, HTTPS URL, GOOGLE_DRIVE_TASKS_FOLDER_ID in GOOGLE_DRIVE_ATTACHMENTS_FOLDER_ID). Za prvi zagon nastavi tudi:\n   INITIAL_BOJAN_PASSWORD=novo-močno-geslo\n   INITIAL_IBRO_PASSWORD=novo-močno-geslo\n   RESET_USER_PASSWORDS=true\n   BACKUP_DIR=/var/backups/indus-ure\nPo prvem uspešnem zagonu odstrani RESET_USER_PASSWORDS in storitev ponovno zaženi.\n\n7. Namesti systemd/nginx datoteke iz application/deploy/, nato:\n   sudo systemctl daemon-reload\n   sudo systemctl enable --now indus-ure.service indus-ure-backup.timer\n   curl --fail http://127.0.0.1:8123/api/health\n\n8. Kot Bojan se prijavi in v Nastavitvah ponovno poveži Google Drive. Zaradi varnosti se ICS povezave ne obnovijo; ustvari nove read-only povezave.\n\nPred produkcijsko obnovo postopek preveri na ločenem testnem strežniku.\n`;
+async function dumpConsistentDatabase(pool, workDir, database, state, { dump = dumpDatabase, writeState = writeSanitizedState } = {}) {
+  const client = await pool.connect();
+  try {
+    await client.query("begin isolation level repeatable read read only");
+    const snapshot = (await client.query("select pg_export_snapshot() as snapshot")).rows[0].snapshot;
+    await dump(workDir, database, snapshot);
+    await writeState(client, state);
+    await client.query("commit");
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally { client.release(); }
 }
+
 function restoreGuide() {
-  return restoreGuideBase().replace(
-    /2\. Na ciljnem Ubuntu namesti Node 20\+, PostgreSQL, nginx, git in tar\. Ustvari uporabnika indus-ure in mape po application\/DEPLOY-UBUNTU\.md\./,
-    "2. Na ciljnem Ubuntu namesti Node 20+, PostgreSQL, nginx, git in tar ter strežniško obdelavo slik:\n   sudo apt-get install -y libvips-tools libheif-examples\n   Ustvari uporabnika indus-ure in mape po application/DEPLOY-UBUNTU.md."
-  );
+  return "INDUS URE - HITRA OBNOVA\n==========================\nPosodobljeno 11. 9. 2026. Velja za Ure, NE za Fakture.\nPodrobnosti: application/OPERATIONS.md in application/DEPLOY-UBUNTU.md.\n\nPaket vsebuje PostgreSQL bazo, priloge in kodo aplikacije. Namenoma NE vsebuje OAuth žetonov, prijavnih sej, hashov gesel, ICS povezav ali /etc/indus-ure.env.\ndatabase.dump in sanitized-state.sql sta zajeta v istem izvoženem PostgreSQL posnetku. Obnovi OBA iz ISTEGA paketa.\n\n1. Prenesi .tar.gz in istoimensko .sha256 datoteko. Preveri in razpakiraj v zasebno mapo:\n   sha256sum -c indus-ure-recovery-....tar.gz.sha256\n   mkdir restore && tar -xzf indus-ure-recovery-....tar.gz -C restore\n   chmod 0644 restore/database.dump restore/sanitized-state.sql\n   Uporabnik postgres potrebuje tudi prehod do te mape. Po obnovi odstrani njegov začasni dostop.\n\n2. Na ciljnem Ubuntu namesti Node 20+, PostgreSQL, nginx, git in tar ter obdelavo slik:\n   sudo apt-get install -y libvips-tools libheif-examples\n   Ustvari uporabnika indus-ure in mape po application/DEPLOY-UBUNTU.md.\n   NAJPREJ preveri obnovo v izolirani bazi in hash prilog. Za redno objavo je obvezen run-indus-ure-postgres-qa; obnovitev produkcije potrebuje posebej dovoljenje lastnika.\n\n3. Pred potrjeno produkcijsko obnovo naredi neodvisno kopijo trenutne baze, medijev in okolja. Ustavi aplikacijo IN vse skripte, timerje ali druge pisce baze. Preveri ciljni strežnik:\n   sudo systemctl stop indus-ure.service indus-ure-worker-digest.timer indus-ure-backup.timer\n   Preveri tudi morebitne že tekoče digest/backup storitve.\n\n4. BAZA - naslednji ukazi PREPIŠEJO indus_ure, nikoli indus_fakture:\n   sudo -u postgres dropdb --if-exists indus_ure\n   sudo -u postgres createdb --owner=indus_ure indus_ure\n   sudo -u postgres pg_restore --no-owner --no-acl --role=indus_ure -d indus_ure restore/database.dump\n   sudo -u postgres psql -v ON_ERROR_STOP=1 -d indus_ure -f restore/sanitized-state.sql\n   Ne izpusti indus_meta/storage_revision. Ne zaganjaj starega pisca brez CAS zaščite.\n\n5. PRILOGE IN KODA:\n   Ohranjen star MEDIA_DIR naj bo ločena pred-obnovitvena kopija; ne briši ga vnaprej.\n   Pripravi prazno /var/lib/indus-ure/media in vanjo kopiraj restore/media/.\n   Lastništvo indus-ure:indus-ure, zasebne mape 0700.\n   Kodo restore/application/ pripravi kot ločeno preverjeno izdajo, npm ci --omit=dev.\n   Ne prepisuj aktivne izdaje. Preklop izvedi šele po testih, z aplikacijo ustavljeno.\n   Nepovezane stare medijske datoteke se namenoma ohranijo; čiščenje ni del obnove.\n\n6. Ročno obnovi /etc/indus-ure.env iz LOČENEGA varnega zapisa:\n   DATABASE_URL, NODE_ENV=production, HOST=127.0.0.1, PORT=8123,\n   MEDIA_DIR=/var/lib/indus-ure/media, PUBLIC_BASE_URL=https://ure.indus.si,\n   Google OAuth, GOOGLE_DRIVE_BACKUP_PARENT_FOLDER_ID,\n   GOOGLE_DRIVE_TASKS_FOLDER_ID (Dokumenti/Preglednice), GOOGLE_DRIVE_OWNER_EMAIL,\n   BACKUP_DIR=/var/backups/indus-ure.\n   Lokalna javna prijava z geslom NI vključena. Google identitete uporabnikov ostanejo.\n   Izbirna servisna LAN prijava zahteva LAN_SUPPORT_LOGIN_ENABLED, LAN_SUPPORT_LOGIN_PASSWORD\n   (vsaj 24 znakov), izbiro obstoječega uporabnika ter preverjen LAN proxy;\n   natančna imena in omrežne pogoje preveri v OPERATIONS.md. Ne odpiraj je internetu.\n   Skrivnosti in sej ne kopiraj v chat ali Git.\n\n7. Namesti systemd/nginx datoteke iz application/deploy/, nato:\n   sudo systemctl daemon-reload\n   sudo systemctl start indus-ure.service\n   curl --fail http://127.0.0.1:8123/api/health\n   Preveri prijavo, opravilo, prilogo, obračun, števila vrstic in dnevnik napak.\n   Šele po uspešnem preverjanju ponovno vključi prej omogočene timerje.\n\n8. Kot Bojan v Nastavitvah ponovno poveži Google. ICS povezave in seje se ne obnovijo.\n   Ustvari nove read-only ICS povezave ter preveri uspešen nov recovery backup in Drive navodila.\n\nPred produkcijsko obnovo postopek preveri na ločenem testnem strežniku.\n";
 }
 async function verifyLocalArchive(file) {
   const output = await execFileAsync("tar", ["-tzf", file], { maxBuffer: 16 * 1024 * 1024 });
@@ -267,8 +274,7 @@ async function main() {
     const database = path.join(work, "database.dump"), state = path.join(work, "sanitized-state.sql"), media = path.join(work, "media"), application = path.join(work, "application"), guide = path.join(work, "RESTORE-INDUS-URE.txt"), manifestPath = path.join(work, "manifest.json");
     const archive = path.join(BACKUP_DIR, `indus-ure-recovery-${stamp()}.tar.gz`), checksumPath = `${archive}.sha256`;
     await fsp.mkdir(media, { recursive: true, mode: 0o700 });
-    await dumpDatabase(work, database);
-    await writeSanitizedState(pool, state);
+    await dumpConsistentDatabase(pool, work, database, state);
     await copyMedia(media);
     await copyApplication(application);
     await fsp.writeFile(guide, restoreGuide(), { mode: 0o600 });
@@ -297,4 +303,5 @@ async function main() {
     await pool.end().catch(() => {});
   }
 }
-main();
+if (require.main === module) main();
+module.exports = { dumpConsistentDatabase, dumpDatabase, writeSanitizedState, sanitize, restoreGuide };
