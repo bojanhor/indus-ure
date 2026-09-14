@@ -697,10 +697,10 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
       await expect(page.locator("#exportReportPdf")).toBeEnabled();
       expect(await page.evaluate(() => window.matchMedia("(pointer: coarse)").matches)).toBeTruthy();
 
-      const popupPromise = page.waitForEvent("popup");
       await page.locator("#exportReportPdf").click();
-      const popup = await popupPromise;
-      const downloadPromise = popup.waitForEvent("download");
+      await expect(page.locator("#clientReportPdfLink")).toBeVisible();
+      const downloadPromise = page.waitForEvent("download");
+      await page.locator("#clientReportPdfLink").tap();
       const download = await downloadPromise;
       expect(download.suggestedFilename()).toMatch(/^obračun-.*\.pdf$/i);
       const stream = await download.createReadStream();

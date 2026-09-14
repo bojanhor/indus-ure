@@ -1115,11 +1115,13 @@ test("PDF poročilo uporabi seji vezan neposredni prenos, tudi na mobilnem Firef
     fs.readFile(path.join(__dirname, "..", "outputs", "server.js"), "utf8"),
     fs.readFile(path.join(__dirname, "..", "deploy", "nginx-indus-ure.conf"), "utf8")
   ]);
-  assert.match(html, /function requestClientReportPdfDownload\(payload, retried = false\)/);
+  assert.match(html, /function requestClientReportPdfDownload\(payload, retried = false, signal = null\)/);
   assert.match(html, /\/api\/client-report\/pdf-ticket/);
-  assert.match(html, /function clientReportDownloadWindow\(\)/);
-  assert.match(html, /window\.open\("about:blank", "_blank"\)/);
-  assert.match(html, /function startClientReportDownload\(downloadUrl, targetWindow = null\)/);
+  assert.match(html, /id="clientReportPdfDialog"/);
+  assert.match(html, /<a[^>]+id="clientReportPdfLink" download>/);
+  assert.match(html, /function prepareClientReportPdfDownload\(payload\)/);
+  assert.match(html, /if \(!window\.matchMedia\?\.\("\(pointer: coarse\)"\)\.matches\) link\.click\(\)/);
+  assert.doesNotMatch(html, /function clientReportDownloadWindow\(/);
   assert.doesNotMatch(html, /function fetchClientReportPdf\(/);
   assert.match(server, /CLIENT_REPORT_DOWNLOAD_TICKET_TTL_MS/);
   assert.match(server, /function createClientReportDownloadTicket\(/);
