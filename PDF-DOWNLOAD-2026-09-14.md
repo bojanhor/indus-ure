@@ -46,3 +46,22 @@ obračuna. Preostalih odprtih točk in odložene razdelitve monolita ne spreminj
 Objava zahteva obstoječi PostgreSQL QA/restore in uspešno zasebno recovery
 kopijo pred preklopom. Uporabiti samo pripravo kandidata, QA in preklop Ure;
 ne nameščati stare skupne Nginx konfiguracije in ne posegati v Fakture.
+
+## Objava in zaključek
+
+- Objavljena koda: `fd58ad510b2e23c74009d2727cf98735ac7e53cb` (`fd58ad5`).
+- Prvi strežniški zagon se je ustavil pri obstoječem testu časovne serije:
+  neposredni `fs.readFile(db.json)` v drugi procesni instanci je zajel delno
+  zapisano začasno JSON datoteko. Celotni nespremenjeni prehod je bil ponovljen;
+  uspešnih je bilo vseh 204 regresij in 14 PG/restore/upgrade preverjanj.
+  Noben test ni bil izklopljen; produkcijsko shranjevanje ni bilo spremenjeno.
+- Obvezna kopija `backup-20260914T171434Z-104283c2` je uspela pred preklopom:
+  187448231 bajtov, preverjen lokalni arhiv, Drive velikost/MD5, sveže branje
+  in navodila obnove.
+- Po objavi sta v produkcijskem brskalniku uspela samodejni namizni prenos in
+  ponovni prenos prek vidne povezave za Anže zupin. Prikaz dialoga je preverjen
+  tudi pri 390 × 844 px. Podatki obračuna ostajajo 8 vpisov, 16,5 h, 68 km.
+- Google TODO je po objavi popravljen z `requiredRevisionId` in preverjen z
+  novim branjem: odstranjena je samo zadnja PDF točka. Preostali dve odprti
+  točki in odložena razdelitev monolita so nespremenjene.
+- Ta objava ne vključuje GitHub push; koda in ta zapis sta v lokalnem Git-u.
