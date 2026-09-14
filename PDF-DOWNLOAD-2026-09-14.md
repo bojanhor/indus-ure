@@ -85,3 +85,9 @@ ne nameščati stare skupne Nginx konfiguracije in ne posegati v Fakture.
 - Preverjanje povrnitve pred objavo: 204/204 regresij in 36/36 izoliranih
   brskalniških testov. Primerjava treh povrnjenih izvornih/testnih datotek s
   `fc3685e` ne pokaže razlik. To potrjuje povrnitev, ne rešitve Android napake.
+- Povrnitev je objavljena kot `9cd4c95`, po uspešnih 204 strežniških regresijah,
+  14 PG/restore preverjanjih in preverjeni kopiji
+  `backup-20260914T182455Z-21a48dd4` (187453427 bajtov).
+- Po osvežitvi produkcijskega brskalnika je potrjen en gumb Prenesi PDF in
+  odsotnost dodatnega modala. Namizni prenos deluje; Android težava ostaja
+  izrecno nerešena in je z revizijsko zaščito vrnjena v Google TODO.
