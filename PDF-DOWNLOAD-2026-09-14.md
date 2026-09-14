@@ -1,5 +1,10 @@
 # Mobilni prenos PDF obračuna stranke – 14. 9. 2026
 
+**Trenutno stanje: NEREŠENO.** Uporabnik je po objavi na svojem Androidu
+ponovno dobil zataknjen `about:blank`. Spodnji rezultati namiznih/emuliranih
+testov ne dokazujejo, da je njegova težava odpravljena. Na njegovo zahtevo
+vračamo prejšnji tok in odstranjujemo dodatni modal ter drugi gumb za prenos.
+
 Obseg: samo zadnja točka Google TODO, neuspešen Android prenos Anžetovega
 obračuna. Preostalih odprtih točk in odložene razdelitve monolita ne spreminjamo.
 
@@ -65,3 +70,18 @@ ne nameščati stare skupne Nginx konfiguracije in ne posegati v Fakture.
   novim branjem: odstranjena je samo zadnja PDF točka. Preostali dve odprti
   točki in odložena razdelitev monolita so nespremenjene.
 - Ta objava ne vključuje GitHub push; koda in ta zapis sta v lokalnem Git-u.
+
+## Zahtevana povrnitev uporabniškega vmesnika
+
+- Povrnjena je samo sprememba `fd58ad5`: PDF deli aplikacije in pripadajoči
+  obstoječi testi so ponovno enaki stanju `fc3685e` oziroma kodi `190777e`.
+- Dodatnega PDF modala, pripravljene povezave z drugim gumbom, retry prikaza
+  in novih testov tega modala ni več. Obstoječi gumb Prenesi PDF ostane.
+- Strežnik, pravila obračunov, poslovna baza, seje in nastavitve se ne vračajo
+  iz stare varnostne kopije in se v tem posegu ne spreminjajo.
+- To je zahtevana povrnitev vmesnika, ne popravek zataknjenega Android prenosa.
+  Težava se mora vrniti med odprte TODO točke. Brez potrditve na prizadeti
+  napravi je ne označi kot rešeno samo zaradi uspešne Chromium emulacije.
+- Preverjanje povrnitve pred objavo: 204/204 regresij in 36/36 izoliranih
+  brskalniških testov. Primerjava treh povrnjenih izvornih/testnih datotek s
+  `fc3685e` ne pokaže razlik. To potrjuje povrnitev, ne rešitve Android napake.

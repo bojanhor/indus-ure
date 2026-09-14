@@ -3317,13 +3317,6 @@
 
     dialog::backdrop { background: rgba(17, 24, 28, 0.45); }
 
-    #clientReportPdfDialog { width: min(520px, calc(100vw - 26px)); }
-    #clientReportPdfClient { margin-top: 0; overflow-wrap: anywhere; }
-    #clientReportPdfStatus { line-height: 1.5; }
-    #clientReportPdfLink { display: inline-flex; align-items: center; justify-content: center; min-height: 48px; text-decoration: none; }
-    #clientReportPdfDialog .actions { flex-wrap: wrap; }
-    @media (pointer: coarse) { #clientReportPdfLink { width: 100%; } }
-
     #deletedTodosDialog { width: min(680px, calc(100vw - 26px)); max-height: min(760px, calc(100dvh - 26px)); overflow-y: auto; overscroll-behavior: contain; }
     .deleted-todos-list { display: grid; gap: 10px; }
     .deleted-todo-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: #f8faf7; }
@@ -6620,17 +6613,6 @@
     <span class="app-notice-message" id="appNoticeMessage"></span>
     <button class="app-notice-close" id="closeAppNotice" type="button" aria-label="Zapri obvestilo">&times;</button>
   </div>
-  <dialog id="clientReportPdfDialog" aria-labelledby="clientReportPdfTitle" aria-describedby="clientReportPdfStatus">
-    <div class="modal-head"><h3 id="clientReportPdfTitle">PDF obračuna stranke</h3><button class="icon-btn" id="closeClientReportPdf" type="button" aria-label="Zapri prenos PDF">&times;</button></div>
-    <div class="modal-body">
-      <p id="clientReportPdfClient"></p>
-      <p id="clientReportPdfStatus" role="status" aria-live="polite"></p>
-      <div class="actions">
-        <a class="primary hidden" id="clientReportPdfLink" download>Prenesi PDF</a>
-        <button class="secondary hidden" id="retryClientReportPdf" type="button">Poskusi znova</button>
-      </div>
-    </div>
-  </dialog>
   <dialog id="appConfirmDialog">
     <form method="dialog">
       <div class="modal-head"><h3 id="appConfirmTitle">Potrditev</h3><button class="icon-btn" id="appConfirmClose" type="button" title="Zapri">&times;</button></div>
@@ -16794,25 +16776,23 @@
       $("confirmClientBill").disabled = Boolean(active) || !state.clientBillSelectedEventIds?.size;
     }
 
-    async function requestClientReportPdfDownload(payload, retried = false, signal = null) {
+    async function requestClientReportPdfDownload(payload, retried = false) {
       let response;
       try {
         response = await fetch("/api/client-report/pdf-ticket", {
           method: "POST",
           credentials: "same-origin",
           headers: { "Content-Type": "application/json", "X-CSRF-Token": state.csrfToken || "" },
-          body: JSON.stringify(payload),
-          signal
+          body: JSON.stringify(payload)
         });
       } catch (cause) {
-        if (signal?.aborted) throw cause;
         throw new Error("Povezava s strežnikom ni uspela.");
       }
       if (response.status === 403 && !retried) {
         const failure = await response.clone().json().catch(() => null);
         if (/varnostna potrditev seje manjka/i.test(String(failure?.error || ""))) {
           await refreshSessionSecurityContext();
-          return requestClientReportPdfDownload(payload, true, signal);
+          return requestClientReportPdfDownload(payload, true);
         }
       }
       if (!response.ok) {
@@ -16827,58 +16807,37 @@
       return downloadUrl;
     }
 
-    let clientReportPdfRequest = null;
-
-    function clearClientReportPdfRequest() {
-      clientReportPdfRequest?.controller.abort();
-      clearTimeout(clientReportPdfRequest?.expiryTimer);
-      clientReportPdfRequest = null;
-      $("clientReportPdfLink").removeAttribute("href");
-      $("clientReportPdfLink").classList.add("hidden");
-    }
-
-    function closeClientReportPdfDialog() {
-      clearClientReportPdfRequest();
-      $("clientReportPdfDialog").close();
-    }
-
-    async function prepareClientReportPdfDownload(payload) {
-      clearClientReportPdfRequest();
-      const request = { payload, controller: new AbortController(), preparing: true, expiryTimer: null };
-      clientReportPdfRequest = request;
-      const link = $("clientReportPdfLink");
-      $("clientReportPdfStatus").textContent = "Pripravljam povezavo za PDF …";
-      $("clientReportPdfStatus").setAttribute("aria-busy", "true");
-      $("retryClientReportPdf").classList.add("hidden");
-      const timeout = setTimeout(() => request.controller.abort(), 30_000);
+    function clientReportDownloadWindow() {
+      // Firefox on Android can receive a fetched Blob but then suppress its
+      // artificial download click. Reserve a browser tab while the original
+      // button gesture is still active, then navigate that tab to a normal
+      // Content-Disposition download response.
+      if (!window.matchMedia?.("(pointer: coarse)").matches) return null;
+      const target = window.open("about:blank", "_blank");
+      if (!target) return null;
       try {
-        const downloadUrl = await requestClientReportPdfDownload(payload, false, request.controller.signal);
-        if (clientReportPdfRequest !== request || !$("clientReportPdfDialog").open) return;
-        link.href = downloadUrl;
-        link.classList.remove("hidden");
-        $("clientReportPdfStatus").textContent = "Povezava je pripravljena. Za prenos se dotakni gumba Prenesi PDF. Velja 4 minute.";
-        // Keep a real, visible same-origin link. Android Firefox needs a fresh
-        // user gesture after the asynchronous ticket request, not a blank popup
-        // or an artificial click on a hidden Blob/download link.
-        request.expiryTimer = setTimeout(() => {
-          if (clientReportPdfRequest !== request) return;
-          link.removeAttribute("href");
-          link.classList.add("hidden");
-          $("clientReportPdfStatus").textContent = "Povezava je potekla. Za novo povezavo izberi Poskusi znova.";
-          $("retryClientReportPdf").classList.remove("hidden");
-        }, 4 * 60_000);
-        if (!window.matchMedia?.("(pointer: coarse)").matches) link.click();
-      } catch (error) {
-        if (clientReportPdfRequest !== request || !$("clientReportPdfDialog").open) return;
-        $("clientReportPdfStatus").textContent = request.controller.signal.aborted
-          ? "Priprava povezave traja predolgo. Preveri povezavo in poskusi znova."
-          : error.message || "Prenosa PDF poročila ni bilo mogoče pripraviti.";
-        $("retryClientReportPdf").classList.remove("hidden");
-      } finally {
-        clearTimeout(timeout);
-        request.preparing = false;
-        if (clientReportPdfRequest === request) $("clientReportPdfStatus").setAttribute("aria-busy", "false");
+        target.opener = null;
+        target.document.title = "INDUS URE – PDF poročilo";
+        target.document.body.textContent = "Pripravljam PDF poročilo …";
+      } catch {
+        // The direct-link fallback below still works if a browser limits the
+        // temporary window object.
       }
+      return target;
+    }
+
+    function startClientReportDownload(downloadUrl, targetWindow = null) {
+      if (targetWindow && !targetWindow.closed) {
+        targetWindow.location.replace(downloadUrl);
+        return;
+      }
+      const link = document.createElement("a");
+      link.href = downloadUrl;
+      link.download = "";
+      link.style.display = "none";
+      document.body.append(link);
+      link.click();
+      link.remove();
     }
 
     function mobileNativeShareAvailable() {
@@ -16986,11 +16945,15 @@
     }
 
     async function downloadClientReportPdf() {
-      if (clientReportPdfRequest?.preparing) return;
       const payload = reportExportPayload();
-      $("clientReportPdfClient").textContent = payload.clientName;
-      $("clientReportPdfDialog").showModal();
-      await prepareClientReportPdfDownload(payload);
+      const targetWindow = clientReportDownloadWindow();
+      try {
+        const downloadUrl = await requestClientReportPdfDownload(payload);
+        startClientReportDownload(downloadUrl, targetWindow);
+      } catch (error) {
+        if (targetWindow && !targetWindow.closed) targetWindow.close();
+        throw error;
+      }
     }
 
     async function createClientReportGmailDraft() {
@@ -19638,15 +19601,6 @@
     $("cancelBulkClientDialog").addEventListener("click", () => $("bulkClientDialog").close());
     $("confirmClientBill").addEventListener("click", () => confirmClientBillFromReport().catch((error) => showNotice(error.message)));
     $("exportReportPdf").addEventListener("click", () => downloadClientReportPdf().catch((error) => showNotice(error.message)));
-    $("closeClientReportPdf").addEventListener("click", closeClientReportPdfDialog);
-    $("clientReportPdfDialog").addEventListener("cancel", (event) => { event.preventDefault(); closeClientReportPdfDialog(); });
-    $("clientReportPdfDialog").addEventListener("close", () => { if (!$("clientReportPdfDialog").open) clearClientReportPdfRequest(); });
-    $("retryClientReportPdf").addEventListener("click", () => {
-      if (clientReportPdfRequest && !clientReportPdfRequest.preparing) prepareClientReportPdfDownload(clientReportPdfRequest.payload);
-    });
-    $("clientReportPdfLink").addEventListener("click", () => {
-      $("clientReportPdfStatus").textContent = "Prenos je zahtevan. Datoteko poišči med prenosi brskalnika. Če se prenos ne začne, se znova dotakni gumba Prenesi PDF.";
-    });
     $("createReportGmailDraft").addEventListener("click", () => createClientReportGmailDraft().catch((error) => showNotice(error.message)));
     $("addClientBtn").addEventListener("click", () => addClientFromForm().catch((error) => showNotice(error.message)));
     $("ajpesSearchButton").addEventListener("click", () => searchAjpesClients());
