@@ -241,6 +241,7 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
       await page.locator("#toolsMenu > summary").click();
       await page.locator("#clientBillingMenuBtn").click();
       await page.locator("#reportClient").fill(clientName);
+      await page.locator(".open-client-report").filter({ hasText: clientName }).click();
       await expect(page.locator("#confirmClientBill")).toBeEnabled();
 
       await page.route("**/api/client-bills", async (route, request) => {
@@ -692,6 +693,7 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
       await page.locator("#clientBillingMenuBtn").click();
       await expect(page.locator(".report-screen")).toBeVisible();
       await page.locator("#reportClient").fill(CLIENT_ALIAS);
+      await page.locator(".open-client-report").filter({ hasText: CLIENT_ALIAS }).click();
       await expect(page.locator("#exportReportPdf")).toBeEnabled();
       expect(await page.evaluate(() => window.matchMedia("(pointer: coarse)").matches)).toBeTruthy();
 

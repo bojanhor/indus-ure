@@ -4696,12 +4696,12 @@
 
     .client-billing-title-row {
       display: flex;
-      align-items: baseline;
+      align-items: flex-start;
       gap: 8px;
       flex-wrap: wrap;
     }
 
-    .client-billing-title-row h3 { margin: 0; font-size: 16px; overflow-wrap: anywhere; }
+    .client-billing-title-row h3 { flex: 1; min-width: 0; margin: 0; font-size: 16px; overflow-wrap: anywhere; }
     .client-billing-edit-button {
       flex: 0 0 auto;
       width: 30px;
@@ -4774,8 +4774,11 @@
 
     .client-billing-inline-title {
       box-sizing: border-box;
-      width: min(100%, 680px);
+      width: 100%;
       min-height: 34px;
+      resize: none;
+      overflow: hidden;
+      line-height: 1.4;
       padding: 5px 8px;
       border: 1px solid transparent;
       border-radius: 6px;
@@ -5894,7 +5897,7 @@
             <input id="reportTo" type="date">
           </label>
           <label class="client-billing-client" id="reportClientControl">I&#353;&#269;i stranko
-            <input id="reportClient" list="clientList" placeholder="Vse stranke">
+            <input id="reportClient" type="search" autocomplete="off" placeholder="Vse stranke">
           </label>
           <div class="client-billing-sort-control report-billing-filter-options" id="reportBillingFilterControl">
             <span>Prika&#382;i</span>
@@ -8353,6 +8356,7 @@
 
     function reportOverviewSnapshot() {
       return {
+        query: $("reportClient")?.value || "",
         from: $("reportFrom")?.value || "",
         to: $("reportTo")?.value || "",
         sort: reportClientSortMode(),
@@ -8364,6 +8368,7 @@
     }
 
     function restoreReportOverviewSnapshot(snapshot = {}) {
+      $("reportClient").value = String(snapshot?.query || "");
       const from = String(snapshot?.from || "");
       const to = String(snapshot?.to || "");
       if ($("reportFrom")) $("reportFrom").value = isDateKey(from) ? from : "";
@@ -9754,9 +9759,26 @@
       });
     }
 
+    // A synchronous render sees one fresh directory, never a persistent cache
+    // that could retain renamed clients or another worker's view.
+    let clientLookupSnapshot = null;
+    function withClientLookupSnapshot(callback) {
+      if (clientLookupSnapshot) return callback();
+      const records = allClientRecords();
+      const exact = new Map();
+      records.forEach((client) => clientSearchFields(client).forEach((field) => {
+        const key = normalizeText(field);
+        if (key && !exact.has(key)) exact.set(key, client);
+      }));
+      clientLookupSnapshot = { records, exact };
+      try { return callback(); }
+      finally { clientLookupSnapshot = null; }
+    }
+
     function findClient(value) {
       const input = normalizeText(value);
       if (!input) return null;
+      if (clientLookupSnapshot) return clientLookupSnapshot.exact.get(input) || null;
       return allClientRecords().find((client) => clientSearchFields(client)
         .some((field) => normalizeText(field) === input)) || null;
     }
@@ -16130,12 +16152,11 @@
     }
 
     function reportClientSelection() {
-      const input = $("reportClient").value.trim();
       const stableId = String(state.reportClientId || "").trim();
-      const client = findClient(stableId) || findClient(input) || null;
+      const client = findClient(stableId) || findClient(state.reportClient) || null;
       return {
         id: String(client?.clientId || client?.id || stableId || "").trim(),
-        name: String(client?.name || (stableId ? state.reportClient : "") || "").trim()
+        name: String(client?.name || state.reportClient || "").trim()
       };
     }
 
@@ -16497,7 +16518,7 @@
           ].filter(Boolean).join("");
       const fullEditor = `<button class="client-billing-edit-button open-report-todo" type="button" data-todo-id="${escapeHtml(todo.id)}" title="Odpri celoten obrazec" aria-label="Odpri celoten obrazec za: ${escapeHtml(todo.title || "Brez naziva")}"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25Zm17.71-10.21a1 1 0 0 0 0-1.41l-2.55-2.55a1 1 0 0 0-1.41 0l-1.99 1.99 3.75 3.75 2.2-2.2Z"/></svg></button>`;
       const title = inlineEditable
-        ? `<input class="client-billing-inline-title" data-client-billing-inline-field="title" data-todo-id="${escapeHtml(todo.id)}" value="${escapeHtml(todo.title || "")}" aria-label="Naslov dogodka">`
+        ? `<textarea class="client-billing-inline-title" rows="1" data-client-billing-inline-field="title" data-todo-id="${escapeHtml(todo.id)}" aria-label="Naslov dogodka">${escapeHtml(todo.title || "")}</textarea>`
         : `<button class="client-billing-title-trigger open-report-todo" type="button" data-todo-id="${escapeHtml(todo.id)}" aria-label="Odpri vpis: ${escapeHtml(todo.title || "Brez naziva")}">${escapeHtml(todo.title || "Brez naziva")}</button>`;
       return `<article class="client-billing-row">
         <div class="client-billing-selection-slot">${billSelection}</div>
@@ -16523,6 +16544,10 @@
       </button>`;
     }
     function renderReport() {
+      return withClientLookupSnapshot(renderReportContent);
+    }
+
+    function renderReportContent() {
       const selection = reportClientSelection();
       const detail = Boolean(selection.id || selection.name);
       $("reportBillingFilterControl").classList.toggle("hidden", detail);
@@ -16531,7 +16556,7 @@
       $("clearReportClient").classList.toggle("hidden", detail);
       $("reportClientSort").value = reportClientSortMode();
       const summaries = detail ? [] : reportClientSummaries();
-      const lines = detail ? reportTodos().map(reportTodoLine) : reportOverviewLines();
+      const lines = detail ? reportTodos().map(reportTodoLine) : summaries.flatMap((summary) => summary.lines);
       const pendingClientBillLines = detail ? lines.filter((line) => !line.clientBill) : [];
       const selectedClientBillLines = detail ? syncClientBillSelection(lines, selection) : [];
       if (detail) syncReportAttachmentSelection(selectedClientBillLines, selection);
@@ -16590,6 +16615,7 @@
           : "";
         $("clientDetailList").innerHTML = [...pendingLines.map(renderClientBillingRow), billedDivider, ...billedLines.map(renderClientBillingRow)].join("")
           || `<p class="todo-meta">Za ta izbor ni zaključenih storitev.</p>`;
+        requestAnimationFrame(autosizeClientBillingFields);
       } else {
         $("clientDetailList").innerHTML = summaries.map(renderReportClientCard).join("")
           || `<p class="todo-meta">Za ta izbor ni zaključenih storitev.</p>`;
@@ -16597,6 +16623,7 @@
     }
 
     function openClientReport(client, clientId = "", { fromHistory = false, returnSnapshot = null } = {}) {
+      window.clearTimeout(reportSearchRenderTimer);
       const clientDescriptor = reportClientDescriptor({ client, clientId });
       const snapshot = returnSnapshot || { ...reportOverviewSnapshot(), focusKey: clientDescriptor.key };
       if (!fromHistory) {
@@ -16639,8 +16666,9 @@
       renderReport();
     }
     function clearClientReportSelection({ fromHistory = false, snapshot = null } = {}) {
+      window.clearTimeout(reportSearchRenderTimer);
       const hadDetail = Boolean(state.reportClient || state.reportClientId);
-      const returnSnapshot = snapshot || state.reportReturnSnapshot || reportOverviewSnapshot();
+      const returnSnapshot = snapshot || state.reportReturnSnapshot || { ...reportOverviewSnapshot(), query: "" };
       if (!fromHistory && hadDetail && history.state?.[reportHistoryStateKey]?.kind === "detail") {
         history.back();
         return;
@@ -17273,6 +17301,7 @@
     }
 
     function allClientRecords() {
+      if (clientLookupSnapshot) return clientLookupSnapshot.records;
       const map = new Map();
       const add = (name, search = "") => {
         const clean = String(name || "").trim();
@@ -17343,7 +17372,8 @@
         view: state.view,
         selectedClient: state.selectedClient,
         reportClient: state.reportClient,
-        reportClientId: state.reportClientId
+        reportClientId: state.reportClientId,
+        reportQuery: $("reportClient").value
       };
     }
 
@@ -17374,7 +17404,7 @@
       state.selectedClient = previous.selectedClient;
       state.reportClient = previous.reportClient;
       state.reportClientId = previous.reportClientId;
-      $("reportClient").value = previous.reportClient || "";
+      $("reportClient").value = previous.reportQuery ?? previous.reportClient ?? "";
       setView(previous.view);
     }
 
@@ -17386,6 +17416,10 @@
     }
 
     function renderSearch() {
+      return withClientLookupSnapshot(renderSearchContent);
+    }
+
+    function renderSearchContent() {
       const panel = $("searchPanel");
       const query = $("clientSearch").value.trim();
       panel.innerHTML = "";
@@ -17406,8 +17440,10 @@
           <label><input type="checkbox" data-search-filter="completed" ${state.searchIncludeCompleted ? "checked" : ""}> Zaključeno</label>
           <label><input type="checkbox" data-search-filter="other" ${state.searchIncludeOther ? "checked" : ""}> Ostali dogodki</label>
           <span class="search-filter-count">${results.length} / ${matches.length} zadetkov</span>
+          <button type="button" data-close-search aria-label="Zapri iskanje">×</button>
         </div>
       `;
+      panel.querySelector("[data-close-search]").addEventListener("click", clearClientSearchAndRestoreView);
       panel.querySelectorAll("[data-search-filter]").forEach((input) => input.addEventListener("change", () => {
         if (input.dataset.searchFilter === "completed") state.searchIncludeCompleted = input.checked;
         if (input.dataset.searchFilter === "other") state.searchIncludeOther = input.checked;
@@ -19533,12 +19569,22 @@
       const photo = state.todoDialogPhotos.find((item) => item.id === input.dataset.photoCommentId);
       if (photo) photo.comment = input.value.slice(0, 500);
     });
+    let reportSearchRenderTimer = 0;
     $("reportClient").addEventListener("input", () => {
-      const value = $("reportClient").value;
-      const client = findClient(value);
-      state.reportClient = client?.name || "";
-      state.reportClientId = client?.clientId || client?.id || "";
-      renderReport();
+      state.reportClient = "";
+      state.reportClientId = "";
+      window.clearTimeout(reportSearchRenderTimer);
+      reportSearchRenderTimer = window.setTimeout(renderReport, 100);
+    });
+    $("reportClient").addEventListener("keydown", (event) => {
+      if (event.key === "Escape") clearClientReportSelection();
+      if (event.key === "Enter") {
+        event.preventDefault();
+        window.clearTimeout(reportSearchRenderTimer);
+        renderReport();
+        const cards = $("clientDetailList").querySelectorAll(".open-client-report");
+        if (cards.length === 1) cards[0].click();
+      }
     });
     $("clearReportClient").addEventListener("click", clearClientReportSelection);
     $("reportBackToClients").addEventListener("click", clearClientReportSelection);
@@ -19636,6 +19682,19 @@
         openTodoDialog(todo, { reportNavigationIds: navigationIds }).catch((error) => showNotice(error.message));
       }
     });
+    function autosizeClientBillingFields() {
+      const fields = [...$("clientDetailList").querySelectorAll("textarea[data-client-billing-inline-field]")]
+        .filter((field) => field.getClientRects().length);
+      fields.forEach((field) => { field.style.height = "0px"; });
+      const heights = fields.map((field) => field.scrollHeight + 2);
+      fields.forEach((field, index) => { field.style.height = `${heights[index]}px`; });
+    }
+    $("clientDetailList").addEventListener("input", (event) => {
+      if (event.target.matches("textarea[data-client-billing-inline-field]")) autosizeClientBillingFields();
+    });
+    new ResizeObserver(() => {
+      if (state.view === "report") requestAnimationFrame(autosizeClientBillingFields);
+    }).observe($("clientDetailList"));
     $("clientDetailList").addEventListener("change", (event) => {
       const inlineField = event.target.closest("[data-client-billing-inline-field]");
       if (inlineField && !inlineField.disabled) {
@@ -19665,7 +19724,7 @@
     $("clientDetailList").addEventListener("keydown", (event) => {
       const inlineField = event.target.closest("[data-client-billing-inline-field]");
       if (!inlineField || event.key !== "Enter") return;
-      if (inlineField.tagName === "TEXTAREA" && !event.ctrlKey && !event.metaKey) return;
+      if (inlineField.dataset.clientBillingInlineField === "notes" && !event.ctrlKey && !event.metaKey) return;
       event.preventDefault();
       inlineField.blur();
     });
@@ -19782,9 +19841,14 @@
     $("clearClientSearch").addEventListener("click", clearClientSearchAndRestoreView);
     document.addEventListener("click", (event) => {
       if (!$("clientSearch").value.trim()) return;
-      if (event.target.closest('#searchPanel, #clientSearch, #clearClientSearch')) return;
+      if (event.target.closest('#searchPanel .result, #searchPanel .search-filter-bar label, #searchPanel .search-filter-bar button, #clientSearch, #clearClientSearch')) return;
       clearClientSearchAndRestoreView();
     }, true);
+    document.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape" || !$("clientSearch").value.trim() || event.target.closest("dialog")) return;
+      event.preventDefault();
+      clearClientSearchAndRestoreView();
+    });
     $("exportCsv").addEventListener("click", exportCsv);
     $("googleDrive").addEventListener("click", () => connectGoogleDrive().catch((error) => showNotice(error.message)));
     $("driveReconnectBtn").addEventListener("click", () => connectGoogleDrive().catch((error) => showNotice(error.message)));
