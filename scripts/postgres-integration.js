@@ -5,6 +5,7 @@ const fs = require("node:fs/promises");
 const path = require("node:path");
 const http = require("node:http");
 const { spawn } = require("node:child_process");
+const { isDeepStrictEqual } = require("node:util");
 const { Pool } = require("pg");
 const { PostgresStore } = require("../outputs/postgres-store");
 const { normalizeDb, createSession, sessionTokenHash, attachmentVisibleToUser } = require("../outputs/server");
@@ -102,9 +103,21 @@ async function main() {
       assert.deepEqual(rollbackAfter[table], rollbackBefore[table], `Code rollback changed ${table}`);
     }
     const forward = await store.load();
-    const beforeForward = JSON.stringify(forward);
+    // Storage rows and the compatibility view are not the same shape (for
+    // example todo defaults are synthesized). Compare both normalized views,
+    // then verify that writing through either version preserves business rows.
+    const previousView = JSON.parse(JSON.stringify(forward));
+    previous.normalizeDb(previousView);
     normalizeDb(forward);
-    assert.equal(JSON.stringify(forward), beforeForward, "Forward reload after rollback changes normalized data");
+    const forwardView = JSON.parse(JSON.stringify(forward));
+    const differentKeys = [...new Set([...Object.keys(previousView), ...Object.keys(forwardView)])]
+      .filter(key => !isDeepStrictEqual(previousView[key], forwardView[key]));
+    assert.deepEqual(differentKeys, [], "Old and new code disagree on normalized data");
+    await store.save(forward);
+    const forwardAfter = await digest();
+    for (const table of tables.filter(table => !["indus_meta", "indus_sessions"].includes(table))) {
+      assert.deepEqual(forwardAfter[table], rollbackBefore[table], `Forward reload changed ${table}`);
+    }
     check("rollback.previous_code_reads_writes_and_forward_reload", { previousRelease: path.basename(path.dirname(path.dirname(previousServer))) });
     await fs.writeFile(reportPath, JSON.stringify({ checks, before, after, passed: true }, null, 2));
     return;
