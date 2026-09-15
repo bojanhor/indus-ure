@@ -5,13 +5,32 @@ const path = require("node:path");
 
 // Fixed, local source only. Assemble into the existing CSP-nonced inline script:
 // no dynamic URL/import/eval and no additional browser request on first edit.
-const marker = "/* @indus-module:time-entry-editor */";
-const editorSource = fs.readFileSync(path.join(__dirname, "editor", "time-entry.js"), "utf8");
-if (/<\/script/i.test(editorSource)) throw new Error("Editor module must not close the inline script");
+const browserModules = [
+  ["time-entry-editor", "editor/time-entry.js"],
+  ["editor/media-preview", "editor/media-preview.js"],
+  ["editor/media-upload", "editor/media-upload.js"],
+  ["editor/media-codec", "editor/media-codec.js"],
+  ["editor/drafts", "editor/drafts.js"],
+  ["editor/task-form", "editor/task-form.js"],
+  ["editor/task-dialog", "editor/task-dialog.js"],
+  ["editor/task-save", "editor/task-save.js"],
+  ["editor/edit-locks", "editor/edit-locks.js"],
+  ["editor/worker-billing", "editor/worker-billing.js"],
+  ["editor/client-billing", "editor/client-billing.js"],
+  ["editor/undo-history", "editor/undo-history.js"],
+];
+const sources = browserModules.map(([name, file]) => {
+  const source = fs.readFileSync(path.join(__dirname, file), "utf8");
+  if (/<\/script/i.test(source)) throw new Error("Browser module must not close the inline script");
+  return { marker: `/* @indus-module:${name} */`, source };
+});
 
 function renderAppShell(template) {
-  if (template.split(marker).length !== 2) throw new Error("Expected exactly one time-entry editor module marker");
-  return template.replace(marker, () => editorSource);
+  for (const { marker, source } of sources) {
+    if (template.split(marker).length !== 2) throw new Error(`Expected exactly one browser module marker: ${marker}`);
+    template = template.replace(marker, () => source);
+  }
+  return template;
 }
 
 module.exports = { renderAppShell };

@@ -8,7 +8,7 @@ const IMAGE_SIGNATURES = {
 };
 
 // Attachment validation, metadata, staging ownership and hydration.
-// Network authentication and streaming routes remain in server.js.
+// Network authentication and streaming routes are in attachment-transfer.js.
 function createAttachmentModel({ MAX_TODO_IMAGE_DATA_LENGTH, MAX_TODO_PDF_DATA_LENGTH, MAX_TODO_ATTACHMENTS_DATA_LENGTH, MAX_TODO_THUMBNAIL_DATA_LENGTH, MAX_TODO_ATTACHMENTS }) {
 // BEGIN preserved attachment model
 function validImageDataUrl(value, maxEncodedLength) {
@@ -224,5 +224,4 @@ function hydrateTodoAttachments(db, todo) {
   return { validImageDataUrl, validPdfDataUrl, validTodoAttachmentDataUrl, validTodoThumbnailDataUrl, limitTodoAttachmentsData, validTodoAttachmentId, validGoogleDriveId, googleDriveFileInfo, googleWorkspaceFileInfo, googleDriveDefaultName, cleanTodoDriveFiles, stampTodoDriveFiles, todoAttachmentContentId, pendingAttachmentMap, storeTodoAttachments, attachmentApiUrl, hydrateTodoAttachments };
 }
 
-module.exports = { createAttachmentModel };
-
+module.exports = { createAttachmentModel, IMAGE_SIGNATURES };

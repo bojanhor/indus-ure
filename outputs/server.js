@@ -183,7 +183,6 @@ function todoVehicle(value) {
   return TODO_VEHICLES.has(vehicle) ? vehicle : "personal";
 }
 
-
 const MAX_TODO_IMAGE_DATA_LENGTH = 700_000;
 const MAX_TODO_PDF_DATA_LENGTH = 2_100_000;
 const MAX_TODO_ATTACHMENTS_DATA_LENGTH = 5_000_000;
@@ -207,393 +206,10 @@ const PENDING_ATTACHMENT_TTL_MS = 12 * 60 * 60 * 1000;
 const TODO_CREATE_RECEIPT_TTL_MS = 90 * 24 * 60 * 60 * 1000;
 const MAX_TODO_CREATE_RECEIPTS = 10_000;
 
-
 const { validImageDataUrl, validPdfDataUrl, validTodoAttachmentDataUrl, validTodoThumbnailDataUrl, limitTodoAttachmentsData, validTodoAttachmentId, validGoogleDriveId, googleDriveFileInfo, googleWorkspaceFileInfo, googleDriveDefaultName, cleanTodoDriveFiles, stampTodoDriveFiles, todoAttachmentContentId, pendingAttachmentMap, storeTodoAttachments, attachmentApiUrl, hydrateTodoAttachments } = require("./attachment-model").createAttachmentModel({
   MAX_TODO_IMAGE_DATA_LENGTH, MAX_TODO_PDF_DATA_LENGTH, MAX_TODO_ATTACHMENTS_DATA_LENGTH, MAX_TODO_THUMBNAIL_DATA_LENGTH, MAX_TODO_ATTACHMENTS
 });
 
-function undoClone(value) {
-  return JSON.parse(JSON.stringify(value == null ? null : value));
-}
-
-function undoAttachmentMetadata(attachment = {}) {
-  const copy = { ...(attachment || {}) };
-  // Files stay in protected media storage. History contains only metadata and
-  // never a second copy of the original or thumbnail.
-  delete copy.data;
-  delete copy.thumbnailData;
-  return copy;
-}
-
-function undoBusinessSnapshot(db = {}) {
-  const snapshot = {};
-  for (const key of UNDO_ARRAY_SNAPSHOT_KEYS) snapshot[key] = undoClone(db[key] || []);
-  snapshot.attachments = Object.fromEntries(Object.entries(db.attachments || {}).map(([id, attachment]) => [id, undoAttachmentMetadata(attachment)]));
-  for (const key of UNDO_VALUE_SNAPSHOT_KEYS) snapshot[key] = undoClone(db[key]);
-  return snapshot;
-}
-
-function undoItemId(key, item) {
-  if (!item || typeof item !== "object") return "";
-  if (key === "clients") return String(item.clientId || item.id || "").trim();
-  if (key === "billingLocks") return String(item.id || (item.workerId && item.month ? item.workerId + ":" + item.month : "")).trim();
-  return String(item.id || "").trim();
-}
-
-function undoArrayPatch(key, before = [], after = []) {
-  const oldItems = Array.isArray(before) ? before : [];
-  const newItems = Array.isArray(after) ? after : [];
-  if ([...oldItems, ...newItems].some((item) => item && !undoItemId(key, item))) {
-    return JSON.stringify(oldItems) === JSON.stringify(newItems) ? null : { replace: undoClone(oldItems) };
-  }
-  const oldById = new Map(oldItems.map((item) => [undoItemId(key, item), item]));
-  const newById = new Map(newItems.map((item) => [undoItemId(key, item), item]));
-  const changes = [];
-  for (const id of new Set([...oldById.keys(), ...newById.keys()])) {
-    const previous = oldById.get(id);
-    const next = newById.get(id);
-    if (JSON.stringify(previous) !== JSON.stringify(next)) {
-      changes.push({ id, before: previous === undefined ? null : undoClone(previous) });
-    }
-  }
-  const oldOrder = oldItems.map((item) => undoItemId(key, item));
-  const newOrder = newItems.map((item) => undoItemId(key, item));
-  const order = JSON.stringify(oldOrder) === JSON.stringify(newOrder) ? null : oldOrder;
-  // PostgreSQL does not guarantee the incidental order in which unrelated
-  // rows are read.  That order is not a business change and must never use
-  // up the single undo slot before the actual mutation is written.
-  if (!changes.length) return null;
-  return { changes, ...(order ? { order } : {}) };
-}
-
-function undoAttachmentPatch(before = {}, after = {}) {
-  const oldItems = before && typeof before === "object" ? before : {};
-  const newItems = after && typeof after === "object" ? after : {};
-  const changes = [];
-  for (const id of new Set([...Object.keys(oldItems), ...Object.keys(newItems)])) {
-    const previous = oldItems[id];
-    const next = newItems[id];
-    if (JSON.stringify(previous) !== JSON.stringify(next)) {
-      changes.push({ id, before: previous === undefined ? null : undoAttachmentMetadata(previous) });
-    }
-  }
-  return changes.length ? { changes } : null;
-}
-
-function normalizeUndoArrayPatch(key, raw) {
-  if (!raw || typeof raw !== "object") return null;
-  if (Array.isArray(raw.replace)) return { replace: undoClone(raw.replace) };
-  const changes = (Array.isArray(raw.changes) ? raw.changes : [])
-    .map((change) => ({
-      id: undoItemId(key, { id: change?.id, clientId: key === "clients" ? change?.id : "" }),
-      before: change && Object.hasOwn(change, "before") ? undoClone(change.before) : null
-    }))
-    .filter((change) => Boolean(change.id));
-  const order = (Array.isArray(raw.order) ? raw.order : [])
-    .map((id) => String(id || "").trim())
-    .filter(Boolean);
-  // Older journals may contain an order-only patch produced by a database
-  // read.  It cannot restore any business data, so hide it instead of
-  // offering a misleading Undo action.
-  return changes.length ? { changes, ...(order.length ? { order } : {}) } : null;
-}
-
-function normalizeUndoAttachmentPatch(raw) {
-  const changes = (Array.isArray(raw?.changes) ? raw.changes : [])
-    .map((change) => ({
-      id: validTodoAttachmentId(change?.id) ? String(change.id) : "",
-      before: change && Object.hasOwn(change, "before") && change.before && typeof change.before === "object"
-        ? undoAttachmentMetadata(change.before)
-        : null
-    }))
-    .filter((change) => Boolean(change.id));
-  return changes.length ? { changes } : null;
-}
-
-function normalizeUndoPatch(raw) {
-  if (!raw || typeof raw !== "object" || Number(raw.version || 0) !== UNDO_JOURNAL_SCHEMA_VERSION) return null;
-  const arrays = {};
-  for (const key of UNDO_ARRAY_SNAPSHOT_KEYS) {
-    const patch = normalizeUndoArrayPatch(key, raw.arrays?.[key]);
-    if (patch) arrays[key] = patch;
-  }
-  const attachments = normalizeUndoAttachmentPatch(raw.attachments);
-  const values = {};
-  for (const key of UNDO_VALUE_SNAPSHOT_KEYS) {
-    if (raw.values && Object.hasOwn(raw.values, key)) values[key] = undoClone(raw.values[key]);
-  }
-  if (!Object.keys(arrays).length && !attachments && !Object.keys(values).length) return null;
-  const patch = {
-    version: UNDO_JOURNAL_SCHEMA_VERSION,
-    ...(Object.keys(arrays).length ? { arrays } : {}),
-    ...(attachments ? { attachments } : {}),
-    ...(Object.keys(values).length ? { values } : {})
-  };
-  return Buffer.byteLength(JSON.stringify(patch), "utf8") <= UNDO_MAX_PATCH_BYTES ? patch : null;
-}
-
-function undoPatchFromSnapshots(beforeState = {}, afterState = {}) {
-  const arrays = {};
-  for (const key of UNDO_ARRAY_SNAPSHOT_KEYS) {
-    const patch = undoArrayPatch(key, beforeState[key], afterState[key]);
-    if (patch) arrays[key] = patch;
-  }
-  const attachments = undoAttachmentPatch(beforeState.attachments, afterState.attachments);
-  const values = {};
-  for (const key of UNDO_VALUE_SNAPSHOT_KEYS) {
-    if (JSON.stringify(beforeState[key]) !== JSON.stringify(afterState[key])) values[key] = undoClone(beforeState[key]);
-  }
-  return normalizeUndoPatch({
-    version: UNDO_JOURNAL_SCHEMA_VERSION,
-    arrays,
-    attachments,
-    values
-  });
-}
-
-function undoPatchPreviousItem(patch, key, context = {}) {
-  const changes = patch?.arrays?.[key]?.changes || [];
-  const change = changes.find((candidate) => candidate && typeof candidate === "object");
-  if (!change) return null;
-  if (change.before && typeof change.before === "object") return change.before;
-  const id = String(change.id || "");
-  if (!id) return null;
-  const items = Array.isArray(context?.[key]) ? context[key] : [];
-  const idKey = key === "clients" ? "clientId" : "id";
-  return items.find((item) => String(item?.[idKey] || item?.id || "") === id) || null;
-}
-
-function normalizeLegacyUndoAction(rawAction, patch, context = {}) {
-  const todo = undoPatchPreviousItem(patch, "todos", context);
-  const clientBill = undoPatchPreviousItem(patch, "clientBills", context);
-  const title = cleanAuditLogText(todo?.title || "", 100);
-  const clientName = cleanAuditLogText(clientBill?.clientName || clientBill?.client || todo?.client || "", 120);
-  let action = rawAction;
-  if (title && /\u00bbbrez naslova\u00ab/iu.test(action)) {
-    action = action.replace(/\u00bbbrez naslova\u00ab/iu, `\u00bb${title}\u00ab`);
-  }
-  // A few early client-bill actions were recorded before their customer name
-  // was attached to the log context. The bill/todo snapshot is authoritative,
-  // so repair only the known generic placeholder, never a real client name.
-  if (clientName && /\bstrank[oa]\b/iu.test(action) && /\u00bb(?:stranko|stranka)?\u00ab/iu.test(action)) {
-    action = action.replace(/\u00bb(?:stranko|stranka)?\u00ab/iu, `\u00bb${clientName}\u00ab`);
-  }
-  return action;
-}
-
-function normalizeUndoJournal(raw, context = {}) {
-  const values = Array.isArray(raw) ? raw : [];
-  return values
-    // Version 1 stored whole database copies. They are intentionally dropped
-    // during the migration: retaining them would keep the performance issue.
-    .map((record) => ({ record, patch: normalizeUndoPatch(record?.patch) }))
-    .filter(({ record, patch }) => record && typeof record === "object" && patch)
-    .map(({ record, patch }) => {
-      const rawAction = cleanAuditLogText(record.action || "Spremenjeni podatki", 220) || "Spremenjeni podatki";
-      const action = normalizeLegacyUndoAction(rawAction, patch, context);
-      return {
-        id: /^[a-f0-9-]{16,80}$/i.test(String(record.id || "")) ? String(record.id) : crypto.randomUUID(),
-        createdAt: Number.isFinite(Date.parse(record.createdAt)) ? String(record.createdAt) : new Date().toISOString(),
-        actorId: cleanUserId(record.actorId) || "system",
-        actorName: cleanAuditActorName(record.actorName, "Sistem"),
-        action,
-        route: cleanAuditLogText(record.route || "", 180),
-        patch,
-        undoneAt: Number.isFinite(Date.parse(record.undoneAt)) ? String(record.undoneAt) : "",
-        undoneBy: cleanUserId(record.undoneBy),
-        undoneByName: cleanAuditActorName(record.undoneByName, ""),
-        undoAction: cleanAuditLogText(record.undoAction || "", 220)
-      };
-    })
-    .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))
-    .slice(0, UNDO_JOURNAL_LIMIT);
-}
-
-function undoProtectedAttachmentIds(db = {}) {
-  const protectedIds = new Set();
-  const includePatch = (patch) => {
-    for (const change of patch?.attachments?.changes || []) {
-      if (change?.before && validTodoAttachmentId(change.id)) protectedIds.add(change.id);
-    }
-  };
-  for (const record of normalizeUndoJournal(db.undoJournal)) includePatch(record.patch);
-  for (const attachmentId of Object.keys(activeUndoCapture?.beforeState?.attachments || {})) {
-    if (validTodoAttachmentId(attachmentId)) protectedIds.add(attachmentId);
-  }
-  return protectedIds;
-}
-
-function undoChangedItem(before = [], after = [], idKey = "id") {
-  const oldItems = new Map((Array.isArray(before) ? before : []).map((item) => [String(item?.[idKey] || item?.id || ""), item]));
-  const newItems = new Map((Array.isArray(after) ? after : []).map((item) => [String(item?.[idKey] || item?.id || ""), item]));
-  for (const [id, item] of newItems) {
-    if (!id) continue;
-    if (!oldItems.has(id) || JSON.stringify(oldItems.get(id)) !== JSON.stringify(item)) return item;
-  }
-  for (const [id, item] of oldItems) {
-    if (id && !newItems.has(id)) return item;
-  }
-  return null;
-}
-
-function undoActionLabel({ req, actor, beforeState, afterState }) {
-  const pathname = new URL(req.url, "http://undo.local").pathname;
-  const method = String(req.method || "").toUpperCase();
-  const prefix = cleanAuditActorName(actor?.name, "Uporabnik") + " je";
-  const todo = undoChangedItem(beforeState.todos, afterState.todos);
-  const client = undoChangedItem(beforeState.clients, afterState.clients, "clientId");
-  const clientBill = undoChangedItem(beforeState.clientBills, afterState.clientBills);
-  const payroll = undoChangedItem(beforeState.payrolls, afterState.payrolls);
-  const debt = undoChangedItem(beforeState.debts, afterState.debts);
-  if (pathname.startsWith("/api/todos")) {
-    const title = cleanAuditLogText(todo?.title || "brez naslova", 100);
-    if (method === "POST" && pathname === "/api/todos") return prefix + " ustvaril dogodek \u00bb" + title + "\u00ab";
-    if (method === "DELETE") return prefix + " izbrisal dogodek \u00bb" + title + "\u00ab";
-    if (pathname.endsWith("/reorder")) return prefix + " prerazvrstil opravila";
-    if (pathname.endsWith("/bulk-client")) return prefix + " paketno zamenjal stranko pri izbranih dogodkih";
-    return prefix + " spremenil dogodek \u00bb" + title + "\u00ab";
-  }
-  if (pathname.startsWith("/api/clients")) {
-    const name = cleanAuditLogText(client?.alias || client?.name || "stranko", 100);
-    return method === "POST" && pathname === "/api/clients"
-      ? prefix + " dodal stranko \u00bb" + name + "\u00ab"
-      : method === "DELETE" ? prefix + " izbrisal stranko \u00bb" + name + "\u00ab" : prefix + " uredil stranko \u00bb" + name + "\u00ab";
-  }
-  if (pathname.startsWith("/api/client-bills")) {
-    const name = cleanAuditLogText(clientBill?.clientName || clientBill?.client || "stranko", 100);
-    return method === "POST" ? prefix + " potrdil obra\u010dun za stranko \u00bb" + name + "\u00ab" : prefix + " spremenil obra\u010dun stranke \u00bb" + name + "\u00ab";
-  }
-  if (pathname.startsWith("/api/payrolls")) {
-    const workerName = cleanAuditLogText(payroll?.workerName || payroll?.personName || payroll?.workerId || "delavca", 100);
-    return prefix + " spremenil obra\u010dun ur za " + workerName;
-  }
-  if (pathname.startsWith("/api/advances")) return prefix + " spremenil zalo\u017eena sredstva" + (debt?.reason ? ": " + cleanAuditLogText(debt.reason, 90) : "");
-  if (pathname.startsWith("/api/personal-purchases")) return prefix + " spremenil osebni nakup" + (debt?.reason ? ": " + cleanAuditLogText(debt.reason, 90) : "");
-  if (pathname.startsWith("/api/settings")) return prefix + " spremenil nastavitve obra\u010dunavanja";
-  return prefix + " spremenil podatke";
-}
-
-function undoEligibleRequest(req) {
-  if (!isUnsafeRequest(req)) return false;
-  const pathname = new URL(req.url, "http://undo.local").pathname;
-  if (/^\/api\/todos\/(?:video|drive-files|[^/]+\/(?:lock|completion-request|share-pdf-ticket))/.test(pathname)) return false;
-  if (/^\/api\/(?:attachments|notifications|auth|google|login|logout|password|profile|billing-locks|undo-journal|backup)\b/.test(pathname)) return false;
-  return /^\/api\/(?:todos(?:\/|$)|entries(?:\/|$)|clients(?:\/|$)|client-bills(?:\/|$)|payrolls(?:\/|$)|advances(?:\/|$)|personal-purchases(?:\/|$)|debts(?:\/|$)|settings\/billing$)/.test(pathname);
-}
-
-function appendUndoJournalForMutation(db) {
-  const capture = activeUndoCapture;
-  if (!capture || capture.recorded || !capture.actor) return false;
-  const afterState = undoBusinessSnapshot(db);
-  const patch = undoPatchFromSnapshots(capture.beforeState, afterState);
-  if (!patch) return false;
-  const record = {
-    id: crypto.randomUUID(),
-    createdAt: new Date().toISOString(),
-    actorId: cleanUserId(capture.actor.id) || "system",
-    actorName: cleanAuditActorName(capture.actor.name, "Sistem"),
-    action: undoActionLabel({ req: capture.req, actor: capture.actor, beforeState: capture.beforeState, afterState }),
-    route: new URL(capture.req.url, "http://undo.local").pathname,
-    patch,
-    undoneAt: "",
-    undoneBy: "",
-    undoneByName: "",
-    undoAction: ""
-  };
-  db.undoJournal = normalizeUndoJournal([record, ...(db.undoJournal || [])]);
-  capture.recorded = true;
-  return true;
-}
-
-function currentUndoRecord(db = {}) {
-  return normalizeUndoJournal(db.undoJournal).find((record) => !record.undoneAt) || null;
-}
-
-function restoreUndoArrayPatch(db, key, patch) {
-  if (Array.isArray(patch?.replace)) {
-    db[key] = undoClone(patch.replace);
-    return;
-  }
-  const current = Array.isArray(db[key]) ? db[key] : [];
-  const items = new Map(current.map((item) => [undoItemId(key, item), item]).filter(([id]) => id));
-  for (const change of patch?.changes || []) {
-    if (change.before === null) items.delete(change.id);
-    else items.set(change.id, undoClone(change.before));
-  }
-  const restored = [];
-  const used = new Set();
-  for (const id of patch?.order || []) {
-    const item = items.get(id);
-    if (item) {
-      restored.push(item);
-      used.add(id);
-    }
-  }
-  for (const item of current) {
-    const id = undoItemId(key, item);
-    if (id && !used.has(id) && items.has(id)) {
-      restored.push(items.get(id));
-      used.add(id);
-    }
-  }
-  for (const [id, item] of items) {
-    if (!used.has(id)) restored.push(item);
-  }
-  db[key] = restored;
-}
-
-function restoreUndoPatch(db, patch) {
-  const normalized = normalizeUndoPatch(patch);
-  if (!normalized) throw new Error("Zgodovina za to dejanje ni več veljavna.");
-  for (const key of UNDO_ARRAY_SNAPSHOT_KEYS) {
-    if (normalized.arrays?.[key]) restoreUndoArrayPatch(db, key, normalized.arrays[key]);
-  }
-  if (normalized.attachments) {
-    const attachments = { ...(db.attachments || {}) };
-    for (const change of normalized.attachments.changes || []) {
-      if (change.before === null) delete attachments[change.id];
-      else attachments[change.id] = { ...(attachments[change.id] || {}), ...undoAttachmentMetadata(change.before), id: change.id };
-    }
-    db.attachments = attachments;
-  }
-  for (const key of UNDO_VALUE_SNAPSHOT_KEYS) {
-    if (normalized.values && Object.hasOwn(normalized.values, key)) db[key] = undoClone(normalized.values[key]);
-  }
-}
-
-function visibleUndoJournal(db, user) {
-  const current = currentUndoRecord(db);
-  return normalizeUndoJournal(db.undoJournal).map((record) => ({
-    id: record.id,
-    createdAt: record.createdAt,
-    actorId: record.actorId,
-    actorName: record.actorName,
-    action: record.action,
-    undoneAt: record.undoneAt,
-    undoneBy: record.undoneBy,
-    undoneByName: record.undoneByName,
-    undoAction: record.undoAction,
-    canUndo: !record.undoneAt && record.id === current?.id
-      && (user?.role === "boss" || String(record.actorId) === String(user?.id))
-  }));
-}
-
-
-function pruneUnusedTodoAttachments(db) {
-  const pending = new Set(Object.keys(pendingAttachmentMap(db)));
-  const used = new Set([
-    ...(db.todos || []).flatMap((todo) => (todo.photos || []).map((photo) => photo.attachmentId)),
-    ...(db.debts || []).flatMap((debt) => (debt.photos || []).map((photo) => photo.attachmentId)),
-    ...undoProtectedAttachmentIds(db)
-  ].filter(validTodoAttachmentId));
-  let changed = false;
-  for (const attachmentId of Object.keys(db.attachments || {})) {
-    if (used.has(attachmentId) || pending.has(attachmentId)) continue;
-    delete db.attachments[attachmentId];
-    changed = true;
-  }
-  return changed;
-}
 const CLIENT_REFERENCE_MIGRATIONS = Object.freeze([
   Object.freeze({
     from: "GOSTINSTVO IN TURIZEM ANA KEPIC S.P.",
@@ -2531,15 +2147,9 @@ const {
   normalizeDb,
   ensureAuditLogStore,
   ensureWorkerDigestRunStore,
-  appendUndoJournalForMutation,
-  undoProtectedAttachmentIds
+  appendUndoJournalForMutation: (...args) => appendUndoJournalForMutation(...args),
+  undoProtectedAttachmentIds: (...args) => undoProtectedAttachmentIds(...args)
 });
-
-
-
-
-
-
 
 async function ensureAuditLogStore() {
   if (!DATABASE_URL) return;
@@ -2731,11 +2341,6 @@ async function persistedAuditLogForUser(user, limit = 500) {
   };
   return visibleAuditLogForUser(db, user);
 }
-
-
-
-
-
 
 function securityHeaders(extra = {}, nonce = "") {
   const scriptSource = nonce ? `'self' 'nonce-${nonce}'` : "'self'";
@@ -3639,104 +3244,6 @@ function xlsxSheetXml(rows = [], columns = []) {
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><dimension ref="${dimension}"/><sheetViews><sheetView workbookViewId="0" showGridLines="0"><selection activeCell="A1" sqref="A1"/></sheetView></sheetViews><sheetFormatPr defaultRowHeight="18"/><cols>${columnXml}</cols><sheetData>${rowXml}</sheetData><autoFilter ref="A5:${xlsxColumnName(Math.max(1, columns.length))}${Math.max(5, rows.length)}"/></worksheet>`;
 }
 
-function workerPayrollXlsxReport(db, workerId, rangeInput) {
-  const range = payrollRange(rangeInput);
-  if (!range || !db.users?.[workerId]) return null;
-  const stored = (db.payrolls || []).find((payroll) => payroll.workerId === workerId && payroll.from === range.from && payroll.to === range.to);
-  const payroll = stored && ["archiving", "confirmed", "paid"].includes(stored.status)
-    ? normalizePayroll(stored, db)
-    : buildPayrollSnapshot(db, workerId, range);
-  if (!payroll) return null;
-  const byId = (items = []) => new Map(items.map((item) => [String(item.id || ""), item]));
-  const debts = byId(db.debts || []);
-  const advances = (payroll.advanceIds || []).map((id) => debts.get(String(id))).filter(Boolean);
-  const receipts = (payroll.clientReceiptIds || []).map((id) => debts.get(String(id))).filter(Boolean);
-  const purchases = (payroll.personalPurchaseIds || []).map((id) => debts.get(String(id))).filter(Boolean);
-  return { payroll, worker: db.users[workerId], range, advances, receipts, purchases };
-}
-
-function workerPayrollXlsxEntries(report) {
-  const detailRows = (report.payroll.lines || []).map((line) => ({
-    date: xlsxDateSerial(line.date), start: xlsxTimeSerial(line.start), end: xlsxTimeSerial(line.end),
-    hourlyRate: Number(line.hourlyRate || 0), workerKm: Number(line.workerKm || 0), kmRate: Number(line.kmRate || 0), commuteKm: Number(line.commuteKm || 0),
-    client: line.client || "", title: line.title || "", status: line.status || ""
-  }));
-  const financialRows = [
-    ...report.advances.map((item) => ({ date: item.date, type: "Založeno", reason: item.reason || "", amount: Number(item.amount || 0), impact: Number(item.amount || 0) })),
-    ...report.receipts.map((item) => ({ date: item.date, type: "Prejeta sredstva", reason: item.reason || "", amount: Number(item.amount || 0), impact: Number(item.amount || 0) })),
-    ...report.purchases.map((item) => ({ date: item.date, type: "Osebni nakup", reason: item.reason || "", amount: Number(item.amount || 0), impact: -Number(item.amount || 0) })),
-    ...(report.payroll.payments || []).map((item) => ({ date: String(item.createdAt || "").slice(0, 10), type: "Že izplačano", reason: item.note || "", amount: Number(item.amount || 0), impact: -Number(item.amount || 0) }))
-  ].sort((left, right) => String(left.date).localeCompare(String(right.date)) || left.type.localeCompare(right.type, "sl"));
-  const entryLastRow = Math.max(2, detailRows.length + 1);
-  const financialLastRow = Math.max(2, financialRows.length + 1);
-  const summary = [
-    [{ value: "OBRAČUN DELAVCA", style: 1 }, { value: "", style: 1 }, { value: "", style: 1 }],
-    [{ value: "Delavec", style: 2 }, { value: report.worker.billing?.exportTitle || report.worker.name || report.worker.id, style: 3 }],
-    [{ value: "Obdobje", style: 2 }, { value: `${report.range.from} – ${report.range.to}`, style: 3 }],
-    [{ value: "Stanje", style: 2 }, { value: report.payroll.status === "paid" ? "Plačano" : report.payroll.status === "confirmed" ? "Potrjeno" : "V pripravi", style: 3 }],
-    [{ value: "Ure", style: 4 }, { value: "", style: 6, formula: `SUM('Vnosi'!D2:D${entryLastRow})` }, { value: "Delo", style: 4 }, { value: "", style: 7, formula: `SUM('Vnosi'!F2:F${entryLastRow})` }],
-    [{ value: "Kilometrina", style: 4 }, { value: "", style: 6, formula: `SUM('Vnosi'!G2:G${entryLastRow})+SUM('Vnosi'!J2:J${entryLastRow})` }, { value: "Kilometrina", style: 4 }, { value: "", style: 7, formula: `SUM('Vnosi'!K2:K${entryLastRow})` }],
-    [{ value: "Znesek skupaj", style: 8 }, { value: "", style: 9, formula: "D5+D6" }],
-    [{ value: "Založeno", style: 4 }, { value: "", style: 7, formula: `SUMIF('Finančni vnosi'!B2:B${financialLastRow},"Založeno",'Finančni vnosi'!D2:D${financialLastRow})` }],
-    [{ value: "Prejeta sredstva", style: 4 }, { value: "", style: 7, formula: `SUMIF('Finančni vnosi'!B2:B${financialLastRow},"Prejeta sredstva",'Finančni vnosi'!D2:D${financialLastRow})` }],
-    [{ value: "Osebni nakupi", style: 4 }, { value: "", style: 7, formula: `SUMIF('Finančni vnosi'!B2:B${financialLastRow},"Osebni nakup",'Finančni vnosi'!D2:D${financialLastRow})` }],
-    [{ value: "Že izplačano", style: 4 }, { value: "", style: 7, formula: `SUMIF('Finančni vnosi'!B2:B${financialLastRow},"Že izplačano",'Finančni vnosi'!D2:D${financialLastRow})` }],
-    [{ value: "Razlika", style: 8 }, { value: "", style: 9, formula: "B8+B9-B10-B11" }],
-    [{ value: "Za izplačilo", style: 10 }, { value: "", style: 11, formula: "B7+B12" }]
-  ];
-  const details = [["Datum", "Od", "Do", "Ure", "EUR/h", "Delo", "Km delavca", "EUR/km", "Vožnja", "Pot v službo", "Kilometrina", "Skupaj", "Stranka", "Ime opravila", "Status"]]
-    .concat(detailRows.map((line, index) => {
-      const row = index + 2;
-      return [line.date, line.start, line.end, { formula: `IF(OR(B${row}=\"\",C${row}=\"\"),0,(C${row}-B${row})*24)` }, line.hourlyRate, { formula: `D${row}*E${row}` }, line.workerKm, line.kmRate, { formula: `G${row}*H${row}` }, line.commuteKm, { formula: `(G${row}+J${row})*H${row}` }, { formula: `F${row}+K${row}` }, line.client, line.title, line.status];
-    }));
-  const finances = [["Datum", "Vrsta", "Opis", "Znesek", "Vpliv na izplačilo"]]
-    .concat(financialRows.map((line) => [xlsxDateSerial(line.date), line.type, line.reason, line.amount, line.impact]));
-  return { summary, details, finances };
-}
-
-async function sendWorkerPayrollXlsx(res, report) {
-  const sheets = workerPayrollXlsxEntries(report);
-  const rows = (matrix) => matrix.map((row) => row.map((value) => typeof value === "object" && value ? { value: value.value ?? "", formula: value.formula || "" } : { value }));
-  const detailSheetRows = rows(sheets.details).map((row, rowIndex) => row.map((cell, columnIndex) => {
-    const style = rowIndex === 0 ? 1
-      : columnIndex === 0 ? 12
-        : [1, 2].includes(columnIndex) ? 13
-          : [3, 4, 6, 7, 9].includes(columnIndex) ? 14
-            : [5, 8, 10, 11].includes(columnIndex) ? 15 : 3;
-    return { ...cell, style };
-  }));
-  const financialSheetRows = rows(sheets.finances).map((row, rowIndex) => row.map((cell, columnIndex) => ({
-    ...cell,
-    style: rowIndex === 0 ? 1 : columnIndex === 0 ? 12 : [3, 4].includes(columnIndex) ? 15 : 3
-  })));
-  const xml = {
-    "[Content_Types].xml": `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/worksheets/sheet3.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/><Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/><Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/></Types>`,
-    "_rels/.rels": `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/></Relationships>`,
-    "xl/workbook.xml": `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><workbookPr date1904="0"/><sheets><sheet name="Povzetek" sheetId="1" r:id="rId1"/><sheet name="Vnosi" sheetId="2" r:id="rId2"/><sheet name="Finančni vnosi" sheetId="3" r:id="rId3"/></sheets><calcPr calcId="191029" fullCalcOnLoad="1" forceFullCalc="1"/></workbook>`,
-    "xl/_rels/workbook.xml.rels": `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet3.xml"/><Relationship Id="rId4" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`,
-    "xl/styles.xml": `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="4"><numFmt numFmtId="164" formatCode="dd.mm.yyyy"/><numFmt numFmtId="165" formatCode="hh:mm"/><numFmt numFmtId="166" formatCode="0.00"/><numFmt numFmtId="167" formatCode="# ##0.00 &quot;EUR&quot;"/></numFmts><fonts count="3"><font><sz val="10"/><name val="Aptos"/></font><font><b/><sz val="10"/><name val="Aptos Display"/></font><font><b/><color rgb="FFFFFFFF"/><sz val="10"/><name val="Aptos Display"/></font></fonts><fills count="5"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF1E6172"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFE6F2EF"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FF173F4C"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border><border><left style="thin"><color rgb="FFD7E0DD"/></left><right style="thin"><color rgb="FFD7E0DD"/></right><top style="thin"><color rgb="FFD7E0DD"/></top><bottom style="thin"><color rgb="FFD7E0DD"/></bottom><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="16"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/><xf numFmtId="0" fontId="2" fillId="2" borderId="0" applyFont="1" applyFill="1"/><xf numFmtId="0" fontId="1" fillId="3" borderId="1" applyFont="1" applyFill="1" applyBorder="1"/><xf numFmtId="0" fontId="0" fillId="0" borderId="1" applyBorder="1"/><xf numFmtId="0" fontId="1" fillId="0" borderId="1" applyFont="1" applyBorder="1"/><xf numFmtId="166" fontId="0" fillId="0" borderId="1" applyNumberFormat="1" applyBorder="1"/><xf numFmtId="166" fontId="1" fillId="3" borderId="1" applyNumberFormat="1" applyFont="1" applyFill="1" applyBorder="1"/><xf numFmtId="167" fontId="1" fillId="3" borderId="1" applyNumberFormat="1" applyFont="1" applyFill="1" applyBorder="1"/><xf numFmtId="0" fontId="1" fillId="3" borderId="1" applyFont="1" applyFill="1" applyBorder="1"/><xf numFmtId="167" fontId="1" fillId="3" borderId="1" applyNumberFormat="1" applyFont="1" applyFill="1" applyBorder="1"/><xf numFmtId="0" fontId="2" fillId="4" borderId="1" applyFont="1" applyFill="1" applyBorder="1"/><xf numFmtId="167" fontId="2" fillId="4" borderId="1" applyNumberFormat="1" applyFont="1" applyFill="1" applyBorder="1"/><xf numFmtId="164" fontId="0" fillId="0" borderId="1" applyNumberFormat="1" applyBorder="1"/><xf numFmtId="165" fontId="0" fillId="0" borderId="1" applyNumberFormat="1" applyBorder="1"/><xf numFmtId="166" fontId="0" fillId="0" borderId="1" applyNumberFormat="1" applyBorder="1"/><xf numFmtId="167" fontId="0" fillId="0" borderId="1" applyNumberFormat="1" applyBorder="1"/></cellXfs></styleSheet>`,
-    "xl/worksheets/sheet1.xml": xlsxSheetXml(rows(sheets.summary), [28, 26, 20, 22]),
-    "xl/worksheets/sheet2.xml": xlsxSheetXml(detailSheetRows, [13, 9, 9, 10, 11, 14, 14, 11, 14, 14, 15, 15, 28, 45, 16]),
-    "xl/worksheets/sheet3.xml": xlsxSheetXml(financialSheetRows, [13, 20, 50, 16, 22]),
-    "docProps/core.xml": `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:creator>INDUS URE</dc:creator><dc:title>Obračun delavca</dc:title><dcterms:created xsi:type="dcterms:W3CDTF">${new Date().toISOString()}</dcterms:created></cp:coreProperties>`,
-    "docProps/app.xml": `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes"><Application>INDUS URE</Application><TitlesOfParts><vt:vector size="3" baseType="lpstr"><vt:lpstr>Povzetek</vt:lpstr><vt:lpstr>Vnosi</vt:lpstr><vt:lpstr>Finančni vnosi</vt:lpstr></vt:vector></TitlesOfParts></Properties>`
-  };
-  const safeWorker = String(report.worker.name || report.worker.id || "delavec").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-|-$/g, "").toLowerCase() || "delavec";
-  res.writeHead(200, securityHeaders({
-    "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    "Content-Disposition": attachmentContentDisposition(`indus-ure-obracun-${safeWorker}-${report.range.from}-${report.range.to}.xlsx`),
-    "Cache-Control": "no-store"
-  }));
-  await new Promise((resolve, reject) => {
-    const archive = archiver("zip", { zlib: { level: 9 } });
-    archive.on("error", reject);
-    res.on("finish", resolve);
-    archive.pipe(res);
-    for (const [filename, content] of Object.entries(xml)) archive.append(content, { name: filename });
-    archive.finalize().catch(reject);
-  });
-}
-
 function dailyReportBossEmail(db) {
   const boss = Object.values(db?.users || {}).find((user) => user?.role === "boss" && user.active !== false);
   return String(boss?.email || GOOGLE_DRIVE_OWNER_EMAIL || "").trim().toLowerCase();
@@ -3824,1474 +3331,17 @@ function financialEntryAccessError(user, entry, label) {
 }
 
 const { payrollRange, payrollNextDate, payrollSequenceError, isPayrollMonth, payrollPeriodEnded, scheduledPayrollMinutesForTodo, payrollMinutesForTodo, payrollLineForTodo, commuteKmOneWayForUser, withDailyCommuteInPayroll, payrollTotals, payrollAdvances, payrollPersonalPurchases, payrollClientReceipts, payrollWorkerForTodo, normalizePayroll, finalizePayrollAmounts, lockedPayrollLineTodoIds, lockedPayrollFinancialIds, buildPayrollSnapshot, payrollForUser, payrollLockForTodos } = require("./payroll-rules").createPayrollRules({
-  isDateKey, nonnegativeNumber, defaultHourlyRateForUser, cleanUserId, signedNumber, isTrashedTodo, correctionPayrollLine, PAYROLL_STATUSES, PAYROLL_PAID_TODO_STATUSES
+  isDateKey, nonnegativeNumber, defaultHourlyRateForUser, cleanUserId, signedNumber: (...args) => signedNumber(...args), isTrashedTodo, correctionPayrollLine: (...args) => correctionPayrollLine(...args), PAYROLL_STATUSES, PAYROLL_PAID_TODO_STATUSES
 });
 
 // Confirmed payrolls/client bills are immutable.  A later edit produces a
 // correction row; the following account contains just that difference.
-function signedNumber(value, fallback = 0, maximum = 1_000_000) {
-  const number = Number(value);
-  return Number.isFinite(number) && Math.abs(number) <= maximum ? number : fallback;
-}
-function correctionDateKey(now = new Date()) {
-  const parts = Object.fromEntries(new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Ljubljana", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(now).filter((part) => part.type !== "literal").map((part) => [part.type, part.value]));
-  return parts.year + "-" + parts.month + "-" + parts.day;
-}
-function confirmedPayrollLineForTodo(db, todoId) {
-  const matches = [];
-  for (const payroll of db.payrolls || []) {
-    if (!["confirmed", "paid"].includes(String(payroll?.status || ""))) continue;
-    for (const line of payroll.lines || []) if (String(line?.todoId || "") === String(todoId || "")) matches.push({ payroll, line });
-  }
-  return matches.sort((left, right) => String(right.payroll.confirmedAt || "").localeCompare(String(left.payroll.confirmedAt || "")))[0] || null;
-}
-function latestCorrection(db, predicate) {
-  return (db.settlementCorrections || []).filter(predicate).sort((left, right) => String(right.updatedAt || right.createdAt || "").localeCompare(String(left.updatedAt || left.createdAt || "")))[0] || null;
-}
-function workerCorrectionSnapshot(db, todo, fallback = {}) {
-  const raw = payrollLineForTodo(db, todo, todo?.syncUser || todo?.createdBy || "");
-  const hourlyRate = nonnegativeNumber(todo?.billingHourlyRate, nonnegativeNumber(fallback.hourlyRate, 0, 10_000), 10_000);
-  const kmRate = nonnegativeNumber(fallback.kmRate, nonnegativeNumber(db.settings?.billing?.workerOwnVehicleKmRate, 0, 1_000), 1_000);
-  const minutes = Number(raw?.minutes || 0);
-  const workerKm = nonnegativeNumber(todo?.billingKm, 0, 1_000_000);
-  const commuteKm = nonnegativeNumber(fallback.commuteKm, 0, 1_000_000);
-  const km = Number((workerKm + commuteKm).toFixed(2));
-  const workAmount = Number((minutes / 60 * hourlyRate).toFixed(2));
-  const kmAmount = Number((km * kmRate).toFixed(2));
-  return { todoId: String(todo?.id || fallback.todoId || ""), assignmentGroupId: String(todo?.assignmentGroupId || fallback.assignmentGroupId || ""), workerId: String(todo?.syncUser || todo?.createdBy || fallback.workerId || ""), date: isDateKey(todo?.date) ? String(todo.date) : String(fallback.date || ""), start: String(todo?.start || ""), end: String(todo?.end || ""), title: String(todo?.title || fallback.title || "").slice(0, 300), client: String(todo?.client || fallback.client || "").slice(0, 240), status: String(todo?.status || fallback.status || ""), minutes, hours: Number((minutes / 60).toFixed(4)), hourlyRate, workerKm, workFromHome: Boolean(todo?.workFromHome), commuteKm, km, kmRate, workAmount, kmAmount, totalAmount: Number((workAmount + kmAmount).toFixed(2)) };
-}
-function workerCorrectionDelta(before = {}, after = {}) {
-  const result = {};
-  for (const key of ["minutes", "hours", "workerKm", "commuteKm", "km", "workAmount", "kmAmount", "totalAmount"]) result[key] = Number((signedNumber(after[key]) - signedNumber(before[key])).toFixed(key === "minutes" ? 0 : 2));
-  return result;
-}
-
-function zeroWorkerCorrectionSnapshot(baseline = {}) {
-  return {
-    ...baseline,
-    date: "",
-    start: "",
-    end: "",
-    status: "corrected",
-    minutes: 0,
-    hours: 0,
-    workerKm: 0,
-    commuteKm: 0,
-    km: 0,
-    workAmount: 0,
-    kmAmount: 0,
-    totalAmount: 0
-  };
-}
-function clientCorrectionSnapshot(todos = []) {
-  const list = (todos || []).filter(Boolean).slice().sort((left, right) => String(left.date || "").localeCompare(String(right.date || "")) || String(left.start || "").localeCompare(String(right.start || "")));
-  const first = list[0] || {};
-  const warranty = Boolean(first.warranty);
-  const isMaterial = first.status === "material";
-  const isClientOnly = isMaterial || first.status === "note";
-  return { eventId: todoBillingEventId(first), clientId: String(first.clientId || ""), client: String(first.client || ""), date: String(first.date || ""), start: String(first.start || ""), end: String(first.end || ""), title: String(first.title || "").slice(0, 300), notes: String(first.notes || "").slice(0, 10_000), material: String(first.material || "").slice(0, 10_000), status: String(first.status || ""), externalDelivery: Boolean(first.externalDelivery), materialAmount: isMaterial ? nonnegativeNumber(first.materialAmount, 0, 1_000_000) : 0, warranty, clientKm: warranty || isClientOnly ? 0 : nonnegativeNumber(first.clientKm, 0, 1_000_000), clientVehicle: todoVehicle(first.clientVehicle), hours: warranty || isClientOnly ? 0 : clientBillableHoursForTodos(list), todoIds: list.map((todo) => String(todo.id || "")).filter(Boolean) };
-}
-function sameValue(left, right) { return JSON.stringify(left || {}) === JSON.stringify(right || {}); }
-function pendingCorrectionsForTodo(db, todo) {
-  const todoId = String(todo?.id || ""), eventId = todoBillingEventId(todo);
-  return (db.settlementCorrections || []).filter((item) => item?.status === "pending" && ((item.type === "worker" && String(item.todoId || "") === todoId) || (item.type === "client" && String(item.eventId || "") === eventId)));
-}
-function upsertSettlementCorrections(db, beforeTodos, afterTodos, actor, now = new Date().toISOString()) {
-  const preliminaryBeforeClient = clientCorrectionSnapshot(beforeTodos);
-  const preliminaryAfterClient = clientCorrectionSnapshot(afterTodos);
-  const preliminaryEventId = String(preliminaryBeforeClient.eventId || preliminaryAfterClient.eventId || "");
-  if (confirmedClientBillByEvent(db).get(preliminaryEventId)
-    && preliminaryBeforeClient.clientId && preliminaryAfterClient.clientId
-    && preliminaryBeforeClient.clientId !== preliminaryAfterClient.clientId) {
-    return { corrections: [], error: "Pri ?e obra?unani storitvi stranke ni mogo?e zamenjati neposredno. Najprej naredi lo?en dobropis." };
-  }
-  const beforeById = new Map((beforeTodos || []).map((todo) => [String(todo.id || ""), todo]));
-  const afterById = new Map((afterTodos || []).map((todo) => [String(todo.id || ""), todo]));
-  const result = [];
-  for (const [todoId, before] of beforeById) {
-    const prior = confirmedPayrollLineForTodo(db, todoId);
-    const current = workerCorrectionSnapshot(db, afterById.get(todoId) || { ...before, date: "", start: "", end: "", status: "deleted", billingKm: 0 }, prior?.line || {});
-    const priorWorkerId = String(prior?.line?.workerId || "");
-    const reassigned = Boolean(priorWorkerId && current.workerId && priorWorkerId !== current.workerId);
-    const correctionWorkerId = reassigned ? priorWorkerId : String(current.workerId || priorWorkerId || "");
-    const pending = latestCorrection(db, (item) => item?.type === "worker" && item?.status === "pending"
-      && String(item.todoId || "") === todoId && String(item.workerId || "") === correctionWorkerId);
-    const settled = latestCorrection(db, (item) => item?.type === "worker" && item?.status === "settled"
-      && String(item.todoId || "") === todoId && String(item.workerId || "") === correctionWorkerId);
-    if (!prior && !pending && !settled) continue;
-    const baseline = pending?.before || settled?.after || prior?.line;
-    const after = reassigned ? zeroWorkerCorrectionSnapshot(baseline) : current;
-    if (sameValue(baseline, after)) {
-      if (pending) db.settlementCorrections = db.settlementCorrections.filter((item) => item.id !== pending.id);
-      continue;
-    }
-    // A reassignment after a confirmed payroll is two separate facts: the
-    // former worker gets a negative delta in the next account, while the new
-    // worker receives the normal live entry in their still-open account.
-    const correction = { id: pending?.id || crypto.randomUUID(), type: "worker", status: "pending", todoId, eventId: todoBillingEventId(before), workerId: correctionWorkerId, sourcePayrollId: String(prior?.payroll?.id || pending?.sourcePayrollId || settled?.sourcePayrollId || ""), before: baseline, after, delta: workerCorrectionDelta(baseline, after), effectiveDate: correctionDateKey(new Date(now)), createdAt: pending?.createdAt || now, createdBy: pending?.createdBy || actor?.id || "system", createdByName: pending?.createdByName || actor?.name || "", updatedAt: now, updatedBy: actor?.id || "system", updatedByName: actor?.name || "" };
-    if (pending) Object.assign(pending, correction); else db.settlementCorrections.push(correction);
-    result.push(correction);
-  }
-  const beforeClient = clientCorrectionSnapshot(beforeTodos), afterClient = clientCorrectionSnapshot(afterTodos);
-  const eventId = String(beforeClient.eventId || afterClient.eventId || "");
-  const clientBill = confirmedClientBillByEvent(db).get(eventId);
-  const pendingClient = latestCorrection(db, (item) => item?.type === "client" && item?.status === "pending" && String(item.eventId || "") === eventId);
-  const settledClient = latestCorrection(db, (item) => item?.type === "client" && item?.status === "settled" && String(item.eventId || "") === eventId);
-  if (clientBill || pendingClient || settledClient) {
-    const baseline = pendingClient?.before || settledClient?.after || beforeClient;
-    if (baseline.clientId && afterClient.clientId && baseline.clientId !== afterClient.clientId) return { corrections: result, error: "Pri ?e obra?unani storitvi stranke ni mogo?e zamenjati neposredno. Najprej naredi lo?en dobropis." };
-    if (sameValue(baseline, afterClient)) {
-      if (pendingClient) db.settlementCorrections = db.settlementCorrections.filter((item) => item.id !== pendingClient.id);
-    } else {
-      const delta = { hours: Number((signedNumber(afterClient.hours) - signedNumber(baseline.hours)).toFixed(2)), clientKm: Number((signedNumber(afterClient.clientKm) - signedNumber(baseline.clientKm)).toFixed(2)), materialAmount: Number((signedNumber(afterClient.materialAmount) - signedNumber(baseline.materialAmount)).toFixed(2)) };
-      const correction = { id: pendingClient?.id || crypto.randomUUID(), type: "client", status: "pending", eventId, clientId: String(afterClient.clientId || baseline.clientId || ""), clientName: String(afterClient.client || baseline.client || ""), sourceClientBillId: String(clientBill?.id || pendingClient?.sourceClientBillId || settledClient?.sourceClientBillId || ""), before: baseline, after: afterClient, delta, effectiveDate: correctionDateKey(), createdAt: pendingClient?.createdAt || now, createdBy: pendingClient?.createdBy || actor?.id || "system", createdByName: pendingClient?.createdByName || actor?.name || "", updatedAt: now, updatedBy: actor?.id || "system", updatedByName: actor?.name || "" };
-      if (pendingClient) Object.assign(pendingClient, correction); else db.settlementCorrections.push(correction);
-      result.push(correction);
-    }
-  }
-  return { corrections: result, error: "" };
-}
-function correctionPayrollLine(correction) {
-  const after = correction.after || {}, delta = correction.delta || {};
-  return { todoId: "correction:" + correction.id, sourceTodoId: String(correction.todoId || ""), correctionId: String(correction.id || ""), correction: true, assignmentGroupId: String(after.assignmentGroupId || correction.eventId || correction.todoId || ""), workerId: String(correction.workerId || after.workerId || ""), date: String(correction.effectiveDate || correctionDateKey()), start: "", end: "", title: "Popravek: " + String(after.title || "vpis ur").slice(0, 270), client: String(after.client || ""), status: "correction", minutes: Math.round(signedNumber(delta.minutes)), unpaidMealMinutes: 0, hours: signedNumber(delta.hours), hourlyRate: nonnegativeNumber(after.hourlyRate, 0, 10_000), workerKm: signedNumber(delta.workerKm), workFromHome: Boolean(after.workFromHome), commuteKm: signedNumber(delta.commuteKm), km: signedNumber(delta.km), kmRate: nonnegativeNumber(after.kmRate, 0, 1_000), workAmount: Number(signedNumber(delta.workAmount).toFixed(2)), kmAmount: Number(signedNumber(delta.kmAmount).toFixed(2)), totalAmount: Number(signedNumber(delta.totalAmount).toFixed(2)) };
-}
-function settleCorrectionsForPayroll(db, payroll, actor) {
-  const ids = new Set((payroll.lines || []).map((line) => String(line.correctionId || "")).filter(Boolean));
-  let changed = 0;
-  for (const correction of db.settlementCorrections || []) if (correction.type === "worker" && correction.status === "pending" && ids.has(correction.id)) { correction.status = "settled"; correction.workerPayrollId = payroll.id; correction.settledAt = new Date().toISOString(); correction.settledBy = actor?.id || "system"; changed += 1; }
-  return changed;
-}
-function settleCorrectionsForClientBill(db, bill, actor) {
-  const ids = new Set((bill.correctionIds || []).map(String).filter(Boolean));
-  let changed = 0;
-  for (const correction of db.settlementCorrections || []) if (correction.type === "client" && correction.status === "pending" && ids.has(correction.id)) { correction.status = "settled"; correction.clientBillId = bill.id; correction.settledAt = new Date().toISOString(); correction.settledBy = actor?.id || "system"; changed += 1; }
-  return changed;
-}
-
-function todoBillingEventId(todo) {
-  return String(todo?.assignmentGroupId || todo?.id || "").trim();
-}
-
-function todoRequiresClientBilling(todo) {
-  return Boolean(todo && !todo.imported && ["execution", "material", "note"].includes(String(todo.status || "")) && String(todo.clientId || todo.client || "").trim());
-}
-
-function clientBillIsConfirmed(bill) {
-  return CLIENT_BILL_STATUSES.has(String(bill?.status || ""));
-}
-
-function clientBillEventIds(bill) {
-  return [...new Set((Array.isArray(bill?.eventIds) ? bill.eventIds : []).map((id) => String(id || "").trim()).filter(Boolean))];
-}
-
-function clientForBilling(db, input = {}) {
-  const wanted = [input?.clientId, input?.clientName, input?.client]
-    .map((value) => String(value || "").trim().toLowerCase())
-    .filter(Boolean);
-  if (!wanted.length) return null;
-  return (db.clients || []).find((client) => [client.clientId, client.id, client.name, client.search, client.taxId, client.registryNumber]
-    .filter(Boolean)
-    .some((value) => wanted.includes(String(value).trim().toLowerCase()))) || null;
-}
-
-function normalizeClientBill(input, db) {
-  const client = clientForBilling(db, input || {});
-  const clientId = String(client?.clientId || input?.clientId || "").trim().slice(0, 160);
-  const clientName = String(client?.name || input?.clientName || input?.client || "").trim().slice(0, 240);
-  const eventIds = clientBillEventIds(input);
-  if (!clientName || !eventIds.length) return null;
-  const lines = (Array.isArray(input?.lines) ? input.lines : []).map((line) => {
-    const eventId = String(line?.eventId || line?.assignmentGroupId || "").trim();
-    if (!eventIds.includes(eventId)) return null;
-    return {
-      eventId,
-      todoIds: [...new Set((Array.isArray(line?.todoIds) ? line.todoIds : []).map((id) => String(id || "").trim()).filter(Boolean))],
-      date: isDateKey(line?.date) ? String(line.date) : "",
-      start: String(line?.start || "").slice(0, 5),
-      end: String(line?.end || "").slice(0, 5),
-      title: String(line?.title || "").trim().slice(0, 300),
-      clientKm: nonnegativeNumber(line?.clientKm, 0, 1_000_000),
-      clientVehicle: todoVehicle(line?.clientVehicle),
-      clientBillableMinutes: normalizedClientBillableMinutes(line?.clientBillableMinutes),
-      warranty: Boolean(line?.warranty),
-      status: String(line?.status || "").slice(0, 40),
-      materialAmount: nonnegativeNumber(line?.materialAmount, 0, 1_000_000),
-      externalDelivery: Boolean(line?.externalDelivery),
-      clientKmRate: 0
-    };
-  }).filter(Boolean);
-  const createdAt = String(input?.createdAt || new Date().toISOString());
-  const status = String(input?.status || "") === "cancelled" ? "cancelled" : "confirmed";
-  return {
-    id: String(input?.id || crypto.randomUUID()),
-    clientId,
-    clientName,
-    from: isDateKey(input?.from) ? String(input.from) : "",
-    to: isDateKey(input?.to) ? String(input.to) : "",
-    status,
-    eventIds,
-    lines,
-    createdBy: String(input?.createdBy || "system"),
-    createdByName: String(input?.createdByName || ""),
-    createdAt,
-    confirmedAt: String(input?.confirmedAt || createdAt),
-    confirmedBy: String(input?.confirmedBy || input?.createdBy || "system"),
-    confirmedByName: String(input?.confirmedByName || input?.createdByName || ""),
-    cancelledAt: status === "cancelled" ? String(input?.cancelledAt || createdAt) : "",
-    cancelledBy: status === "cancelled" ? String(input?.cancelledBy || "system") : "",
-    cancelledByName: status === "cancelled" ? String(input?.cancelledByName || "") : "",
-    // A direct settlement records the actual amount paid by the client. The
-    // normal client report intentionally does not calculate a client price.
-    directSettlement: Boolean(input?.directSettlement),
-    receivedAmount: nonnegativeNumber(input?.receivedAmount, 0, 1_000_000),
-    creditedWorkerId: cleanUserId(input?.creditedWorkerId),
-    creditedWorkerName: String(input?.creditedWorkerName || "").trim().slice(0, 120),
-    clientReceiptId: String(input?.clientReceiptId || "").trim().slice(0, 100),
-    note: String(input?.note || "").trim().slice(0, 2_000)
-  };
-}
-
-function cancelClientBill(db, billId, actor = null) {
-  const bill = (db.clientBills || []).find((item) => String(item?.id || "") === String(billId || ""));
-  if (!bill || !clientBillIsConfirmed(bill)) return null;
-  const linkedReceiptId = String(bill.clientReceiptId || "");
-  if (linkedReceiptId) {
-    const referencedPayroll = (db.payrolls || []).find((payroll) => (payroll.clientReceiptIds || []).map(String).includes(linkedReceiptId));
-    if (referencedPayroll) {
-      return { error: "Neposrednega poračuna ni mogoče preklicati, ker je plačilo že vključeno v obračun delavca. Najprej odpri ali popravi ta obračun." };
-    }
-    db.debts = (db.debts || []).filter((item) => String(item?.id || "") !== linkedReceiptId);
-  }
-  const auditActor = actor || { id: "system", name: "Sistem" };
-  const now = new Date().toISOString();
-  const eventIds = new Set(clientBillEventIds(bill));
-  bill.status = "cancelled";
-  bill.cancelledAt = now;
-  bill.cancelledBy = auditActor.id;
-  bill.cancelledByName = auditActor.name || "";
-  for (const todo of db.todos || []) {
-    if (!eventIds.has(todoBillingEventId(todo))) continue;
-    todo.history = [...(todo.history || []), audit(auditActor, `preklican obračun stranki ${bill.clientName}`)];
-  }
-  const archive = reconcileTodoArchives(db, auditActor);
-  return { clientBill: bill, archive };
-}
-function confirmedClientBillByEvent(db) {
-  const byEvent = new Map();
-  for (const bill of db.clientBills || []) {
-    if (!clientBillIsConfirmed(bill)) continue;
-    for (const eventId of clientBillEventIds(bill)) {
-      const current = byEvent.get(eventId);
-      if (!current || String(current.confirmedAt || "") <= String(bill.confirmedAt || "")) byEvent.set(eventId, bill);
-    }
-  }
-  return byEvent;
-}
-
-function clientBillLockForTodos(db, todos = []) {
-  const bills = confirmedClientBillByEvent(db);
-  return todos.map((todo) => bills.get(todoBillingEventId(todo))).find(Boolean) || null;
-}
-
-function clientBillEditLockMessage(bill) {
-  const clientName = String(bill?.clientName || bill?.client || "stranko").trim() || "stranko";
-  return `Dogodek je že v potrjenem obračunu stranki ${clientName} in je zaklenjen. Za dodatno delo ali popravek ustvari nov dogodek.`;
-}
-
-function clientBillCandidates(db, input = {}) {
-  const client = clientForBilling(db, input);
-  if (!client) return { client: null, groups: [] };
-  const from = isDateKey(input.from) ? String(input.from) : "";
-  const to = isDateKey(input.to) ? String(input.to) : "";
-  const requestedEventIds = Array.isArray(input?.eventIds)
-    ? new Set(input.eventIds.map((id) => String(id || "").trim()).filter(Boolean))
-    : null;
-  const billed = confirmedClientBillByEvent(db);
-  const groups = new Map();
-  for (const todo of db.todos || []) {
-    if (isTrashedTodo(todo) || !todoRequiresClientBilling(todo)) continue;
-    if (String(todo.clientId || "") !== String(client.clientId || "") && String(todo.client || "").trim().toLowerCase() !== String(client.name || "").trim().toLowerCase()) continue;
-    if ((from && String(todo.date || "") < from) || (to && String(todo.date || "") > to)) continue;
-    const eventId = todoBillingEventId(todo);
-    // A confirmed customer bill is immutable.  Older data can still contain
-    // pending correction markers from the former workflow, but those markers
-    // must never make the original event billable a second time.
-    if (!eventId || billed.has(eventId)) continue;
-    if (requestedEventIds && !requestedEventIds.has(eventId)) continue;
-    if (!groups.has(eventId)) groups.set(eventId, []);
-    groups.get(eventId).push(todo);
-  }
-  return { client, groups: [...groups.entries()].map(([eventId, todos]) => ({ eventId, todos })), requestedEventIds };
-}
-
-function optionalReportHours(todo = {}) {
-  const raw = todo?.reportHours;
-  if (raw === null || raw === "" || typeof raw === "undefined") return null;
-  const hours = Number(raw);
-  return Number.isFinite(hours) ? hours : null;
-}
-function todoDurationHours(todo = {}) {
-  const reportHours = optionalReportHours(todo);
-  if (reportHours !== null) return reportHours;
-  const start = /^(\d{2}):(\d{2})$/.exec(String(todo.start || ""));
-  const end = /^(\d{2}):(\d{2})$/.exec(String(todo.end || ""));
-  if (!start || !end) return 0;
-  const startMinutes = Number(start[1]) * 60 + Number(start[2]);
-  const endMinutes = Number(end[1]) * 60 + Number(end[2]);
-  return endMinutes > startMinutes ? (endMinutes - startMinutes) / 60 : 0;
-}
 
 // Customer-billable time is deliberately independent from the worker's
 // attendance. null means automatic mode: it follows the actual worker
 // duration. A number is a boss-approved manual amount, rounded to the same
 // quarter-hour precision as the time picker. We keep the value in minutes so
 // zero remains an intentional, unambiguous customer charge.
-function normalizedClientBillableMinutes(value) {
-  const minutes = nonnegativeNumber(value, null, 1_000_000);
-  return minutes === null ? null : Math.round(minutes / 15) * 15;
-}
-
-function todoClientBillableMinutes(todo = {}) {
-  const reportHours = optionalReportHours(todo);
-  if (reportHours !== null) return Math.round(reportHours * 60);
-  const manual = normalizedClientBillableMinutes(todo.clientBillableMinutes);
-  return manual === null ? Math.round(todoDurationHours(todo) * 60) : manual;
-}
-
-function clientBillableMinutesForTodos(todos = []) {
-  const list = (todos || []).filter(Boolean);
-  // An assignment group is one customer event. When its boss has set one
-  // shared manual amount, take it once instead of adding the same value for
-  // every assigned worker.
-  const manual = list.map((todo) => normalizedClientBillableMinutes(todo.clientBillableMinutes))
-    .find((minutes) => minutes !== null);
-  return manual === undefined ? list.reduce((sum, todo) => sum + todoClientBillableMinutes(todo), 0) : manual;
-}
-
-function clientBillableHoursForTodos(todos = []) {
-  return Number((clientBillableMinutesForTodos(todos) / 60).toFixed(2));
-}
-
-function clientBillableHoursWarning(beforeTodos = [], afterTodos = []) {
-  const beforeManual = (beforeTodos || []).map((todo) => normalizedClientBillableMinutes(todo?.clientBillableMinutes))
-    .find((minutes) => minutes !== null);
-  if (beforeManual === undefined) return null;
-  const beforeWorkerMinutes = Math.round((beforeTodos || []).reduce((sum, todo) => sum + todoDurationHours(todo) * 60, 0));
-  const afterWorkerMinutes = Math.round((afterTodos || []).reduce((sum, todo) => sum + todoDurationHours(todo) * 60, 0));
-  if (beforeWorkerMinutes === afterWorkerMinutes) return null;
-  return {
-    clientBillableHours: Number((beforeManual / 60).toFixed(2)),
-    beforeWorkerHours: Number((beforeWorkerMinutes / 60).toFixed(2)),
-    afterWorkerHours: Number((afterWorkerMinutes / 60).toFixed(2))
-  };
-}
-function clientReportSelection(db, input = {}) {
-  const selection = clientBillCandidates(db, input);
-  if (!selection.client || !selection.groups.length) return null;
-  if (selection.requestedEventIds && selection.groups.length !== selection.requestedEventIds.size) return null;
-  const groups = selection.groups.map((group) => {
-    const todos = [...group.todos].sort((left, right) => String(left.date || "").localeCompare(String(right.date || ""))
-      || String(left.start || "").localeCompare(String(right.start || ""))
-      || String(left.id || "").localeCompare(String(right.id || "")));
-    const correction = latestCorrection(db, (item) => item?.type === "client" && item?.status === "pending" && String(item.eventId || "") === String(group.eventId));
-    if (!correction || !todos.length) return { eventId: group.eventId, todos };
-    const representative = todos[0];
-    return { eventId: group.eventId, todos: [{ ...representative, title: "Popravek obračuna: " + String(correction.after?.title || representative.title || "storitev"), start: "", end: "", reportHours: signedNumber(correction.delta?.hours), clientKm: signedNumber(correction.delta?.clientKm), materialAmount: signedNumber(correction.delta?.materialAmount), externalDelivery: Boolean(correction.after?.externalDelivery), status: correction.after?.status || representative.status, clientVehicle: correction.after?.clientVehicle || representative.clientVehicle, notes: "Popravek že potrjene storitve. Poročilo vsebuje samo razliko glede na prvotni obračun.", material: correction.after?.material || "" }] };
-  }).sort((left, right) => {
-    const leftTodo = left.todos[0] || {};
-    const rightTodo = right.todos[0] || {};
-    return String(leftTodo.date || "").localeCompare(String(rightTodo.date || ""))
-      || String(leftTodo.start || "").localeCompare(String(rightTodo.start || ""))
-      || String(leftTodo.title || "").localeCompare(String(rightTodo.title || ""));
-  });
-  return {
-    client: selection.client,
-    from: isDateKey(input?.from) ? String(input.from) : "",
-    to: isDateKey(input?.to) ? String(input.to) : "",
-    groups
-  };
-}
-
-function clientReportRequestIsValid(input) {
-  return Boolean(input && typeof input === "object" && !Array.isArray(input))
-    && (input.eventIds === undefined || Array.isArray(input.eventIds));
-}
-
-function clientReportDownloadPayload(input = {}) {
-  const cleanList = (value, max = 1_000) => Array.isArray(value)
-    ? [...new Set(value.map((item) => String(item || "").trim().slice(0, 240)).filter(Boolean))].slice(0, max)
-    : undefined;
-  return {
-    clientId: String(input.clientId || "").trim().slice(0, 160),
-    clientName: String(input.clientName || "").trim().slice(0, 240),
-    from: isDateKey(input.from) ? String(input.from) : "",
-    to: isDateKey(input.to) ? String(input.to) : "",
-    eventIds: cleanList(input.eventIds),
-    attachmentIds: cleanList(input.attachmentIds),
-    exportOptions: clientReportExportOptions(input.exportOptions)
-  };
-}
-
-function pruneClientReportDownloadTickets(now = Date.now()) {
-  for (const [token, ticket] of clientReportDownloadTickets) {
-    if (Number(ticket?.expiresAt || 0) <= now) clientReportDownloadTickets.delete(token);
-  }
-  while (clientReportDownloadTickets.size > MAX_CLIENT_REPORT_DOWNLOAD_TICKETS) {
-    const oldest = clientReportDownloadTickets.keys().next().value;
-    if (!oldest) break;
-    clientReportDownloadTickets.delete(oldest);
-  }
-}
-
-function createClientReportDownloadTicket(req, user, payload) {
-  pruneClientReportDownloadTickets();
-  const token = crypto.randomBytes(32).toString("base64url");
-  clientReportDownloadTickets.set(token, {
-    userId: String(user?.id || ""),
-    sessionHash: sessionTokenHash(sessionTokenFromRequest(req)),
-    payload: clientReportDownloadPayload(payload),
-    expiresAt: Date.now() + CLIENT_REPORT_DOWNLOAD_TICKET_TTL_MS
-  });
-  return token;
-}
-
-function clientReportDownloadTicketForRequest(req, user, token) {
-  pruneClientReportDownloadTickets();
-  const ticket = clientReportDownloadTickets.get(String(token || ""));
-  if (!ticket) return null;
-  const sameUser = ticket.userId && ticket.userId === String(user?.id || "");
-  const sameSession = ticket.sessionHash && ticket.sessionHash === sessionTokenHash(sessionTokenFromRequest(req));
-  return sameUser && sameSession ? ticket : null;
-}
-
-function pruneTodoSharePdfDownloadTickets(now = Date.now()) {
-  for (const [token, ticket] of todoSharePdfDownloadTickets) {
-    if (Number(ticket?.expiresAt || 0) <= now) todoSharePdfDownloadTickets.delete(token);
-  }
-  while (todoSharePdfDownloadTickets.size > MAX_CLIENT_REPORT_DOWNLOAD_TICKETS) {
-    const oldest = todoSharePdfDownloadTickets.keys().next().value;
-    if (!oldest) break;
-    todoSharePdfDownloadTickets.delete(oldest);
-  }
-}
-
-function createTodoSharePdfDownloadTicket(req, user, todoId) {
-  pruneTodoSharePdfDownloadTickets();
-  const token = crypto.randomBytes(32).toString("base64url");
-  todoSharePdfDownloadTickets.set(token, {
-    userId: String(user?.id || ""),
-    sessionHash: sessionTokenHash(sessionTokenFromRequest(req)),
-    todoId: String(todoId || ""),
-    expiresAt: Date.now() + CLIENT_REPORT_DOWNLOAD_TICKET_TTL_MS
-  });
-  return token;
-}
-
-function todoSharePdfDownloadTicketForRequest(req, user, token) {
-  pruneTodoSharePdfDownloadTickets();
-  const ticket = todoSharePdfDownloadTickets.get(String(token || ""));
-  if (!ticket) return null;
-  const sameUser = ticket.userId && ticket.userId === String(user?.id || "");
-  const sameSession = ticket.sessionHash && ticket.sessionHash === sessionTokenHash(sessionTokenFromRequest(req));
-  return sameUser && sameSession ? ticket : null;
-}
-
-function safeReportFileName(value, fallback = "priloga") {
-  const cleaned = String(value || "").trim()
-    .replace(/[\/:*?"<>|\u0000-\u001f]+/g, "-")
-    .replace(/\s+/g, " ")
-    .slice(0, 120);
-  return cleaned || fallback;
-}
-
-function attachmentMimeExtension(mimeType) {
-  const type = String(mimeType || "").toLowerCase();
-  if (type === "application/pdf") return ".pdf";
-  if (type === "image/jpeg") return ".jpg";
-  if (type === "image/png") return ".png";
-  if (type === "image/webp") return ".webp";
-  if (type === "text/plain") return ".txt";
-  return "";
-}
-
-function clientReportAttachmentSelection(report, attachmentIds) {
-  const available = new Map();
-  for (const group of report.groups || []) {
-    for (const todo of group.todos || []) {
-      for (const photo of todo.photos || []) {
-        const attachmentId = String(photo?.attachmentId || "");
-        if (!validTodoAttachmentId(attachmentId) || available.has(attachmentId)) continue;
-        available.set(attachmentId, {
-          id: attachmentId,
-          name: safeReportFileName(photo.name || "priloga"),
-          eventId: group.eventId
-        });
-      }
-    }
-  }
-  const requested = Array.isArray(attachmentIds)
-    ? [...new Set(attachmentIds.map((id) => String(id || "").trim()).filter(Boolean))]
-    : [...available.keys()];
-  if (requested.length > 1_000) throw new Error("Za en izvoz lahko izbereš največ 1000 prilog.");
-  if (requested.some((id) => !validTodoAttachmentId(id) || !available.has(id))) {
-    throw new Error("Izbrana priloga ne pripada oznacenim vpisom poročila.");
-  }
-  return requested.map((id) => available.get(id));
-}
-
-function dataUrlAttachmentBytes(value) {
-  const match = String(value || "").match(/^data:([^;,]+);base64,([A-Za-z0-9+/]+={0,2})$/);
-  return match ? { mimeType: match[1], bytes: Buffer.from(match[2], "base64") } : null;
-}
-
-async function loadClientReportAttachments(db, selected = [], { maxAttachmentBytes = REPORT_PDF_MAX_TOTAL_BYTES, maxTotalBytes = REPORT_PDF_MAX_TOTAL_BYTES, destination = "PDF" } = {}) {
-  const attachments = [];
-  let totalBytes = 0;
-  for (const selectedAttachment of selected) {
-    let mimeType = "application/octet-stream";
-    let bytes = null;
-    if (DATABASE_URL) {
-      const stored = await getPgStore().getAttachment(selectedAttachment.id, false);
-      if (stored) {
-        mimeType = String(stored.mimeType || mimeType);
-        bytes = await fsp.readFile(stored.filePath);
-      }
-    } else {
-      const parsed = dataUrlAttachmentBytes(db.attachments?.[selectedAttachment.id]?.data);
-      if (parsed) {
-        mimeType = parsed.mimeType || mimeType;
-        bytes = parsed.bytes;
-      }
-    }
-    if (!bytes?.length) throw new Error(`Priloge \"${selectedAttachment.name}\" ni mogoče prebrati.`);
-    if (bytes.length > maxAttachmentBytes) {
-      throw new Error(`Priloga \"${selectedAttachment.name}\" je prevelika za ${destination} izvoz.`);
-    }
-    totalBytes += bytes.length;
-    if (totalBytes > maxTotalBytes) {
-      throw new Error(`Izbrane priloge so skupaj prevelike za ${destination} izvoz. Izberi manj prilog.`);
-    }
-    const extension = attachmentMimeExtension(mimeType);
-    const baseName = safeReportFileName(selectedAttachment.name || "priloga");
-    const filename = extension && !baseName.toLowerCase().endsWith(extension) ? `${baseName}${extension}` : baseName;
-    const storedMetadata = db.attachments?.[selectedAttachment.id] || {};
-    attachments.push({
-      ...selectedAttachment,
-      mimeType,
-      bytes,
-      filename,
-      driveFileId: String(storedMetadata.driveFileId || ""),
-      driveUrl: String(storedMetadata.driveUrl || "")
-    });
-  }
-  return attachments;
-}
-
-function reportPdfFontPath(weight = "regular") {
-  return path.resolve(root, "..", "node_modules", "pdfjs-dist", "standard_fonts", weight === "bold" ? "LiberationSans-Bold.ttf" : "LiberationSans-Regular.ttf");
-}
-
-function reportPdfDate(date) {
-  if (!isDateKey(date)) return "Brez datuma";
-  const [year, month, day] = String(date).split("-");
-  return `${day}. ${month}. ${year}`;
-}
-
-function clientReportExportOptions(input = {}) {
-  const hoursMode = ["client_billable", "worker_total", "worker_time"].includes(String(input?.hoursMode || ""))
-    ? String(input.hoursMode)
-    : "client_billable";
-  const heading = String(input?.heading || "").trim().slice(0, 120);
-  return { hoursMode, heading };
-}
-
-function reportPdfAssigneeTitle(db, todo) {
-  const worker = db.users?.[todo?.syncUser || todo?.createdBy] || {};
-  const title = String(worker.billing?.exportTitle || "").trim() || "Izvajalec";
-  const name = String(worker.name || todo?.updatedByName || todo?.createdByName || "").trim();
-  return name ? `${title} (${name})` : title;
-}
-
-function reportPdfAssignees(db, todos) {
-  return [...new Set((todos || []).map((todo) => reportPdfAssigneeTitle(db, todo)))].join(", ");
-}
-
-function reportPdfVehicleLabel(vehicle) {
-  return vehicle === "van" ? "kombi" : "osebni avto";
-}
-
-function reportPdfDriveFileLink(doc, file) {
-  const url = String(file?.url || "").trim();
-  if (!url) return;
-  const label = file?.kind === "video" ? "Video" : "Dokument";
-  doc.font(reportPdfFontPath("bold")).fillColor("#1e3430").text(`${label}: `, { continued: true });
-  doc.font(reportPdfFontPath()).fillColor("#0d6d95").text(String(file?.name || "Priloga"), { link: url, underline: true });
-  doc.fillColor("#263634");
-}
-function reportPdfAttachmentSummary(attachments = []) {
-  const counts = attachments.reduce((summary, attachment) => {
-    const type = String(attachment?.mimeType || "").toLowerCase();
-    if (type.startsWith("image/")) summary.photos += 1;
-    else if (type === "application/pdf") summary.pdfs += 1;
-    else summary.files += 1;
-    return summary;
-  }, { photos: 0, pdfs: 0, files: 0 });
-  const plural = (count, one, two, few, many) => count === 1 ? one : count === 2 ? two : count < 5 ? few : many;
-  return [
-    counts.photos && `${counts.photos} ${plural(counts.photos, "fotografija", "fotografiji", "fotografije", "fotografij")}`,
-    counts.pdfs && `${counts.pdfs} ${plural(counts.pdfs, "PDF dokument", "PDF dokumenta", "PDF dokumenti", "PDF dokumentov")}`,
-    counts.files && `${counts.files} ${plural(counts.files, "datoteka", "datoteki", "datoteke", "datotek")}`
-  ].filter(Boolean).join(", ");
-}
-
-function reportPdfAttachmentTitle(attachment, index) {
-  const type = String(attachment?.mimeType || "").toLowerCase();
-  if (type.startsWith("image/")) return `Fotografija ${index}`;
-  if (type === "application/pdf") return `PDF dokument ${index}`;
-  return `Priloga ${index}`;
-}
-
-function reportPdfAttachmentLinks(doc, attachments = []) {
-  if (!attachments.length) return;
-  const shared = attachments.filter((attachment) => String(attachment?.driveUrl || "").trim());
-  if (!shared.length) {
-    reportPdfLine(doc, "Vključene priloge", reportPdfAttachmentSummary(attachments));
-    return;
-  }
-  doc.font(reportPdfFontPath("bold")).fillColor("#1e3430").text("Vključene priloge: ", { continued: true });
-  if (shared.length === 1) {
-    doc.font(reportPdfFontPath()).fillColor("#0d6d95").text(reportPdfAttachmentSummary(shared), {
-      link: shared[0].driveUrl,
-      underline: true
-    });
-  } else {
-    shared.forEach((attachment, index) => {
-      doc.font(reportPdfFontPath()).fillColor("#0d6d95").text(reportPdfAttachmentTitle(attachment, index + 1), {
-        link: attachment.driveUrl,
-        underline: true,
-        continued: index < shared.length - 1
-      });
-      if (index < shared.length - 1) doc.text(" · ", { continued: true });
-    });
-  }
-  doc.fillColor("#263634");
-}
-
-function reportPdfLine(doc, label, value) {
-  if (!value) return;
-  doc.font(reportPdfFontPath("bold")).fillColor("#1e3430").text(`${label}: `, { continued: true });
-  doc.font(reportPdfFontPath()).fillColor("#263634").text(String(value));
-}
-
-function reportPdfEnsureSpace(doc, height = 0) {
-  const bottom = doc.page.height - doc.page.margins.bottom;
-  if (doc.y + height > bottom) doc.addPage();
-}
-
-function reportPdfAttachmentPreviews(doc, attachments = []) {
-  const images = attachments.filter((attachment) => /^image\/(jpeg|png)$/i.test(String(attachment?.mimeType || '')));
-  for (const [index, attachment] of images.entries()) {
-    reportPdfEnsureSpace(doc, 218);
-    const label = reportPdfAttachmentTitle(attachment, index + 1);
-    doc.font(reportPdfFontPath('bold')).fontSize(10).fillColor('#1e3430').text(label);
-    const x = doc.page.margins.left;
-    const y = doc.y + 5;
-    try {
-      // Half of the printable A4 width keeps reports readable while retaining
-      // enough detail for photos from the field.
-      doc.image(attachment.bytes, x, y, { fit: [250, 180], align: 'left', valign: 'top' });
-      if (String(attachment.driveUrl || '').trim()) doc.link(x, y, 250, 180, attachment.driveUrl);
-      doc.y = y + 188;
-    } catch {
-      reportPdfLine(doc, 'Priloga', 'Slike ni bilo mogo\u010de vgraditi; v PDF je prilo\u017een izvirnik.');
-    }
-  }
-}
-
-function buildClientReportPdf(db, report, attachments = [], exportOptions = {}) {
-  const options = clientReportExportOptions(exportOptions);
-  const heading = options.heading || 'Obra\u010dun opravljenih storitev';
-  const title = `${heading} - ${safeReportFileName(report.client?.name || 'stranka')}`;
-  return new Promise((resolve, reject) => {
-    const doc = new PDFDocument({
-      size: 'A4',
-      margin: 46,
-      info: { Title: title, Author: 'INDUS URE', Subject: heading }
-    });
-    const chunks = [];
-    doc.on('data', (chunk) => chunks.push(chunk));
-    doc.once('error', reject);
-    doc.once('end', () => resolve(Buffer.concat(chunks)));
-    try {
-      doc.font(reportPdfFontPath('bold')).fontSize(21).fillColor('#0d536b').text(heading);
-      doc.moveDown(0.3);
-      doc.font(reportPdfFontPath()).fontSize(11).fillColor('#263634');
-      reportPdfLine(doc, 'Stranka', report.client?.name || '');
-      if (report.client?.email) reportPdfLine(doc, 'E-po\u0161ta', report.client.email);
-      if (report.from || report.to) reportPdfLine(doc, 'Obdobje', `${report.from ? reportPdfDate(report.from) : '-'} - ${report.to ? reportPdfDate(report.to) : '-'}`);
-      doc.moveDown(0.8);
-
-      for (const group of report.groups || []) {
-        const todo = group.todos?.[0] || {};
-        const warranty = Boolean(todo.warranty);
-        const materialEntry = todo.status === "material";
-        const noteEntry = todo.status === "note";
-        const clientBillableHours = warranty || materialEntry || noteEntry ? 0 : clientBillableHoursForTodos(group.todos);
-        const workerHours = warranty || materialEntry || noteEntry ? 0 : Number((group.todos || []).reduce((sum, item) => sum + todoDurationHours(item), 0).toFixed(2));
-        const hours = options.hoursMode === "client_billable" ? clientBillableHours : workerHours;
-        const clientKm = warranty || materialEntry || noteEntry ? 0 : Math.max(0, Number(todo.clientKm || 0));
-        doc.font(reportPdfFontPath('bold')).fontSize(13).fillColor('#143b34').text(reportPdfDate(todo.date));
-        doc.font(reportPdfFontPath('bold')).fontSize(12).fillColor('#161f20').text(String(todo.title || 'Brez naziva'));
-        doc.font(reportPdfFontPath()).fontSize(10).fillColor('#263634');
-        if (!materialEntry && !noteEntry) reportPdfLine(doc, 'Izvajalec', reportPdfAssignees(db, group.todos));
-        if (options.hoursMode === "worker_time" && !materialEntry && !noteEntry) {
-          const workerTimes = (group.todos || []).filter((item) => item.start && item.end)
-            .map((item) => reportPdfAssigneeTitle(db, item) + ': ' + item.start + '-' + item.end).join(', ');
-          if (workerTimes) reportPdfLine(doc, '\u010cas izvajalcev', workerTimes);
-        }
-        if (materialEntry) reportPdfLine(doc, todo.externalDelivery ? 'Dostava' : 'Vrsta vpisa', todo.externalDelivery ? 'Material je neposredno dostavil zunanji dobavitelj.' : 'Material brez izvajalca.');
-        if (noteEntry) reportPdfLine(doc, 'Vrsta vpisa', 'Zapisek brez obračuna ur in kilometrine.');
-        if (warranty) reportPdfLine(doc, 'Garancija', 'Storitev se ne obra\u010dunava stranki.');
-        if (hours) reportPdfLine(doc, options.hoursMode === "client_billable" ? 'Za obra\u010dun' : 'Ure izvajalcev', hours.toLocaleString('sl-SI', { maximumFractionDigits: 2 }) + ' h');
-        if (clientKm) reportPdfLine(doc, 'Stro\u0161ki prevoza (obe smeri)', `${reportPdfVehicleLabel(todo.clientVehicle)} - ${clientKm.toLocaleString('sl-SI', { maximumFractionDigits: 1 })} km`);
-        if (todo.notes) reportPdfLine(doc, 'Opis del', todo.notes);
-        if (todo.material) reportPdfLine(doc, 'Material', todo.material);
-        const driveFiles = [...new Map(group.todos.flatMap((item) => item.driveFiles || []).filter((file) => file?.url).map((file) => [file.url, file])).values()];
-        for (const file of driveFiles) reportPdfDriveFileLink(doc, file);
-        const groupAttachments = attachments.filter((attachment) => attachment.eventId === group.eventId);
-        if (groupAttachments.length) reportPdfAttachmentLinks(doc, groupAttachments);
-        reportPdfAttachmentPreviews(doc, groupAttachments);
-        doc.moveDown(0.75);
-        reportPdfEnsureSpace(doc, 20);
-        doc.strokeColor('#a9c5bd').lineWidth(1.4).moveTo(doc.page.margins.left, doc.y).lineTo(doc.page.width - doc.page.margins.right, doc.y).stroke();
-        doc.moveDown(0.75);
-      }
-
-      const workerHoursByWorker = new Map();
-      const travel = { personal: 0, van: 0 };
-      const totalHours = (report.groups || []).reduce((sum, group) => {
-        const representative = group.todos?.[0] || {};
-        if (['material', 'note'].includes(representative.status)) return sum;
-        if (representative.warranty) return sum;
-        const vehicle = representative.clientVehicle === 'van' ? 'van' : 'personal';
-        travel[vehicle] += Math.max(0, Number(representative.clientKm || 0));
-        const clientBillableHours = clientBillableHoursForTodos(group.todos || []);
-        const workerHours = (group.todos || []).reduce((hours, item) => hours + todoDurationHours(item), 0);
-        if (options.hoursMode !== "client_billable") {
-          for (const item of group.todos || []) {
-            const workerHoursForItem = todoDurationHours(item);
-            if (!workerHoursForItem) continue;
-            const label = reportPdfAssigneeTitle(db, item);
-            workerHoursByWorker.set(label, (workerHoursByWorker.get(label) || 0) + workerHoursForItem);
-          }
-        }
-        return sum + (options.hoursMode === "client_billable" ? clientBillableHours : workerHours);
-      }, 0);
-      reportPdfEnsureSpace(doc, 105);
-      doc.moveDown(0.4);
-      doc.font(reportPdfFontPath('bold')).fontSize(13).fillColor('#0d536b').text(options.hoursMode === "client_billable" ? 'Ure za obra\u010dun' : 'Ure izvajalcev');
-      if (options.hoursMode !== "client_billable" && workerHoursByWorker.size) {
-        [...workerHoursByWorker.entries()].sort(([left], [right]) => left.localeCompare(right, 'sl')).forEach(([label, hours]) => {
-          reportPdfLine(doc, label, hours.toLocaleString('sl-SI', { maximumFractionDigits: 2 }) + ' h');
-        });
-      }
-      reportPdfLine(doc, 'Skupaj', totalHours.toLocaleString('sl-SI', { maximumFractionDigits: 2 }) + ' h');
-      if (travel.personal || travel.van) {
-        doc.moveDown(0.35);
-        doc.font(reportPdfFontPath('bold')).fontSize(13).fillColor('#0d536b').text('Skupaj prevoza');
-        if (travel.personal) reportPdfLine(doc, 'Osebni avto', `${travel.personal.toLocaleString('sl-SI', { maximumFractionDigits: 1 })} km`);
-        if (travel.van) reportPdfLine(doc, 'Kombi', `${travel.van.toLocaleString('sl-SI', { maximumFractionDigits: 1 })} km`);
-        reportPdfLine(doc, 'Skupaj', `${(travel.personal + travel.van).toLocaleString('sl-SI', { maximumFractionDigits: 1 })} km`);
-      }
-
-      for (const attachment of attachments) {
-        doc.file(attachment.bytes, {
-          name: attachment.filename,
-          type: attachment.mimeType,
-          description: `Priloga: ${attachment.name}`,
-          relationship: 'Supplement'
-        });
-      }
-      doc.end();
-    } catch (error) {
-      reject(error);
-    }
-  });
-}
-
-async function sendClientReportPdf(res, db, body) {
-  const report = clientReportSelection(db, body);
-  if (!report) {
-    sendJson(res, 409, { error: "Izbrani vpisi niso več na voljo za poročilo. Osveži pogled in preveri izbor." });
-    return false;
-  }
-  let attachments;
-  try {
-    const requestedAttachments = clientReportAttachmentSelection(report, body.attachmentIds);
-    attachments = await loadClientReportAttachments(db, requestedAttachments, { destination: "PDF" });
-  } catch (error) {
-    console.error("Prilog za PDF poročilo ni bilo mogoče pripraviti:", error?.message || error);
-    sendJson(res, 400, { error: "Izbrane priloge za PDF poročilo niso na voljo. Osveži pogled in poskusi znova." });
-    return false;
-  }
-  let pdf;
-  try {
-    pdf = await buildClientReportPdf(db, report, attachments, body.exportOptions);
-  } catch (error) {
-    console.error("PDF poročila ni bilo mogoče ustvariti:", error?.message || error);
-    sendJson(res, 500, { error: "PDF poročila ni bilo mogoče pripraviti. Poskusi znova." });
-    return false;
-  }
-  const filename = clientReportFilename(report.client);
-  res.writeHead(200, securityHeaders({
-    "Content-Type": "application/pdf",
-    "Content-Length": pdf.length,
-    "Content-Disposition": attachmentContentDisposition(filename),
-    "Cache-Control": "no-store"
-  }));
-  res.end(pdf);
-  return true;
-}
-
-function todoShareReport(db, todo) {
-  const todos = todoAssignmentItems(db, todo).filter((item) => !isTrashedTodo(item));
-  if (!todos.length) return null;
-  const first = todos[0];
-  const client = clientForBilling(db, { clientId: first.clientId, clientName: first.client }) || {
-    clientId: String(first.clientId || ""),
-    name: String(first.client || "Brez stranke"),
-    email: ""
-  };
-  return {
-    client,
-    from: String(first.date || ""),
-    to: String(first.endDate || first.date || ""),
-    groups: [{ eventId: todoBillingEventId(first), todos }]
-  };
-}
-
-function todoSharePdfFilename(todo) {
-  const date = isDateKey(todo?.date) ? String(todo.date) : "brez-datuma";
-  const title = safeReportFileName(todo?.title || "dogodek").replace(/\s+/g, "-");
-  return `dogodek-${date}-${title || "brez-naslova"}.pdf`;
-}
-
-async function sendTodoSharePdf(res, db, todo) {
-  const report = todoShareReport(db, todo);
-  if (!report) {
-    sendJson(res, 404, { error: "Dogodek ni več na voljo." });
-    return false;
-  }
-  try {
-    const attachments = await loadClientReportAttachments(db, clientReportAttachmentSelection(report), { destination: "PDF" });
-    const pdf = await buildClientReportPdf(db, report, attachments, { hoursMode: "worker_time", heading: "Dogodek" });
-    res.writeHead(200, securityHeaders({
-      "Content-Type": "application/pdf",
-      "Content-Length": pdf.length,
-      "Content-Disposition": attachmentContentDisposition(todoSharePdfFilename(todo)),
-      "Cache-Control": "no-store"
-    }));
-    res.end(pdf);
-    return true;
-  } catch (error) {
-    console.error("PDF dogodka ni bilo mogoče ustvariti:", error?.message || error);
-    sendJson(res, 500, { error: "PDF dogodka ni bilo mogoče pripraviti. Poskusi znova." });
-    return false;
-  }
-}
-
-function workerDigestBaseUrl() {
-  return PUBLIC_BASE_URL || `http://127.0.0.1:${PORT}`;
-}
-
-function workerDigestTodoUrl(todoId) {
-  return `${workerDigestBaseUrl()}/?todo=${encodeURIComponent(String(todoId || ""))}`;
-}
-
-function workerDigestPortalUrl(workerId, date) {
-  const id = cleanUserId(workerId);
-  const reportDate = isDateKey(date) ? String(date) : "";
-  if (!id || !reportDate) return `${workerDigestBaseUrl()}/`;
-  return `${workerDigestBaseUrl()}/?worker-digest-worker=${encodeURIComponent(id)}&worker-digest-date=${encodeURIComponent(reportDate)}`;
-}
-
-function workerDigestMinutes(value) {
-  const match = /^(\d{2}):(\d{2})$/.exec(String(value || ""));
-  return match ? Number(match[1]) * 60 + Number(match[2]) : null;
-}
-
-function workerDigestGapLabel(value) {
-  const minutes = Math.max(0, Math.round(Number(value) || 0));
-  if (minutes < 60) return `${minutes} min`;
-  const hours = Math.floor(minutes / 60);
-  const remainder = minutes % 60;
-  return remainder ? `${hours} h ${remainder} min` : `${hours} h`;
-}
-
-function workerDailyDigestSnapshot(db, workerId, date) {
-  const worker = db.users?.[workerId] || null;
-  if (!worker || !isDateKey(date)) return null;
-  // This is a historical daily journal, not a live payroll draft: archived or
-  // already confirmed entries must stay visible in the morning digest.
-  const lines = withDailyCommuteInPayroll(db, workerId, (db.todos || [])
-    .filter((todo) => !todo.imported && !isTrashedTodo(todo) && (todo.syncUser || todo.createdBy) === workerId && todo.date === date)
-    .map((todo) => payrollLineForTodo(db, todo, workerId))
-    .filter(Boolean)
-    .sort((left, right) => String(left.date || "").localeCompare(String(right.date || "")) || String(left.start || "").localeCompare(String(right.start || "")) || String(left.title || "").localeCompare(String(right.title || ""), "sl")));
-  const totals = payrollTotals(lines);
-  const warnings = (db.todos || [])
-    .filter((todo) => !todo.imported && !isTrashedTodo(todo) && (todo.syncUser || todo.createdBy) === workerId && todo.date === date && PAYROLL_PAID_TODO_STATUSES.has(todo.status))
-    .filter((todo) => Boolean(todo.hoursNeedsReview) || !payrollMinutesForTodo(db, todo))
-    .sort((left, right) => String(left.start || "").localeCompare(String(right.start || "")) || String(left.title || "").localeCompare(String(right.title || "")))
-    .map((todo) => ({ id: String(todo.id || ""), title: String(todo.title || "Brez naziva"), start: String(todo.start || ""), end: String(todo.end || "") }));
-  return {
-    workerId,
-    workerName: String(worker.name || workerId),
-    email: String(worker.email || "").trim().toLowerCase(),
-    date,
-    portalUrl: workerDigestPortalUrl(workerId, date),
-    lines,
-    warnings,
-    totals
-  };
-}
-
-function canReadWorkerDailyReport(user, workerId) {
-  const id = cleanUserId(workerId);
-  return Boolean(user && id && (user.role === "boss" || cleanUserId(user.id) === id));
-}
-
-function workerDailyReportFilename(report) {
-  const worker = safeReportFileName(report?.workerName || "delavec").replace(/\s+/g, "-");
-  return `dnevni-povzetek-${worker || "delavec"}-${report?.date || "dan"}.pdf`;
-}
-
-function workerDigestHtmlEscape(value) {
-  return String(value ?? "").replace(/[&<>"']/g, (character) => ({
-    "&": "&amp;",
-    "<": "&lt;",
-    ">": "&gt;",
-    "\"": "&quot;",
-    "'": "&#39;"
-  }[character]));
-}
-
-function workerDigestAmount(value, digits = 2) {
-  return Number(value || 0).toLocaleString("sl-SI", {
-    minimumFractionDigits: digits,
-    maximumFractionDigits: digits
-  });
-}
-
-function workerDailyReportText(report = {}) {
-  const readableDate = reportPdfDate(report.date);
-  const lines = [...(report.lines || [])].sort((left, right) => String(left.start || "").localeCompare(String(right.start || "")) || String(left.end || "").localeCompare(String(right.end || "")) || String(left.title || "").localeCompare(String(right.title || "")));
-  const text = [
-    "Dnevni povzetek ur",
-    `Delavec: ${report.workerName || ""}`,
-    `Datum: ${readableDate}`,
-    ""
-  ];
-  if (lines.length) {
-    text.push("Vpisane ure:");
-    for (const line of lines) {
-      const time = line.start && line.end ? `${line.start}-${line.end}` : "Brez ure";
-      const client = line.client ? ` | ${line.client}` : "";
-      text.push(`- ${time} | ${line.title || "Brez naziva"}${client} | ${workerDigestAmount(line.hours || 0)} h | ${workerDigestAmount(line.hourlyRate || 0)} EUR/h`);
-    }
-  } else {
-    text.push("Za ta dan ni vpisanih obra\u010dunskih ur.");
-  }
-  if ((report.warnings || []).length) {
-    text.push("", "Potrebno je preveriti ure:");
-    for (const warning of report.warnings) text.push(`- ${warning.title || "Brez naziva"}`);
-  }
-  const totals = report.totals || payrollTotals(lines);
-  text.push("", `Skupaj: ${workerDigestAmount(totals.hours || 0)} h | ${workerDigestAmount(totals.totalAmount || 0)} EUR`);
-  if (report.portalUrl) text.push("", `Odpri dnevni povzetek v INDUS URE: ${report.portalUrl}`);
-  return text.join("\n");
-}
-
-function workerDailyReportHtml(report = {}) {
-  const readableDate = reportPdfDate(report.date);
-  const lines = [...(report.lines || [])].sort((left, right) => String(left.start || "").localeCompare(String(right.start || "")) || String(left.end || "").localeCompare(String(right.end || "")) || String(left.title || "").localeCompare(String(right.title || "")));
-  const rows = lines.map((line) => {
-    const time = line.start && line.end ? `${line.start}&ndash;${line.end}` : "Brez ure";
-    const title = workerDigestHtmlEscape(line.title || "Brez naziva");
-    const client = workerDigestHtmlEscape(line.client || "");
-    const href = workerDigestTodoUrl(line.todoId);
-    return `<tr><td style="padding:10px 8px;border-bottom:1px solid #d7e4df;white-space:nowrap">${time}</td><td style="padding:10px 8px;border-bottom:1px solid #d7e4df"><a href="${href}" style="color:#0d536b;font-weight:700;text-decoration:none">${title}</a>${client ? `<br><span style="color:#60706c">${client}</span>` : ""}</td><td style="padding:10px 8px;border-bottom:1px solid #d7e4df;text-align:right;white-space:nowrap">${workerDigestAmount(line.hours || 0)} h</td></tr>`;
-  }).join("") || '<tr><td colspan="3" style="padding:12px 8px;color:#60706c">Za ta dan ni vpisanih obra\u010dunskih ur.</td></tr>';
-  const warnings = (report.warnings || []).map((warning) => `<li style="margin:4px 0"><a href="${workerDigestTodoUrl(warning.id)}" style="color:#a12b22">${workerDigestHtmlEscape(warning.title || "Brez naziva")}</a></li>`).join("");
-  const totals = report.totals || payrollTotals(lines);
-  const portalUrl = String(report.portalUrl || workerDigestPortalUrl(report.workerId, report.date));
-  return `<!doctype html><html lang="sl"><body style="margin:0;background:#f3f7f5;color:#1e3430;font:15px Arial,sans-serif"><main style="max-width:680px;margin:0 auto;padding:24px"><section style="background:#fff;border:1px solid #d7e4df;border-radius:14px;overflow:hidden"><header style="padding:22px 24px;background:#0d536b;color:#fff"><h1 style="margin:0;font-size:22px">Dnevni povzetek ur</h1><p style="margin:7px 0 0">${workerDigestHtmlEscape(report.workerName || "Delavec")} &middot; ${workerDigestHtmlEscape(readableDate)}</p></header><div style="padding:18px 24px"><table role="presentation" style="width:100%;border-collapse:collapse"><tbody>${rows}</tbody></table>${warnings ? `<section style="margin-top:18px;padding:12px 14px;background:#fff5f3;border-left:4px solid #b3261e"><strong>Potrebno je preveriti ure</strong><ul style="margin:8px 0 0;padding-left:20px">${warnings}</ul></section>` : ""}<section style="margin-top:18px;padding:14px;background:#eaf4f1;border-radius:9px"><strong>Skupaj: ${workerDigestAmount(totals.hours || 0)} h</strong><span style="float:right">${workerDigestAmount(totals.totalAmount || 0)} EUR</span></section><p style="margin:22px 0 4px"><a href="${workerDigestHtmlEscape(portalUrl)}" style="display:inline-block;padding:11px 16px;border-radius:8px;background:#0d536b;color:#fff;font-weight:700;text-decoration:none">Odpri dnevni povzetek</a></p></div></section></main></body></html>`;
-}
-
-function buildWorkerDailyReportPdf(db, report) {
-  const snapshot = report || {};
-  const title = `Dnevni povzetek ur - ${safeReportFileName(snapshot.workerName || "delavec")}`;
-  return new Promise((resolve, reject) => {
-    const doc = new PDFDocument({
-      size: "A4",
-      margin: 46,
-      info: { Title: title, Author: "INDUS URE", Subject: "Dnevni povzetek ur" }
-    });
-    const chunks = [];
-    doc.on("data", (chunk) => chunks.push(chunk));
-    doc.once("error", reject);
-    doc.once("end", () => resolve(Buffer.concat(chunks)));
-    try {
-      doc.font(reportPdfFontPath("bold")).fontSize(21).fillColor("#0d536b").text("Dnevni povzetek ur");
-      doc.moveDown(0.3);
-      doc.font(reportPdfFontPath()).fontSize(11).fillColor("#263634");
-      reportPdfLine(doc, "Delavec", snapshot.workerName || "");
-      reportPdfLine(doc, "Datum", reportPdfDate(snapshot.date));
-      doc.moveDown(0.75);
-
-      const lines = [...(snapshot.lines || [])].sort((left, right) => String(left.start || "").localeCompare(String(right.start || "")) || String(left.end || "").localeCompare(String(right.end || "")) || String(left.title || "").localeCompare(String(right.title || "")));
-      let previous = null;
-      for (const line of lines) {
-        const startMinutes = workerDigestMinutes(line.start);
-        const previousEnd = workerDigestMinutes(previous?.end);
-        if (previous && startMinutes !== null && previousEnd !== null && startMinutes > previousEnd) {
-          reportPdfEnsureSpace(doc, 28);
-          doc.font(reportPdfFontPath("bold")).fontSize(10).fillColor("#0d536b").text(`\u2195 Razmak med vnosi: ${workerDigestGapLabel(startMinutes - previousEnd)}`);
-          doc.moveDown(0.25);
-        }
-        reportPdfEnsureSpace(doc, 88);
-        const url = workerDigestTodoUrl(line.todoId);
-        doc.font(reportPdfFontPath("bold")).fontSize(13).fillColor("#143b34").text(`${line.start}-${line.end}`, { continued: true });
-        doc.font(reportPdfFontPath("bold")).fontSize(12).fillColor("#161f20").text(`  ${line.title || "Brez naziva"}`, { link: url, underline: true });
-        doc.font(reportPdfFontPath()).fontSize(10).fillColor("#263634");
-        if (line.client) reportPdfLine(doc, "Stranka", line.client);
-        reportPdfLine(doc, "Vpisane ure", `${Number(line.hours || 0).toLocaleString("sl-SI", { maximumFractionDigits: 2 })} h`);
-        reportPdfLine(doc, "Urna postavka", `${Number(line.hourlyRate || 0).toLocaleString("sl-SI", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR/h`);
-        if (Number(line.km || 0)) reportPdfLine(doc, "Kilometrina", `${Number(line.km || 0).toLocaleString("sl-SI", { maximumFractionDigits: 1 })} km`);
-        doc.moveDown(0.4);
-        doc.strokeColor("#a9c5bd").lineWidth(1.2).moveTo(doc.page.margins.left, doc.y).lineTo(doc.page.width - doc.page.margins.right, doc.y).stroke();
-        doc.moveDown(0.5);
-        previous = line;
-      }
-
-      for (const warning of snapshot.warnings || []) {
-        reportPdfEnsureSpace(doc, 45);
-        const url = workerDigestTodoUrl(warning.id);
-        doc.font(reportPdfFontPath("bold")).fontSize(11).fillColor("#b3261e").text(`\u26a0 Popravi delovne ure: ${warning.title}`, { link: url, underline: true });
-        doc.font(reportPdfFontPath()).fontSize(10).fillColor("#263634").text("Za ta vpis manjka ali je ozna\u010dena kot potrebna preveritev ura prihoda oziroma odhoda.");
-        doc.moveDown(0.35);
-      }
-
-      const totals = payrollTotals(lines);
-      reportPdfEnsureSpace(doc, 90);
-      doc.moveDown(0.35);
-      doc.font(reportPdfFontPath("bold")).fontSize(13).fillColor("#0d536b").text("Povzetek dneva");
-      reportPdfLine(doc, "Ure", `${Number(totals.hours || 0).toLocaleString("sl-SI", { maximumFractionDigits: 2 })} h`);
-      reportPdfLine(doc, "Delo", `${Number(totals.workAmount || 0).toLocaleString("sl-SI", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR`);
-      reportPdfLine(doc, "Kilometrina", `${Number(totals.km || 0).toLocaleString("sl-SI", { maximumFractionDigits: 1 })} km - ${Number(totals.kmAmount || 0).toLocaleString("sl-SI", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR`);
-      reportPdfLine(doc, "Skupaj", `${Number(totals.totalAmount || 0).toLocaleString("sl-SI", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR`);
-      doc.end();
-    } catch (error) {
-      reject(error);
-    }
-  });
-}
-function mimeBase64(value) {
-  return Buffer.from(value).toString("base64").replace(/.{1,76}/g, "$&\r\n");
-}
-
-function gmailPdfDraftRaw({ to, subject, text, pdf, pdfFilename, attachments = [] }) {
-  const boundary = `indus-ure-${crypto.randomBytes(18).toString("hex")}`;
-  const encodedSubject = `=?UTF-8?B?${Buffer.from(String(subject || ""), "utf8").toString("base64")}?=`;
-  const parts = [
-    `To: ${to}`,
-    `Subject: ${encodedSubject}`,
-    "MIME-Version: 1.0",
-    `Content-Type: multipart/mixed; boundary=\"${boundary}\"`,
-    "",
-    `--${boundary}`,
-    "Content-Type: text/plain; charset=utf-8",
-    "Content-Transfer-Encoding: base64",
-    "",
-    mimeBase64(String(text || "")),
-    `--${boundary}`,
-    `Content-Type: application/pdf; name=\"${pdfFilename}\"`,
-    "Content-Transfer-Encoding: base64",
-    `Content-Disposition: attachment; filename=\"${pdfFilename}\"`,
-    "",
-    mimeBase64(pdf)
-  ];
-  for (const attachment of attachments) {
-    parts.push(
-      `--${boundary}`,
-      `Content-Type: ${attachment.mimeType}; name=\"${attachment.filename}\"`,
-      "Content-Transfer-Encoding: base64",
-      `Content-Disposition: attachment; filename=\"${attachment.filename}\"`,
-      "",
-      mimeBase64(attachment.bytes)
-    );
-  }
-  parts.push(`--${boundary}--`, "");
-  return Buffer.from(parts.join("\r\n")).toString("base64url");
-}
-
-function gmailDraftRaw({ to, pdf, pdfFilename, attachments = [] }) {
-  return gmailPdfDraftRaw({
-    to,
-    pdf,
-    pdfFilename,
-    attachments,
-    subject: "Obra\u010dun",
-    text: "Pozdravljeni, v prilogi vam po\u0161iljam obra\u010dun opravljenih storitev in porabljenega materiala.\n\nZa pojasnila sem seveda na voljo."
-  });
-}
-
-function gmailWorkerDigestDraftRaw({ to, workerName, date, pdf, pdfFilename }) {
-  const readableDate = reportPdfDate(date);
-  return gmailPdfDraftRaw({
-    to,
-    pdf,
-    pdfFilename,
-    subject: `Dnevni povzetek ur - ${workerName} - ${readableDate}`,
-    text: `Pozdravljeni,\n\nv prilogi je dnevni povzetek vpisanih ur za ${readableDate}. Povezave v PDF-ju odprejo isto opravilo v INDUS URE.\n\nLep pozdrav.`
-  });
-}
-
-function gmailWorkerDigestMessageRaw({ to, workerName, date, html, text }) {
-  const recipient = String(to || "").trim().toLowerCase();
-  if (!validEmailAddress(recipient)) throw new Error("Dnevnega povzetka ni mogo\u010de poslati brez veljavnega Bojanovega e-naslova.");
-  const boundary = `indus-ure-digest-${crypto.randomBytes(18).toString("hex")}`;
-  const subject = `Dnevni povzetek ur - ${String(workerName || "delavec")} - ${reportPdfDate(date)}`;
-  const encodedSubject = `=?UTF-8?B?${Buffer.from(subject, "utf8").toString("base64")}?=`;
-  const parts = [
-    `To: ${recipient}`,
-    `Subject: ${encodedSubject}`,
-    "MIME-Version: 1.0",
-    `Content-Type: multipart/alternative; boundary=\"${boundary}\"`,
-    "",
-    `--${boundary}`,
-    "Content-Type: text/plain; charset=utf-8",
-    "Content-Transfer-Encoding: base64",
-    "",
-    mimeBase64(String(text || "")),
-    `--${boundary}`,
-    "Content-Type: text/html; charset=utf-8",
-    "Content-Transfer-Encoding: base64",
-    "",
-    mimeBase64(String(html || "")),
-    `--${boundary}--`,
-    ""
-  ];
-  return Buffer.from(parts.join("\r\n")).toString("base64url");
-}
-
-function gmailCompletionRequestRaw({ to, subject, text }) {
-  const encodedSubject = `=?UTF-8?B?${Buffer.from(String(subject || ""), "utf8").toString("base64")}?=`;
-  const parts = [
-    `To: ${to}`,
-    `Subject: ${encodedSubject}`,
-    "MIME-Version: 1.0",
-    "Content-Type: text/plain; charset=utf-8",
-    "Content-Transfer-Encoding: base64",
-    "",
-    mimeBase64(String(text || ""))
-  ];
-  return Buffer.from(parts.join("\r\n")).toString("base64url");
-}
-
-function clientReportFilename(client) {
-  const suffix = safeReportFileName(client?.name || "stranka").replace(/\s+/g, "-");
-  return `obračun-${suffix || "stranka"}.pdf`;
-}
-function attachmentContentDisposition(filename) {
-  const original = safeReportFileName(filename, "priloga");
-  const asciiFallback = original.normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^A-Za-z0-9._ -]+/g, "-")
-    .replace(/\s+/g, " ")
-    .replace(/^[-. ]+|[-. ]+$/g, "")
-    .slice(0, 120) || "priloga";
-  const utf8Filename = encodeURIComponent(original).replace(/[!'()*]/g, (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`);
-  return `attachment; filename="${asciiFallback}"; filename*=UTF-8''${utf8Filename}`;
-}
-
-function buildClientBillSnapshot(db, input, actor) {
-  const selection = clientBillCandidates(db, input);
-  if (!selection.client || !selection.groups.length) return null;
-  if (selection.requestedEventIds && selection.groups.length !== selection.requestedEventIds.size) return null;
-  const createdAt = new Date().toISOString();
-  return normalizeClientBill({
-    id: crypto.randomUUID(),
-    clientId: selection.client.clientId,
-    clientName: selection.client.name,
-    from: isDateKey(input?.from) ? String(input.from) : "",
-    to: isDateKey(input?.to) ? String(input.to) : "",
-    status: "confirmed",
-    eventIds: selection.groups.map((group) => group.eventId),
-    correctionIds: selection.groups.flatMap((group) => (db.settlementCorrections || [])
-      .filter((correction) => correction.type === "client" && correction.status === "pending" && String(correction.eventId || "") === String(group.eventId))
-      .map((correction) => correction.id)),
-    lines: selection.groups.map((group) => {
-      const representative = group.todos.slice().sort((left, right) => String(left.date || "").localeCompare(String(right.date || "")) || String(left.start || "").localeCompare(String(right.start || "")))[0];
-      return {
-        eventId: group.eventId,
-        todoIds: group.todos.map((todo) => todo.id),
-        date: representative.date,
-        start: representative.start,
-        end: representative.end,
-        title: representative.title,
-        clientKm: representative.clientKm,
-        clientVehicle: representative.clientVehicle,
-        clientBillableMinutes: clientBillableMinutesForTodos(group.todos),
-        warranty: Boolean(representative.warranty),
-        status: String(representative.status || ""),
-        materialAmount: nonnegativeNumber(representative.materialAmount, 0, 1_000_000),
-        externalDelivery: Boolean(representative.externalDelivery),
-        clientKmRate: 0
-      };
-    }),
-    createdBy: actor?.id || "system",
-    createdByName: actor?.name || "",
-    createdAt,
-    confirmedAt: createdAt,
-    confirmedBy: actor?.id || "system",
-    confirmedByName: actor?.name || "",
-    directSettlement: Boolean(input?.directSettlement),
-    receivedAmount: nonnegativeNumber(input?.receivedAmount, 0, 1_000_000),
-    creditedWorkerId: cleanUserId(input?.creditedWorkerId),
-    creditedWorkerName: String(input?.creditedWorkerName || "").trim().slice(0, 120),
-    clientReceiptId: String(input?.clientReceiptId || "").trim().slice(0, 100)
-  }, db);
-}
-
-function directClientSettlementRequest(value) {
-  if (!value || typeof value !== "object" || Array.isArray(value) || !value.confirmed) return null;
-  return {
-    amount: nonnegativeNumber(value.amount, null, 1_000_000),
-    creditWorker: Boolean(value.creditWorker)
-  };
-}
-
-function directClientSettlementForTodo(db, todo, input, actor) {
-  const request = directClientSettlementRequest(input);
-  if (!request) return { clientBill: null, clientReceipt: null };
-  if (request.amount === null || request.amount < 0) {
-    return { error: "Za poraÄŤunano storitev vpiĹˇi prejeti znesek." };
-  }
-  if (!todoRequiresClientBilling(todo)) {
-    return { error: "S stranko lahko neposredno poraÄŤunaĹˇ samo zakljuÄŤen vpis ur z izbrano stranko." };
-  }
-  const eventId = todoBillingEventId(todo);
-  const current = confirmedClientBillByEvent(db).get(eventId);
-  if (current) {
-    if (current.directSettlement) return { clientBill: current, clientReceipt: current.clientReceiptId ? (db.debts || []).find((item) => item.id === current.clientReceiptId) || null : null };
-    return { error: "Ta dogodek je Ĺľe v potrjenem obraÄŤunu stranki." };
-  }
-  const workerId = payrollWorkerForTodo(todo);
-  const creditWorker = request.creditWorker && request.amount > 0;
-  if (creditWorker && !db.users?.[workerId]) {
-    return { error: "Delavca za plaÄŤilo v dobro ni bilo mogoÄŤe prepoznati." };
-  }
-  const clientReceiptId = creditWorker ? crypto.randomUUID() : "";
-  const clientBill = buildClientBillSnapshot(db, {
-    clientId: todo.clientId,
-    clientName: todo.client,
-    eventIds: [eventId],
-    directSettlement: true,
-    receivedAmount: request.amount,
-    creditedWorkerId: creditWorker ? workerId : "",
-    creditedWorkerName: creditWorker ? (db.users[workerId]?.name || workerId) : "",
-    clientReceiptId
-  }, actor);
-  if (!clientBill) return { error: "Dogodka ni bilo mogoÄŤe pripraviti za obraÄŤun stranki." };
-  db.clientBills.push(clientBill);
-  let clientReceipt = null;
-  if (creditWorker) {
-    // We never rewrite a confirmed payroll. A late client payment becomes a
-    // new credit in today's open settlement, while sourceDate still points to
-    // the original work entry.
-    const sourcePayroll = confirmedPayrollLineForTodo(db, todo.id);
-    const accountingDate = sourcePayroll ? serverDateKey() : String(todo.date || serverDateKey());
-    const now = new Date().toISOString();
-    clientReceipt = {
-      id: clientReceiptId,
-      type: "client_receipt",
-      person: workerId,
-      month: accountingDate.slice(0, 7),
-      date: accountingDate,
-      sourceDate: String(todo.date || ""),
-      amount: Number(request.amount.toFixed(2)),
-      reason: `PlaÄŤilo stranke ${todo.client}: ${todo.title || "storitev"}`.slice(0, 2_000),
-      projectTodoId: String(todo.id || ""),
-      clientBillId: clientBill.id,
-      photos: [],
-      createdBy: actor?.id || "system",
-      createdByName: actor?.name || "",
-      createdAt: now,
-      updatedBy: actor?.id || "system",
-      updatedByName: actor?.name || "",
-      updatedAt: now
-    };
-    db.debts.push(clientReceipt);
-  }
-  for (const item of db.todos || []) {
-    if (todoBillingEventId(item) !== eventId) continue;
-    item.history = [...(item.history || []), audit(actor || { id: "system", name: "Sistem" }, creditWorker
-      ? `neposredno poraÄŤunano s stranko; ${request.amount.toFixed(2)} EUR v dobro delavca`
-      : `neposredno poraÄŤunano s stranko; ${request.amount.toFixed(2)} EUR`)];
-  }
-  const settledCorrections = settleCorrectionsForClientBill(db, clientBill, actor);
-  const archive = reconcileTodoArchives(db, actor);
-  return { clientBill, clientReceipt, settledCorrections, archive };
-}
-
-function clientSettlementFromBill(bill) {
-  if (!bill) return { confirmed: false };
-  return {
-    confirmed: true,
-    direct: Boolean(bill.directSettlement),
-    amount: nonnegativeNumber(bill.receivedAmount, 0, 1_000_000),
-    creditedWorkerId: String(bill.creditedWorkerId || ""),
-    creditedWorkerName: String(bill.creditedWorkerName || ""),
-    confirmedAt: String(bill.confirmedAt || ""),
-    clientBillId: String(bill.id || "")
-  };
-}
-
-function clientSettlementForTodo(db, todo) {
-  return clientSettlementFromBill(confirmedClientBillByEvent(db).get(todoBillingEventId(todo)));
-}
-
-function confirmedPayrollByTodo(db) {
-  const byTodo = new Map();
-  const todosById = new Map((db.todos || []).map((todo) => [String(todo.id || ""), todo]));
-  for (const payroll of db.payrolls || []) {
-    if (!["confirmed", "paid"].includes(payroll.status)) continue;
-    for (const line of payroll.lines || []) {
-      const todoId = String(line?.todoId || "");
-      const todo = todosById.get(todoId);
-      // A historic line belonging to a former worker is not a settlement for
-      // the current worker, nor may it cause the live task to be archived.
-      if (todoId && todo && payrollWorkerForTodo(todo) === String(payroll.workerId || "") && !byTodo.has(todoId)) {
-        byTodo.set(todoId, payroll);
-      }
-    }
-  }
-  return byTodo;
-}
-
-function reconcileTodoArchives(db, actor = null) {
-  const payrolls = confirmedPayrollByTodo(db);
-  const bills = confirmedClientBillByEvent(db);
-  const now = new Date().toISOString();
-  const auditActor = actor || { id: "system", name: "Sistem" };
-  let archived = 0;
-  let restored = 0;
-  let changed = false;
-  for (const todo of db.todos || []) {
-    if (isTrashedTodo(todo)) continue;
-    const payroll = payrolls.get(String(todo.id || ""));
-    const hasPendingCorrection = pendingCorrectionsForTodo(db, todo).length > 0;
-    const needsClientBill = todoRequiresClientBilling(todo);
-    const bill = needsClientBill ? bills.get(todoBillingEventId(todo)) : null;
-    const desiredClientBillId = bill?.id || "";
-    const clientOnly = ["material", "note"].includes(todo.status);
-    const readyForArchive = Boolean(!hasPendingCorrection && (clientOnly ? bill : (payroll && (!needsClientBill || bill))));
-    if (todo.clientBillId !== desiredClientBillId || todo.clientBilledAt !== (bill?.confirmedAt || "")) {
-      todo.clientBillId = desiredClientBillId;
-      todo.clientBilledAt = bill?.confirmedAt || "";
-      todo.updatedAt = now;
-      todo.updatedBy = auditActor.id;
-      todo.updatedByName = auditActor.name || "";
-      changed = true;
-    }
-    if (readyForArchive) {
-      if (!todo.archivedAt || todo.archivedPayrollId !== (clientOnly ? "" : payroll.id) || todo.archivedClientBillId !== desiredClientBillId) {
-        todo.archivedAt = todo.archivedAt || now;
-        todo.archivedPayrollId = clientOnly ? "" : payroll.id;
-        todo.archivedClientBillId = desiredClientBillId;
-        todo.updatedAt = now;
-        todo.updatedBy = auditActor.id;
-        todo.updatedByName = auditActor.name || "";
-        todo.history = [...(todo.history || []), audit(auditActor, clientOnly
-          ? todo.status === "material"
-            ? `arhivirano po potrjenem obračunu materiala za stranko ${bill.clientName}`
-            : `arhivirano po potrjenem obračunu zapiska za stranko ${bill.clientName}`
-          : needsClientBill
-          ? `arhivirano po potrjenem obračunu delavca in stranke ${bill.clientName}`
-          : `arhivirano po potrjenem obračunu delavca ${payroll.month}`)];
-        archived += 1;
-        changed = true;
-      }
-      continue;
-    }
-    if (todo.archivedAt || todo.archivedPayrollId || todo.archivedClientBillId) {
-      todo.archivedAt = "";
-      todo.archivedPayrollId = "";
-      todo.archivedClientBillId = "";
-      todo.updatedAt = now;
-      todo.updatedBy = auditActor.id;
-      todo.updatedByName = auditActor.name || "";
-      todo.history = [...(todo.history || []), audit(auditActor, clientOnly
-        ? todo.status === "material"
-          ? "vrnjeno iz arhiva: manjka potrjeni obračun materiala za stranko"
-          : "vrnjeno iz arhiva: manjka potrjeni obračun zapiska za stranko"
-        : needsClientBill
-        ? "vrnjeno iz arhiva: manjka potrjeni obračun stranki ali delavca"
-        : "vrnjeno iz arhiva: manjka potrjeni obračun delavca")];
-      restored += 1;
-      changed = true;
-    }
-  }
-  return { archived, restored, changed };
-}
-function archiveRetentionMonthsForDb(db) {
-  return Math.min(120, Math.max(1, Math.round(nonnegativeNumber(db?.settings?.archive?.retentionMonths, 12, 120))));
-}
-
-function archiveRetentionCandidates(db, now = new Date()) {
-  const months = archiveRetentionMonthsForDb(db);
-  const cutoff = new Date(now instanceof Date ? now.getTime() : new Date(now).getTime());
-  cutoff.setUTCMonth(cutoff.getUTCMonth() - months);
-  const cutoffMs = cutoff.getTime();
-  const byGroup = new Map();
-  for (const todo of db.todos || []) {
-    if (isTrashedTodo(todo)) continue;
-    const groupId = String(todo.assignmentGroupId || todo.id || "");
-    if (!groupId) continue;
-    const group = byGroup.get(groupId) || [];
-    group.push(todo);
-    byGroup.set(groupId, group);
-  }
-  const groups = [];
-  for (const [id, todos] of byGroup) {
-    const fullyArchived = todos.length > 0 && todos.every((todo) => {
-      const archivedAt = new Date(String(todo.archivedAt || "")).getTime();
-      return Number.isFinite(archivedAt) && archivedAt < cutoffMs;
-    });
-    if (!fullyArchived) continue;
-    const managedDriveFiles = managedDriveFilesForTodos(todos);
-    groups.push({ id, todos, managedDriveFiles });
-  }
-  return { retentionMonths: months, cutoffAt: cutoff.toISOString(), groups };
-}
-
-function purgeArchivedTodoGroups(db, groups) {
-  const groupIds = new Set((groups || []).map((group) => String(group.id || "")).filter(Boolean));
-  if (!groupIds.size) return { groups: 0, todos: 0, attachments: 0, adHocClients: 0 };
-  const beforeTodos = (db.todos || []).length;
-  const beforeAttachments = Object.keys(db.attachments || {}).length;
-  const beforeClients = (db.clients || []).length;
-  db.todos = (db.todos || []).filter((todo) => !groupIds.has(String(todo.assignmentGroupId || todo.id || "")));
-  pruneUnusedTodoAttachments(db);
-  pruneUnusedAdHocClients(db);
-  return {
-    groups: groupIds.size,
-    todos: beforeTodos - db.todos.length,
-    attachments: beforeAttachments - Object.keys(db.attachments || {}).length,
-    adHocClients: beforeClients - (db.clients || []).length
-  };
-}
 
 function defaultHourlyRateForUser(db, userId) {
   return nonnegativeNumber(
@@ -6476,294 +4526,6 @@ async function googleDriveConnectionStatus(req, db) {
   }
 }
 
-async function createManagedGoogleDriveFile(req, db, actor, input = {}) {
-  if (!googleDriveTasksReady()) {
-    throw new Error("Google Dokumenti niso nastavljeni: manjka mapa ali Bojanov e-naslov v okolju strežnika.");
-  }
-  const owner = googleDriveOwner(db);
-  if (!googleDriveTokenAvailable(owner)) {
-    throw new Error("Bojan mora najprej v Nastavitvah povezati Google Dokumente in preglednice.");
-  }
-  const kind = input.kind === "spreadsheet" ? "spreadsheet" : input.kind === "document" ? "document" : "";
-  if (!kind) throw new Error("Izberi Google Dokument ali Google Preglednico.");
-  const title = String(input.title || "").trim();
-  if (!title) throw new Error("Najprej vpiši ime opravila.");
-  const client = String(input.client || "").trim();
-  const name = [client, title].filter(Boolean).join(" - ").slice(0, 180);
-  const { google } = require("googleapis");
-  const drive = google.drive({ version: "v3", auth: googleClient(req, owner.google.tokens) });
-  const mimeType = kind === "document"
-    ? "application/vnd.google-apps.document"
-    : "application/vnd.google-apps.spreadsheet";
-  let created = null;
-  try {
-    const response = await drive.files.create({
-      requestBody: {
-        name,
-        mimeType,
-        parents: [GOOGLE_DRIVE_TASKS_FOLDER_ID],
-        appProperties: {
-          indusApp: INDUS_GOOGLE_APP_ID,
-          indusResource: "task-attachment"
-        }
-      },
-      fields: "id,name,mimeType,webViewLink,parents,owners(emailAddress),driveId"
-    });
-    created = response.data;
-    await drive.permissions.create({
-      fileId: created.id,
-      requestBody: { type: "anyone", role: "reader", allowFileDiscovery: false },
-      fields: "id,type,role"
-    });
-    const ownedByBojan = (created.owners || []).some((item) => String(item.emailAddress || "").toLowerCase() === GOOGLE_DRIVE_OWNER_EMAIL);
-    const inConfiguredFolder = (created.parents || []).includes(GOOGLE_DRIVE_TASKS_FOLDER_ID);
-    if (!created.id || !created.webViewLink || created.driveId || !ownedByBojan || !inConfiguredFolder) {
-      throw new Error("Google datoteke ni bilo mogoče ustvariti kot Bojanovo datoteko v izbrani mapi.");
-    }
-    return {
-      id: crypto.randomUUID(),
-      kind,
-      fileId: created.id,
-      url: created.webViewLink,
-      name: String(created.name || name).slice(0, 180),
-      managed: true,
-      ownerEmail: GOOGLE_DRIVE_OWNER_EMAIL,
-      createdBy: actor.id,
-      createdByName: actor.name,
-      createdAt: new Date().toISOString()
-    };
-  } catch (error) {
-    if (created?.id) {
-      try {
-        await drive.files.delete({ fileId: created.id });
-      } catch (cleanupError) {
-        console.warn(`Google osnutka ${created.id} ni bilo mogoče odstraniti: ${cleanupError.message || cleanupError}`);
-      }
-    }
-    throw error;
-  }
-}
-
-function cleanDriveUploadName(value) {
-  return String(value || "video")
-    .replace(/[\u0000-\u001f<>:"\/|?*]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 180) || "video";
-}
-
-function videoMimeType(value, filename = "") {
-  const requested = String(value || "").split(";", 1)[0].trim().toLowerCase();
-  if (requested.startsWith("video/")) return requested;
-  const extension = path.extname(String(filename || "")).toLowerCase();
-  return ({
-    ".mp4": "video/mp4",
-    ".m4v": "video/x-m4v",
-    ".mov": "video/quicktime",
-    ".webm": "video/webm",
-    ".mkv": "video/x-matroska",
-    ".avi": "video/x-msvideo",
-    ".3gp": "video/3gpp"
-  })[extension] || "";
-}
-
-function limitIncomingVideoStream(stream, maximumBytes) {
-  let received = 0;
-  const limiter = new Transform({
-    transform(chunk, encoding, callback) {
-      received += chunk.length;
-      if (received > maximumBytes) {
-        const error = new Error("Video je prevelik. Najve\u010dja dovoljena velikost je " + Math.round(maximumBytes / 1024 / 1024) + " MB.");
-        stream.destroy(error);
-        callback(error);
-        return;
-      }
-      callback(null, chunk);
-    }
-  });
-  stream.once("aborted", () => limiter.destroy(new Error("Prenos videa je bil prekinjen.")));
-  stream.once("error", (error) => limiter.destroy(error));
-  return stream.pipe(limiter);
-}
-
-function videoStorageExtension(mimeType, filename = "") {
-  const known = {
-    "video/mp4": ".mp4",
-    "video/x-m4v": ".m4v",
-    "video/quicktime": ".mov",
-    "video/webm": ".webm",
-    "video/x-matroska": ".mkv",
-    "video/x-msvideo": ".avi",
-    "video/3gpp": ".3gp"
-  };
-  return known[String(mimeType || "").toLowerCase()] || path.extname(String(filename || "")).toLowerCase() || ".video";
-}
-
-function imageMimeType(value, filename = "") {
-  const requested = String(value || "").split(";", 1)[0].trim().toLowerCase();
-  const extension = path.extname(String(filename || "")).toLowerCase();
-  const knownByExtension = {
-    ".jpg": "image/jpeg",
-    ".jpeg": "image/jpeg",
-    ".png": "image/png",
-    ".webp": "image/webp",
-    ".gif": "image/gif",
-    ".heic": "image/heic",
-    ".heif": "image/heif",
-    ".avif": "image/avif",
-    ".tif": "image/tiff",
-    ".tiff": "image/tiff",
-    ".bmp": "image/bmp",
-    ".jxl": "image/jxl"
-  };
-  if (knownByExtension[extension]) return knownByExtension[extension];
-  // Do not pass arbitrary `image/*` formats (notably SVG) to a native image
-  // decoder. We accept the ordinary camera/gallery raster formats only.
-  return Object.values(knownByExtension).includes(requested) ? requested : "";
-}
-
-function imageProcessorError(error) {
-  if (error?.code === "ENOENT") return new Error("Strežniška obdelava slik ni pripravljena. Obvesti skrbnika sistema.");
-  const detail = String(error?.stderr || error?.message || "").replace(/\s+/g, " ").trim();
-  if (/timeout|timed out/i.test(detail)) return new Error("Obdelava slike je trajala predolgo. Izberi manjšo sliko.");
-  return new Error(`Slike ni bilo mogoče obdelati${detail ? `: ${detail.slice(0, 180)}` : "."}`);
-}
-
-async function createTodoJpegDerivative(inputPath, outputPath, maxSide, quality) {
-  try {
-    await execFileAsync(
-      IMAGE_PROCESSOR,
-      ["thumbnail", inputPath, `${outputPath}[Q=${quality},strip]`, String(maxSide)],
-      { timeout: TODO_IMAGE_PROCESS_TIMEOUT_MS, maxBuffer: 1_000_000, windowsHide: true }
-    );
-  } catch (error) {
-    throw imageProcessorError(error);
-  }
-  const result = await fsp.readFile(outputPath);
-  if (!IMAGE_SIGNATURES.jpeg(result)) throw new Error("Strežnik ni ustvaril veljavne JPEG slike.");
-  return result;
-}
-
-async function moveAttachmentFile(tempPath, targetPath) {
-  await fsp.mkdir(path.dirname(targetPath), { recursive: true, mode: 0o700 });
-  try {
-    // rename() overwrites an existing target on Linux. Never claim an
-    // existing content-addressed object as a newly created upload.
-    await fsp.copyFile(tempPath, targetPath, fs.constants.COPYFILE_EXCL);
-    await fsp.rm(tempPath, { force: true });
-    return true;
-  } catch (error) {
-    if (error.code !== "EEXIST") throw error;
-    await fsp.rm(tempPath, { force: true });
-    return false;
-  }
-}
-
-async function receiveLocalTodoImage(input = {}) {
-  const mimeType = imageMimeType(input.mimeType, input.name);
-  if (!mimeType) throw new Error("Izberi veljavno slikovno datoteko.");
-  const declaredBytes = Number(input.contentLength);
-  if (Number.isSafeInteger(declaredBytes) && declaredBytes <= 0) throw new Error("Prazne slike ni mogoče dodati.");
-  if (Number.isSafeInteger(declaredBytes) && declaredBytes > MAX_TODO_IMAGE_BYTES) throw new Error(`Slika je prevelika. Največja dovoljena velikost je ${Math.round(MAX_TODO_IMAGE_BYTES / 1024 / 1024)} MB.`);
-
-  const uploadDirectory = path.join(MEDIA_DIR, ".uploads");
-  await fsp.mkdir(uploadDirectory, { recursive: true, mode: 0o700 });
-  const uploadId = crypto.randomUUID();
-  const sourcePath = path.join(uploadDirectory, `${uploadId}.source`);
-  const displayTempPath = path.join(uploadDirectory, `${uploadId}.display.jpg`);
-  const thumbnailTempPath = path.join(uploadDirectory, `${uploadId}.thumb.jpg`);
-  let byteSize = 0;
-  const counter = new Transform({
-    transform(chunk, encoding, callback) {
-      byteSize += chunk.length;
-      if (byteSize > MAX_TODO_IMAGE_BYTES) {
-        callback(new Error(`Slika je prevelika. Največja dovoljena velikost je ${Math.round(MAX_TODO_IMAGE_BYTES / 1024 / 1024)} MB.`));
-        return;
-      }
-      callback(null, chunk);
-    }
-  });
-  input.stream.once("aborted", () => counter.destroy(new Error("Nalaganje slike je bilo prekinjeno.")));
-  let displayTargetPath = "";
-  let thumbnailTargetPath = "";
-  let displayCreated = false;
-  let thumbnailCreated = false;
-  try {
-    await pipeline(input.stream, counter, fs.createWriteStream(sourcePath, { mode: 0o600 }));
-    if (!byteSize) throw new Error("Prazne slike ni mogoče dodati.");
-    const display = await createTodoJpegDerivative(sourcePath, displayTempPath, TODO_IMAGE_DISPLAY_MAX_SIDE, 85);
-    await createTodoJpegDerivative(sourcePath, thumbnailTempPath, TODO_IMAGE_THUMBNAIL_MAX_SIDE, 72);
-    const attachmentId = crypto.createHash("sha256").update(display).digest("hex");
-    const storageKey = path.posix.join("objects", `${attachmentId}.jpg`);
-    const thumbnailKey = path.posix.join("thumbnails", `${attachmentId}.jpg`);
-    displayTargetPath = path.join(MEDIA_DIR, ...storageKey.split("/"));
-    thumbnailTargetPath = path.join(MEDIA_DIR, ...thumbnailKey.split("/"));
-    displayCreated = await moveAttachmentFile(displayTempPath, displayTargetPath);
-    thumbnailCreated = await moveAttachmentFile(thumbnailTempPath, thumbnailTargetPath);
-    return {
-      attachmentId,
-      mimeType: "image/jpeg",
-      byteSize: display.length,
-      storageKey,
-      thumbnailKey,
-      displayTargetPath,
-      thumbnailTargetPath,
-      createdFiles: { display: displayCreated, thumbnail: thumbnailCreated }
-    };
-  } catch (error) {
-    if (displayCreated && displayTargetPath) await fsp.rm(displayTargetPath, { force: true }).catch(() => {});
-    if (thumbnailCreated && thumbnailTargetPath) await fsp.rm(thumbnailTargetPath, { force: true }).catch(() => {});
-    throw error;
-  } finally {
-    await Promise.all([sourcePath, displayTempPath, thumbnailTempPath].map((file) => fsp.rm(file, { force: true }).catch(() => {})));
-  }
-}
-
-async function receiveLocalTodoVideo(input = {}) {
-  const mimeType = videoMimeType(input.mimeType, input.name);
-  if (!mimeType) throw new Error("Izberi veljavno video datoteko.");
-  const declaredBytes = Number(input.contentLength);
-  if (Number.isSafeInteger(declaredBytes) && declaredBytes <= 0) throw new Error("Praznega videa ni mogoče dodati.");
-  if (Number.isSafeInteger(declaredBytes) && declaredBytes > MAX_VIDEO_BYTES) throw new Error(`Video je prevelik. Največja dovoljena velikost je ${Math.round(MAX_VIDEO_BYTES / 1024 / 1024)} MB.`);
-
-  const uploadDirectory = path.join(MEDIA_DIR, ".uploads");
-  await fsp.mkdir(uploadDirectory, { recursive: true, mode: 0o700 });
-  const temporaryPath = path.join(uploadDirectory, `${crypto.randomUUID()}.part`);
-  const digest = crypto.createHash("sha256");
-  let byteSize = 0;
-  const counter = new Transform({
-    transform(chunk, encoding, callback) {
-      byteSize += chunk.length;
-      if (byteSize > MAX_VIDEO_BYTES) {
-        callback(new Error(`Video je prevelik. Največja dovoljena velikost je ${Math.round(MAX_VIDEO_BYTES / 1024 / 1024)} MB.`));
-        return;
-      }
-      digest.update(chunk);
-      callback(null, chunk);
-    }
-  });
-  input.stream.once("aborted", () => counter.destroy(new Error("Prenos videa je bil prekinjen.")));
-  try {
-    await pipeline(input.stream, counter, fs.createWriteStream(temporaryPath, { mode: 0o600 }));
-    if (!byteSize) throw new Error("Praznega videa ni mogoče dodati.");
-    const attachmentId = digest.digest("hex");
-    const storageKey = path.posix.join("objects", `${attachmentId}${videoStorageExtension(mimeType, input.name)}`);
-    const targetPath = path.join(MEDIA_DIR, ...storageKey.split("/"));
-    await fsp.mkdir(path.dirname(targetPath), { recursive: true, mode: 0o700 });
-    const createdFile = await moveAttachmentFile(temporaryPath, targetPath);
-    return { attachmentId, mimeType, byteSize, storageKey, targetPath, createdFile };
-  } catch (error) {
-    await fsp.rm(temporaryPath, { force: true }).catch(() => {});
-    throw error;
-  }
-}
-function systemGoogleDriveClient(tokens) {
-  const { google } = require("googleapis");
-  const auth = new google.auth.OAuth2(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI || undefined);
-  auth.setCredentials(tokens || {});
-  return google.drive({ version: "v3", auth });
-}
-
 async function deleteRetentionManagedDriveFiles(db, files) {
   if (!files.length) return { deleted: 0, skipped: 0 };
   const owner = googleDriveOwner(db);
@@ -6886,22 +4648,7 @@ function entrySummary(entry) {
   if (entry.status === "vacation") return title || "Dopust";
   return `${entry.client || "Stranka"} - ${title}`;
 }
-function payrollTodosForArchive(db, payroll) {
-  const todoIds = new Set((payroll.lines || []).map((line) => String(line.todoId || "")).filter(Boolean));
-  return (db.todos || []).filter((todo) => todoIds.has(String(todo.id || ""))
-    && payrollWorkerForTodo(todo) === String(payroll.workerId || ""));
-}
 
-async function archivePayrollTodos(db, payroll, actor) {
-  // A completed project entry is archived only after both sides are locked:
-  // the worker payroll and the client bill. Internal work and meals have no
-  // client side and therefore need only the worker payroll.
-  const result = reconcileTodoArchives(db, actor);
-  const awaitingClientBilling = payrollTodosForArchive(db, payroll)
-    .filter((todo) => todoRequiresClientBilling(todo) && !todo.clientBillId)
-    .length;
-  return { ...result, awaitingClientBilling, archiveCalendarName: "interni arhiv" };
-}
 const STATIC_TYPES = {
   ".html": "text/html; charset=utf-8",
   ".css": "text/css; charset=utf-8",
@@ -7040,30 +4787,6 @@ function cleanupPendingGoogleStates() {
   for (const [state, pending] of pendingGoogleConnections) {
     if (pending.startedAt < cutoff) pendingGoogleConnections.delete(state);
   }
-}
-
-async function sendAttachmentFile(res, attachment) {
-  const stat = await fsp.stat(attachment.filePath);
-  res.writeHead(200, securityHeaders({
-    "Content-Type": attachment.mimeType || "application/octet-stream",
-    "Content-Length": stat.size,
-    "Cache-Control": "private, max-age=3600",
-    "Content-Disposition": "inline"
-  }));
-  fs.createReadStream(attachment.filePath).on("error", () => res.destroy()).pipe(res);
-}
-
-function attachmentVisibleToUser(db, user, attachmentId) {
-  // A freshly uploaded attachment is deliberately not attached to a task until
-  // the form is saved. It must nevertheless be visible to its uploader so the
-  // form can render a video/photo preview and the user can verify it before
-  // saving. The pending map also drops expired records here.
-  const pendingVisible = pendingAttachmentMap(db)[attachmentId]?.userId === user.id;
-  const todoVisible = (db.todos || []).some((todo) => canManageTodo(user, todo)
-    && (todo.photos || []).some((photo) => photo.attachmentId === attachmentId));
-  const advanceVisible = (db.debts || []).some((debt) => (user.role === "boss" || debt.person === user.id)
-    && (debt.photos || []).some((photo) => photo.attachmentId === attachmentId));
-  return pendingVisible || todoVisible || advanceVisible;
 }
 
 const MAX_BROWSER_RESTORE_BYTES = 1_500 * 1024 * 1024;
@@ -7569,66 +5292,7 @@ async function handleApi(req, res) {
       sendJson(res, 200, { ok: true, user: publicUser(user), csrfToken: db.sessions[sessionTokenHash(sessionToken)]?.csrfToken || "" });
       return;
     }
-    const pendingAttachmentMatch = url.pathname.match(/^\/api\/attachments\/([a-f0-9]{64})\/pending$/);
-    if (pendingAttachmentMatch && req.method === "DELETE") {
-      const user = await requireUser(req, res);
-      if (!user) return;
-      const attachmentId = pendingAttachmentMatch[1];
-      const db = await readRequestDb(req);
-      const pending = pendingAttachmentMap(db);
-      if (pending[attachmentId]?.userId !== user.id) {
-        sendJson(res, 404, { error: "Začasna priloga ne obstaja." });
-        return;
-      }
-      delete pending[attachmentId];
-      // Cancel staging, not a shared attachment already used by an event.
-      pruneUnusedTodoAttachments(db);
-      await writeDbAsync(db);
-      sendJson(res, 200, { ok: true });
-      return;
-    }
-    const attachmentMatch = url.pathname.match(/^\/api\/attachments\/([a-f0-9]{64})(\/thumbnail)?$/);
-    if (attachmentMatch && req.method === "GET") {
-      const user = await requireUser(req, res);
-      if (!user) return;
-      const attachmentId = attachmentMatch[1];
-      const db = DATABASE_URL
-        ? await getFocusedPgStore().attachmentAccessSeed(attachmentId)
-        : await readRequestDb(req);
-      if (!attachmentVisibleToUser(db, user, attachmentId)) {
-        sendJson(res, 404, { error: "Priloga ne obstaja." });
-        return;
-      }
-      if (DATABASE_URL) {
-        const attachment = await getPgStore().getAttachment(attachmentId, Boolean(attachmentMatch[2]));
-        if (!attachment) {
-          sendJson(res, 404, { error: "Priloga ne obstaja." });
-          return;
-        }
-        await sendAttachmentFile(res, attachment);
-        return;
-      }
-      const source = db.attachments?.[attachmentId];
-      const storageKey = attachmentMatch[2] ? source?.thumbnailKey : source?.storageKey;
-      const relativeStorageKey = safeRestoreRelativePath(storageKey);
-      const localFile = relativeStorageKey
-        ? path.resolve(MEDIA_DIR, relativeStorageKey)
-        : "";
-      if (localFile && localFile.startsWith(`${MEDIA_DIR}${path.sep}`) && fs.existsSync(localFile)) {
-        await sendAttachmentFile(res, { filePath: localFile, mimeType: attachmentMatch[2] ? source?.thumbnailMimeType || "image/jpeg" : source?.mimeType });
-        return;
-      }
-      const dataUrl = attachmentMatch[2] ? source?.thumbnailData : source?.data;
-      const match = String(dataUrl || "").match(/^data:([^;,]+);base64,([A-Za-z0-9+/]+={0,2})$/);
-      if (!match) {
-        sendJson(res, 404, { error: "Priloga ne obstaja." });
-        return;
-      }
-      const bytes = Buffer.from(match[2], "base64");
-      res.writeHead(200, securityHeaders({ "Content-Type": match[1], "Content-Length": bytes.length, "Cache-Control": "private, max-age=3600", "Content-Disposition": "inline" }));
-      res.end(bytes);
-      return;
-    }
+    if (await handleAttachmentDownload(req, res, url)) return;
     if (url.pathname === "/api/health" && req.method === "GET") {
       if (DATABASE_URL) await getPgPool().query("select 1");
       sendJson(res, 200, { ok: true });
@@ -7781,79 +5445,7 @@ async function handleApi(req, res) {
       return;
     }
 
-    if (url.pathname === "/api/undo-journal" && req.method === "GET") {
-      const user = await requireUser(req, res);
-      if (!user) return;
-      const db = await readRequestDb(req);
-      sendJson(res, 200, {
-        actions: visibleUndoJournal(db, user),
-        locked: Boolean(undoSystemLock),
-        maxActions: UNDO_JOURNAL_LIMIT
-      });
-      return;
-    }
-    const undoMatch = url.pathname.match(/^\/api\/undo-journal\/([a-f0-9-]{16,80})$/);
-    if (undoMatch && req.method === "POST") {
-      const user = await requireUser(req, res);
-      if (!user) return;
-      const body = await readBody(req);
-      if (body.confirm !== true) {
-        sendJson(res, 400, { error: "Za razveljavitev je potrebna izrecna potrditev." });
-        return;
-      }
-      const db = await readRequestDb(req);
-      const current = currentUndoRecord(db);
-      const requestedId = undoMatch[1];
-      if (!current || current.id !== requestedId) {
-        sendJson(res, 409, { error: "To dejanje ni več zadnje. Najprej razveljavi novejše dejanje." });
-        return;
-      }
-      if (user.role !== "boss" && String(current.actorId) !== String(user.id)) {
-        sendJson(res, 403, { error: "Razveljaviš lahko samo svoje zadnje dejanje." });
-        return;
-      }
-      undoSystemLock = {
-        actionId: current.id,
-        startedAt: new Date().toISOString(),
-        actorId: user.id,
-        actorName: user.name || user.id
-      };
-      try {
-        restoreUndoPatch(db, current.patch);
-        // Billing and archive flags are derived from confirmed payrolls and
-        // client bills.  Recalculate them after every undo so an entry whose
-        // client bill was restored/deleted immediately returns to the list of
-        // open client-billing items.
-        reconcileTodoArchives(db, user);
-        const undoneAt = new Date().toISOString();
-        db.undoJournal = normalizeUndoJournal(db.undoJournal).map((record) => record.id === current.id
-          ? {
-            ...record,
-            undoneAt,
-            undoneBy: user.id,
-            undoneByName: user.name || user.id,
-            undoAction: (user.name || user.id) + " je razveljavil: " + record.action
-          }
-          : record);
-        await writeDbAsync(db);
-        scheduleAuditLog({
-          actor: user,
-          action: "undo.applied",
-          targetType: "undo",
-          targetId: current.id,
-          context: { action: current.action }
-        });
-        sendJson(res, 200, {
-          ok: true,
-          undoneAction: current.action,
-          actions: visibleUndoJournal(db, user),
-          syncRevision: db.syncRevision
-        });
-      } finally {
-        undoSystemLock = null;
-      }
-      return;
-    }
+    if (await handleUndoJournal(req, res, url)) return;
     const notificationReadMatch = url.pathname.match(/^\/api\/notifications\/([^/]+)\/read$/);
     if (notificationReadMatch && req.method === "POST") {
       const user = await requireUser(req, res);
@@ -8373,636 +5965,12 @@ async function handleApi(req, res) {
       return;
     }
 
-    if (url.pathname === "/api/worker-daily-report" && req.method === "GET") {
-      const user = await requireUser(req, res);
-      if (!user) return;
-      const requestedWorkerId = url.searchParams.get("workerId");
-      const workerId = requestedWorkerId === null || requestedWorkerId === ""
-        ? cleanUserId(user.id)
-        : cleanUserId(requestedWorkerId);
-      const date = String(url.searchParams.get("date") || "");
-      if (!workerId || !isDateKey(date)) {
-        sendJson(res, 400, { error: "Izberi veljavnega delavca in datum dnevnega povzetka." });
-        return;
-      }
-      if (!canReadWorkerDailyReport(user, workerId)) {
-        sendJson(res, 403, { error: "Dnevni povzetek drugega delavca vidi samo \u0161ef." });
-        return;
-      }
-      const db = await readRequestDb(req);
-      if (!db.users?.[workerId]) {
-        sendJson(res, 404, { error: "Delavec ne obstaja." });
-        return;
-      }
-      const report = workerDailyDigestSnapshot(db, workerId, date);
-      if (!report) {
-        sendJson(res, 404, { error: "Dnevni povzetek ni na voljo." });
-        return;
-      }
-      sendJson(res, 200, { report });
-      return;
-    }
-    if (url.pathname === "/api/payroll-export.xlsx" && req.method === "GET") {
-      const user = await requireUser(req, res);
-      if (!user) return;
-      const requestedWorkerId = cleanUserId(url.searchParams.get("workerId") || user.id);
-      const workerId = user.role === "boss" ? requestedWorkerId : user.id;
-      if (!workerId || (user.role !== "boss" && requestedWorkerId !== user.id)) {
-        sendJson(res, 403, { error: "Izvoz obračuna drugega delavca lahko pripravi samo šef." });
-        return;
-      }
-      const range = payrollRange({ from: url.searchParams.get("from"), to: url.searchParams.get("to") });
-      if (!range) {
-        sendJson(res, 400, { error: "Za izvoz izberi veljavno obračunsko obdobje." });
-        return;
-      }
-      const db = await readRequestDb(req);
-      const report = workerPayrollXlsxReport(db, workerId, range);
-      if (!report) {
-        sendJson(res, 404, { error: "Obračun za izbranega delavca ni na voljo." });
-        return;
-      }
-      try {
-        await sendWorkerPayrollXlsx(res, report);
-      } catch (error) {
-        console.error("Worker payroll XLSX export failed", error);
-        if (!res.headersSent) sendJson(res, 500, { error: "Izvoz XLSX ni uspel." });
-        else res.destroy(error);
-      }
-      return;
-    }
+    if (await handleWorkerReports(req, res, url)) return;
 
-    if (url.pathname === "/api/payrolls" && req.method === "GET") {
-      const user = await requireUser(req, res);
-      if (!user) return;
-      const db = await readRequestDb(req);
-      sendJson(res, 200, { payrolls: payrollForUser(db, user) });
-      return;
-    }
+    if (await handlePayrollList(req, res, url)) return;
 
-    const todoSharePdfTicketMatch = url.pathname.match(/^\/api\/todos\/([^/]+)\/share-pdf-ticket$/);
-    if (todoSharePdfTicketMatch && req.method === "POST") {
-      const user = await requireUser(req, res);
-      if (!user) return;
-      const id = decodeURIComponent(todoSharePdfTicketMatch[1]);
-      const db = await readRequestDb(req);
-      const todo = (db.todos || []).find((item) => item.id === id);
-      if (!todo || isTrashedTodo(todo) || !canManageTodo(user, todo) || !todoShareReport(db, todo)) {
-        sendJson(res, 404, { error: "Dogodek ni več na voljo." });
-        return;
-      }
-      const token = createTodoSharePdfDownloadTicket(req, user, id);
-      sendJson(res, 201, { downloadUrl: `/api/todos/share-pdf-download?ticket=${encodeURIComponent(token)}` });
-      return;
-    }
-
-    if (url.pathname === "/api/todos/share-pdf-download" && req.method === "GET") {
-      const user = await requireUser(req, res);
-      if (!user) return;
-      const ticket = todoSharePdfDownloadTicketForRequest(req, user, url.searchParams.get("ticket"));
-      if (!ticket) {
-        sendJson(res, 410, { error: "Povezava za prenos PDF-ja je potekla. Ponovno odpri deljenje dogodka." });
-        return;
-      }
-      const db = await readRequestDb(req);
-      const todo = (db.todos || []).find((item) => item.id === ticket.todoId);
-      if (!todo || isTrashedTodo(todo) || !canManageTodo(user, todo)) {
-        sendJson(res, 404, { error: "Dogodek ni več na voljo." });
-        return;
-      }
-      await sendTodoSharePdf(res, db, todo);
-      return;
-    }
-
-    if (url.pathname === "/api/client-report/pdf-ticket" && req.method === "POST") {
-      const user = await requireUser(req, res);
-      if (!user) return;
-      if (user.role !== "boss") {
-        sendJson(res, 403, { error: "PDF poročilo za stranko lahko pripravi samo šef." });
-        return;
-      }
-      const body = await readBody(req);
-      if (!clientReportRequestIsValid(body)) {
-        sendJson(res, 400, { error: "Izbrani vpisi za poročilo niso pravilni." });
-        return;
-      }
-      const db = await readRequestDb(req);
-      const report = clientReportSelection(db, body);
-      if (!report) {
-        sendJson(res, 409, { error: "Izbrani vpisi niso več na voljo za poročilo. Osveži pogled in preveri izbor." });
-        return;
-      }
-      try {
-        clientReportAttachmentSelection(report, body.attachmentIds);
-      } catch {
-        sendJson(res, 400, { error: "Izbrane priloge za PDF poročilo niso pravilne." });
-        return;
-      }
-      const token = createClientReportDownloadTicket(req, user, body);
-      sendJson(res, 201, { downloadUrl: `/api/client-report/pdf-download?ticket=${encodeURIComponent(token)}` });
-      return;
-    }
-
-    if (url.pathname === "/api/client-report/pdf-download" && req.method === "GET") {
-      const user = await requireUser(req, res);
-      if (!user) return;
-      if (user.role !== "boss") {
-        sendJson(res, 403, { error: "PDF poročilo za stranko lahko pripravi samo šef." });
-        return;
-      }
-      const ticket = clientReportDownloadTicketForRequest(req, user, url.searchParams.get("ticket"));
-      if (!ticket) {
-        sendJson(res, 410, { error: "Povezava za prenos PDF-ja je potekla. Ponovno klikni Prenesi PDF." });
-        return;
-      }
-      const db = await readRequestDb(req);
-      await sendClientReportPdf(res, db, ticket.payload);
-      return;
-    }
-
-    if (url.pathname === "/api/client-report/pdf" && req.method === "POST") {
-      const user = await requireUser(req, res);
-      if (!user) return;
-      if (user.role !== "boss") {
-        sendJson(res, 403, { error: "PDF poročilo za stranko lahko pripravi samo šef." });
-        return;
-      }
-      const body = await readBody(req);
-      if (body.eventIds !== undefined && !Array.isArray(body.eventIds)) {
-        sendJson(res, 400, { error: "Izbrani vpisi za poročilo niso pravilni." });
-        return;
-      }
-      const db = await readRequestDb(req);
-      const report = clientReportSelection(db, body);
-      if (!report) {
-        sendJson(res, 409, { error: "Izbrani vpisi niso več na voljo za poročilo. Osvezi pogled in preveri izbor." });
-        return;
-      }
-      const requestedAttachments = clientReportAttachmentSelection(report, body.attachmentIds);
-      const attachments = await loadClientReportAttachments(db, requestedAttachments, { destination: "PDF" });
-      const pdf = await buildClientReportPdf(db, report, attachments, body.exportOptions);
-      const filename = clientReportFilename(report.client);
-      res.writeHead(200, securityHeaders({
-        "Content-Type": "application/pdf",
-        "Content-Length": pdf.length,
-        "Content-Disposition": attachmentContentDisposition(filename),
-        "Cache-Control": "no-store"
-      }));
-      res.end(pdf);
-      return;
-    }
-
-    if (url.pathname === "/api/client-report/gmail-draft" && req.method === "POST") {
-      const user = await requireUser(req, res);
-      if (!user) return;
-      if (user.role !== "boss" || String(user.email || "").toLowerCase() !== GOOGLE_DRIVE_OWNER_EMAIL) {
-        sendJson(res, 403, { error: "Gmail osnutek lahko ustvari samo Bojanov račun." });
-        return;
-      }
-      const body = await readBody(req);
-      if (body.eventIds !== undefined && !Array.isArray(body.eventIds)) {
-        sendJson(res, 400, { error: "Izbrani vpisi za poročilo niso pravilni." });
-        return;
-      }
-      const db = await readRequestDb(req);
-      const owner = googleDriveOwner(db);
-      if (!googleReady() || !googleWorkspaceTokenAvailable(owner)) {
-        sendJson(res, 409, { error: "V Nastavitvah kot Bojan najprej ponovno poveži Google Dokumente, preglednice in Gmail." });
-        return;
-      }
-      const report = clientReportSelection(db, body);
-      if (!report) {
-        sendJson(res, 409, { error: "Izbrani vpisi niso več na voljo za poročilo. Osvezi pogled in preveri izbor." });
-        return;
-      }
-      const email = String(report.client?.email || "").trim();
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-        sendJson(res, 409, { error: "V bazi za izbrano stranko ni veljavnega e-postnega naslova." });
-        return;
-      }
-      const requestedAttachments = clientReportAttachmentSelection(report, body.attachmentIds);
-      const attachments = await loadClientReportAttachments(db, requestedAttachments, {
-        maxAttachmentBytes: REPORT_GMAIL_MAX_ATTACHMENT_BYTES,
-        maxTotalBytes: REPORT_GMAIL_MAX_TOTAL_BYTES,
-        destination: "Gmail"
-      });
-      const pdf = await buildClientReportPdf(db, report, attachments, body.exportOptions);
-      const filename = clientReportFilename(report.client);
-      try {
-        const { google } = require("googleapis");
-        const gmail = google.gmail({ version: "v1", auth: googleClient(req, owner.google.tokens) });
-        const draft = await gmail.users.drafts.create({
-          userId: "me",
-          requestBody: { message: { raw: gmailDraftRaw({ to: email, pdf, pdfFilename: filename, attachments }) } }
-        });
-        sendJson(res, 201, { ok: true, draftId: String(draft.data?.id || ""), email });
-      } catch (error) {
-        console.error("Gmail osnutka ni bilo mogoče ustvariti:", error.message || error);
-        sendJson(res, 502, { error: "Gmail osnutka ni bilo mogoče ustvariti. V Nastavitvah ponovno poveži Google račun in poskusi znova." });
-      }
-      return;
-    }
-    if (url.pathname === "/api/client-bills" && req.method === "GET") {
-      const user = await requireUser(req, res);
-      if (!user) return;
-      if (user.role !== "boss") {
-        sendJson(res, 403, { error: "Obračune strank vidi samo šef." });
-        return;
-      }
-      const db = await readRequestDb(req);
-      sendJson(res, 200, { clientBills: db.clientBills || [] });
-      return;
-    }
-
-    if (url.pathname === "/api/client-bills" && req.method === "POST") {
-      const user = await requireUser(req, res);
-      if (!user) return;
-      if (user.role !== "boss") {
-        sendJson(res, 403, { error: "Obračun stranki lahko potrdi samo šef." });
-        return;
-      }
-      const body = await readBody(req);
-      if (body.eventIds !== undefined && !Array.isArray(body.eventIds)) {
-        sendJson(res, 400, { error: "Izbrani vpisi za obračun niso pravilni." });
-        return;
-      }
-      if (Array.isArray(body.eventIds)) {
-        body.eventIds = [...new Set(body.eventIds.map((id) => String(id || "").trim()).filter(Boolean))];
-        if (!body.eventIds.length) {
-          sendJson(res, 400, { error: "Označi vsaj en vpis za obračun stranki." });
-          return;
-        }
-        if (body.eventIds.length > 2_000) {
-          sendJson(res, 400, { error: "Za en obračun lahko izbereš največ 2000 vpisov." });
-          return;
-        }
-      }
-      if ((body.from && !isDateKey(body.from)) || (body.to && !isDateKey(body.to)) || (body.from && body.to && body.from > body.to)) {
-        sendJson(res, 400, { error: "Obdobje obračuna stranki ni pravilno." });
-        return;
-      }
-      const db = await readRequestDb(req);
-      const client = clientForBilling(db, body);
-      if (!client) {
-        sendJson(res, 400, { error: "Stranke ni bilo mogoče prepoznati." });
-        return;
-      }
-      const clientBill = buildClientBillSnapshot(db, { ...body, clientId: client.clientId, clientName: client.name }, user);
-      if (!clientBill) {
-        sendJson(res, 409, { error: Array.isArray(body.eventIds) ? "Eden ali več označenih vpisov ni več na voljo za obračun. Osvezi poročilo in preveri izbor." : "Za to stranko v izbranem obdobju ni novih zaključenih storitev za obračun." });
-        return;
-      }
-      db.clientBills.push(clientBill);
-      const settledCorrections = settleCorrectionsForClientBill(db, clientBill, user);
-      const archive = reconcileTodoArchives(db, user);
-      await writeDbAsync(db);
-      sendJson(res, 201, { clientBill, clientBills: db.clientBills, archive, settledCorrections, todos: visibleTodosForUser(db, user) });
-      return;
-    }
-
-    const clientBillDeleteMatch = /^\/api\/client-bills\/([^/]+)$/.exec(url.pathname);
-    if (clientBillDeleteMatch && req.method === "DELETE") {
-      const user = await requireUser(req, res);
-      if (!user) return;
-      if (user.role !== "boss") {
-        sendJson(res, 403, { error: "Obračun stranki lahko prekliče samo šef." });
-        return;
-      }
-      const db = await readRequestDb(req);
-      const result = cancelClientBill(db, clientBillDeleteMatch[1], user);
-      if (!result) {
-        sendJson(res, 404, { error: "Potrjenega obračuna stranki ni bilo mogoče najti." });
-        return;
-      }
-      if (result.error) {
-        sendJson(res, 409, { error: result.error });
-        return;
-      }
-      await writeDbAsync(db);
-      sendJson(res, 200, { clientBill: result.clientBill, clientBills: db.clientBills || [], archive: result.archive, todos: visibleTodosForUser(db, user) });
-      return;
-    }
-    if (url.pathname === "/api/payrolls" && req.method === "POST") {
-      const user = await requireUser(req, res);
-      if (!user) return;
-      if (user.role !== "boss") {
-        sendJson(res, 403, { error: "Samo šef lahko potrdi obračun." });
-        return;
-      }
-      const body = await readBody(req);
-      const workerId = cleanUserId(body.workerId);
-      const range = payrollRange(body);
-      if (!workerId || !range) {
-        sendJson(res, 400, { error: "Delavec ali obračunsko obdobje ni pravilno." });
-        return;
-      }
-      if (!payrollPeriodEnded(range)) {
-        sendJson(res, 409, { error: "Obračun lahko potrdiš največ do današnjega dne." });
-        return;
-      }
-      const db = await readRequestDb(req);
-      if (!db.users?.[workerId]) {
-        sendJson(res, 400, { error: "Delavec ne obstaja." });
-        return;
-      }
-      const existingIndex = db.payrolls.findIndex((payroll) => payroll.workerId === workerId && payroll.from === range.from && payroll.to === range.to);
-      const previous = existingIndex >= 0 ? db.payrolls[existingIndex] : {};
-      const sequenceError = payrollSequenceError(db, workerId, range, previous.id || "");
-      if (sequenceError) {
-        sendJson(res, 409, { error: sequenceError });
-        return;
-      }
-      if (previous.status && !["draft", "archiving"].includes(previous.status)) {
-        sendJson(res, 409, { error: "Ta obračun je že potrjen ali plačan." });
-        return;
-      }
-      const now = new Date().toISOString();
-      let payroll;
-      if (previous.status === "archiving") {
-        // Resume exactly the snapshot that was locked before archiving started.
-        payroll = normalizePayroll({
-          ...previous,
-          updatedBy: user.id,
-          updatedByName: user.name,
-          updatedAt: now
-        }, db);
-      } else {
-        payroll = buildPayrollSnapshot(db, workerId, range, {
-          ...previous,
-          id: previous.id || crypto.randomUUID(),
-          status: "archiving",
-          createdBy: previous.createdBy || user.id,
-          createdByName: previous.createdByName || user.name,
-          createdAt: previous.createdAt || now,
-          updatedBy: user.id,
-          updatedByName: user.name,
-          updatedAt: now
-        }, body.note);
-      }
-      if (!payroll?.lines.length) {
-        sendJson(res, 400, { error: "Za izbrano obdobje delavec nima zaključenih vnosov ur." });
-        return;
-      }
-      if (existingIndex >= 0) db.payrolls[existingIndex] = payroll;
-      else db.payrolls.push(payroll);
-      // Persist the locked snapshot before final confirmation, so a retry can finish safely.
-      await writeDbAsync(db);
-      payroll = normalizePayroll({
-        ...payroll,
-        status: "confirmed",
-        updatedBy: user.id,
-        updatedByName: user.name,
-        updatedAt: new Date().toISOString(),
-        confirmedAt: payroll.confirmedAt || new Date().toISOString(),
-        confirmedBy: user.id,
-        confirmedByName: user.name
-      }, db);
-      const finalIndex = db.payrolls.findIndex((item) => item.id === payroll.id);
-      if (finalIndex >= 0) db.payrolls[finalIndex] = payroll;
-      else db.payrolls.push(payroll);
-      const settledCorrections = settleCorrectionsForPayroll(db, payroll, user);
-      const archive = await archivePayrollTodos(db, payroll, user);
-      await writeDbAsync(db);
-      sendJson(res, 200, { payrolls: payrollForUser(db, user), payroll, archive, settledCorrections });
-      return;
-    }
-    const payrollPaymentMatch = url.pathname.match(/^\/api\/payrolls\/([^/]+)\/payments$/);
-    if (payrollPaymentMatch && req.method === "POST") {
-      const user = await requireUser(req, res);
-      if (!user) return;
-      if (user.role !== "boss") {
-        sendJson(res, 403, { error: "Samo šef lahko evidentira izplačilo." });
-        return;
-      }
-      const body = await readBody(req);
-      const amount = nonnegativeNumber(body.amount, null, 1_000_000);
-      const note = String(body.note || "").trim().slice(0, 1_000);
-      if (amount === null || amount <= 0) {
-        sendJson(res, 400, { error: "Vnesi znesek delnega izplačila." });
-        return;
-      }
-      const db = await readRequestDb(req);
-      const index = db.payrolls.findIndex((payroll) => payroll.id === decodeURIComponent(payrollPaymentMatch[1]));
-      if (index < 0) {
-        sendJson(res, 404, { error: "Obračun ne obstaja." });
-        return;
-      }
-      const current = normalizePayroll(db.payrolls[index], db);
-      if (!current || !["confirmed", "paid"].includes(current.status)) {
-        sendJson(res, 409, { error: "Delno izplačilo je mogoče vpisati samo pri potrjenem obračunu." });
-        return;
-      }
-      if (amount > current.remainingAmount + 0.005) {
-        sendJson(res, 409, { error: `Preostanek za izplačilo je ${current.remainingAmount.toFixed(2)} EUR.` });
-        return;
-      }
-      const now = new Date().toISOString();
-      const payments = [...current.payments, { id: crypto.randomUUID(), amount, note, createdAt: now, createdBy: user.id, createdByName: user.name }];
-      const next = normalizePayroll({ ...current, payments, status: "confirmed", updatedAt: now, updatedBy: user.id, updatedByName: user.name }, db);
-      if (next.remainingAmount <= 0.005) {
-        next.status = "paid";
-        next.paidAt = now;
-        next.paidBy = user.id;
-        next.paidByName = user.name;
-      }
-      db.payrolls[index] = next;
-      await writeDbAsync(db);
-      sendJson(res, 201, { payroll: next, payrolls: payrollForUser(db, user) });
-      return;
-    }
-    const payrollPaymentDeleteMatch = url.pathname.match(/^\/api\/payrolls\/([^/]+)\/payments\/([^/]+)$/);
-    if (payrollPaymentDeleteMatch && req.method === "DELETE") {
-      const user = await requireUser(req, res);
-      if (!user) return;
-      if (user.role !== "boss") {
-        sendJson(res, 403, { error: "Samo šef lahko izbriše evidentirano izplačilo." });
-        return;
-      }
-      const payrollId = decodeURIComponent(payrollPaymentDeleteMatch[1]);
-      const paymentId = decodeURIComponent(payrollPaymentDeleteMatch[2]);
-      const db = await readRequestDb(req);
-      const index = db.payrolls.findIndex((payroll) => payroll.id === payrollId);
-      if (index < 0) {
-        sendJson(res, 404, { error: "Obračun ne obstaja." });
-        return;
-      }
-      const current = normalizePayroll(db.payrolls[index], db);
-      if (!current || !["confirmed", "paid"].includes(current.status)) {
-        sendJson(res, 409, { error: "Izplačilo lahko izbrišeš samo pri potrjenem obračunu." });
-        return;
-      }
-      if (!(current.payments || []).some((payment) => payment.id === paymentId)) {
-        sendJson(res, 404, { error: "Izplačilo ne obstaja." });
-        return;
-      }
-      const now = new Date().toISOString();
-      const payroll = normalizePayroll({
-        ...current,
-        status: "confirmed",
-        payments: current.payments.filter((payment) => payment.id !== paymentId),
-        paidAt: "",
-        paidBy: "",
-        paidByName: "",
-        updatedAt: now,
-        updatedBy: user.id,
-        updatedByName: user.name
-      }, db);
-      db.payrolls[index] = payroll;
-      await writeDbAsync(db);
-      sendJson(res, 200, { payroll, payrolls: payrollForUser(db, user) });
-      return;
-    }
-    const payrollMatch = url.pathname.match(/^\/api\/payrolls\/([^/]+)$/);
-    if (payrollMatch && req.method === "PUT") {
-      const user = await requireUser(req, res);
-      if (!user) return;
-      if (user.role !== "boss") {
-        sendJson(res, 403, { error: "Samo šef lahko potrjuje ali odpira obračune." });
-        return;
-      }
-      const body = await readBody(req);
-      const action = String(body.action || "refresh");
-      const db = await readRequestDb(req);
-      const index = db.payrolls.findIndex((payroll) => payroll.id === decodeURIComponent(payrollMatch[1]));
-      if (index < 0) {
-        sendJson(res, 404, { error: "Obračun ne obstaja." });
-        return;
-      }
-      const current = db.payrolls[index];
-      const now = new Date().toISOString();
-      if (action === "confirm" && !payrollPeriodEnded(current)) {
-        sendJson(res, 409, { error: "Obračun lahko potrdiš največ do današnjega dne." });
-        return;
-      }
-      if (action === "confirm") {
-        const sequenceError = payrollSequenceError(db, current.workerId, current, current.id);
-        if (sequenceError) {
-          sendJson(res, 409, { error: sequenceError });
-          return;
-        }
-      }
-      let payroll;
-      if (action === "refresh") {
-        if (current.status !== "draft") {
-          sendJson(res, 409, { error: "Potrjen obračun najprej ponovno odpri." });
-          return;
-        }
-        payroll = buildPayrollSnapshot(db, current.workerId, current, {
-          ...current,
-          updatedBy: user.id,
-          updatedByName: user.name,
-          updatedAt: now
-        }, body.note);
-      } else if (action === "confirm") {
-        if (!["draft", "archiving"].includes(current.status)) {
-          sendJson(res, 409, { error: "Potrdi lahko samo odprt ali nedokončano arhiviran obračun." });
-          return;
-        }
-        payroll = current.status === "archiving"
-          ? normalizePayroll({ ...current, updatedBy: user.id, updatedByName: user.name, updatedAt: now }, db)
-          : buildPayrollSnapshot(db, current.workerId, current, {
-            ...current,
-            status: "archiving",
-            updatedBy: user.id,
-            updatedByName: user.name,
-            updatedAt: now
-          }, body.note);
-        if (!payroll?.lines.length) {
-          sendJson(res, 400, { error: "Obračun nima zaključenih vnosov ur." });
-          return;
-        }
-        db.payrolls[index] = payroll;
-        await writeDbAsync(db);
-        payroll = normalizePayroll({
-          ...payroll,
-          status: "confirmed",
-          updatedBy: user.id,
-          updatedByName: user.name,
-          updatedAt: new Date().toISOString(),
-          confirmedAt: payroll.confirmedAt || new Date().toISOString(),
-          confirmedBy: user.id,
-          confirmedByName: user.name
-        }, db);
-      } else if (action === "paid") {
-        if (current.status !== "confirmed") {
-          sendJson(res, 409, { error: "Kot plačanega lahko označiš samo potrjen obračun." });
-          return;
-        }
-        payroll = normalizePayroll({
-          ...current,
-          status: "paid",
-          payments: current.remainingAmount > 0.005 ? [...(current.payments || []), { id: crypto.randomUUID(), amount: current.remainingAmount, note: "Celotno izplačilo", createdAt: now, createdBy: user.id, createdByName: user.name }] : current.payments,
-          updatedBy: user.id,
-          updatedByName: user.name,
-          updatedAt: now,
-          paidAt: now,
-          paidBy: user.id,
-          paidByName: user.name
-        }, db);
-      } else if (action === "reopen") {
-        if (current.status === "draft") {
-          sendJson(res, 409, { error: "Obračun je že odprt za popravke." });
-          return;
-        }
-        const clientBill = clientBillLockForTodos(db, payrollTodosForArchive(db, current));
-        if (clientBill) {
-          sendJson(res, 409, { error: `Obračun vsebuje vnos, ki je že v potrjenem obračunu stranki ${clientBill.clientName}. Najprej je potreben kontroliran popravek obračuna stranki.` });
-          return;
-        }
-        payroll = buildPayrollSnapshot(db, current.workerId, current, {
-          ...current,
-          status: "draft",
-          updatedBy: user.id,
-          updatedByName: user.name,
-          updatedAt: now,
-          paidAt: "",
-          paidBy: "",
-          paidByName: ""
-        }, body.note);
-      } else {
-        sendJson(res, 400, { error: "Neznano dejanje obračuna." });
-        return;
-      }
-      if (!payroll?.lines.length) {
-        sendJson(res, 400, { error: "Obračun nima zaključenih vnosov ur." });
-        return;
-      }
-      db.payrolls[index] = payroll;
-      const settledCorrections = action === "confirm" ? settleCorrectionsForPayroll(db, payroll, user) : 0;
-      const archive = ["confirm", "reopen"].includes(action) ? await archivePayrollTodos(db, payroll, user) : null;
-      await writeDbAsync(db);
-      sendJson(res, 200, { payrolls: payrollForUser(db, user), payroll, archive, settledCorrections });
-      return;
-    }
-
-    if (payrollMatch && req.method === "DELETE") {
-      const user = await requireUser(req, res);
-      if (!user) return;
-      if (user.role !== "boss") {
-        sendJson(res, 403, { error: "Samo šef lahko briše osnutek obračuna." });
-        return;
-      }
-      const db = await readRequestDb(req);
-      const index = db.payrolls.findIndex((payroll) => payroll.id === decodeURIComponent(payrollMatch[1]));
-      if (index < 0) {
-        sendJson(res, 404, { error: "Obračun ne obstaja." });
-        return;
-      }
-      if (db.payrolls[index].status !== "draft") {
-        sendJson(res, 409, { error: "Potrjenega obračuna ni mogoče izbrisati; najprej ga ponovno odpri." });
-        return;
-      }
-      const deleting = db.payrolls[index];
-      const laterPayroll = db.payrolls.some((payroll) => payroll.workerId === deleting.workerId && payroll.from > deleting.to);
-      if (laterPayroll) {
-        sendJson(res, 409, { error: "Osnutka ne moreš izbrisati, ker bi med obračuni nastala luknja." });
-        return;
-      }
-      db.payrolls.splice(index, 1);
-      await writeDbAsync(db);
-      sendJson(res, 200, { payrolls: payrollForUser(db, user) });
-      return;
-    }
+    if (await handleReportDownloads(req, res, url)) return;
+    if (await handleSettlements(req, res, url)) return;
     if (url.pathname === "/api/workers/billing" && req.method === "GET") {
       const user = await requireUser(req, res);
       if (!user) return;
@@ -9770,105 +6738,7 @@ async function handleApi(req, res) {
       return;
     }
 
-    if (url.pathname === "/api/todos/image" && req.method === "POST") {
-      const user = await requireUser(req, res);
-      if (!user) return;
-      let name = String(req.headers["x-indus-file-name"] || "fotografija");
-      try { name = decodeURIComponent(name); } catch { /* keep encoded value */ }
-      const received = await receiveLocalTodoImage({
-        stream: req,
-        name,
-        mimeType: req.headers["content-type"],
-        contentLength: req.headers["content-length"]
-      });
-      try {
-        const photo = await runSerializedWork(async () => {
-          const db = await readRequestDb(req);
-          const pending = pendingAttachmentMap(db);
-          db.attachments[received.attachmentId] = {
-            ...(db.attachments[received.attachmentId] || {}),
-            id: received.attachmentId,
-            mimeType: received.mimeType,
-            byteSize: received.byteSize,
-            storageKey: received.storageKey,
-            thumbnailKey: received.thumbnailKey,
-            thumbnailMimeType: "image/jpeg",
-            createdBy: user.id,
-            createdByName: user.name,
-            createdAt: new Date().toISOString()
-          };
-          pending[received.attachmentId] = { userId: user.id, expiresAt: Date.now() + PENDING_ATTACHMENT_TTL_MS };
-          await writeDbAsync(db);
-          return {
-            id: crypto.randomUUID(),
-            attachmentId: received.attachmentId,
-            name: name.slice(0, 120) || "Fotografija",
-            comment: "",
-            createdBy: user.id,
-            createdByName: user.name,
-            createdAt: new Date().toISOString(),
-            mimeType: received.mimeType,
-            url: attachmentApiUrl(received.attachmentId),
-            thumbnailUrl: attachmentApiUrl(received.attachmentId, true)
-          };
-        });
-        sendJson(res, 201, { photo });
-      } catch (error) {
-        if (received.createdFiles?.display) await fsp.rm(received.displayTargetPath, { force: true }).catch(() => {});
-        if (received.createdFiles?.thumbnail) await fsp.rm(received.thumbnailTargetPath, { force: true }).catch(() => {});
-        throw error;
-      }
-      return;
-    }
-
-    if (url.pathname === "/api/todos/video" && req.method === "POST") {
-      const user = await requireUser(req, res);
-      if (!user) return;
-      let name = String(req.headers["x-indus-file-name"] || "video");
-      try { name = decodeURIComponent(name); } catch { /* keep encoded value */ }
-      const received = await receiveLocalTodoVideo({
-        stream: req,
-        name,
-        mimeType: req.headers["content-type"],
-        contentLength: req.headers["content-length"]
-      });
-      try {
-        const photo = await runSerializedWork(async () => {
-          const db = await readRequestDb(req);
-          const pending = pendingAttachmentMap(db);
-          db.attachments[received.attachmentId] = {
-            ...(db.attachments[received.attachmentId] || {}),
-            id: received.attachmentId,
-            mimeType: received.mimeType,
-            byteSize: received.byteSize,
-            storageKey: received.storageKey,
-            thumbnailKey: "",
-            createdBy: user.id,
-            createdByName: user.name,
-            createdAt: new Date().toISOString()
-          };
-          pending[received.attachmentId] = { userId: user.id, expiresAt: Date.now() + PENDING_ATTACHMENT_TTL_MS };
-          await writeDbAsync(db);
-          return {
-            id: crypto.randomUUID(),
-            attachmentId: received.attachmentId,
-            name: "Video",
-            comment: "",
-            createdBy: user.id,
-            createdByName: user.name,
-            createdAt: new Date().toISOString(),
-            mimeType: received.mimeType,
-            url: attachmentApiUrl(received.attachmentId),
-            thumbnailUrl: ""
-          };
-        });
-        sendJson(res, 201, { photo });
-      } catch (error) {
-        if (received.createdFile) await fsp.rm(received.targetPath, { force: true }).catch(() => {});
-        throw error;
-      }
-      return;
-    }
+    if (await handleAttachmentUpload(req, res, url)) return;
 
     if (url.pathname === "/api/entries" && req.method === "POST") {
       const user = await requireUser(req, res);
@@ -10603,101 +7473,7 @@ async function handleApi(req, res) {
       sendJson(res, 200, { todos: visibleTodosForUser(db, user), deletedTodos: visibleTrashedTodosForUser(db, user), lateTimeEntryReportsQueued: lateTimeEntryReport ? 1 : 0 });
       return;
     }
-    const todoClientBillingFieldsMatch = url.pathname.match(/^\/api\/todos\/([^/]+)\/client-billing-fields$/);
-    if (todoClientBillingFieldsMatch && req.method === "POST") {
-      const user = await requireUser(req, res);
-      if (!user) return;
-      if (user.role !== "boss") {
-        sendJson(res, 403, { error: "Podatke za obračun stranki lahko spreminja samo šef." });
-        return;
-      }
-      const id = decodeURIComponent(todoClientBillingFieldsMatch[1]);
-      const body = await readBody(req);
-      const editableFields = ["title", "notes", "clientBillableHours", "clientKm"];
-      const requested = editableFields.filter((field) => Object.hasOwn(body, field));
-      if (requested.length !== 1) {
-        sendJson(res, 400, { error: "Izberi natanko eno polje za hitro urejanje." });
-        return;
-      }
-      const field = requested[0];
-      const db = await readRequestDb(req);
-      const previousTodo = (db.todos || []).find((item) => String(item.id || "") === id);
-      if (!previousTodo || isTrashedTodo(previousTodo)) {
-        sendJson(res, 404, { error: "Opravilo ne obstaja." });
-        return;
-      }
-      const assignmentItems = todoAssignmentItems(db, previousTodo);
-      const clientBillLock = clientBillLockForTodos(db, assignmentItems);
-      if (clientBillLock) {
-        sendJson(res, 403, { error: clientBillEditLockMessage(clientBillLock) });
-        return;
-      }
-      const editLock = todoAssignmentEditLockConflict(db, previousTodo, user, "");
-      if (editLock) {
-        sendJson(res, 409, { error: `Opravilo trenutno ureja ${editLock.lockedByName || editLock.lockedById}.` });
-        return;
-      }
-      const baseUpdatedAt = String(body.baseUpdatedAt || "");
-      if (baseUpdatedAt && baseUpdatedAt !== String(previousTodo.updatedAt || "")) {
-        sendJson(res, 409, { error: "Dogodek je bil medtem spremenjen na drugi napravi." });
-        return;
-      }
-
-      const changes = {};
-      if (field === "title") {
-        const title = capitalizeTodoText(String(body.title || "").slice(0, 300));
-        if (!title) {
-          sendJson(res, 400, { error: "Naslov dogodka ne sme biti prazen." });
-          return;
-        }
-        changes.title = title;
-      } else if (field === "notes") {
-        changes.notes = capitalizeTodoText(String(body.notes || "").slice(0, 10_000));
-      } else {
-        if (String(previousTodo.status || "") !== "execution") {
-          sendJson(res, 409, { error: "Ure in strošek prevoza sta na voljo samo pri izvedeni storitvi." });
-          return;
-        }
-        const raw = String(body[field] ?? "").trim().replace(",", ".");
-        if (!raw) {
-          sendJson(res, 400, { error: field === "clientKm" ? "Vpiši kilometre ali izrecno 0." : "Vpiši ure za obračun ali izrecno 0." });
-          return;
-        }
-        const value = Number(raw);
-        if (!Number.isFinite(value) || value < 0 || value > (field === "clientKm" ? 1_000_000 : 16_666.67)) {
-          sendJson(res, 400, { error: field === "clientKm" ? "Strošek prevoza mora biti med 0 in 1.000.000 km." : "Ure za obračun niso veljavne." });
-          return;
-        }
-        if (field === "clientKm") changes.clientKm = Number(value.toFixed(2));
-        else changes.clientBillableMinutes = normalizedClientBillableMinutes(Math.round(value * 60));
-      }
-
-      const actionLabels = {
-        title: "naslov",
-        notes: "opis del",
-        clientBillableHours: "ure za obračun",
-        clientKm: "strošek prevoza"
-      };
-      const action = `spremenjeno v poročilu stranke: ${actionLabels[field]}`;
-      const now = new Date().toISOString();
-      const assignmentIds = new Set(assignmentItems.map((item) => String(item.id || "")));
-      db.todos = db.todos.map((item) => {
-        if (!assignmentIds.has(String(item.id || ""))) return item;
-        const next = {
-          ...item,
-          ...changes,
-          updatedBy: user.id,
-          updatedByName: user.name,
-          updatedAt: now,
-          history: [...(item.history || []), audit(user, action)]
-        };
-        next.revisionHistory = appendTodoRevision(item, next, user, action, now);
-        return next;
-      });
-      await writeDbAsync(db);
-      sendJson(res, 200, { todos: visibleTodosForUser(db, user) });
-      return;
-    }
+    if (await handleClientBillingFields(req, res, url)) return;
 
     const todoChangeNoticeMatch = url.pathname.match(/^\/api\/todos\/([^/]+)\/change-notice(\/seen)?$/);
     if (todoChangeNoticeMatch && req.method === "POST") {
@@ -11263,6 +8039,252 @@ async function start() {
   });
 
 }
+
+// Domain composition; keep transport mutation serialization in this entry point.
+const { createUndoService } = require("./undo-service");
+const {
+  undoBusinessSnapshot,
+  undoArrayPatch,
+  normalizeUndoJournal,
+  undoProtectedAttachmentIds,
+  undoEligibleRequest,
+  appendUndoJournalForMutation,
+  handleUndoJournal
+} = createUndoService({
+    cleanAuditActorName: (...args) => cleanAuditActorName(...args),
+    cleanAuditLogText: (...args) => cleanAuditLogText(...args),
+    cleanUserId: (...args) => cleanUserId(...args),
+    isUnsafeRequest: (...args) => isUnsafeRequest(...args),
+    readBody: (...args) => readBody(...args),
+    readRequestDb: (...args) => readRequestDb(...args),
+    reconcileTodoArchives: (...args) => reconcileTodoArchives(...args),
+    requireUser: (...args) => requireUser(...args),
+    scheduleAuditLog: (...args) => scheduleAuditLog(...args),
+    sendJson: (...args) => sendJson(...args),
+    validTodoAttachmentId: (...args) => validTodoAttachmentId(...args),
+    writeDbAsync: (...args) => writeDbAsync(...args),
+    moduleValues: {
+      get activeUndoCapture() { return activeUndoCapture; },
+      set activeUndoCapture(value) { activeUndoCapture = value; },
+      get crypto() { return crypto; },
+      get UNDO_ARRAY_SNAPSHOT_KEYS() { return UNDO_ARRAY_SNAPSHOT_KEYS; },
+      get UNDO_JOURNAL_LIMIT() { return UNDO_JOURNAL_LIMIT; },
+      get UNDO_JOURNAL_SCHEMA_VERSION() { return UNDO_JOURNAL_SCHEMA_VERSION; },
+      get UNDO_MAX_PATCH_BYTES() { return UNDO_MAX_PATCH_BYTES; },
+      get UNDO_VALUE_SNAPSHOT_KEYS() { return UNDO_VALUE_SNAPSHOT_KEYS; },
+      get undoSystemLock() { return undoSystemLock; },
+      set undoSystemLock(value) { undoSystemLock = value; }
+    }
+});
+
+const { createSettlementService } = require("./settlement-service");
+const {
+  signedNumber,
+  latestCorrection,
+  pendingCorrectionsForTodo,
+  upsertSettlementCorrections,
+  correctionPayrollLine,
+  settleCorrectionsForPayroll,
+  settleCorrectionsForClientBill,
+  todoBillingEventId,
+  todoRequiresClientBilling,
+  clientForBilling,
+  normalizeClientBill,
+  cancelClientBill,
+  confirmedClientBillByEvent,
+  clientBillLockForTodos,
+  clientBillEditLockMessage,
+  clientBillCandidates,
+  todoDurationHours,
+  normalizedClientBillableMinutes,
+  todoClientBillableMinutes,
+  clientBillableMinutesForTodos,
+  clientBillableHoursForTodos,
+  clientBillableHoursWarning,
+  buildClientBillSnapshot,
+  directClientSettlementRequest,
+  directClientSettlementForTodo,
+  clientSettlementFromBill,
+  clientSettlementForTodo,
+  reconcileTodoArchives,
+  archiveRetentionMonthsForDb,
+  archiveRetentionCandidates,
+  purgeArchivedTodoGroups,
+  archivePayrollTodos,
+  handlePayrollList,
+  handleSettlements,
+  handleClientBillingFields
+} = createSettlementService({
+    appendTodoRevision: (...args) => appendTodoRevision(...args),
+    audit: (...args) => audit(...args),
+    buildPayrollSnapshot: (...args) => buildPayrollSnapshot(...args),
+    capitalizeTodoText: (...args) => capitalizeTodoText(...args),
+    cleanUserId: (...args) => cleanUserId(...args),
+    isDateKey: (...args) => isDateKey(...args),
+    isTrashedTodo: (...args) => isTrashedTodo(...args),
+    managedDriveFilesForTodos: (...args) => managedDriveFilesForTodos(...args),
+    nonnegativeNumber: (...args) => nonnegativeNumber(...args),
+    normalizePayroll: (...args) => normalizePayroll(...args),
+    payrollForUser: (...args) => payrollForUser(...args),
+    payrollLineForTodo: (...args) => payrollLineForTodo(...args),
+    payrollPeriodEnded: (...args) => payrollPeriodEnded(...args),
+    payrollRange: (...args) => payrollRange(...args),
+    payrollSequenceError: (...args) => payrollSequenceError(...args),
+    payrollWorkerForTodo: (...args) => payrollWorkerForTodo(...args),
+    pruneUnusedAdHocClients: (...args) => pruneUnusedAdHocClients(...args),
+    pruneUnusedTodoAttachments: (...args) => pruneUnusedTodoAttachments(...args),
+    readBody: (...args) => readBody(...args),
+    readRequestDb: (...args) => readRequestDb(...args),
+    requireUser: (...args) => requireUser(...args),
+    sendJson: (...args) => sendJson(...args),
+    serverDateKey: (...args) => serverDateKey(...args),
+    todoAssignmentEditLockConflict: (...args) => todoAssignmentEditLockConflict(...args),
+    todoAssignmentItems: (...args) => todoAssignmentItems(...args),
+    todoVehicle: (...args) => todoVehicle(...args),
+    visibleTodosForUser: (...args) => visibleTodosForUser(...args),
+    writeDbAsync: (...args) => writeDbAsync(...args),
+    moduleValues: {
+      get CLIENT_BILL_STATUSES() { return CLIENT_BILL_STATUSES; },
+      get crypto() { return crypto; }
+    }
+});
+
+const { createReportService } = require("./report-service");
+const {
+  workerPayrollXlsxReport,
+  workerPayrollXlsxEntries,
+  sendWorkerPayrollXlsx,
+  clientReportSelection,
+  clientReportAttachmentSelection,
+  reportPdfDate,
+  buildClientReportPdf,
+  workerDigestPortalUrl,
+  workerDailyDigestSnapshot,
+  canReadWorkerDailyReport,
+  workerDailyReportFilename,
+  workerDailyReportText,
+  workerDailyReportHtml,
+  buildWorkerDailyReportPdf,
+  mimeBase64,
+  gmailDraftRaw,
+  gmailWorkerDigestDraftRaw,
+  gmailWorkerDigestMessageRaw,
+  gmailCompletionRequestRaw,
+  attachmentContentDisposition,
+  handleWorkerReports,
+  handleReportDownloads
+} = createReportService({
+    buildPayrollSnapshot: (...args) => buildPayrollSnapshot(...args),
+    canManageTodo: (...args) => canManageTodo(...args),
+    cleanUserId: (...args) => cleanUserId(...args),
+    clientBillableHoursForTodos: (...args) => clientBillableHoursForTodos(...args),
+    clientBillCandidates: (...args) => clientBillCandidates(...args),
+    clientForBilling: (...args) => clientForBilling(...args),
+    getPgStore: (...args) => getPgStore(...args),
+    googleClient: (...args) => googleClient(...args),
+    googleDriveOwner: (...args) => googleDriveOwner(...args),
+    googleReady: (...args) => googleReady(...args),
+    googleWorkspaceTokenAvailable: (...args) => googleWorkspaceTokenAvailable(...args),
+    isDateKey: (...args) => isDateKey(...args),
+    isTrashedTodo: (...args) => isTrashedTodo(...args),
+    latestCorrection: (...args) => latestCorrection(...args),
+    normalizePayroll: (...args) => normalizePayroll(...args),
+    payrollLineForTodo: (...args) => payrollLineForTodo(...args),
+    payrollMinutesForTodo: (...args) => payrollMinutesForTodo(...args),
+    payrollRange: (...args) => payrollRange(...args),
+    payrollTotals: (...args) => payrollTotals(...args),
+    readBody: (...args) => readBody(...args),
+    readRequestDb: (...args) => readRequestDb(...args),
+    requireUser: (...args) => requireUser(...args),
+    securityHeaders: (...args) => securityHeaders(...args),
+    sendJson: (...args) => sendJson(...args),
+    sessionTokenFromRequest: (...args) => sessionTokenFromRequest(...args),
+    sessionTokenHash: (...args) => sessionTokenHash(...args),
+    signedNumber: (...args) => signedNumber(...args),
+    todoAssignmentItems: (...args) => todoAssignmentItems(...args),
+    todoBillingEventId: (...args) => todoBillingEventId(...args),
+    todoDurationHours: (...args) => todoDurationHours(...args),
+    validEmailAddress: (...args) => validEmailAddress(...args),
+    validTodoAttachmentId: (...args) => validTodoAttachmentId(...args),
+    withDailyCommuteInPayroll: (...args) => withDailyCommuteInPayroll(...args),
+    xlsxDateSerial: (...args) => xlsxDateSerial(...args),
+    xlsxSheetXml: (...args) => xlsxSheetXml(...args),
+    xlsxTimeSerial: (...args) => xlsxTimeSerial(...args),
+    moduleValues: {
+      get archiver() { return archiver; },
+      get CLIENT_REPORT_DOWNLOAD_TICKET_TTL_MS() { return CLIENT_REPORT_DOWNLOAD_TICKET_TTL_MS; },
+      get clientReportDownloadTickets() { return clientReportDownloadTickets; },
+      get crypto() { return crypto; },
+      get DATABASE_URL() { return DATABASE_URL; },
+      get fsp() { return fsp; },
+      get GOOGLE_DRIVE_OWNER_EMAIL() { return GOOGLE_DRIVE_OWNER_EMAIL; },
+      get MAX_CLIENT_REPORT_DOWNLOAD_TICKETS() { return MAX_CLIENT_REPORT_DOWNLOAD_TICKETS; },
+      get path() { return path; },
+      get PAYROLL_PAID_TODO_STATUSES() { return PAYROLL_PAID_TODO_STATUSES; },
+      get PDFDocument() { return PDFDocument; },
+      get PORT() { return PORT; },
+      get PUBLIC_BASE_URL() { return PUBLIC_BASE_URL; },
+      get REPORT_GMAIL_MAX_ATTACHMENT_BYTES() { return REPORT_GMAIL_MAX_ATTACHMENT_BYTES; },
+      get REPORT_GMAIL_MAX_TOTAL_BYTES() { return REPORT_GMAIL_MAX_TOTAL_BYTES; },
+      get REPORT_PDF_MAX_TOTAL_BYTES() { return REPORT_PDF_MAX_TOTAL_BYTES; },
+      get root() { return root; },
+      get todoSharePdfDownloadTickets() { return todoSharePdfDownloadTickets; }
+    }
+});
+
+const { createAttachmentTransfer } = require("./attachment-transfer");
+const {
+  pruneUnusedTodoAttachments,
+  videoMimeType,
+  moveAttachmentFile,
+  systemGoogleDriveClient,
+  attachmentVisibleToUser,
+  handleAttachmentDownload,
+  handleAttachmentUpload
+} = createAttachmentTransfer({
+    attachmentApiUrl: (...args) => attachmentApiUrl(...args),
+    canManageTodo: (...args) => canManageTodo(...args),
+    getFocusedPgStore: (...args) => getFocusedPgStore(...args),
+    getPgStore: (...args) => getPgStore(...args),
+    googleClient: (...args) => googleClient(...args),
+    googleDriveOwner: (...args) => googleDriveOwner(...args),
+    googleDriveTasksReady: (...args) => googleDriveTasksReady(...args),
+    googleDriveTokenAvailable: (...args) => googleDriveTokenAvailable(...args),
+    pendingAttachmentMap: (...args) => pendingAttachmentMap(...args),
+    readRequestDb: (...args) => readRequestDb(...args),
+    requireUser: (...args) => requireUser(...args),
+    runSerializedWork: (...args) => runSerializedWork(...args),
+    safeRestoreRelativePath: (...args) => safeRestoreRelativePath(...args),
+    securityHeaders: (...args) => securityHeaders(...args),
+    sendJson: (...args) => sendJson(...args),
+    undoProtectedAttachmentIds: (...args) => undoProtectedAttachmentIds(...args),
+    validTodoAttachmentId: (...args) => validTodoAttachmentId(...args),
+    writeDbAsync: (...args) => writeDbAsync(...args),
+    moduleValues: {
+      get crypto() { return crypto; },
+      get DATABASE_URL() { return DATABASE_URL; },
+      get execFileAsync() { return execFileAsync; },
+      get fs() { return fs; },
+      get fsp() { return fsp; },
+      get GOOGLE_CLIENT_ID() { return GOOGLE_CLIENT_ID; },
+      get GOOGLE_CLIENT_SECRET() { return GOOGLE_CLIENT_SECRET; },
+      get GOOGLE_DRIVE_OWNER_EMAIL() { return GOOGLE_DRIVE_OWNER_EMAIL; },
+      get GOOGLE_DRIVE_TASKS_FOLDER_ID() { return GOOGLE_DRIVE_TASKS_FOLDER_ID; },
+      get GOOGLE_REDIRECT_URI() { return GOOGLE_REDIRECT_URI; },
+      get IMAGE_PROCESSOR() { return IMAGE_PROCESSOR; },
+      get INDUS_GOOGLE_APP_ID() { return INDUS_GOOGLE_APP_ID; },
+      get MAX_TODO_IMAGE_BYTES() { return MAX_TODO_IMAGE_BYTES; },
+      get MAX_VIDEO_BYTES() { return MAX_VIDEO_BYTES; },
+      get MEDIA_DIR() { return MEDIA_DIR; },
+      get path() { return path; },
+      get PENDING_ATTACHMENT_TTL_MS() { return PENDING_ATTACHMENT_TTL_MS; },
+      get pipeline() { return pipeline; },
+      get TODO_IMAGE_DISPLAY_MAX_SIDE() { return TODO_IMAGE_DISPLAY_MAX_SIDE; },
+      get TODO_IMAGE_PROCESS_TIMEOUT_MS() { return TODO_IMAGE_PROCESS_TIMEOUT_MS; },
+      get TODO_IMAGE_THUMBNAIL_MAX_SIDE() { return TODO_IMAGE_THUMBNAIL_MAX_SIDE; },
+      get Transform() { return Transform; }
+    }
+});
 
 if (require.main === module) {
   start().catch((error) => {

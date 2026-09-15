@@ -61,7 +61,9 @@ test("HTTP reads cannot persist normalization; attachment GET uses targeted acce
   assert.match(source, /require\("\.\/storage"\)\.createStorage/);
   assert.match(read, /normalizeDb\(await getPgStore\(\)\.load\(\)\)\.db/);
   assert.doesNotMatch(read, /writeDbAsync|\.save\(/);
-  const attachment = source.slice(source.indexOf('if (attachmentMatch && req.method === "GET")'), source.indexOf('if (url.pathname === "/api/health"'));
+  const transfer = fs.readFileSync(path.join(__dirname, "../outputs/attachment-transfer.js"), "utf8");
+  const attachment = transfer.slice(transfer.indexOf('if (attachmentMatch && req.method === "GET")'), transfer.indexOf('async function handleAttachmentUpload('));
+  assert.match(source, /if \(await handleAttachmentDownload\(req, res, url\)\) return;/);
   assert.match(attachment, /attachmentAccessSeed\(attachmentId\)/);
   assert.doesNotMatch(attachment, /readDbAsync\(/);
   assert.match(source, /if \(error.code === "STALE_SNAPSHOT"\)[\s\S]{0,100}sendJson\(res, 409/);

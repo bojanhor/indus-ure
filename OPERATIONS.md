@@ -6,7 +6,8 @@ INDUS Ure in INDUS Fakture sta ločeni aplikaciji istega poslovnega lastnika
 (Bojan Horvat). Skupna domena/prijava ne pomeni skupne poslovne baze ali
 skupnega dovoljenja za spremembe kode. Poseg v Ure sam po sebi ne dovoljuje
 posega v Fakture. Uporabnik je 15. 9. 2026 dovolil postopno razdelitev monolita
-in povrnljivo objavo; obseg prve faze opisuje `MODULARIZATION-2026-09-15.md`.
+in povrnljivo objavo; obseg prve faze opisuje `MODULARIZATION-2026-09-15.md`,
+zaključek dogovorjenih sklopov pa `MODULARIZATION-COMPLETE-2026-09-15.md`.
 
 | | Ure | Fakture |
 |---|---|---|

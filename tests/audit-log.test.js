@@ -16,7 +16,7 @@ const ibro = { id: "ibro", name: "Ibro", role: "worker" };
 const maja = { id: "maja", name: "Maja", role: "worker" };
 
 test("audit labels use proper guillemets instead of mojibake", () => {
-  const source = fs.readFileSync(path.join(__dirname, "..", "outputs", "server.js"), "utf8");
+  const source = fs.readFileSync(path.join(__dirname, "..", "outputs", "undo-service.js"), "utf8");
   const labelFunction = source.match(/function undoActionLabel[\s\S]*?\n}/)?.[0] || "";
   assert.match(labelFunction, /izbrisal dogodek \\u00bb/);
   assert.match(labelFunction, /izbrisal stranko \\u00bb/);

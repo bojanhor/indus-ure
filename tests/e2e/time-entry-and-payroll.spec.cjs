@@ -118,7 +118,7 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
           mimeType: "image/png"
         };
         state.todoDialogPhotos = [photo];
-        window.openPhotoEditor(photo);
+        openPhotoEditor(photo);
       });
       await expect(page.locator("#photoEditorDialog")).toBeVisible();
       await expect(page.locator("#photoEditorRotateLeft")).toBeVisible();

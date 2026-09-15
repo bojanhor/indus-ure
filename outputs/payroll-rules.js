@@ -1,7 +1,7 @@
 "use strict";
 const crypto = require("node:crypto");
 
-// Payroll domain rules; orchestration and HTTP remain in server.js.
+// Payroll domain rules; settlement orchestration/HTTP are in settlement-service.js.
 function createPayrollRules({ isDateKey, nonnegativeNumber, defaultHourlyRateForUser, cleanUserId, signedNumber, isTrashedTodo, correctionPayrollLine, PAYROLL_STATUSES, PAYROLL_PAID_TODO_STATUSES }) {
 // BEGIN preserved payroll rules
 function payrollRange(input = {}) {
