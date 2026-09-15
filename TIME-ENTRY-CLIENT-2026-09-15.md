@@ -38,3 +38,22 @@ Malice so iz tega seznama izključene.
 - PostgreSQL QA vsebuje dodatni primer zavrnitve za obe vlogi z dokazom,
   da se opravila in stranke ob zavrnitvi ne spremenijo. Izvedba in varnostna
   kopija sta obvezni pred preklopom produkcije.
+
+## Objava
+
+- Objavljena izdaja: `07f7690` (15. 9. 2026).
+- PostgreSQL QA: 12 preverjanj + 3 preverjanja obnove/nadgradnje uspešna;
+  na kandidatu ponovno uspešnih vseh 206 strežniških testov.
+- Pred preklopom uspešna zasebna recovery kopija
+  `backup-20260915T120233Z-0f19adc1`, 188.239.783 bajtov;
+  localArchive, driveSize, driveMd5, freshDriveRead in restoreInstructions
+  potrjeni. SHA-256:
+  `779cbdf3ed33511dcd086915de89bc241bebc7f6f1f1a1198dffc84c2b8ad3d3`.
+- Produkcija: health OK, Ure in Fakture aktivni, brez opozoril ob zagonu.
+- Ročni brskalniški preizkus na objavljeni različici: »Shrani in zapri«
+  pri vpisu brez stranke pokaže opozorilo in pusti obrazec odprt. Osnutek je
+  nato zavržen z X; bralni SQL je potrdil 0 ustvarjenih testnih dogodkov.
+- Ponovni pregled je potrdil istih 6 arhiviranih vpisov brez stranke;
+  ni dodatnih vpisov z nazivom stranke, a brez njene reference.
+- Objava je preklopila samo Ure; ni sprememb konfiguracije Faktur ali Nginxa
+  in ni obnove ali popravljanja zgodovinskih poslovnih podatkov.
