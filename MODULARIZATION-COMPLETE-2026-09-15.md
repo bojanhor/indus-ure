@@ -81,5 +81,31 @@ poznejši uporabniški vpisi ostanejo. Ne obidi neuspele varnostne kopije.
 Za povrnitev ne uporabljaj skupnega `deploy.ps1`, ne posegaj v Fakture
 in ne odstranjuj predhodne izdaje.
 
-Dokazila dejanske objave, končni health pregled in vizualni pregled se
-dopolnijo po uspešnem zaključku produkcijskega postopka.
+## Dokazila uspešne objave
+
+- Izdaja `8b0141e`, aktivna od 15. 9. 2026 ob 21:08 po lokalnem času.
+- Arhiv kode SHA-256:
+  `425f5c685a16995e1b747590887e2e15f4482b6db4e0c5e3a68c45f03a641f10`.
+- Strežniški prehod: 234/234 testov in 16/16 PG preverjanj, vključno z
+  nadgradnjo produkcijske kopije ter zapisom s prejšnjo izdajo `64ad819`
+  in ponovnim branjem z novo kodo. Produkcijska baza pri QA ni bila spremenjena.
+- Root-only dokazilo: `/var/lib/indus-ure/qa/8b0141e.sha256`, vsebinski hash
+  `933a668d1ffbad5a610e818d83defd85610daef098b29c626b5d899cefd9601a`.
+- Recovery: `backup-20260915T190730Z-9dc80190`, datoteka
+  `indus-ure-recovery-20260915T190730Z.tar.gz`, 188.231.437 bajtov.
+  SHA-256: `be1ed01c121ca6d451d1b66d63304400a47123f7692d192570620f87c6e719ee`.
+  Preverjeno: lokalni arhiv, Drive velikost, MD5, sveže branje metapodatkov
+  in navodila za obnovo. Kopija vsebuje podatke, priloge in predhodno kodo.
+- Ure in Fakture sta po preklopu aktivni, oba health odgovora sta uspešna,
+  brez opozoril storitve Ure. Izdaja `64ad819` in njeno QA dokazilo sta ohranjena.
+- Produkcijski brskalnik: opravilo odprto takoj po osvežitvi, prikazana
+  fotografija, pregled obračuna Ibra, seznam in podrobnosti obračuna stranke,
+  vrnitev na seznam ter prikaz 20 dejanj v zgodovini.
+- Časovni izbirnik: začetna ura → minute → končna ura → minute → skrit
+  izbirnik, prikaz 1 h 15 min. Nov obrazec zavržen z X brez shranjevanja;
+  v produkciji nismo potrjevali obračunov ali izvajali Undo.
+- Brskalnik vrnjen v šefovski pogled Opravila. Lokalno je prestanih tudi
+  vseh 40 izoliranih brskalniških testov, vključno z zapisnimi UI scenariji.
+- Trenutni Google TODO nima več točke o modularizaciji; vsebuje štiri
+  druge zahteve. Dokument je bil samo prebran, nobena druga zahteva ni
+  odstranjena ali označena kot opravljena.
