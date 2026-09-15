@@ -6745,8 +6745,16 @@ function validateDebt(debt) {
   return "";
 }
 
-function validateTodo(todo, { requireClientId = false } = {}) {
+function validateTodo(todo, { requireClientId = false, db = null } = {}) {
   if (!todo.title) return "Manjka opis opravila.";
+  const requiresHoursClient = TIME_ENTRY_TODO_STATUSES.has(todo.status) && todo.status !== "meal";
+  if (requiresHoursClient && !String(todo.client || "").trim() && !String(todo.clientId || "").trim()) {
+    return "Za vpis ur izberi stranko.";
+  }
+  if (requiresHoursClient && requireClientId) {
+    const clientExists = todo.clientId && (!db || (db.clients || []).some((client) => String(client.clientId || client.id || "") === String(todo.clientId)));
+    if (!clientExists) return "Stranke ni bilo mogoče identificirati.";
+  }
   if (requireClientId && todo.client && !todo.clientId) return "Stranke ni bilo mogoče identificirati.";
   if (["material", "note"].includes(todo.status) && !todo.clientId) return todo.status === "note" ? "Za zapisek izberi stranko." : "Za vpis materiala izberi stranko.";
   if (todo.date && !/^\d{4}-\d{2}-\d{2}$/.test(todo.date)) return "Datum opravila ni pravilen.";
@@ -10315,7 +10323,7 @@ async function handleApi(req, res) {
         return;
       }
       todo = contactSelection.todo;
-      const resolvedValidation = validateTodo(todo, { requireClientId: true });
+      const resolvedValidation = validateTodo(todo, { requireClientId: true, db });
       if (resolvedValidation) {
         sendJson(res, 400, { error: resolvedValidation });
         return;
@@ -11080,7 +11088,7 @@ async function handleApi(req, res) {
         const previousDate = String(previousTodo.date || "");
         const dayShift = previousDate && date ? Math.round((new Date(`${date}T00:00:00`) - new Date(`${previousDate}T00:00:00`)) / 86400000) : 0;
         const endDate = shiftDateKey(todoEndDate(previousTodo), dayShift) || date;
-        const validation = validateTodo({ ...previousTodo, date, endDate, start, end });
+        const validation = validateTodo({ ...previousTodo, date, endDate, start, end }, { requireClientId: true, db });
         if (validation) {
           sendJson(res, 400, { error: validation });
           return;
@@ -11183,7 +11191,7 @@ async function handleApi(req, res) {
       const previousDate = String(previousTodo.date || "");
       const dayShift = previousDate && date ? Math.round((new Date(`${date}T00:00:00`) - new Date(`${previousDate}T00:00:00`)) / 86400000) : 0;
       const endDate = shiftDateKey(todoEndDate(previousTodo), dayShift) || date;
-      const validation = validateTodo({ ...previousTodo, date, endDate, start, end });
+      const validation = validateTodo({ ...previousTodo, date, endDate, start, end }, { requireClientId: true, db });
       if (validation) {
         sendJson(res, 400, { error: validation });
         return;
@@ -11492,7 +11500,7 @@ async function handleApi(req, res) {
         return;
       }
       todo = contactSelection.todo;
-      const resolvedValidation = validateTodo(todo, { requireClientId: true });
+      const resolvedValidation = validateTodo(todo, { requireClientId: true, db });
       if (resolvedValidation) {
         sendJson(res, 400, { error: resolvedValidation });
         return;

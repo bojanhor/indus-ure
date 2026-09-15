@@ -9919,7 +9919,16 @@
       return showFormValidationError($("todoForm"), message, field);
     }
 
+    function validateTodoHoursClient(todo) {
+      if (timeEntryStatusIds.has(todo.status) && todo.status !== "meal"
+          && !String(todo.client || "").trim() && !String(todo.clientId || "").trim()) {
+        return invalidTodoForm("Za vpis ur izberi stranko.", "todoFormClient");
+      }
+      return true;
+    }
+
     function validateTodo(todo) {
+      if (!validateTodoHoursClient(todo)) return false;
       const materialEntry = todo.status === "material";
       const noteEntry = todo.status === "note";
       if (!materialEntry && !noteEntry && (!todo.id || Array.isArray(todo.assigneeIds)) && (!Array.isArray(todo.assigneeIds) || todo.assigneeIds.length === 0)) {
@@ -15632,6 +15641,9 @@
         driveFiles: state.todoDialogDriveFiles,
         photos: state.todoDialogPhotos
       };
+      // Check before confirmations, optimistic closing and the automatic
+      // missing-time slot path, which intentionally skips full validation.
+      if (!validateTodoHoursClient(todo)) return;
       const previousClientBillableMinutes = manualClientBillableMinutes(existing?.clientBillableMinutes);
       const workerHoursChanged = Boolean(existing)
         && Math.round(duration(existing) * 60) !== Math.round(duration(todo) * 60);

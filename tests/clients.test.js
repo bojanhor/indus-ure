@@ -322,3 +322,20 @@ test("nevezana ad-hoc stranka se odstrani, povezana pa ostane", () => {
   assert.equal(pruneUnusedAdHocClients(database), true);
   assert.deepEqual(database.clients.map((client) => client.clientId), [usedId]);
 });
+
+test("vpisi ur zahtevajo stranko, malica in načrtovana opravila ostanejo izjema", () => {
+  const base = { title: "Delo", date: "2026-09-15", start: "08:00", end: "09:00" };
+  const db = { clients: [{ clientId: "client-test", name: "Testna stranka" }] };
+  for (const status of ["execution", "drive", "purchase"]) {
+    const todo = { ...base, status };
+    assert.equal(validateTodo(todo), "Za vpis ur izberi stranko.");
+    assert.equal(validateTodo({ ...todo, client: "  ", clientId: "  " }), "Za vpis ur izberi stranko.");
+    assert.equal(validateTodo({ ...todo, client: "Ad hoc stranka" }), "");
+    assert.equal(validateTodo({ ...todo, client: "Ad hoc stranka" }, { requireClientId: true, db }), "Stranke ni bilo mogoče identificirati.");
+    assert.equal(validateTodo({ ...todo, clientId: "nonexistent" }, { requireClientId: true, db }), "Stranke ni bilo mogoče identificirati.");
+    assert.equal(validateTodo({ ...todo, clientId: "client-test" }, { requireClientId: true, db }), "");
+  }
+  for (const status of ["meal", "open", "internal"]) {
+    assert.equal(validateTodo({ ...base, status }, { requireClientId: true, db }), "");
+  }
+});

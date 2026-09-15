@@ -87,6 +87,7 @@ test("časovna serija shrani premik datuma in zaokrožene ure atomarno", { timeo
       headers,
       body: JSON.stringify({
         title: "Premik v dnevnem pogledu",
+        client: "Testna stranka",
         status: "execution",
         date: "2026-07-21",
         endDate: "2026-07-21",
@@ -107,6 +108,7 @@ test("časovna serija shrani premik datuma in zaokrožene ure atomarno", { timeo
       headers,
       body: JSON.stringify({
         title: "Premik v dnevnem pogledu",
+        client: "Testna stranka",
         status: "execution",
         date: "2026-07-21",
         endDate: "2026-07-21",
@@ -184,6 +186,7 @@ test("časovna serija shrani premik datuma in zaokrožene ure atomarno", { timeo
       headers,
       body: JSON.stringify({
         title: "Drugi premik", status: "execution", date: "2026-07-22", endDate: "2026-07-22",
+        client: "Testna stranka",
         start: "13:00", end: "14:00", syncUser: "bojan", assigneeIds: ["bojan"]
       })
     });

@@ -118,8 +118,8 @@ test("video sprejme tudi datoteko brez MIME vrste", () => {
 });
 
 test("zaključeno opravilo se brez datuma in ur zavrne", () => {
-  assert.equal(validateTodo({ title: "Delo", status: "execution", date: "", start: "", end: "" }), "Za zaključeno opravilo vnesi datum ter uro od in do.");
-  assert.equal(validateTodo({ title: "Delo", status: "execution", date: "2026-07-20", start: "08:00", end: "09:00" }), "");
+  assert.equal(validateTodo({ title: "Delo", client: "Testna stranka", status: "execution", date: "", start: "", end: "" }), "Za zaključeno opravilo vnesi datum ter uro od in do.");
+  assert.equal(validateTodo({ title: "Delo", client: "Testna stranka", status: "execution", date: "2026-07-20", start: "08:00", end: "09:00" }), "");
 });
 
 test("večdnevno opravilo ohrani datum do, starejša opravila pa se varno obravnavajo kot enodnevna", () => {
@@ -127,7 +127,7 @@ test("večdnevno opravilo ohrani datum do, starejša opravila pa se varno obravn
   assert.equal(todo.endDate, "2026-07-23");
   assert.equal(validateTodo(todo), "");
   assert.equal(
-    validateTodo({ title: "Ure", status: "execution", date: "2026-07-20", endDate: "2026-07-23", start: "08:00", end: "12:00" }),
+    validateTodo({ title: "Ure", client: "Testna stranka", status: "execution", date: "2026-07-20", endDate: "2026-07-23", start: "08:00", end: "12:00" }),
     "Opravilo z uro je lahko samo za en dan. Za večdnevno opravilo pusti uri prazni."
   );
 

@@ -145,11 +145,11 @@ test("malica se delavcu plača največ do nastavljene meje", () => {
 test("vo\u017enja in nabava sta obra\u010dunljiva vnosa ur", () => {
   const db = { settings: { billing: { mealPaidMinutes: 45 } } };
   for (const status of ["drive", "purchase"]) {
-    const todo = { title: "Vnos ur", status, date: "2026-07-20", start: "08:00", end: "09:00" };
+    const todo = { title: "Vnos ur", client: "Testna stranka", status, date: "2026-07-20", start: "08:00", end: "09:00" };
     assert.equal(payrollMinutesForTodo(db, todo), 60);
     assert.equal(validateTodo(todo), "");
   }
-  assert.match(validateTodo({ title: "Vnos ur", status: "drive", date: "", start: "", end: "" }), /datum ter uro/);
+  assert.match(validateTodo({ title: "Vnos ur", client: "Testna stranka", status: "drive", date: "", start: "", end: "" }), /datum ter uro/);
 });
 
 test("vsako opravilo dobi skriti skupni ID dogodka", () => {

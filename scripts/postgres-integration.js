@@ -206,6 +206,22 @@ async function main() {
     assert.equal(persisted.todos.filter(todo => ["HTTP boss", "HTTP worker"].includes(todo.title)).length, 2);
     check("http.two_parallel_sessions_keep_both_changes");
 
+    const beforeClientValidation = await store.load();
+    for (const headers of [boss, worker]) {
+      for (const status of ["execution", "drive", "purchase"]) {
+        const invalidHours = { ...createBody("Missing client must not save"), status, client: " ", clientId: "", date: "2032-03-15", endDate: "2032-03-15", start: "08:00", end: "09:00" };
+        const rejected = await request("/api/todos", { method: "POST", headers, body: JSON.stringify(invalidHours) });
+        assert.equal(rejected.status, 400, await rejected.text());
+      }
+      const planned = beforeClientValidation.todos.find(todo => todo.title === "HTTP worker");
+      const rejectedEdit = await request(`/api/todos/${planned.id}`, { method: "PUT", headers, body: JSON.stringify({ ...planned, status: "execution", client: "", clientId: "", date: "2032-03-15", endDate: "2032-03-15", start: "08:00", end: "09:00" }) });
+      assert.equal(rejectedEdit.status, 400, await rejectedEdit.text());
+    }
+    const afterClientValidation = await store.load();
+    assert.deepEqual(afterClientValidation.todos, beforeClientValidation.todos);
+    assert.deepEqual(afterClientValidation.clients, beforeClientValidation.clients);
+    check("http.hours_require_client_for_both_roles_without_partial_writes");
+
     const body = JSON.stringify(createBody("Must not partially save"));
     const countBeforeSlow = fullLoads();
     let finish;

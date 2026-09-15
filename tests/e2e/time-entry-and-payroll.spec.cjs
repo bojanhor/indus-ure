@@ -1401,6 +1401,7 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
       await localLogin(page, "ibro");
       await page.locator("#writeHoursButton").click();
       await page.locator("#todoFormTask").fill("PW invalid time");
+      await page.locator("#todoFormClient").fill(CLIENT_ALIAS);
       await page.locator("#todoFormDate").fill(ENTRY_DATE);
       await page.locator("#todoFormStart").evaluate((input) => {
         input.value = "10:00";
