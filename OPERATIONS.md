@@ -5,7 +5,8 @@
 INDUS Ure in INDUS Fakture sta ločeni aplikaciji istega poslovnega lastnika
 (Bojan Horvat). Skupna domena/prijava ne pomeni skupne poslovne baze ali
 skupnega dovoljenja za spremembe kode. Poseg v Ure sam po sebi ne dovoljuje
-posega v Fakture. Razdelitev monolita je odložena do posebnega zahtevka.
+posega v Fakture. Uporabnik je 15. 9. 2026 dovolil postopno razdelitev monolita
+in povrnljivo objavo; obseg prve faze opisuje `MODULARIZATION-2026-09-15.md`.
 
 | | Ure | Fakture |
 |---|---|---|
@@ -46,6 +47,8 @@ testne dokaze in pravila; ta navodila jih ne nadomeščajo.
 - HTTP branje ne shranjuje normalizacije. Združljivostna normalizacija
   ostane samo v pomnilniku; obstojna normalizacija teče pred odprtjem HTTP
   porta v `migratePostgresNormalization()`.
+  Življenjski cikel shrambe in predpomnilnik posamezne zahteve sta v
+  `outputs/storage.js`; relacijski mehanizem ostaja v `outputs/postgres-store.js`.
 - `PostgresStore.load()` uporabi eno transakcijo `REPEATABLE READ READ ONLY`.
   Vseh dvanajst skupin podatkov zato pripada istemu trenutku.
 - `save()` sprejme samo isti objekt, ki ga je vrnil `load()` tega store-a.
@@ -86,6 +89,8 @@ Revizijska zaščita ne more zaščititi pred administratorjem, ki jo obide.
    nespremenjene vrstice, pravice prilog in dejanski recovery format.
    Obnovi dump in recovery kopijo, preveri zgoščene vrednosti vseh poslovnih
    tabel ter testne datoteke. Nadgradnjo preveri še na ločeni kopiji produkcije.
+   Na tej kopiji preveri tudi branje in zapis s trenutno objavljeno kodo ter
+   ponovni prehod na kandidata. Produkcijska baza pri tem ni cilj zapisovanja.
    Ob uspehu shrani root-owned dokaz za točno vsebino kandidata v
    `/var/lib/indus-ure/qa/<revizija>.*`. Začasne baze/vloga/datoteke se odstranijo.
 5. `deploy-indus-ure` zahteva ustrezen dokaz in skladno vsebino kandidata,

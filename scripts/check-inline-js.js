@@ -1,9 +1,10 @@
 const fs = require("fs");
 const path = require("path");
 const vm = require("vm");
+const { renderAppShell } = require("../outputs/app-shell");
 
 const htmlPath = path.join(__dirname, "..", "outputs", "index.html");
-const html = fs.readFileSync(htmlPath, "utf8");
+const html = renderAppShell(fs.readFileSync(htmlPath, "utf8"));
 const scripts = [...html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/gi)];
 
 if (scripts.length === 0) {

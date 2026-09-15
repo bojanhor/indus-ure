@@ -86,6 +86,26 @@ async function main() {
     const afterNoop = await fingerprints();
     for (const table of tables.filter(table => !["indus_meta", "indus_sessions"].includes(table))) assert.deepEqual(afterNoop[table], beforeNoop[table], `Normalization is not idempotent for ${table}`);
     check("upgrade.production_clone_preserves_business_counts_and_is_idempotent");
+    // This mode already requires a private QA database. Exercise the deployed
+    // version against the upgraded clone, never against production itself.
+    const previousServer = await fs.realpath("/opt/indus-ure/current/outputs/server.js");
+    assert.match(previousServer, /^\/opt\/indus-ure\/releases\/[a-f0-9]{7,40}\/outputs\/server\.js$/);
+    const previous = require(previousServer);
+    const { PostgresStore: PreviousStore } = require(path.join(path.dirname(previousServer), "postgres-store.js"));
+    const previousStore = new PreviousStore(pool, media);
+    const rollbackBefore = await digest();
+    const rollbackDb = await previousStore.load();
+    previous.normalizeDb(rollbackDb);
+    await previousStore.save(rollbackDb);
+    const rollbackAfter = await digest();
+    for (const table of tables.filter(table => !["indus_meta", "indus_sessions"].includes(table))) {
+      assert.deepEqual(rollbackAfter[table], rollbackBefore[table], `Code rollback changed ${table}`);
+    }
+    const forward = await store.load();
+    const beforeForward = JSON.stringify(forward);
+    normalizeDb(forward);
+    assert.equal(JSON.stringify(forward), beforeForward, "Forward reload after rollback changes normalized data");
+    check("rollback.previous_code_reads_writes_and_forward_reload", { previousRelease: path.basename(path.dirname(path.dirname(previousServer))) });
     await fs.writeFile(reportPath, JSON.stringify({ checks, before, after, passed: true }, null, 2));
     return;
   }

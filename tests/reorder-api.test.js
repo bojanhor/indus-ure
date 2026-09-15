@@ -83,7 +83,11 @@ test("API združi ročni vrstni red med šefom in delavcem, ne da bi premaknil s
       body: JSON.stringify({ sourceId: c.id, targetId: a.id, placement: "before" })
     });
     assert.equal(reorder.status, 200, reorder.body);
-    const persisted = JSON.parse(await fs.readFile(path.join(dataDir, "db.json"), "utf8"));
+    // Read the persisted state through the server, not midway through a
+    // concurrent JSON audit-file write in the isolated test instance.
+    const persistedResponse = await request(port, "/api/todos", { headers: bossHeaders });
+    assert.equal(persistedResponse.status, 200, persistedResponse.body);
+    const persisted = JSON.parse(persistedResponse.body);
     const ordered = [...persisted.todos]
       .filter((todo) => !todo.done && todo.status === "open")
       .sort((left, right) => Number(left.sharedManualOrder) - Number(right.sharedManualOrder))

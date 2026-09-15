@@ -5,21 +5,29 @@ const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
+const { renderAppShell } = require("../outputs/app-shell");
+
+async function readAppHtml() {
+  return renderAppShell(await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8"));
+}
 
 test("Postgres store singleton is initialized before database startup", async () => {
-  const serverSource = await fs.readFile(path.join(__dirname, "..", "outputs", "server.js"), "utf8");
-  assert.match(serverSource, /let pgStore = null;/);
+  const storageSource = await fs.readFile(path.join(__dirname, "..", "outputs", "storage.js"), "utf8");
+  assert.match(storageSource, /let pgStore = null;/);
+  assert.ok(storageSource.indexOf("let pgStore = null;") < storageSource.indexOf("async function ensurePostgresDb("));
 });
 
 test("opravilo sprejme do 40 prilog v obrazcu in na strežniku", async () => {
   const [html, server] = await Promise.all([
-    fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8"),
+    readAppHtml(),
     fs.readFile(path.join(__dirname, "..", "outputs", "server.js"), "utf8")
   ]);
   assert.match(html, /const maxTodoAttachments = 40;/);
   assert.match(html, /maxTodoAttachments - state\.todoDialogPhotos\.length/);
   assert.match(server, /const MAX_TODO_ATTACHMENTS = 40;/);
-  assert.match(server, /filter\(Boolean\)\.slice\(0, MAX_TODO_ATTACHMENTS\)/);
+  const attachments = await fs.readFile(path.join(__dirname, "..", "outputs", "attachment-model.js"), "utf8");
+  assert.match(server, /require\("\.\/attachment-model"\)\.createAttachmentModel/);
+  assert.match(attachments, /filter\(Boolean\)\.slice\(0, MAX_TODO_ATTACHMENTS\)/);
 });
 
 test("nepooblaščena Google prijava ima splošno zavrnitev in trajni zapis", async () => {
@@ -35,7 +43,7 @@ test("nepooblaščena Google prijava ima splošno zavrnitev in trajni zapis", as
 
 test("front-end naročila in foto urejevalnik ohranita dogovorjeni mobilni prikaz", async () => {
   const [html, server] = await Promise.all([
-    fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8"),
+    readAppHtml(),
     fs.readFile(path.join(__dirname, "..", "outputs", "server.js"), "utf8")
   ]);
   assert.match(html, /function todoOrderingSort\(a, b\) \{[\s\S]*?orderedDifference/);
@@ -123,7 +131,7 @@ test("front-end naročila in foto urejevalnik ohranita dogovorjeni mobilni prika
 
 test("oznaka spremembe je zasebna po prejemniku, vidna v vseh pogledih in nastane le ob shranjeni kljukici", async () => {
   const [html, server] = await Promise.all([
-    fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8"),
+    readAppHtml(),
     fs.readFile(path.join(__dirname, "..", "outputs", "server.js"), "utf8")
   ]);
   assert.match(server, /function recordTodoChangeNotices\(db, todos, actor, fields/);
@@ -161,13 +169,13 @@ test("oznaka spremembe je zasebna po prejemniku, vidna v vseh pogledih in nastan
 });
 
 test("prehod iz novega dogodka v vpis ur počaka na zaprtje modala", async () => {
-  const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  const html = await readAppHtml();
   assert.match(html, /\$\("todoCreationTabs"\)\.addEventListener\("click", async \(event\) => \{/);
   assert.match(html, /\$\("todoDialog"\)\.close\(\);[\s\S]{0,600}await new Promise\(\(resolve\) => setTimeout\(resolve, 0\)\);[\s\S]{0,1000}openStandaloneHoursDialog/);
 });
 
 test("disketa shrani nov ali obstoječi vpis brez zapiranja modala", async () => {
-  const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  const html = await readAppHtml();
   assert.match(html, /id="saveTodoWithoutClosing" type="button" title="Shrani brez zapiranja"/);
   assert.match(html, /async function saveTodoFromDialog\(\{ closeAfterSave = true, handover = false \} = \{\}\)/);
   assert.match(html, /async function keepTodoDialogOpenAfterSave\(data, todo, wasCreating\)/);
@@ -177,7 +185,7 @@ test("disketa shrani nov ali obstoječi vpis brez zapiranja modala", async () =>
 
 test("ročni filter loči in omogoča razvrščanje nujnih opravil", async () => {
   const [html, server] = await Promise.all([
-    fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8"),
+    readAppHtml(),
     fs.readFile(path.join(__dirname, "..", "outputs", "server.js"), "utf8")
   ]);
   assert.match(html, /function todoManualCategory\(todo\) \{\s*if \(todo\?\.urgent\) return "urgent";/);
@@ -200,7 +208,7 @@ test("ročni filter loči in omogoča razvrščanje nujnih opravil", async () =>
 });
 
 test("zahtevek za dopolnitev uporabnika jasno vodi od pošiljanja do potrditve", async () => {
-  const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  const html = await readAppHtml();
   assert.match(html, /id="completionRequestSubmit"/);
   assert.match(html, /function setCompletionRequestSending\(sending\)/);
   assert.match(html, /Pošiljam zahtevek po e-pošti\. Počakaj na potrditev/);
@@ -209,7 +217,7 @@ test("zahtevek za dopolnitev uporabnika jasno vodi od pošiljanja do potrditve",
 });
 
 test("večdnevno opravilo ima ločen datum do in se prikaže skozi cel razpon", async () => {
-  const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  const html = await readAppHtml();
   assert.match(html, /id="todoFormEndDate"/);
   assert.match(html, /id="setTodoFormEndDateTomorrow"/);
   assert.match(html, /id="advanceTodoFormEndDate"/);
@@ -221,7 +229,7 @@ test("večdnevno opravilo ima ločen datum do in se prikaže skozi cel razpon", 
 });
 
 test("obračunsko obdobje samodejno sledi novemu dnevu, ročna izbira pa ostane ločena po delavcu", async () => {
-  const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  const html = await readAppHtml();
   assert.match(html, /billingRangeSelections: \{\}/);
   assert.match(html, /function billingRangeSelectionForWorker\(workerId\)/);
   assert.match(html, /function billingTodayKey\(now = new Date\(\)\)/);
@@ -246,7 +254,7 @@ test("obračunsko obdobje samodejno sledi novemu dnevu, ročna izbira pa ostane 
   assert.match(html, /saveBillingRangeSelection\(state\.billingWorkerId, \{ from: button\.dataset\.from, to: button\.dataset\.to \}\);/);
 });
 test("obnovitev seje ohrani pogled, preverjanje v ozadju pa ne preusmeri uporabnika", async () => {
-  const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  const html = await readAppHtml();
   assert.match(html, /const sessionRecoveryUiStateKey = "indus-ure-session-return"/);
   assert.match(html, /function rememberSessionRecoveryUiState\(\)/);
   assert.match(html, /function restoreSessionRecoveryUiState\(\)/);
@@ -259,7 +267,7 @@ test("obnovitev seje ohrani pogled, preverjanje v ozadju pa ne preusmeri uporabn
   assert.match(html, /const restoredSessionUi = restoreSessionRecoveryUiState\(\);/);
 });
 test("poročilo stranke odpre isti vpis s klikom na naslov ali zeleni povzetek", async () => {
-  const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  const html = await readAppHtml();
   assert.match(html, /client-billing-title-trigger/);
   assert.match(html, /client-billing-charges-trigger/);
   assert.match(html, /open-report-todo/);
@@ -268,7 +276,7 @@ test("poročilo stranke odpre isti vpis s klikom na naslov ali zeleni povzetek",
 });
 test("client report can switch between billable and worker hours", async () => {
   const [html, server] = await Promise.all([
-    fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8"),
+    readAppHtml(),
     fs.readFile(path.join(__dirname, "..", "outputs", "server.js"), "utf8")
   ]);
   assert.match(html, /id="reportHoursMode"/);
@@ -292,7 +300,7 @@ test("client report can switch between billable and worker hours", async () => {
 });
 test("client billing filter, back navigation confirmation and scoped late mail are present", async () => {
   const [html, server] = await Promise.all([
-    fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8"),
+    readAppHtml(),
     fs.readFile(path.join(__dirname, "..", "outputs", "server.js"), "utf8")
   ]);
   assert.match(html, /id="reportShowPending"/);
@@ -314,7 +322,7 @@ test("client billing filter, back navigation confirmation and scoped late mail a
   assert.match(server, /editorWorkContext/);
 });
 test("dnevni pregled varno vleče enodnevno opravilo brez ure v 15-minutno časovnico", async () => {
-  const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  const html = await readAppHtml();
   assert.match(html, /function beginDayAllDayPointerDrag\(event, todo\)/);
   assert.match(html, /touchHoldRequired = event\.pointerType === "touch"/);
   assert.match(html, /setTimeout\(\(\) => \{[\s\S]*?\}, 400\)/);
@@ -326,7 +334,7 @@ test("dnevni pregled varno vleče enodnevno opravilo brez ure v 15-minutno časo
   assert.match(html, /\.day-timeline-event\.is-drop-preview/);
 });
 test("večdnevno opravilo dobi povezani mesečni trak in varne kontrole vnosa", async () => {
-  const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  const html = await readAppHtml();
   assert.match(html, /function todoIsMultiDayCalendarSpan\(todo\)/);
   assert.match(html, /function monthMultiDayLayout\(todos, gridStart, dayCount = 42\)/);
   assert.match(html, /function appendMonthMultiDayLanes\(day, key, weekIndex, layout\)/);
@@ -346,7 +354,7 @@ test("večdnevno opravilo dobi povezani mesečni trak in varne kontrole vnosa", 
   assert.match(html, /min-height: 40px/);
 });
 test("obrazci, obnova pogleda in tarifa pri vpisu ur imajo varne uporabniške kontrole", async () => {
-  const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  const html = await readAppHtml();
   assert.match(html, /event\.target !== dialog \|\| !dialog\.open \|\| todoDialogSaveInFlight \|\| state\.dayTimelineSaving/);
   assert.match(html, /dialog\.close\(\);/);
   assert.match(html, /window\.addEventListener\("pagehide", \(\) => \{\s*persistTodoCreationDraft\(\)\.catch\(\(\) => \{\}\);\s*rememberSessionRecoveryUiState\(\);/);
@@ -356,7 +364,7 @@ test("obrazci, obnova pogleda in tarifa pri vpisu ur imajo varne uporabniške ko
 });
 test("client billing supports bulk selection and safe client reassignment", async () => {
   const [html, server] = await Promise.all([
-    fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8"),
+    readAppHtml(),
     fs.readFile(path.join(__dirname, "..", "outputs", "server.js"), "utf8")
   ]);
   assert.match(html, /id="selectAllClientBill"/);
@@ -378,7 +386,7 @@ test("client billing supports bulk selection and safe client reassignment", asyn
   assert.match(server, /paketno zamenjal stranko pri izbranih dogodkih/);
 });
 test("imenik strank podpira več stabilnih kontaktov in varno brisanje", async () => {
-  const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  const html = await readAppHtml();
   assert.match(html, /id="clientEditContacts"/);
   assert.match(html, /id="addClientEditContact"/);
   assert.match(html, /function clientEditContactDrafts\(/);
@@ -391,7 +399,7 @@ test("imenik strank podpira več stabilnih kontaktov in varno brisanje", async (
 });
 test("AJPES iskalnik polni le osnutek lokalne stranke, brez prikaza notranjega ID-ja med zadetki", async () => {
   const [html, server] = await Promise.all([
-    fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8"),
+    readAppHtml(),
     fs.readFile(path.join(__dirname, "..", "outputs", "server.js"), "utf8")
   ]);
   assert.match(html, /id="ajpesSearch"/);
@@ -407,7 +415,7 @@ test("AJPES iskalnik polni le osnutek lokalne stranke, brez prikaza notranjega I
 });
 
 test("mese\u010dni in dnevni pogled ohranita berljivost nujnih in zaklju\u010denih dogodkov", async () => {
-  const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  const html = await readAppHtml();
   assert.match(html, /\.day-todo\.done\.todo-status-execution/);
   assert.match(html, /\.day-todo\.urgent/);
   assert.match(html, /\.day-multiday-event\.urgent\.is-span-start/);
@@ -462,6 +470,14 @@ test("HTML shell has a strict nonce CSP and PWA endpoints", { timeout: 15_000 },
     assert.doesNotMatch(page.headers["content-security-policy"] || "", /unsafe-inline/);
     const nonce = /<script nonce="([^"]+)"/.exec(page.body)?.[1];
     assert.ok(nonce);
+    assert.equal((page.body.match(/function createTimeEntryEditor\(/g) || []).length, 1);
+    assert.doesNotMatch(page.body, /@indus-module:/);
+    assert.equal((await request(port, "/editor/time-entry.js")).status, 404);
+    assert.equal((await request(port, "/storage.js")).status, 404);
+    const head = await request(port, "/", { method: "HEAD" });
+    assert.equal(head.status, 200);
+    assert.equal(head.body, "");
+    assert.equal(Number(head.headers["content-length"]), Buffer.byteLength(page.body));
     const escapedNonce = nonce.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     assert.match(page.body, new RegExp(`<style nonce="${escapedNonce}"`));
     const worker = await request(port, "/service-worker.js");
@@ -757,7 +773,7 @@ test("lastnik vidi začasno video prilogo pred shranjevanjem, drugi uporabniki n
 });
 
 test("zapiranje obstoječega opravila ne odstranjuje že shranjenih videov", async () => {
-  const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  const html = await readAppHtml();
   assert.match(html, /\{ \.\.\.data\.photo, temporaryUpload: true \}/);
   assert.match(html, /function markTodoDialogAttachmentsSaved\(\)/);
   assert.match(html, /if \(!photo\?\.temporaryUpload \|\| !isVideoAttachment\(photo\)/);
@@ -768,7 +784,7 @@ test("zapiranje obstoječega opravila ne odstranjuje že shranjenih videov", asy
 test("completion request UI and authenticated link flow are present", async () => {
   const [server, html] = await Promise.all([
     fs.readFile(path.join(__dirname, "..", "outputs", "server.js"), "utf8"),
-    fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8")
+    readAppHtml()
   ]);
   assert.match(server, /TODO_COMPLETION_REQUEST_TTL_MS/);
   assert.match(server, /\/completion-request\$/);
@@ -793,15 +809,16 @@ test("completion request UI and authenticated link flow are present", async () =
 test("e-poštna povezava odpre ciljno opravilo pred celotnim nalaganjem", async () => {
   const [server, html, store] = await Promise.all([
     fs.readFile(path.join(__dirname, "..", "outputs", "server.js"), "utf8"),
-    fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8"),
+    readAppHtml(),
     fs.readFile(path.join(__dirname, "..", "outputs", "postgres-store.js"), "utf8")
   ]);
   assert.match(server, /function visibleTodoForUser\(db, user, id\) \{/);
   assert.match(server, /const todo = visibleTodoForUser\(db, user, id\);/);
   assert.match(server, /async function requireUserForFocusedTodo\(req, res\) \{/);
-  assert.match(server, /function getFocusedPgPool\(\) \{/);
-  assert.match(server, /application_name: "indus-ure-focused-read"/);
-  assert.match(server, /max: 1,/);
+  const storage = await fs.readFile(path.join(__dirname, "..", "outputs", "storage.js"), "utf8");
+  assert.match(storage, /function getFocusedPgPool\(\) \{/);
+  assert.match(storage, /application_name: "indus-ure-focused-read"/);
+  assert.match(storage, /max: 1,/);
   assert.match(server, /getFocusedPgStore\(\)\.sessionWithRevision\(sessionTokenHash\(token\)\)/);
   assert.match(server, /const focused = await getFocusedPgStore\(\)\.focusedTodoForLock\(id\);/);
   assert.match(server, /completionRequestGroup\(id, tokenHash\)/);
@@ -857,7 +874,7 @@ test("zagonska identiteta in imenik v PostgreSQL ostaneta ozka", async () => {
 });
 
 test("initial application shell waits for one snapshot and renders only the active view", async () => {
-  const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  const html = await readAppHtml();
   const bootSource = html.slice(html.indexOf("async function boot()"), html.indexOf("async function reconnectAfterOffline()"));
   const renderSource = html.slice(html.indexOf("function render()"), html.indexOf("function calendarDayTodoSort"));
   assert.match(html, /<body class="booting">/);
@@ -878,7 +895,7 @@ test("initial application shell waits for one snapshot and renders only the acti
 
 test("spletni zagon ne pokaže zastarele oznake spremembe iz lokalnega predpomnilnika", async () => {
   const [html, worker] = await Promise.all([
-    fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8"),
+    readAppHtml(),
     fs.readFile(path.join(__dirname, "..", "outputs", "service-worker.js"), "utf8")
   ]);
   const cachedSnapshot = html.slice(html.indexOf("function applyOnlineCachedSnapshot"), html.indexOf("function showLoginScreen"));
@@ -889,7 +906,7 @@ test("spletni zagon ne pokaže zastarele oznake spremembe iz lokalnega predpomni
 });
 
 test("hitre bližnjice odprejo pravo formo in filter zaključenih opravil ostane ločen po uporabniku", async () => {
-  const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  const html = await readAppHtml();
   assert.match(html, /href="\?quick=task"/);
   assert.match(html, /href="\?quick=hours"/);
   assert.match(html, /function quickCreateHref\(mode\)/);
@@ -903,7 +920,7 @@ test("hitre bližnjice odprejo pravo formo in filter zaključenih opravil ostane
   assert.match(html, /localStorage\.setItem\(todoBillingFilterStorageKey\(\), JSON\.stringify/);
 });
 test("monthly drag autoscrolls at the edge while a short mouse click still opens the event", async () => {
-  const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  const html = await readAppHtml();
   assert.match(html, /const MONTH_TODO_AUTO_SCROLL_EDGE = 108;/);
   assert.match(html, /function tickMonthTodoPointerDragAutoScroll\(timestamp\)/);
   assert.match(html, /cancelAnimationFrame\(drag\.autoScrollFrame\)/);
@@ -918,7 +935,7 @@ test("hitre PWA bližnjice imajo ločen manifest in ne naložijo celotne zgodovi
   const [server, store, html, worker, manifest] = await Promise.all([
     fs.readFile(path.join(__dirname, "..", "outputs", "server.js"), "utf8"),
     fs.readFile(path.join(__dirname, "..", "outputs", "postgres-store.js"), "utf8"),
-    fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8"),
+    readAppHtml(),
     fs.readFile(path.join(__dirname, "..", "outputs", "service-worker.js"), "utf8"),
     fs.readFile(path.join(__dirname, "..", "outputs", "manifest.webmanifest"), "utf8")
   ]);
@@ -940,7 +957,7 @@ test("hitre PWA bližnjice imajo ločen manifest in ne naložijo celotne zgodovi
 });
 
 test("boss can create a task for workers directly from admin view", async () => {
-  const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  const html = await readAppHtml();
   assert.match(html, /\$\("newTodoButton"\)\.classList\.remove\("hidden"\);/);
   assert.match(html, /function startTodoForDate\(date = ""\) \{\s*openTodoDialog\(\{ date, _adminCreate: isAdminView\(\) \}\);/);
   assert.match(html, /todo\._adminCreate\s*\? \[\]/);
@@ -959,7 +976,7 @@ test("boss can create a task for workers directly from admin view", async () => 
 });
 
 test("nova forma opravila ohrani osnutek med vrstama vnosa in ne podeduje stranke iz obra\u010duna", async () => {
-  const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  const html = await readAppHtml();
   assert.match(html, /#todoDialog #todoFormStatusField \{ order: -1; \}/);
   assert.match(html, /\$\("todoFormClient"\)\.value = client\?\.search \|\| todo\.client \|\| "";/);
   assert.doesNotMatch(html, /\$\("todoFormClient"\)\.value = client\?\.search \|\| todo\.client \|\| \$\("reportClient"\)/);
@@ -972,7 +989,7 @@ test("nova forma opravila ohrani osnutek med vrstama vnosa in ne podeduje strank
 });
 
 test("nova forma samodejno obnovi osnutek po osvežitvi, X pa ga izrecno zavrže", async () => {
-  const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  const html = await readAppHtml();
   assert.match(html, /const offlineTodoCreationDraftStore = "creationDrafts"/);
   assert.match(html, /const offlineTodoCreationDraftMaxAgeMs = 14 \* 24 \* 60 \* 60 \* 1000/);
   assert.match(html, /function persistTodoCreationDraft\(\)/);
@@ -990,7 +1007,7 @@ test("nova forma samodejno obnovi osnutek po osvežitvi, X pa ga izrecno zavrže
 
 test("zgodovina opravila je šefovski pogled z navigacijo po dejanskih prejšnjih stanjih", async () => {
   const [html, server] = await Promise.all([
-    fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8"),
+    readAppHtml(),
     fs.readFile(path.join(__dirname, "..", "outputs", "server.js"), "utf8")
   ]);
   assert.match(server, /const TODO_REVISION_HISTORY_LIMIT = 12/);
@@ -1007,7 +1024,7 @@ test("zgodovina opravila je šefovski pogled z navigacijo po dejanskih prejšnji
 
 test("todo polish persists client report sorting and closes the daily view after explicit save", async () => {
   const [html, server] = await Promise.all([
-    fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8"),
+    readAppHtml(),
     fs.readFile(path.join(__dirname, "..", "outputs", "server.js"), "utf8")
   ]);
   assert.match(html, /const reportClientSortModes = \["recent", "hours_desc", "oldest", "count_desc", "name_asc", "name_desc"\]/);
@@ -1019,7 +1036,7 @@ test("todo polish persists client report sorting and closes the daily view after
 });
 
 test("iskanje omogo\u010da skok do opravila z za\u010dasno poudaritvijo", async () => {
-  const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  const html = await readAppHtml();
   assert.match(html, /class="search-result-locate icon-btn"/);
   assert.match(html, /function revealTodoFromSearch\(todo\)/);
   assert.match(html, /target\.scrollIntoView\(\{ behavior: "smooth", block: "center", inline: "nearest" \}\)/);
@@ -1027,7 +1044,7 @@ test("iskanje omogo\u010da skok do opravila z za\u010dasno poudaritvijo", async 
   assert.match(html, /@keyframes search-result-highlight/);
 });
 test("calendar-only task controls are date-bound, unavailable for time entries, and excluded only from task lists", async () => {
-  const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  const html = await readAppHtml();
   const materialIndex = html.indexOf('id="todoFormMaterialField"');
   const dateTimeIndex = html.indexOf('id="todoFormDateTimeSection"');
   const attachmentsIndex = html.indexOf('id="todoFormAttachments"');
@@ -1059,7 +1076,7 @@ test("calendar-only task controls are date-bound, unavailable for time entries, 
 
 test("izvorno opravilo se prikaže samo pri res povezanem vpisu ur", async () => {
   const [html, server] = await Promise.all([
-    fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8"),
+    readAppHtml(),
     fs.readFile(path.join(__dirname, "..", "outputs", "server.js"), "utf8")
   ]);
   assert.match(html, /function sourceProjectDetailsForTodo\(todo = \{\}\)/);
@@ -1073,7 +1090,7 @@ test("izvorno opravilo se prikaže samo pri res povezanem vpisu ur", async () =>
 });
 
 test("blocked form saves keep an accessible error inside the active form", async () => {
-  const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  const html = await readAppHtml();
   assert.match(html, /\.form-validation-error \{[\s\S]*?position: sticky;/);
   assert.match(html, /function showFormValidationError\(formOrField, message, field = null\)/);
   assert.match(html, /node\.setAttribute\("role", "alert"\)/);
@@ -1087,7 +1104,7 @@ test("blocked form saves keep an accessible error inside the active form", async
 });
 
 test("date sort is ascending and client view hides only order status chips", async () => {
-  const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  const html = await readAppHtml();
   assert.match(html, /function todoDateSort\(a, b\) \{[\s\S]*?String\(a\.date\)\.localeCompare\(String\(b\.date\)\)[\s\S]*?String\(a\.start \|\| "00:00"\)\.localeCompare\(String\(b\.start \|\| "00:00"\)\)[\s\S]*?String\(a\.end \|\| "00:00"\)\.localeCompare\(String\(b\.end \|\| "00:00"\)\)/);
   assert.match(html, /const showStatusChip = !todoOrderStatusIds\.has\(todo\.status\);/);
   assert.match(html, /showStatusChip \? `<span class="todo-chip todo-status-chip todo-status-color \$\{todoStatusClass\(todo\.status\)\}">/);
@@ -1095,7 +1112,7 @@ test("date sort is ascending and client view hides only order status chips", asy
 
 test("logistična statusa sta ločena, Vrni nima več stare oznake in ročni filter nima odvečnega opisa", async () => {
   const [html, server] = await Promise.all([
-    fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8"),
+    readAppHtml(),
     fs.readFile(path.join(__dirname, "..", "outputs", "server.js"), "utf8")
   ]);
   assert.ok(html.includes('{ id: "return_and_bill", label: "Vrne naj" }'));
@@ -1111,7 +1128,7 @@ test("logistična statusa sta ločena, Vrni nima več stare oznake in ročni fil
 
 test("PDF poročilo uporabi seji vezan neposredni prenos, tudi na mobilnem Firefoxu", async () => {
   const [html, server, nginx] = await Promise.all([
-    fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8"),
+    readAppHtml(),
     fs.readFile(path.join(__dirname, "..", "outputs", "server.js"), "utf8"),
     fs.readFile(path.join(__dirname, "..", "deploy", "nginx-indus-ure.conf"), "utf8")
   ]);
@@ -1131,7 +1148,7 @@ test("PDF poročilo uporabi seji vezan neposredni prenos, tudi na mobilnem Firef
 });
 
 test("skupni obračun strank uporablja shranjeni kljukici brez Excel izvozov", async () => {
-  const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  const html = await readAppHtml();
   assert.match(html, /id="reportBillingFilterControl"/);
   assert.match(html, /id="reportShowPending"/);
   assert.match(html, /id="reportShowBilled"/);
@@ -1144,7 +1161,7 @@ test("skupni obračun strank uporablja shranjeni kljukici brez Excel izvozov", a
 });
 test("prijavljen uporabnik dobi neblokirajoč zagonski okvir in PostgreSQL indekse", async () => {
   const [html, store] = await Promise.all([
-    fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8"),
+    readAppHtml(),
     fs.readFile(path.join(__dirname, "..", "outputs", "postgres-store.js"), "utf8")
   ]);
   assert.match(html, /id="appStartupStatus"/);
@@ -1164,7 +1181,7 @@ test("prijavljen uporabnik dobi neblokirajoč zagonski okvir in PostgreSQL indek
 
 test("dogodek in vsaka priloga imata varno deljenje brez dodatnega zavihka", async () => {
   const [html, server] = await Promise.all([
-    fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8"),
+    readAppHtml(),
     fs.readFile(path.join(__dirname, "..", "outputs", "server.js"), "utf8")
   ]);
   assert.match(html, /id="shareTodoPdf"/);
@@ -1252,7 +1269,7 @@ test("produkcijska lokalna podporna prijava zahteva zaupanja vreden LAN proxy", 
   }
 });
 test("dnevni obračun prikaže ločene postavke in ne povprečne urne tarife", async () => {
-  const html = await fs.readFile(path.join(__dirname, "..", "outputs", "index.html"), "utf8");
+  const html = await readAppHtml();
   const server = await fs.readFile(path.join(__dirname, "..", "outputs", "server.js"), "utf8");
   assert.match(html, /function billingHoursBreakdown\(lines\)/);
   assert.match(html, /function billingDayBreakdownMarkup\(lines, totals\)/);

@@ -10,7 +10,7 @@ const { execFile } = require("child_process");
 const { promisify } = require("util");
 const PDFDocument = require("pdfkit");
 const archiver = require("archiver");
-const { PostgresStore } = require("./postgres-store");
+const { renderAppShell } = require("./app-shell");
 const {
   isUsableTaxId,
   isStableClientId,
@@ -131,16 +131,6 @@ const TODO_EDITOR_DIAGNOSTICS_RETENTION_MS = 24 * 60 * 60 * 1000;
 const TODO_EDITOR_DIAGNOSTICS_MAX_SAMPLES = 600;
 const TODO_EDITOR_DIAGNOSTIC_MAX_DURATION_MS = 120_000;
 const TODO_EDITOR_DIAGNOSTIC_SLOW_MS = 1_000;
-let pgPool = null;
-let pgStore = null;
-// A full database snapshot can legitimately occupy all three general read
-// connections for a moment.  Editing a task must never wait behind that
-// background work, so session checks and the two tiny lock lookups use one
-// separate, read-only-by-convention lane.  It adds at most one idle database
-// connection and does not participate in writes or full-state hydration.
-let pgFocusedPool = null;
-let pgFocusedStore = null;
-let pgReady = null;
 let auditLogStoreReady = null;
 let workerDigestStoreReady = null;
 let auditLogStoreCleanupAt = 0;
@@ -193,11 +183,7 @@ function todoVehicle(value) {
   return TODO_VEHICLES.has(vehicle) ? vehicle : "personal";
 }
 
-const IMAGE_SIGNATURES = {
-  png: (buffer) => buffer.length >= 8 && buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])),
-  jpeg: (buffer) => buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff,
-  webp: (buffer) => buffer.length >= 12 && buffer.subarray(0, 4).toString("ascii") === "RIFF" && buffer.subarray(8, 12).toString("ascii") === "WEBP"
-};
+
 const MAX_TODO_IMAGE_DATA_LENGTH = 700_000;
 const MAX_TODO_PDF_DATA_LENGTH = 2_100_000;
 const MAX_TODO_ATTACHMENTS_DATA_LENGTH = 5_000_000;
@@ -222,215 +208,9 @@ const TODO_CREATE_RECEIPT_TTL_MS = 90 * 24 * 60 * 60 * 1000;
 const MAX_TODO_CREATE_RECEIPTS = 10_000;
 
 
-function validImageDataUrl(value, maxEncodedLength) {
-  if (typeof value !== "string" || value.length > maxEncodedLength) return false;
-  const match = value.match(/^data:image\/(png|jpe?g|webp);base64,([A-Za-z0-9+/]+={0,2})$/);
-  if (!match) return false;
-  const type = match[1] === "jpg" ? "jpeg" : match[1];
-  try {
-    const buffer = Buffer.from(match[2], "base64");
-    if (!buffer.length || !IMAGE_SIGNATURES[type]?.(buffer)) return false;
-    return buffer.toString("base64").replace(/=+$/, "") === match[2].replace(/=+$/, "");
-  } catch {
-    return false;
-  }
-}
-
-function validPdfDataUrl(value, maxEncodedLength = MAX_TODO_PDF_DATA_LENGTH) {
-  if (typeof value !== "string" || value.length > maxEncodedLength) return false;
-  const match = value.match(/^data:application\/pdf;base64,([A-Za-z0-9+/]+={0,2})$/);
-  if (!match) return false;
-  try {
-    const buffer = Buffer.from(match[1], "base64");
-    if (buffer.length < 5 || buffer.subarray(0, 5).toString("ascii") !== "%PDF-") return false;
-    return buffer.toString("base64").replace(/=+$/, "") === match[1].replace(/=+$/, "");
-  } catch {
-    return false;
-  }
-}
-
-function validTodoAttachmentDataUrl(value) {
-  return validImageDataUrl(value, MAX_TODO_IMAGE_DATA_LENGTH) || validPdfDataUrl(value);
-}
-
-function validTodoThumbnailDataUrl(value) {
-  return validImageDataUrl(value, MAX_TODO_THUMBNAIL_DATA_LENGTH);
-}
-
-function limitTodoAttachmentsData(items) {
-  let total = 0;
-  return items.filter((item) => {
-    const length = String(item.data || "").length;
-    if (total + length > MAX_TODO_ATTACHMENTS_DATA_LENGTH) return false;
-    total += length;
-    return true;
-  });
-}
-
-function validTodoAttachmentId(value) {
-  return /^[a-f0-9]{64}$/.test(String(value || ""));
-}
-
-function validGoogleDriveId(value) {
-  return /^[A-Za-z0-9_-]{10,200}$/.test(String(value || ""));
-}
-
-function googleDriveFileInfo(value) {
-  try {
-    const url = new URL(String(value || "").trim());
-    if (url.protocol !== "https:") return null;
-    if (url.hostname === "docs.google.com") {
-      const match = url.pathname.match(/^\/(document|spreadsheets)\/d\/([A-Za-z0-9_-]{10,200})(?:\/|$)/);
-      if (!match) return null;
-      return {
-        kind: match[1] === "document" ? "document" : "spreadsheet",
-        fileId: match[2],
-        url: url.toString()
-      };
-    }
-    if (url.hostname === "drive.google.com") {
-      const direct = url.pathname.match(/^\/file\/d\/([A-Za-z0-9_-]{10,200})(?:\/|$)/);
-      const fileId = direct?.[1] || (url.pathname === "/open" ? url.searchParams.get("id") : "");
-      if (!validGoogleDriveId(fileId)) return null;
-      return { kind: "video", fileId, url: url.toString() };
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-// Kept for callers that deliberately accept only a Google Doc or Sheet pasted by a user.
-function googleWorkspaceFileInfo(value) {
-  const info = googleDriveFileInfo(value);
-  return info?.kind === "video" ? null : info;
-}
-
-function googleDriveDefaultName(kind) {
-  if (kind === "spreadsheet") return "Google Preglednica";
-  if (kind === "video") return "Video";
-  return "Google Dokument";
-}
-
-function cleanTodoDriveFiles(items) {
-  const seen = new Set();
-  return (Array.isArray(items) ? items : []).map((item) => {
-    const info = googleWorkspaceFileInfo(item?.url);
-    if (!info || seen.has(info.fileId)) return null;
-    seen.add(info.fileId);
-    return {
-      id: String(item?.id || crypto.randomUUID()).slice(0, 100),
-      kind: info.kind,
-      fileId: info.fileId,
-      url: info.url,
-      name: String(item?.name || googleDriveDefaultName(info.kind)).trim().slice(0, 180),
-      mimeType: "",
-      managed: false,
-      ownerEmail: "",
-      createdBy: String(item?.createdBy || "").slice(0, 100),
-      createdByName: String(item?.createdByName || "").slice(0, 120),
-      createdAt: String(item?.createdAt || new Date().toISOString()).slice(0, 40)
-    };
-  }).filter(Boolean).slice(0, 12);
-}
-function stampTodoDriveFiles(todo, user) {
-  return (todo.driveFiles || []).map((file) => ({
-    ...file,
-    createdBy: file.createdBy || user.id,
-    createdByName: file.createdByName || user.name,
-    createdAt: file.createdAt || new Date().toISOString()
-  }));
-}
-
-function todoAttachmentContentId(data) {
-  const encoded = String(data || "").split(",", 2)[1] || "";
-  const bytes = Buffer.from(encoded, "base64");
-  return crypto.createHash("sha256").update(bytes).digest("hex");
-}
-
-function pendingAttachmentMap(db) {
-  if (!db.settings || typeof db.settings !== "object" || Array.isArray(db.settings)) db.settings = {};
-  const source = db.settings.pendingAttachments && typeof db.settings.pendingAttachments === "object"
-    ? db.settings.pendingAttachments
-    : {};
-  const now = Date.now();
-  const pending = Object.fromEntries(Object.entries(source)
-    .filter(([id, item]) => validTodoAttachmentId(id) && item && Number(item.expiresAt) > now && String(item.userId || ""))
-    .map(([id, item]) => [id, { userId: String(item.userId), expiresAt: Number(item.expiresAt) }]));
-  db.settings.pendingAttachments = pending;
-  return pending;
-}
-
-function storeTodoAttachments(db, todo, user = {}) {
-  if (!db.attachments || typeof db.attachments !== "object" || Array.isArray(db.attachments)) db.attachments = {};
-  const pending = pendingAttachmentMap(db);
-  const photos = (todo.photos || []).map((photo) => {
-    const data = String(photo.data || "");
-    const thumbnailData = String(photo.thumbnailData || "");
-    const requestedAttachmentId = String(photo.attachmentId || "");
-    const staged = pending[requestedAttachmentId];
-    let attachmentId = validTodoAttachmentId(requestedAttachmentId) && db.attachments[requestedAttachmentId]
-      && (!staged || staged.userId === user.id)
-      ? requestedAttachmentId
-      : "";
-    if (validTodoAttachmentDataUrl(data)) {
-      attachmentId = todoAttachmentContentId(data);
-      if (!db.attachments[attachmentId]) {
-        db.attachments[attachmentId] = {
-          id: attachmentId,
-          data,
-          thumbnailData: validTodoThumbnailDataUrl(thumbnailData) ? thumbnailData : "",
-          createdBy: photo.createdBy || user.id || "system",
-          createdByName: photo.createdByName || user.name || "",
-          createdAt: photo.createdAt || new Date().toISOString()
-        };
-      }
-    }
-    if (!attachmentId) return null;
-    if (validTodoThumbnailDataUrl(thumbnailData) && !db.attachments[attachmentId].thumbnailData) {
-      db.attachments[attachmentId].thumbnailData = thumbnailData;
-    }
-    if (pending[attachmentId]?.userId === user.id) delete pending[attachmentId];
-    return {
-      id: photo.id || crypto.randomUUID(),
-      attachmentId,
-      name: String(photo.name || "priloga").slice(0, 120),
-      comment: String(photo.comment || "").trim().slice(0, 500),
-      createdBy: photo.createdBy || user.id || "system",
-      createdByName: photo.createdByName || user.name || "",
-      createdAt: photo.createdAt || new Date().toISOString()
-    };
-  }).filter(Boolean).slice(0, MAX_TODO_ATTACHMENTS);
-  return { ...todo, photos };
-}
-
-function attachmentApiUrl(attachmentId, thumbnail = false) {
-  return `/api/attachments/${encodeURIComponent(attachmentId)}${thumbnail ? "/thumbnail" : ""}`;
-}
-
-function hydrateTodoAttachments(db, todo) {
-  return {
-    ...todo,
-    photos: (todo.photos || []).map((photo) => {
-      const attachment = db.attachments?.[photo.attachmentId] || {};
-      const originalData = String(attachment.data || "");
-      const hasOriginal = Boolean(attachment.storageKey || originalData);
-      const hasThumbnail = Boolean(attachment.thumbnailKey || attachment.thumbnailData);
-      const dataMimeType = (originalData.match(/^data:([^;,]+)[;,]/i) || [])[1] || "";
-      return {
-        ...photo,
-        // The bootstrap response intentionally contains metadata only. Media is
-        // fetched from the protected attachment route after the user explicitly
-        // opens it, so opening a task or report never downloads all its files.
-        data: "",
-        thumbnailData: "",
-        url: hasOriginal ? attachmentApiUrl(photo.attachmentId) : "",
-        thumbnailUrl: hasThumbnail ? attachmentApiUrl(photo.attachmentId, true) : "",
-        mimeType: String(attachment.mimeType || photo.mimeType || dataMimeType || "")
-      };
-    }).filter((photo) => Boolean(photo.url))
-  };
-}
+const { validImageDataUrl, validPdfDataUrl, validTodoAttachmentDataUrl, validTodoThumbnailDataUrl, limitTodoAttachmentsData, validTodoAttachmentId, validGoogleDriveId, googleDriveFileInfo, googleWorkspaceFileInfo, googleDriveDefaultName, cleanTodoDriveFiles, stampTodoDriveFiles, todoAttachmentContentId, pendingAttachmentMap, storeTodoAttachments, attachmentApiUrl, hydrateTodoAttachments } = require("./attachment-model").createAttachmentModel({
+  MAX_TODO_IMAGE_DATA_LENGTH, MAX_TODO_PDF_DATA_LENGTH, MAX_TODO_ATTACHMENTS_DATA_LENGTH, MAX_TODO_THUMBNAIL_DATA_LENGTH, MAX_TODO_ATTACHMENTS
+});
 
 function undoClone(value) {
   return JSON.parse(JSON.stringify(value == null ? null : value));
@@ -2728,65 +2508,38 @@ function normalizeDb(db = {}) {
   return { db, changed };
 }
 
-function ensureDb() {
-  if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
-  if (!fs.existsSync(dbFile)) {
-    fs.writeFileSync(dbFile, JSON.stringify({ users: defaultUsers, sessions: {}, entries: [], todos: [], attachments: {}, debts: [], clients: [], clientBills: [], auditLog: [], undoJournal: [] }, null, 2), "utf8");
-    return;
-  }
+const {
+  ensureDb,
+  readDb,
+  writeDb,
+  getPgPool,
+  getPgStore,
+  getFocusedPgPool,
+  getFocusedPgStore,
+  initialDatabaseState,
+  ensurePostgresDb,
+  readDbAsync,
+  readRequestDb,
+  migratePostgresNormalization,
+  writeDbAsync
+} = require("./storage").createStorage({
+  DATABASE_URL,
+  MEDIA_DIR,
+  dataDir,
+  dbFile,
+  defaultUsers,
+  normalizeDb,
+  ensureAuditLogStore,
+  ensureWorkerDigestRunStore,
+  appendUndoJournalForMutation,
+  undoProtectedAttachmentIds
+});
 
-  const { db, changed } = normalizeDb(JSON.parse(fs.readFileSync(dbFile, "utf8")));
-  if (changed) writeDb(db);
-}
 
-function readDb() {
-  ensureDb();
-  return JSON.parse(fs.readFileSync(dbFile, "utf8"));
-}
 
-function writeDb(db) {
-  fs.writeFileSync(dbFile, JSON.stringify(db, null, 2), "utf8");
-}
 
-function getPgPool() {
-  if (pgPool) return pgPool;
-  const { Pool } = require("pg");
-  const isLocal = /localhost|127\.0\.0\.1/.test(DATABASE_URL);
-  // A small VM cannot keep ten full-state PostgreSQL requests in memory.
-  // Mutations are already serialized, so three connections cover reads without
-  // amplifying memory pressure or row-lock contention.
-  pgPool = new Pool({
-    connectionString: DATABASE_URL,
-    ssl: isLocal ? false : { rejectUnauthorized: false },
-    max: Math.max(1, Math.min(3, Number(process.env.INDUS_URE_PG_POOL_MAX || 3))),
-    idleTimeoutMillis: 10_000
-  });
-  return pgPool;
-}
 
-function getPgStore() {
-  if (!pgStore) pgStore = new PostgresStore(getPgPool(), MEDIA_DIR);
-  return pgStore;
-}
 
-function getFocusedPgPool() {
-  if (pgFocusedPool) return pgFocusedPool;
-  const { Pool } = require("pg");
-  const isLocal = /localhost|127\.0\.0\.1/.test(DATABASE_URL);
-  pgFocusedPool = new Pool({
-    connectionString: DATABASE_URL,
-    ssl: isLocal ? false : { rejectUnauthorized: false },
-    max: 1,
-    idleTimeoutMillis: 10_000,
-    application_name: "indus-ure-focused-read"
-  });
-  return pgFocusedPool;
-}
-
-function getFocusedPgStore() {
-  if (!pgFocusedStore) pgFocusedStore = new PostgresStore(getFocusedPgPool(), MEDIA_DIR);
-  return pgFocusedStore;
-}
 
 async function ensureAuditLogStore() {
   if (!DATABASE_URL) return;
@@ -2978,82 +2731,11 @@ async function persistedAuditLogForUser(user, limit = 500) {
   };
   return visibleAuditLogForUser(db, user);
 }
-function initialDatabaseState() {
-  return {
-    users: JSON.parse(JSON.stringify(defaultUsers)),
-    sessions: {},
-    entries: [],
-    todos: [],
-    attachments: {},
-    debts: [],
-    clients: [],
-    billingLocks: [],
-    payrolls: [],
-    clientBills: [],
-    settlementCorrections: [],
-    todoCreateReceipts: {},
-    workerDigestRuns: [],
-    lateTimeEntryReports: [],
-    auditLog: [],
-    undoJournal: [],
-    settings: {},
-    calendarToken: crypto.randomBytes(24).toString("hex"),
-    syncRevision: 0
-  };
-}
 
-async function ensurePostgresDb() {
-  if (!DATABASE_URL) return;
-  if (pgReady) return pgReady;
-  pgReady = (async () => {
-    // Normalize legacy JSON once before writing relational rows so UUID client references,
-    // assignment groups and attachment metadata survive the conversion intact.
-    await getPgStore().ensure(initialDatabaseState(), normalizeDb);
-    await ensureAuditLogStore();
-    await ensureWorkerDigestRunStore();
-  })();
-  return pgReady;
-}
 
-async function readDbAsync() {
-  if (!DATABASE_URL) return readDb();
-  await ensurePostgresDb();
-  // Normalization is an in-memory compatibility view. A GET must never save
-  // this snapshot. Persisted migrations run explicitly before HTTP startup.
-  return normalizeDb(await getPgStore().load()).db;
-}
 
-async function readRequestDb(req) {
-  if (!req.indusDb?.todos) req.indusDb = await readDbAsync();
-  return req.indusDb;
-}
 
-async function migratePostgresNormalization() {
-  await ensurePostgresDb();
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const db = await getPgStore().load();
-    const before = JSON.stringify(db);
-    normalizeDb(db);
-    if (before === JSON.stringify(db)) return;
-    try {
-      await getPgStore().save(db, { protectedAttachmentIds: [...undoProtectedAttachmentIds(db)] });
-      return;
-    } catch (error) {
-      if (error.code !== "STALE_SNAPSHOT" || attempt === 2) throw error;
-    }
-  }
-}
 
-async function writeDbAsync(db) {
-  appendUndoJournalForMutation(db);
-  db.syncRevision = Math.max(0, Number(db.syncRevision || 0)) + 1;
-  if (!DATABASE_URL) {
-    writeDb(db);
-    return;
-  }
-  await ensurePostgresDb();
-  await getPgStore().save(db, { protectedAttachmentIds: [...undoProtectedAttachmentIds(db)] });
-}
 
 function securityHeaders(extra = {}, nonce = "") {
   const scriptSource = nonce ? `'self' 'nonce-${nonce}'` : "'self'";
@@ -4141,370 +3823,9 @@ function financialEntryAccessError(user, entry, label) {
   return `Delavec lahko ${label} popravi ali izbriše samo na dan vnosa.`;
 }
 
-function payrollRange(input = {}) {
-  input = typeof input === "string" ? { month: input } : (input || {});
-  const month = String(input.month || "");
-  const legacyMonth = isPayrollMonth(month) ? month : "";
-  const from = isDateKey(input.from) ? String(input.from) : (legacyMonth ? `${legacyMonth}-01` : "");
-  const to = isDateKey(input.to)
-    ? String(input.to)
-    : (legacyMonth ? `${legacyMonth}-${String(new Date(Number(legacyMonth.slice(0, 4)), Number(legacyMonth.slice(5, 7)), 0).getDate()).padStart(2, "0")}` : "");
-  return from && to && from <= to ? { from, to, month: legacyMonth || from.slice(0, 7) } : null;
-}
-
-function payrollNextDate(key) {
-  const date = new Date(`${key}T00:00:00`);
-  date.setDate(date.getDate() + 1);
-  return [date.getFullYear(), String(date.getMonth() + 1).padStart(2, "0"), String(date.getDate()).padStart(2, "0")].join("-");
-}
-
-// A worker's payroll periods form an inclusive, contiguous timeline. Each
-// calendar day therefore belongs to exactly one payroll: the next period must
-// begin on the day after the previous one ends.
-function payrollSequenceError(db, workerId, rangeInput, excludeId = "") {
-  const range = payrollRange(rangeInput);
-  if (!range) return "Obračunsko obdobje ni pravilno.";
-  const records = (db.payrolls || [])
-    .filter((payroll) => payroll.workerId === workerId && payroll.id !== excludeId)
-    .map((payroll) => ({ ...payroll, range: payrollRange(payroll) }))
-    .filter((payroll) => payroll.range)
-    .map((payroll) => ({ id: payroll.id, from: payroll.range.from, to: payroll.range.to }));
-  if (!records.length) return "";
-  const earliest = records.slice().sort((left, right) => left.from.localeCompare(right.from))[0];
-  if (range.to < earliest.from) return "Starejšega obračuna pred prvim obstoječim obračunom ni mogoče dodati.";
-  records.push({ id: excludeId || "candidate", from: range.from, to: range.to });
-  records.sort((left, right) => left.from.localeCompare(right.from) || left.to.localeCompare(right.to));
-  for (let index = 1; index < records.length; index += 1) {
-    const previous = records[index - 1];
-    const current = records[index];
-    const nextDay = payrollNextDate(previous.to);
-    if (current.from <= previous.to) return "Obra\u010dunski obdobji se prekrivata.";
-    if (current.from > nextDay) return "Za\u010detek obra\u010duna mora biti " + nextDay + ".";
-  }
-  return "";
-}
-function isPayrollMonth(value) {
-  const match = /^(\d{4})-(\d{2})$/.exec(String(value || ""));
-  return Boolean(match && Number(match[2]) >= 1 && Number(match[2]) <= 12);
-}
-function payrollPeriodEnded(value, now = new Date()) {
-  if (typeof value === "object" && value) {
-    const range = payrollRange(value);
-    if (!range) return false;
-    const parts = Object.fromEntries(new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Ljubljana", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(now).filter((part) => part.type !== "literal").map((part) => [part.type, part.value]));
-    const today = `${parts.year}-${parts.month}-${parts.day}`;
-    return range.to <= today;
-  }
-  const match = /^(\d{4})-(\d{2})$/.exec(String(value || ""));
-  if (!match) return false;
-  const localParts = Object.fromEntries(new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Europe/Ljubljana",
-    year: "numeric",
-    month: "2-digit"
-  }).formatToParts(now).filter((part) => part.type !== "literal").map((part) => [part.type, part.value]));
-  const year = Number(match[1]);
-  const month = Number(match[2]);
-  const currentYear = Number(localParts.year || 0);
-  const currentMonth = Number(localParts.month || 0);
-  return year < currentYear || (year === currentYear && month < currentMonth);
-}
-function scheduledPayrollMinutesForTodo(todo) {
-  if (!todo || !/^\d{4}-\d{2}-\d{2}$/.test(String(todo.date || ""))) return null;
-  const start = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(String(todo.start || ""));
-  const end = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(String(todo.end || ""));
-  if (!start || !end) return null;
-  const minutes = (Number(end[1]) * 60 + Number(end[2])) - (Number(start[1]) * 60 + Number(start[2]));
-  return minutes > 0 ? minutes : null;
-}
-
-function payrollMinutesForTodo(db, todo) {
-  if (!todo || !PAYROLL_PAID_TODO_STATUSES.has(todo.status)) return null;
-  const minutes = scheduledPayrollMinutesForTodo(todo);
-  if (!minutes) return null;
-  if (todo.status === "meal") {
-    const mealPaidMinutes = Math.round(nonnegativeNumber(db?.settings?.billing?.mealPaidMinutes, 45, 240));
-    return Math.min(minutes, mealPaidMinutes) || null;
-  }
-  return minutes;
-}
-
-function payrollLineForTodo(db, todo, workerId = "") {
-  const minutes = payrollMinutesForTodo(db, todo);
-  if (!minutes) return null;
-  const scheduledMinutes = scheduledPayrollMinutesForTodo(todo) || minutes;
-  const unpaidMealMinutes = todo.status === "meal" ? Math.max(0, scheduledMinutes - minutes) : 0;
-  const hourlyRate = nonnegativeNumber(todo.billingHourlyRate, defaultHourlyRateForUser(db, todo.syncUser || todo.createdBy), 10_000);
-  const workerKm = nonnegativeNumber(todo.billingKm, 0, 1_000_000);
-  // Kilometrina delavca je povračilo za njegovo lastno vozilo.
-  // Ne sme se mešati s tarifo, ki se zaračuna stranki za kombi ali osebni avto.
-  const kmRate = nonnegativeNumber(
-    db.settings?.billing?.workerOwnVehicleKmRate,
-    nonnegativeNumber(db.settings?.billing?.kmRate, 0, 1_000),
-    1_000
-  );
-  const hours = minutes / 60;
-  const workAmount = Number((hours * hourlyRate).toFixed(2));
-  const kmAmount = Number((workerKm * kmRate).toFixed(2));
-  return {
-    todoId: String(todo.id || ""),
-    assignmentGroupId: String(todo.assignmentGroupId || todo.id || ""),
-    workerId: String(workerId || todo.syncUser || todo.createdBy || ""),
-    date: String(todo.date || ""),
-    start: String(todo.start || ""),
-    end: String(todo.end || ""),
-    title: String(todo.title || "").slice(0, 300),
-    client: String(todo.client || "").slice(0, 240),
-    status: String(todo.status || ""),
-    minutes,
-    unpaidMealMinutes,
-    hours,
-    hourlyRate,
-    workerKm,
-    workFromHome: Boolean(todo.workFromHome),
-    commuteEligible: Boolean(todo.commuteEligible),
-    commuteKm: 0,
-    km: workerKm,
-    kmRate,
-    workAmount,
-    kmAmount,
-    totalAmount: Number((workAmount + kmAmount).toFixed(2))
-  };
-}
-
-function commuteKmOneWayForUser(db, userId) {
-  return nonnegativeNumber(db.users?.[userId]?.billing?.commuteKmOneWay, 0, 1_000_000);
-}
-
-// Each worker gets the commute reimbursement once for a worked day, never once
-// per task. It is attached to the first chronological line so the immutable
-// payroll snapshot remains compatible with the existing task-based archive.
-function withDailyCommuteInPayroll(db, workerId, lines = []) {
-  const commuteKm = Number((commuteKmOneWayForUser(db, workerId) * 2).toFixed(2));
-  if (!commuteKm) return lines;
-  const appliedDates = new Set();
-  return lines.map((line) => {
-    const workerKm = nonnegativeNumber(line.workerKm, nonnegativeNumber(line.km, 0, 1_000_000), 1_000_000);
-    // A remote entry is paid normally, but it cannot trigger the daily commute.
-    // Do not mark its date as used so the first later on-site entry still gets
-    // the one return journey reimbursement.
-    // A meal is paid time but never represents a journey to work.  It must
-    // neither receive the daily commute nor consume that day's commute slot.
-    const addCommute = line.status !== "meal" && Boolean(line.commuteEligible) && !Boolean(line.workFromHome) && !appliedDates.has(line.date);
-    if (addCommute) appliedDates.add(line.date);
-    const lineCommuteKm = addCommute ? commuteKm : 0;
-    const km = Number((workerKm + lineCommuteKm).toFixed(2));
-    const kmAmount = Number((km * Number(line.kmRate || 0)).toFixed(2));
-    return {
-      ...line,
-      workerKm,
-      workFromHome: Boolean(line.workFromHome),
-      commuteKm: lineCommuteKm,
-      km,
-      kmAmount,
-      totalAmount: Number((Number(line.workAmount || 0) + kmAmount).toFixed(2))
-    };
-  });
-}
-
-function payrollTotals(lines = []) {
-  const minutes = lines.reduce((total, line) => total + Number(line.minutes || 0), 0);
-  const workAmount = Number(lines.reduce((total, line) => total + Number(line.workAmount || 0), 0).toFixed(2));
-  const km = Number(lines.reduce((total, line) => total + Number(line.km || 0), 0).toFixed(2));
-  const kmAmount = Number(lines.reduce((total, line) => total + Number(line.kmAmount || 0), 0).toFixed(2));
-  return {
-    minutes,
-    hours: minutes / 60,
-    km,
-    workAmount,
-    kmAmount,
-    totalAmount: Number((workAmount + kmAmount).toFixed(2))
-  };
-}
-
-function payrollAdvances(db, workerId, range) {
-  return (db.debts || []).filter((item) => item.type === "advance" && item.person === workerId && item.date >= range.from && item.date <= range.to);
-}
-
-function payrollPersonalPurchases(db, workerId, range) {
-  return (db.debts || []).filter((item) => item.type === "personal_purchase" && item.person === workerId && item.date >= range.from && item.date <= range.to);
-}
-
-function payrollClientReceipts(db, workerId, range) {
-  return (db.debts || []).filter((item) => item.type === "client_receipt" && item.person === workerId && item.date >= range.from && item.date <= range.to);
-}
-
-function payrollWorkerForTodo(todo) {
-  return String(todo?.syncUser || todo?.createdBy || "").trim();
-}
-
-function normalizePayroll(input, db) {
-  const workerId = cleanUserId(input?.workerId);
-  const range = payrollRange(input);
-  if (!workerId || !db.users?.[workerId] || !range) return null;
-  const lines = (Array.isArray(input?.lines) ? input.lines : []).map((line) => {
-    const correction = Boolean(line?.correction || line?.correctionId);
-    const minutes = Math.round(Number(line?.minutes || 0));
-    const hourlyRate = nonnegativeNumber(line?.hourlyRate, null, 10_000);
-    const commuteKm = correction ? signedNumber(line?.commuteKm) : nonnegativeNumber(line?.commuteKm, 0, 1_000_000);
-    const workerKm = correction ? signedNumber(line?.workerKm) : nonnegativeNumber(line?.workerKm, Math.max(0, nonnegativeNumber(line?.km, 0, 1_000_000) - commuteKm), 1_000_000);
-    const km = correction ? signedNumber(line?.km, workerKm + commuteKm) : Number((workerKm + commuteKm).toFixed(2));
-    const kmRate = nonnegativeNumber(line?.kmRate, 0, 1_000);
-    if (!String(line?.todoId || "") || (!correction && minutes <= 0) || (correction && !Number.isFinite(minutes)) || hourlyRate === null) return null;
-    const scheduledMinutes = correction ? null : scheduledPayrollMinutesForTodo(line);
-    const unpaidMealMinutes = !correction && String(line?.status || "") === "meal"
-      ? Math.max(0, Number.isFinite(scheduledMinutes) ? scheduledMinutes - minutes : Math.round(Number(line?.unpaidMealMinutes || 0)))
-      : 0;
-    const hours = correction ? signedNumber(line?.hours, minutes / 60) : minutes / 60;
-    const workAmount = correction ? signedNumber(line?.workAmount, hours * hourlyRate) : Number((hours * hourlyRate).toFixed(2));
-    const kmAmount = correction ? signedNumber(line?.kmAmount, km * kmRate) : Number((km * kmRate).toFixed(2));
-    return {
-      todoId: String(line.todoId),
-      sourceTodoId: correction ? String(line?.sourceTodoId || "") : "",
-      correctionId: correction ? String(line?.correctionId || "") : "",
-      correction,
-      assignmentGroupId: String(line.assignmentGroupId || line.todoId),
-      workerId,
-      date: String(line.date || ""),
-      start: String(line.start || ""),
-      end: String(line.end || ""),
-      title: String(line.title || "").slice(0, 300),
-      client: String(line.client || "").slice(0, 240),
-      status: String(line.status || ""),
-      minutes,
-      unpaidMealMinutes,
-      hours,
-      hourlyRate,
-      workerKm,
-      workFromHome: Boolean(line?.workFromHome),
-      commuteKm,
-      km,
-      kmRate,
-      workAmount: Number(workAmount.toFixed(2)),
-      kmAmount: Number(kmAmount.toFixed(2)),
-      totalAmount: Number((correction ? signedNumber(line?.totalAmount, workAmount + kmAmount) : workAmount + kmAmount).toFixed(2))
-    };
-  }).filter(Boolean);
-  const totals = payrollTotals(lines);
-  const advanceIds = [...new Set((Array.isArray(input?.advanceIds) ? input.advanceIds : []).map(String).filter(Boolean))];
-  const advanceAmount = Number((Number(input?.advanceAmount || 0)).toFixed(2));
-  const clientReceiptIds = [...new Set((Array.isArray(input?.clientReceiptIds) ? input.clientReceiptIds : []).map(String).filter(Boolean))];
-  const clientReceiptAmount = Number((Number(input?.clientReceiptAmount || 0)).toFixed(2));
-  const personalPurchaseIds = [...new Set((Array.isArray(input?.personalPurchaseIds) ? input.personalPurchaseIds : []).map(String).filter(Boolean))];
-  const personalPurchaseAmount = Number((Number(input?.personalPurchaseAmount || 0)).toFixed(2));
-  const status = PAYROLL_STATUSES.has(input?.status) ? input.status : "draft";
-  const payments = (Array.isArray(input?.payments) ? input.payments : []).map((payment) => {
-    const amount = nonnegativeNumber(payment?.amount, null, 1_000_000);
-    if (amount === null || amount <= 0) return null;
-    return { id: String(payment?.id || crypto.randomUUID()), amount: Number(amount.toFixed(2)), note: String(payment?.note || "").trim().slice(0, 1_000), createdAt: String(payment?.createdAt || new Date().toISOString()), createdBy: String(payment?.createdBy || "system"), createdByName: String(payment?.createdByName || "") };
-  }).filter(Boolean);
-  const createdAt = String(input?.createdAt || new Date().toISOString());
-  return finalizePayrollAmounts({
-    id: String(input?.id || crypto.randomUUID()),
-    workerId,
-    month: range.month,
-    from: range.from,
-    to: range.to,
-    status,
-    note: String(input?.note || "").trim().slice(0, 2_000),
-    lines,
-    advanceIds,
-    advanceAmount,
-    clientReceiptIds,
-    clientReceiptAmount,
-    personalPurchaseIds,
-    personalPurchaseAmount,
-    payoutAmount: Number((totals.totalAmount + advanceAmount + clientReceiptAmount - personalPurchaseAmount).toFixed(2)),
-    payments,
-    paidAmount: Number((status === "paid" && payments.length === 0 ? Math.max(0, totals.totalAmount + advanceAmount + clientReceiptAmount - personalPurchaseAmount) : payments.reduce((sum, payment) => sum + payment.amount, 0)).toFixed(2)),
-    remainingAmount: 0,
-    ...totals,
-    createdBy: String(input?.createdBy || "system"),
-    createdByName: String(input?.createdByName || ""),
-    createdAt,
-    updatedBy: String(input?.updatedBy || input?.createdBy || "system"),
-    updatedByName: String(input?.updatedByName || input?.createdByName || ""),
-    updatedAt: String(input?.updatedAt || createdAt),
-    confirmedAt: String(input?.confirmedAt || ""),
-    confirmedBy: String(input?.confirmedBy || ""),
-    confirmedByName: String(input?.confirmedByName || ""),
-    paidAt: String(input?.paidAt || ""),
-    paidBy: String(input?.paidBy || ""),
-    paidByName: String(input?.paidByName || "")
-  });
-}
-
-function finalizePayrollAmounts(payroll) {
-  payroll.payoutAmount = Number(Number(payroll.payoutAmount || 0).toFixed(2));
-  if (payroll.payoutAmount <= 0) {
-    payroll.paidAmount = 0;
-    payroll.remainingAmount = payroll.payoutAmount;
-    return payroll;
-  }
-  payroll.paidAmount = Math.min(payroll.payoutAmount, Math.max(0, Number(payroll.paidAmount || 0)));
-  payroll.remainingAmount = Number((payroll.payoutAmount - payroll.paidAmount).toFixed(2));
-  return payroll;
-}
-function lockedPayrollLineTodoIds(db, excludeId = "", workerId = "") {
-  return new Set((db.payrolls || [])
-    .filter((payroll) => payroll.id !== excludeId
-      && ["archiving", "confirmed", "paid"].includes(payroll.status)
-      && (!workerId || String(payroll.workerId || "") === String(workerId)))
-    .flatMap((payroll) => payroll.lines || [])
-    .map((line) => String(line.todoId || ""))
-    .filter(Boolean));
-}
-
-function lockedPayrollFinancialIds(db, field, excludeId = "") {
-  return new Set((db.payrolls || [])
-    .filter((payroll) => payroll.id !== excludeId && ["archiving", "confirmed", "paid"].includes(payroll.status))
-    .flatMap((payroll) => Array.isArray(payroll[field]) ? payroll[field] : [])
-    .map((id) => String(id || ""))
-    .filter(Boolean));
-}
-function buildPayrollSnapshot(db, workerId, rangeInput, previous = {}, note = undefined) {
-  const range = payrollRange(rangeInput);
-  if (!range) return null;
-  // A task transferred after a confirmed account remains available to its new
-  // worker. The former worker is balanced by a separate correction row.
-  const lockedElsewhere = lockedPayrollLineTodoIds(db, previous.id, workerId);
-  const lockedAdvanceIds = lockedPayrollFinancialIds(db, "advanceIds", previous.id);
-  const lockedClientReceiptIds = lockedPayrollFinancialIds(db, "clientReceiptIds", previous.id);
-  const lockedPersonalPurchaseIds = lockedPayrollFinancialIds(db, "personalPurchaseIds", previous.id);
-  const taskLines = withDailyCommuteInPayroll(db, workerId, (db.todos || [])
-    .filter((todo) => !todo.imported && !isTrashedTodo(todo) && (todo.syncUser || todo.createdBy) === workerId && !todo.archivedAt && String(todo.date || "") >= range.from && String(todo.date || "") <= range.to)
-    .filter((todo) => !lockedElsewhere.has(String(todo.id || "")))
-    .map((todo) => payrollLineForTodo(db, todo, workerId))
-    .filter(Boolean));
-  const correctionLines = (db.settlementCorrections || [])
-    .filter((correction) => correction.type === "worker" && correction.status === "pending" && String(correction.workerId || "") === workerId)
-    .filter((correction) => String(correction.effectiveDate || "") >= range.from && String(correction.effectiveDate || "") <= range.to)
-    .map(correctionPayrollLine)
-    .filter((line) => !lockedElsewhere.has(String(line.todoId || "")));
-  const lines = [...taskLines, ...correctionLines]
-    .sort((a, b) => a.date.localeCompare(b.date) || a.start.localeCompare(b.start) || a.title.localeCompare(b.title));
-  const advances = payrollAdvances(db, workerId, range)
-    .filter((item) => !lockedAdvanceIds.has(String(item.id || "")));
-  const clientReceipts = payrollClientReceipts(db, workerId, range)
-    .filter((item) => !lockedClientReceiptIds.has(String(item.id || "")));
-  const personalPurchases = payrollPersonalPurchases(db, workerId, range)
-    .filter((item) => !lockedPersonalPurchaseIds.has(String(item.id || "")));
-  return normalizePayroll({ ...previous, workerId, ...range, lines, advanceIds: advances.map((item) => item.id), advanceAmount: advances.reduce((total, item) => total + Number(item.amount || 0), 0), clientReceiptIds: clientReceipts.map((item) => item.id), clientReceiptAmount: clientReceipts.reduce((total, item) => total + Number(item.amount || 0), 0), personalPurchaseIds: personalPurchases.map((item) => item.id), personalPurchaseAmount: personalPurchases.reduce((total, item) => total + Number(item.amount || 0), 0), note: note === undefined ? previous.note : note }, db);
-}
-
-function payrollForUser(db, user) {
-  const payrolls = db.payrolls || [];
-  return user.role === "boss" ? payrolls : payrolls.filter((payroll) => payroll.workerId === user.id);
-}
-
-function payrollLockForTodos(db, todos = []) {
-  const todoWorkerById = new Map(todos
-    .filter(Boolean)
-    .map((todo) => [String(todo.id || ""), payrollWorkerForTodo(todo)])
-    .filter(([id, workerId]) => id && workerId));
-  if (!todoWorkerById.size) return null;
-  return (db.payrolls || []).find((payroll) => ["archiving", "confirmed", "paid"].includes(payroll.status)
-    && (payroll.lines || []).some((line) => String(payroll.workerId || "") === todoWorkerById.get(String(line.todoId || "")))) || null;
-}
+const { payrollRange, payrollNextDate, payrollSequenceError, isPayrollMonth, payrollPeriodEnded, scheduledPayrollMinutesForTodo, payrollMinutesForTodo, payrollLineForTodo, commuteKmOneWayForUser, withDailyCommuteInPayroll, payrollTotals, payrollAdvances, payrollPersonalPurchases, payrollClientReceipts, payrollWorkerForTodo, normalizePayroll, finalizePayrollAmounts, lockedPayrollLineTodoIds, lockedPayrollFinancialIds, buildPayrollSnapshot, payrollForUser, payrollLockForTodos } = require("./payroll-rules").createPayrollRules({
+  isDateKey, nonnegativeNumber, defaultHourlyRateForUser, cleanUserId, signedNumber, isTrashedTodo, correctionPayrollLine, PAYROLL_STATUSES, PAYROLL_PAID_TODO_STATUSES
+});
 
 // Confirmed payrolls/client bills are immutable.  A later edit produces a
 // correction row; the following account contains just that difference.
@@ -7669,7 +6990,15 @@ function serveStatic(req, res) {
       const quickManifest = ["task", "hours", "material"].includes(quickMode)
         ? `/manifest.webmanifest?quick=${encodeURIComponent(quickMode)}`
         : "/manifest.webmanifest";
-      responseData = Buffer.from(data.toString("utf8")
+      let html;
+      try {
+        html = renderAppShell(data.toString("utf8"));
+      } catch (error) {
+        console.error("App shell assembly failed:", error.message);
+        sendText(res, 500, "Application unavailable", "text/plain");
+        return;
+      }
+      responseData = Buffer.from(html
         .replace('href="/manifest.webmanifest"', `href="${quickManifest}"`)
         .replace("<style>", `<style nonce="${nonce}">`)
         .replace("<script>", `<script nonce="${nonce}">`), "utf8");

@@ -56,7 +56,10 @@ test("single task edit does not upsert its unchanged assignment or other tables"
 
 test("HTTP reads cannot persist normalization; attachment GET uses targeted access queries", () => {
   const source = fs.readFileSync(path.join(__dirname, "../outputs/server.js"), "utf8");
-  const read = source.slice(source.indexOf("async function readDbAsync()"), source.indexOf("async function readRequestDb("));
+  const storage = fs.readFileSync(path.join(__dirname, "../outputs/storage.js"), "utf8");
+  const read = storage.slice(storage.indexOf("async function readDbAsync()"), storage.indexOf("async function readRequestDb("));
+  assert.match(source, /require\("\.\/storage"\)\.createStorage/);
+  assert.match(read, /normalizeDb\(await getPgStore\(\)\.load\(\)\)\.db/);
   assert.doesNotMatch(read, /writeDbAsync|\.save\(/);
   const attachment = source.slice(source.indexOf('if (attachmentMatch && req.method === "GET")'), source.indexOf('if (url.pathname === "/api/health"'));
   assert.match(attachment, /attachmentAccessSeed\(attachmentId\)/);
