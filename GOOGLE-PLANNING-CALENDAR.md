@@ -113,3 +113,15 @@ simulirani testi niso dokaz uspešnega prenosa na pravi Google račun.
 - Lokalni vizualni pregled nastavitev uspešen. Produkcijski prijavni/Google
   preizkus je ob objavi ustavljen na zahtevi za izrecno potrditev računa in
   dovoljenj. Pravega prenosa v Google še ne označujemo kot preverjenega.
+
+Končna varnostna dopolnitev je objavljena kot `8c5c593`: izklop v okolju
+onemogoči tudi ročno/prisilno sprožen delovni proces. Na tej izdaji je
+uspešnih vseh 255 strežniških, 43 brskalniških in 18 PostgreSQL preverjanj.
+Arhiv kode: `c51c1cf31c8e2a1f4f160fab4724c183db132abef4ce029f32891cea79d267b7`.
+Pred preklopom je preverjena še kopija `backup-20260916T101146Z-807f57cc`
+(188703978 bajtov, SHA-256
+`900febdbcc4536117c5cc23ac220c3bb14014e8d18a8ac3096fcc96e191fd908`).
+Obe aplikaciji sta aktivni, Ure health je uspešen, novih opozoril ni.
+Na voljo sta prejšnji izdaji `066009b` in predintegracijska `8b0141e`.
+Google aktivacija ob zaključku še čaka na uporabnikovo potrditev računa in
+dovoljenj; resnični dogodki še niso bili poslani Googlu.
