@@ -8250,6 +8250,7 @@ const {
 const calendarSyncStore = createCalendarSyncStore({ databaseUrl: DATABASE_URL, file: path.join(dataDir, "planning-calendar-private.json") });
 const googlePlanningCalendar = createGooglePlanningCalendar({
   store: calendarSyncStore, readDb: readDbAsync, baseUrl: PUBLIC_BASE_URL,
+  runtimeEnabled: NODE_ENV === "production" && process.env.DISABLE_GOOGLE_CALENDAR_SYNC !== "true",
   deploymentKey: crypto.createHash("sha256").update(DATABASE_URL || dataDir).digest("hex"),
   definitions: TODO_STATUS_DEFINITIONS,
   createApi: tokens => {

@@ -96,3 +96,20 @@ vmesnik in obstoječi obrazci. Obvezni PostgreSQL QA dodatno preverja
 neodvisnost od poslovnih zapisov in advisory lock dveh povezav.
 Za dejanski Google preizkus je potrebna potrjena službena OAuth povezava;
 simulirani testi niso dokaz uspešnega prenosa na pravi Google račun.
+
+## Objava 16. 9. 2026
+
+- Objavljena koda: `066009b` (prejšnja produkcija `8b0141e`).
+- 254 uspešnih strežniških testov; 43 uspešnih izoliranih brskalniških testov.
+  Po dodatni ureditvi vrnitve iz OAuth še 3/3 ciljnih UI testov.
+- Na točnem strežniškem kandidatu ponovljeni vsi strežniški testi in 18
+  PostgreSQL/restore/upgrade preverjanj, tudi rollback na `8b0141e` in naprej.
+- Arhiv kode SHA-256: `21302e344496d8a95f58e409368a95fc0adb78e1b0af28f4ffcbf9683e47f2f3`.
+- Predobjavna kopija: `backup-20260916T100542Z-cd0f3771`, 188664162 bajtov.
+  SHA-256: `f3ecb7d4fd02781f5ff6fc773316c474b82b084d1b61830699d9d64ff4439881`.
+  Lokalni arhiv, Drive velikost/MD5, sveže branje in navodila za obnovo potrjeni.
+- Ure in Fakture sta po objavi aktivni; Ure health HTTP 200, brez novih
+  opozoril v systemd dnevniku. Fakture niso bile spreminjane.
+- Lokalni vizualni pregled nastavitev uspešen. Produkcijski prijavni/Google
+  preizkus je ob objavi ustavljen na zahtevi za izrecno potrditev računa in
+  dovoljenj. Pravega prenosa v Google še ne označujemo kot preverjenega.

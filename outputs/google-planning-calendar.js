@@ -88,7 +88,7 @@ function safeError(error) {
 }
 function fail(message) { const error = new Error(message); error.safeMessage = message; return error; }
 
-function createGooglePlanningCalendar({ store, readDb, createApi, baseUrl, definitions, deploymentKey = "", now = () => Date.now() }) {
+function createGooglePlanningCalendar({ store, readDb, createApi, baseUrl, definitions, deploymentKey = "", runtimeEnabled = true, now = () => Date.now() }) {
   let timer = null, interval = null, running = false, rerun = false, forceNext = false;
   const instance = hash(baseUrl).slice(0, 24);
   const marker = key => `${APP}:${instance}:${hash(key).slice(0, 24)}`;
@@ -191,6 +191,7 @@ function createGooglePlanningCalendar({ store, readDb, createApi, baseUrl, defin
   }
 
   async function run({ force = false } = {}) {
+    if (!runtimeEnabled) return;
     if (running) { rerun = true; return; }
     running = true;
     try {
@@ -256,6 +257,7 @@ function createGooglePlanningCalendar({ store, readDb, createApi, baseUrl, defin
     }
   }
   function schedule(force = false) {
+    if (!runtimeEnabled) return;
     forceNext ||= force;
     if (timer) return;
     timer = setTimeout(() => { timer = null; const forced = forceNext; forceNext = false; run({ force: forced }).catch(() => {}); }, 1500);

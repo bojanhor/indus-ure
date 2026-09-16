@@ -189,6 +189,14 @@ test("separate calendar failure does not prevent revocation for an inactive work
   f.db.users.ibro.active = false; await f.run();
   assert.equal(f.remote.acls.get(id).filter(rule => rule.role !== "owner").length, 0);
 });
+test("runtime kill switch also blocks manual/forced synchronization", async t => {
+  const f = fixture(t);
+  const stopped = createGooglePlanningCalendar({ store: f.store, readDb: async () => { throw new Error("disabled runtime must not read"); },
+    createApi: () => { throw new Error("disabled runtime must not publish"); }, baseUrl, definitions, runtimeEnabled: false });
+  t.after(() => stopped.stop());
+  stopped.schedule(true); await stopped.run({ force: true });
+  assert.equal(f.remote.calls.length, 0);
+});
 test("calendar HTTP rejects workers' writes and binds OAuth to owner and initiating session", async () => {
   let response, authOptions, connected = false;
   const boss = dbFixture().users.bojan;
