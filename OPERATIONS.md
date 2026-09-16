@@ -106,6 +106,11 @@ ali pošiljanje prave e-pošte zahtevata posebej določen varen testni primer.
 
 ## Obnova in povrnitev
 
+Google koledar planiranja: pravila, nova dovoljenja, operativna vrsta,
+začasna ustavitev in omejitve povrnitve so v `GOOGLE-PLANNING-CALENDAR.md`.
+Stanje `indus_meta/planning_calendar_sync_v1` je ločeno od poslovnega CAS in
+ni del sanitiziranega recovery izvoza; po obnovi se povezava ponovno potrdi.
+
 - Recovery arhiv vsebuje `database.dump`, `sanitized-state.sql`, `media/`,
   `application/`, `manifest.json` in generirani `RESTORE-INDUS-URE.txt`.
   Dump in očiščeni uporabniki/nastavitve uporabljajo isti izvoženi PG posnetek.

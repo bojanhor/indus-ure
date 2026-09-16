@@ -6,6 +6,8 @@ const path = require("node:path");
 // Fixed, local source only. Assemble into the existing CSP-nonced inline script:
 // no dynamic URL/import/eval and no additional browser request on first edit.
 const browserModules = [
+  ["planning-calendar", "planning-calendar.js"],
+  ["editor/planning-calendar", "editor/planning-calendar.js"],
   ["time-entry-editor", "editor/time-entry.js"],
   ["editor/media-preview", "editor/media-preview.js"],
   ["editor/media-upload", "editor/media-upload.js"],

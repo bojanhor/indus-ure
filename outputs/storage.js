@@ -6,7 +6,7 @@ const { PostgresStore } = require("./postgres-store");
 
 // Storage lifecycle and request snapshots. Normalization and audit hooks stay
 // explicit; this facade never imports the HTTP server or changes the schema.
-function createStorage({ DATABASE_URL, MEDIA_DIR, dataDir, dbFile, defaultUsers, normalizeDb, ensureAuditLogStore, ensureWorkerDigestRunStore, appendUndoJournalForMutation, undoProtectedAttachmentIds }) {
+function createStorage({ DATABASE_URL, MEDIA_DIR, dataDir, dbFile, defaultUsers, normalizeDb, ensureAuditLogStore, ensureWorkerDigestRunStore, appendUndoJournalForMutation, undoProtectedAttachmentIds, onCommitted = () => {} }) {
   let pgPool = null;
   let pgStore = null;
   // Session checks and edit-lock lookups use a separate one-connection read
@@ -147,10 +147,12 @@ async function writeDbAsync(db) {
   db.syncRevision = Math.max(0, Number(db.syncRevision || 0)) + 1;
   if (!DATABASE_URL) {
     writeDb(db);
+    onCommitted();
     return;
   }
   await ensurePostgresDb();
   await getPgStore().save(db, { protectedAttachmentIds: [...undoProtectedAttachmentIds(db)] });
+  onCommitted();
 }
 // END preserved storage lifecycle
 

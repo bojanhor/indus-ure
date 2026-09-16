@@ -8,6 +8,7 @@ const { spawn } = require("node:child_process");
 const { isDeepStrictEqual } = require("node:util");
 const { Pool } = require("pg");
 const { PostgresStore } = require("../outputs/postgres-store");
+const { createCalendarSyncStore, KEY: CALENDAR_STATE_KEY } = require("../outputs/calendar-sync-store");
 const { normalizeDb, createSession, sessionTokenHash, attachmentVisibleToUser } = require("../outputs/server");
 const { dumpConsistentDatabase, dumpDatabase, sanitize } = require("./backup-indus-ure");
 
@@ -203,6 +204,33 @@ async function main() {
   assert.equal(attachmentVisibleToUser(seed, { id: "ibro", role: "worker" }, attachmentId), false);
   assert.equal(attachmentVisibleToUser(seed, { id: "bojan", role: "boss" }, attachmentId), true);
   check("attachments.targeted_access_preserves_permissions");
+
+  const calendarStore = createCalendarSyncStore({ databaseUrl: url.href });
+  const competingCalendarStore = createCalendarSyncStore({ databaseUrl: url.href });
+  try {
+    const business = await store.load();
+    await calendarStore.locked(async io => { await io.save({ marker: "operational-only", tokens: { refresh_token: "synthetic-qa-secret" } }); });
+    business.settings.calendarConcurrency = "business-winner";
+    await store.save(business);
+    assert.equal((await calendarStore.load()).marker, "operational-only");
+    assert.equal((await store.load()).settings.calendarConcurrency, "business-winner");
+    assert.equal(Object.hasOwn(await store.load(), CALENDAR_STATE_KEY), false);
+    check("calendar.operational_state_does_not_conflict_with_or_leak_into_business_snapshot");
+    let release, signal;
+    const entered = new Promise(resolve => { signal = resolve; });
+    const held = calendarStore.locked(async () => { signal(); await new Promise(resolve => { release = resolve; }); });
+    await entered;
+    try {
+      let enteredTwice = false;
+      await competingCalendarStore.locked(async () => { enteredTwice = true; });
+      assert.equal(enteredTwice, false);
+      assert.equal((await calendarStore.load()).marker, "operational-only", "status does not wait for remote Google work");
+    } finally { release(); await held; }
+    check("calendar.advisory_lock_excludes_second_worker_but_not_status_reads");
+  } finally {
+    await Promise.all([calendarStore.close(), competingCalendarStore.close()]);
+    await pool.query("delete from indus_meta where key = $1", [CALENDAR_STATE_KEY]);
+  }
 
   const port = 26000 + Math.floor(Math.random() * 2000);
   let output = "";

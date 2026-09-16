@@ -828,7 +828,7 @@ test("e-poštna povezava odpre ciljno opravilo pred celotnim nalaganjem", async 
   assert.match(server, /const todoEditLockRequest = .*lock.*\.test\(req\.url\);/);
   assert.match(server, /const todoEditorDiagnosticRequest = .*todo-editor-diagnostics.*\.test\(req\.url\);/);
   assert.match(server, /const todoSharePdfTicketRequest = .*share-pdf-ticket.*\.test\(req\.url\);/);
-  assert.match(server, /if \(streamedMediaUpload \|\| todoEditLockRequest \|\| todoEditorDiagnosticRequest \|\| todoSharePdfTicketRequest\) \{\s*handleApi\(req, res\)/);
+  assert.match(server, /if \(streamedMediaUpload \|\| todoEditLockRequest \|\| todoEditorDiagnosticRequest \|\| todoSharePdfTicketRequest \|\| planningCalendarRequest\) \{\s*handleApi\(req, res\)/);
   assert.match(server, /TODO_EDITOR_DIAGNOSTICS_RETENTION_MS = 24 \* 60 \* 60 \* 1000/);
   assert.match(server, /function todoEditorDiagnosticSummary\(\)/);
   assert.match(server, /Server-Timing/);

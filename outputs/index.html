@@ -5677,6 +5677,7 @@
 
               <span class="tools-menu-label">Podatki in sinhronizacija</span>
               <button class="menu-action hidden" id="googleDrive" type="button">Google Dokumenti, preglednice in Gmail</button>
+              <button class="menu-action" id="planningCalendarMenu" type="button">Google Koledar — planiranje</button>
               <button class="menu-action admin-only" id="notificationsBtn" type="button">Sistemska opozorila <span id="notificationsCount"></span></button>
               <span class="tools-menu-label">Izbrisano</span>
               <button class="menu-action" id="trashMenuBtn" type="button">Koš opravil</button>
@@ -6530,9 +6531,21 @@
         </label>
         <button class="secondary" id="saveProfile" type="button">Shrani profil</button>
         <div class="calendar-feed-actions">
-          <button class="secondary" id="copyWorkerCalendar" type="button">Kopiraj moj koledar za telefon</button>
-          <button class="secondary hidden" id="copyCombinedCalendar" type="button">Kopiraj zdru&#382;eni &#353;efovski koledar</button>
+          <button class="secondary" id="copyWorkerCalendar" type="button">Kopiraj moj ICS koledar planiranja</button>
+          <button class="secondary hidden" id="copyCombinedCalendar" type="button">Kopiraj skupni ICS koledar planiranja</button>
         </div>
+        <section class="app-settings-section" aria-labelledby="planningCalendarTitle">
+          <h4 id="planningCalendarTitle">Google Koledar — planiranje</h4>
+          <p class="todo-meta">Samo dogodki za planiranje, brez vpisov ur in materiala. Urejanje ostane v INDUS Ure.</p>
+          <p id="planningCalendarStatus" role="status" aria-live="polite">Preverjam povezavo …</p>
+          <div id="planningCalendarLinks" class="calendar-feed-actions"></div>
+          <div class="actions">
+            <button class="primary hidden" id="connectPlanningCalendar" type="button">Poveži Google Koledar</button>
+            <button class="secondary hidden" id="syncPlanningCalendar" type="button">Sinhroniziraj zdaj</button>
+            <button class="secondary hidden" id="pausePlanningCalendar" type="button">Začasno ustavi</button>
+          </div>
+          <p class="todo-meta">Delavci dobijo dostop samo za ogled svojega koledarja. Lastniški Google račun ima tehnično možnost urejanja, vendar se spremembe ne vračajo v Ure.</p>
+        </section>
       </div>
     </form>
   </dialog>
@@ -8826,6 +8839,9 @@ async function boot() {
         // Show the task screen from a lean snapshot first. Financial history
         // does not affect that first paint and hydrates in the background.
         const bootstrapPromise = api("/api/bootstrap?initial=1", { recoverSession: false });
+        // Both requests may reject on the signed-out screen. Mark the parallel
+        // request handled immediately; the await below still propagates its error.
+        bootstrapPromise.catch(() => {});
         const cachedSnapshotPromise = usableOfflineSnapshot().catch(() => null);
         const me = await api("/api/me", { recoverSession: false });
         applyLightweightSession(me, [me.user].filter(Boolean));
@@ -8847,6 +8863,7 @@ async function boot() {
         await openQuickCreateFromLink();
         await openRecoveredTodoCreationDraftAtStartup();
         finishStartupInBackground();
+        planningCalendarUi.resume();
       } catch (error) {
         const openedOffline = isNetworkError(error) ? await activateOfflineSnapshot().catch(() => false) : false;
         if (openedOffline) return;
@@ -9513,6 +9530,10 @@ function isImportedTodo(todo) {
 function calendarTodos({ includeArchived = false } = {}) {
       return uniqueTodosByEventId(contextTodos()).filter((todo) => !isImportedTodo(todo) && (includeArchived || !todo.archivedAt));
     }
+
+/* @indus-module:planning-calendar */
+/* @indus-module:editor/planning-calendar */
+const planningCalendarUi = createPlanningCalendarUi({ api, $, getUser: () => state.user, showNotice, showAppConfirm, openAccount: openAccountDialog });
 
 function applyWorkContextUi() {
       const admin = isAdminView();
@@ -10388,7 +10409,8 @@ function renderMonth() {
       const calendar = $('calendar');
       calendar.innerHTML = '';
       const entries = contextEntries();
-      const todos = calendarTodos().filter((todo) => state.showCompletedCalendarTodos || !['execution', 'material'].includes(todo.status));
+      const todos = state.showCompletedCalendarTodos ? calendarTodos()
+        : PlanningCalendar.select(state.todos, { combined: isAdminView(), userId: activeWorkerId() });
       const todayDate = new Date();
       $('todayDayNumber').textContent = todayDate.getDate();
       $('todayBtn').setAttribute('aria-label', `Danes, ${todayDate.toLocaleDateString('sl-SI')}`);
@@ -13516,6 +13538,7 @@ function openAccountDialog() {
       updateAvatar("accountAvatar", state.user);
       $("copyCombinedCalendar").classList.toggle("hidden", state.user.role !== "boss");
       $("accountDialog").showModal();
+      planningCalendarUi.open();
     }
 
 async function copyCalendarFeed(combined = false) {
@@ -13967,6 +13990,7 @@ document.addEventListener("keydown", (event) => {
     });
 $("exportCsv").addEventListener("click", exportCsv);
 $("googleDrive").addEventListener("click", () => connectGoogleDrive().catch((error) => showNotice(error.message)));
+$("planningCalendarMenu").addEventListener("click", () => { openAccountDialog(); $("planningCalendarTitle").scrollIntoView({ block: "start" }); });
 $("driveReconnectBtn").addEventListener("click", () => connectGoogleDrive().catch((error) => showNotice(error.message)));
 $("downloadBackup").addEventListener("click", () => downloadBackup().catch((error) => showNotice(error.message)));
 $("restoreBackup").addEventListener("click", () => $("restoreBackupFile").click());

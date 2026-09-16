@@ -18,7 +18,7 @@ const {
 const serverPath = path.join(__dirname, "../outputs/server.js");
 const htmlPath = path.join(__dirname, "../outputs/index.html");
 
-test("Google Calendar in Sheets nista več delovni integraciji", () => {
+test("stara dvosmerna Calendar/Sheets integracija ostane izključena; nova je ločen modul", () => {
   const source = fs.readFileSync(serverPath, "utf8");
   assert.doesNotMatch(source, /async function syncGoogleForUser/);
   assert.doesNotMatch(source, /syncClientsWithSheets/);
@@ -77,7 +77,7 @@ test("uvoženi dogodki niso v ICS koledarju", () => {
   }, { userId: "ibro", combined: false });
   assert.doesNotMatch(ics, /Zunanji dogodek/);
 });
-test("skupni koledar ohrani dogodek, dokler ima vsaj en izvajalec neobračunan vnos", () => {
+test("koledar planiranja ne objavi vpisov ur, tudi če še niso obračunani", () => {
   const ics = buildCalendarIcs({
     users: { ibro: { name: "Ibro" }, maja: { name: "Maja" } },
     entries: [],
@@ -86,7 +86,7 @@ test("skupni koledar ohrani dogodek, dokler ima vsaj en izvajalec neobračunan v
       { id: "b", assignmentGroupId: "shared", title: "Montaža", date: "2026-07-20", start: "08:00", end: "09:00", status: "execution", syncUser: "maja", archivedAt: "" }
     ]
   }, { combined: true });
-  assert.match(ics, /TODO: Montaža/);
+  assert.doesNotMatch(ics, /TODO: Montaža/);
 });
 test("zunanje povezave dovolijo samo Google Dokumente in Preglednice", () => {
   const id = "1_z_1I_wX8-VR0K9rXj7BHRFwc--00Ul5";

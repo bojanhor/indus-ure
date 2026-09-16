@@ -11,6 +11,10 @@ const { promisify } = require("util");
 const PDFDocument = require("pdfkit");
 const archiver = require("archiver");
 const { renderAppShell } = require("./app-shell");
+const planningCalendar = require("./planning-calendar");
+const { createCalendarSyncStore } = require("./calendar-sync-store");
+const { createGooglePlanningCalendar } = require("./google-planning-calendar");
+const { createCalendarHttp } = require("./calendar-http");
 const {
   isUsableTaxId,
   isStableClientId,
@@ -2148,7 +2152,8 @@ const {
   ensureAuditLogStore,
   ensureWorkerDigestRunStore,
   appendUndoJournalForMutation: (...args) => appendUndoJournalForMutation(...args),
-  undoProtectedAttachmentIds: (...args) => undoProtectedAttachmentIds(...args)
+  undoProtectedAttachmentIds: (...args) => undoProtectedAttachmentIds(...args),
+  onCommitted: () => { if (NODE_ENV === "production" && process.env.DISABLE_GOOGLE_CALENDAR_SYNC !== "true") googlePlanningCalendar.schedule(); }
 });
 
 async function ensureAuditLogStore() {
@@ -4254,80 +4259,32 @@ function foldIcsLine(line) {
 
 function buildCalendarIcs(db, { userId = "", combined = false } = {}) {
   const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
-  const entries = (db.entries || []).filter((entry) => combined || !userId || (entry.syncUser || entry.createdBy) === userId);
-  const assignedTodos = (db.todos || []).filter((todo) => !todo.imported && !isTrashedTodo(todo) && (combined || !userId || (todo.syncUser || todo.createdBy) === userId));
-  const todos = combined
-    ? [...assignedTodos.reduce((groups, todo) => {
-      const key = todo.assignmentGroupId || todo.id;
-      const current = groups.get(key);
-      // A shared event remains active until every worker's own settlement is
-      // complete. Prefer its unarchived assignment for the combined calendar.
-      if (!current || (current.archivedAt && !todo.archivedAt)) groups.set(key, todo);
-      return groups;
-    }, new Map()).values()]
-    : assignedTodos;
-  const assigneeNames = (todo) => todoAssignmentAssigneeIds(db, todo)
-    .map((id) => db.users?.[id]?.name || id)
-    .filter(Boolean)
-    .join(", ");
-  const calendarName = combined
-    ? "INDUS URE - Vsi delavci"
-    : `INDUS URE - ${db.users?.[userId]?.name || "Delovni koledar"}`;
-  const lines = [
-    "BEGIN:VCALENDAR",
-    "VERSION:2.0",
-    "PRODID:-//INDUS URE//Delovni koledar//SL",
-    "CALSCALE:GREGORIAN",
-    "METHOD:PUBLISH",
-    `X-WR-CALNAME:${calendarName}`,
-    "X-WR-TIMEZONE:Europe/Ljubljana"
-  ];
-
-  for (const entry of entries) {
-    if (!entry.date || !entry.start || !entry.end) continue;
-    const description = [
-      entry.work ? `Delo: ${entry.work}` : "",
-      entry.material ? `Material: ${entry.material}` : "",
-      entry.people ? `Sodelavci: ${entry.people}` : "",
-      entry.km ? `Km: ${entry.km}` : "",
-      entry.notes ? `Opombe: ${entry.notes}` : "",
-      entry.createdByName ? `Dodal: ${entry.createdByName}` : "",
-      entry.updatedByName ? `Spremenil: ${entry.updatedByName}` : ""
-    ].filter(Boolean).join("\n");
-    lines.push("BEGIN:VEVENT", `UID:entry-${entry.id}@indus-ure`, `DTSTAMP:${stamp}`);
-    if (entry.status === "vacation") {
-      lines.push(`DTSTART;VALUE=DATE:${icsDate(entry.date)}`, `DTEND;VALUE=DATE:${addDays(entry.date, 1)}`);
-    } else {
-      lines.push(`DTSTART;TZID=Europe/Ljubljana:${icsDateTime(entry.date, entry.start)}`, `DTEND;TZID=Europe/Ljubljana:${icsDateTime(entry.date, entry.end)}`);
-    }
-    lines.push(
-      `SUMMARY:${icsEscape(entrySummary(entry))}`,
-      `DESCRIPTION:${icsEscape(description)}`,
-      "END:VEVENT"
-    );
-  }
-
+  const todos = planningCalendar.select(db.todos, { userId, combined });
+  const calendarName = combined ? "INDUS URE - Planiranje - Vsi delavci"
+    : `INDUS URE - Planiranje - ${db.users?.[userId]?.name || "Delovni koledar"}`;
+  const lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//INDUS URE//Planiranje//SL",
+    "CALSCALE:GREGORIAN", "METHOD:PUBLISH", `X-WR-CALNAME:${icsEscape(calendarName)}`, "X-WR-TIMEZONE:Europe/Ljubljana"];
   for (const todo of todos) {
-    if (!todo.date || todo.archivedAt) continue;
+    const link = PUBLIC_BASE_URL ? `${PUBLIC_BASE_URL}/?todo=${encodeURIComponent(todo.id)}` : "";
     const description = [
       todo.client ? `Stranka: ${todo.client}` : "",
-      todo.urgent ? "NUJNO: DA" : "",
-      combined ? `Za: ${assigneeNames(todo)}` : "",
+      `Za: ${todo.assigneeIds.map(id => db.users?.[id]?.name || id).join(", ")}`,
       `Status: ${todoStatusDefinition(todo.status).label}`,
-      todo.notes ? `Opombe: ${todo.notes}` : "",
-      todo.createdByName ? `Dodal: ${todo.createdByName}` : ""
+      todo.notes || "", link ? `Odpri v INDUS Ure: ${link}` : ""
     ].filter(Boolean).join("\n");
-    lines.push("BEGIN:VEVENT", `UID:todo-${combined ? (todo.assignmentGroupId || todo.id) : todo.id}@indus-ure`, `DTSTAMP:${stamp}`);
+    lines.push("BEGIN:VEVENT", `UID:planning-${todo.assignmentGroupId}@indus-ure`, `DTSTAMP:${stamp}`);
+    const updated = new Date(todo.updatedAt || todo.createdAt || "");
+    if (Number.isFinite(updated.getTime())) lines.push(`LAST-MODIFIED:${updated.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z")}`);
     const endDate = todoEndDate(todo);
     if (todo.start && todo.end) {
       lines.push(`DTSTART;TZID=Europe/Ljubljana:${icsDateTime(todo.date, todo.start)}`, `DTEND;TZID=Europe/Ljubljana:${icsDateTime(endDate, todo.end)}`);
     } else {
-      // RFC 5545 uses an exclusive end date for all-day events.
-      lines.push(`DTSTART;VALUE=DATE:${icsDate(todo.date)}`, `DTEND;VALUE=DATE:${addDays(endDate, 1)}`);
+      lines.push(`DTSTART;VALUE=DATE:${icsDate(todo.date)}`, `DTEND;VALUE=DATE:${icsDate(planningCalendar.nextDay(endDate))}`);
     }
-    lines.push(`SUMMARY:${icsEscape(`${todo.urgent ? "NUJNO: " : ""}TODO: ${todo.title}`)}`, `DESCRIPTION:${icsEscape(description)}`, "END:VEVENT");
+    lines.push(`SUMMARY:${icsEscape(`${todo.urgent ? "NUJNO: " : ""}TODO: ${todo.title}`)}`, `DESCRIPTION:${icsEscape(description)}`);
+    if (link) lines.push(`URL:${link}`);
+    lines.push("END:VEVENT");
   }
-
   lines.push("END:VCALENDAR");
   return `${lines.map(foldIcsLine).join("\r\n")}\r\n`;
 }
@@ -5458,6 +5415,7 @@ async function handleApi(req, res) {
       sendJson(res, 200, { ok: true });
       return;
     }
+    if (await calendarHttp.handle(req, res, url)) return;
     if (url.pathname === "/api/google/status" || url.pathname === "/api/google/auth-url" || url.pathname === "/api/google/sync") {
       sendJson(res, 410, { error: "Google Calendar sinhronizacija je bila odstranjena. ICS koledar ostaja samo za branje." });
       return;
@@ -7883,7 +7841,7 @@ async function handleCalendarFeed(req, res) {
     const combined = token === db.calendarFeeds?.bossCombined;
     const worker = Object.entries(db.calendarFeeds || {})
       .find(([id, value]) => id !== "bossCombined" && value === token)?.[0] || "";
-    if (!combined && !worker) {
+    if (!combined && (!worker || !db.users?.[worker] || db.users[worker].active === false)) {
       sendText(res, 403, "Forbidden", "text/plain");
       return;
     }
@@ -8011,7 +7969,9 @@ async function start() {
       // it does not mutate the database and must not wait behind an unrelated
       // long-running save before the user can share an event.
       const todoSharePdfTicketRequest = /^\/api\/todos\/[^/?]+\/share-pdf-ticket(?:[/?]|$)/.test(req.url);
-      if (streamedMediaUpload || todoEditLockRequest || todoEditorDiagnosticRequest || todoSharePdfTicketRequest) {
+      const planningCalendarRequest = req.url.startsWith("/api/planning-calendar/")
+        || (req.url.startsWith("/api/google/callback") && String(new URL(req.url, "http://localhost").searchParams.get("state") || "").startsWith("planning:"));
+      if (streamedMediaUpload || todoEditLockRequest || todoEditorDiagnosticRequest || todoSharePdfTicketRequest || planningCalendarRequest) {
         handleApi(req, res).catch((error) => handleUnexpectedRequestError(error, res));
       } else if (req.method !== "GET" || req.url.startsWith("/api/google/callback")) {
         runSerializedMutation(req, res);
@@ -8031,6 +7991,7 @@ async function start() {
   server.headersTimeout = 65_000;
   server.keepAliveTimeout = 5_000;
   if (OPERATIONAL_MONITOR_ENABLED) startOperationalMonitor();
+  if (NODE_ENV === "production" && process.env.DISABLE_GOOGLE_CALENDAR_SYNC !== "true") googlePlanningCalendar.start();
 
   server.listen(PORT, HOST, () => {
     console.log(`INDUS URE lokalno: http://127.0.0.1:${PORT}`);
@@ -8284,6 +8245,22 @@ const {
       get TODO_IMAGE_THUMBNAIL_MAX_SIDE() { return TODO_IMAGE_THUMBNAIL_MAX_SIDE; },
       get Transform() { return Transform; }
     }
+});
+
+const calendarSyncStore = createCalendarSyncStore({ databaseUrl: DATABASE_URL, file: path.join(dataDir, "planning-calendar-private.json") });
+const googlePlanningCalendar = createGooglePlanningCalendar({
+  store: calendarSyncStore, readDb: readDbAsync, baseUrl: PUBLIC_BASE_URL,
+  deploymentKey: crypto.createHash("sha256").update(DATABASE_URL || dataDir).digest("hex"),
+  definitions: TODO_STATUS_DEFINITIONS,
+  createApi: tokens => {
+    const { google } = require("googleapis");
+    return google.calendar({ version: "v3", auth: googleClient(null, tokens), timeout: 10000, retry: false });
+  }
+});
+const calendarHttp = createCalendarHttp({
+  service: googlePlanningCalendar, requireUser, sendJson, sendText, readBody, googleClient, googleReady,
+  ownerEmail: GOOGLE_DRIVE_OWNER_EMAIL, baseUrl: PUBLIC_BASE_URL,
+  googleProfile: async auth => (await require("googleapis").google.oauth2({ version: "v2", auth }).userinfo.get()).data
 });
 
 if (require.main === module) {
