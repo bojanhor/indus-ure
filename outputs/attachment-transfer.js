@@ -284,34 +284,45 @@ async function receiveLocalTodoImage(input = {}) {
 }
 
 async function receiveLocalTodoVideo(input = {}) {
-  const mimeType = videoMimeType(input.mimeType, input.name);
+  const pdf = input.pdf === true;
+  const maximumBytes = pdf ? moduleValues.MAX_PDF_BYTES : moduleValues.MAX_VIDEO_BYTES;
+  const label = pdf ? "PDF" : "Video";
+  const mimeType = pdf ? "application/pdf" : videoMimeType(input.mimeType, input.name);
   if (!mimeType) throw new Error("Izberi veljavno video datoteko.");
   const declaredBytes = Number(input.contentLength);
-  if (Number.isSafeInteger(declaredBytes) && declaredBytes <= 0) throw new Error("Praznega videa ni mogoče dodati.");
-  if (Number.isSafeInteger(declaredBytes) && declaredBytes > moduleValues.MAX_VIDEO_BYTES) throw new Error(`Video je prevelik. Največja dovoljena velikost je ${Math.round(moduleValues.MAX_VIDEO_BYTES / 1024 / 1024)} MB.`);
+  if (Number.isSafeInteger(declaredBytes) && declaredBytes <= 0) throw new Error("Prazne datoteke ni mogoče dodati.");
+  if (Number.isSafeInteger(declaredBytes) && declaredBytes > maximumBytes) throw Object.assign(new Error(`${label} je prevelik. Največja dovoljena velikost je ${Math.round(maximumBytes / 1048576)} MB.`), { status: 413 });
 
   const uploadDirectory = moduleValues.path.join(moduleValues.MEDIA_DIR, ".uploads");
   await moduleValues.fsp.mkdir(uploadDirectory, { recursive: true, mode: 0o700 });
   const temporaryPath = moduleValues.path.join(uploadDirectory, `${moduleValues.crypto.randomUUID()}.part`);
   const digest = moduleValues.crypto.createHash("sha256");
   let byteSize = 0;
+  let signature = Buffer.alloc(0);
   const counter = new moduleValues.Transform({
     transform(chunk, encoding, callback) {
       byteSize += chunk.length;
-      if (byteSize > moduleValues.MAX_VIDEO_BYTES) {
-        callback(new Error(`Video je prevelik. Največja dovoljena velikost je ${Math.round(moduleValues.MAX_VIDEO_BYTES / 1024 / 1024)} MB.`));
+      if (byteSize > maximumBytes) {
+        callback(Object.assign(new Error(`${label} je prevelik. Največja dovoljena velikost je ${Math.round(maximumBytes / 1048576)} MB.`), { status: 413 }));
         return;
+      }
+      if (pdf && signature.length < 5) {
+        signature = Buffer.concat([signature, chunk.subarray(0, 5 - signature.length)]);
+        if (signature.length === 5 && signature.toString("ascii") !== "%PDF-") {
+          callback(Object.assign(new Error("Datoteka ni veljaven PDF."), { status: 400 })); return;
+        }
       }
       digest.update(chunk);
       callback(null, chunk);
     }
   });
-  input.stream.once("aborted", () => counter.destroy(new Error("Prenos videa je bil prekinjen.")));
+  input.stream.once("aborted", () => counter.destroy(new Error("Prenos datoteke je bil prekinjen.")));
   try {
     await moduleValues.pipeline(input.stream, counter, moduleValues.fs.createWriteStream(temporaryPath, { mode: 0o600 }));
-    if (!byteSize) throw new Error("Praznega videa ni mogoče dodati.");
+    if (!byteSize) throw new Error("Prazne datoteke ni mogoče dodati.");
+    if (pdf && signature.toString("ascii") !== "%PDF-") throw Object.assign(new Error("Datoteka ni veljaven PDF."), { status: 400 });
     const attachmentId = digest.digest("hex");
-    const storageKey = moduleValues.path.posix.join("objects", `${attachmentId}${videoStorageExtension(mimeType, input.name)}`);
+    const storageKey = moduleValues.path.posix.join("objects", `${attachmentId}${pdf ? ".pdf" : videoStorageExtension(mimeType, input.name)}`);
     const targetPath = moduleValues.path.join(moduleValues.MEDIA_DIR, ...storageKey.split("/"));
     await moduleValues.fsp.mkdir(moduleValues.path.dirname(targetPath), { recursive: true, mode: 0o700 });
     const createdFile = await moveAttachmentFile(temporaryPath, targetPath);
@@ -469,12 +480,14 @@ async function handleAttachmentUpload(req, res, url) {
       return true;
     }
 
-    if (url.pathname === "/api/todos/video" && req.method === "POST") {
+    if (["/api/todos/video", "/api/todos/pdf"].includes(url.pathname) && req.method === "POST") {
+      const pdf = url.pathname.endsWith("/pdf");
       const user = await requireUser(req, res);
       if (!user) return true;
       let name = String(req.headers["x-indus-file-name"] || "video");
       try { name = decodeURIComponent(name); } catch { /* keep encoded value */ }
       const received = await receiveLocalTodoVideo({
+        pdf,
         stream: req,
         name,
         mimeType: req.headers["content-type"],
@@ -500,7 +513,7 @@ async function handleAttachmentUpload(req, res, url) {
           return {
             id: moduleValues.crypto.randomUUID(),
             attachmentId: received.attachmentId,
-            name: "Video",
+            name: pdf ? cleanDriveUploadName(name) : "Video",
             comment: "",
             createdBy: user.id,
             createdByName: user.name,
@@ -512,7 +525,8 @@ async function handleAttachmentUpload(req, res, url) {
         });
         sendJson(res, 201, { photo });
       } catch (error) {
-        if (received.createdFile) await moduleValues.fsp.rm(received.targetPath, { force: true }).catch(() => {});
+        // A concurrent upload may already reference the same content hash.
+        if (!pdf && received.createdFile) await moduleValues.fsp.rm(received.targetPath, { force: true }).catch(() => {});
         throw error;
       }
       return true;

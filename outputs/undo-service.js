@@ -280,7 +280,7 @@ function undoActionLabel({ req, actor, beforeState, afterState }) {
 function undoEligibleRequest(req) {
   if (!isUnsafeRequest(req)) return false;
   const pathname = new URL(req.url, "http://undo.local").pathname;
-  if (/^\/api\/todos\/(?:video|drive-files|[^/]+\/(?:lock|completion-request|share-pdf-ticket))/.test(pathname)) return false;
+  if (/^\/api\/todos\/(?:video|image|pdf|drive-files|[^/]+\/(?:lock|completion-request|share-pdf-ticket))/.test(pathname)) return false;
   if (/^\/api\/(?:attachments|notifications|auth|google|login|logout|password|profile|billing-locks|undo-journal|backup)\b/.test(pathname)) return false;
   return /^\/api\/(?:todos(?:\/|$)|entries(?:\/|$)|clients(?:\/|$)|client-bills(?:\/|$)|payrolls(?:\/|$)|advances(?:\/|$)|personal-purchases(?:\/|$)|debts(?:\/|$)|settings\/billing$)/.test(pathname);
 }

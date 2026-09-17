@@ -18,37 +18,6 @@ function todoLockUrl(todoId) {
       return `/api/todos/${encodeURIComponent(todoId)}/lock`;
     }
 
-function todoEditorDiagnosticMetric(value) {
-      const duration = Number(value);
-      return Number.isFinite(duration) && duration >= 0 && duration <= 120_000 ? Math.round(duration) : null;
-    }
-
-function reportTodoEditorOpenTiming(todo, metrics = {}) {
-      if (!todo?.id || !state.token || state.offlineMode || !navigator.onLine) return;
-      const result = ["ready", "rejected", "closed", "error", "offline"].includes(String(metrics.result || ""))
-        ? String(metrics.result)
-        : "error";
-      // This intentionally contains only timing/count values and the opaque
-      // event identifier. The server hashes the identifier and never stores
-      // title, customer, description or attachment/file names.
-      const payload = {
-        todoId: String(todo.id),
-        result,
-        formPrepareMs: todoEditorDiagnosticMetric(metrics.formPrepareMs),
-        lockWaitMs: todoEditorDiagnosticMetric(metrics.lockWaitMs),
-        totalMs: todoEditorDiagnosticMetric(metrics.totalMs),
-        attachmentCount: Math.max(0, Math.min(40, Math.round(Number(metrics.attachmentCount) || 0)))
-      };
-      void api("/api/todo-editor-diagnostics", {
-        method: "POST",
-        body: JSON.stringify(payload),
-        recoverSession: false,
-        requestTimeoutMs: 2_500
-      }).catch(() => {
-        // Diagnostics are best-effort and must never affect ordinary editing.
-      });
-    }
-
 function todoHandoverApi(todoId, body) {
       return api(`${todoLockUrl(todoId)}/handover`, {
         method: "POST", body: JSON.stringify(body), requestTimeoutMs: 8_000
@@ -171,7 +140,7 @@ function resumeTodoLockHeartbeat(todoId, token) {
       const current = state.todoEditLock;
       if (!current || state.todoLockHeartbeat || state.offlineMode || !navigator.onLine) return;
       if (current.todoId !== todoId || current.token !== token) return;
-      state.todoLockHeartbeat = setInterval(renewTodoEditLock, 20_000);
+      state.todoLockHeartbeat = setInterval(renewTodoEditLock, moduleValues.appConfig.locks.heartbeatSeconds * 1000);
     }
 
 function renewTodoEditLock() {
@@ -251,7 +220,7 @@ async function acquireTodoEditLockForDialog(todoId) {
         }
         if (state.todoLockHeartbeat) clearInterval(state.todoLockHeartbeat);
         state.todoEditLock = { todoId, token: data.lockToken, expiresAt: data.lock?.expiresAt || "" };
-        state.todoLockHeartbeat = setInterval(renewTodoEditLock, 20_000);
+        state.todoLockHeartbeat = setInterval(renewTodoEditLock, moduleValues.appConfig.locks.heartbeatSeconds * 1000);
         startTodoHandoverWatch();
         return true;
       } catch (error) {
@@ -312,7 +281,6 @@ function installEditLockBindings1() {
 
   return {
     todoLockUrl,
-    reportTodoEditorOpenTiming,
     clearTodoEditLockState,
     pauseTodoLockHeartbeat,
     resumeTodoLockHeartbeat,

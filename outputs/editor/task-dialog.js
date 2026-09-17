@@ -37,7 +37,6 @@ function createTaskDialog({
   renderTodoFormSourceProject,
   renderTodoStatusChoices,
   renderTodoTaskSuggestions,
-  reportTodoEditorOpenTiming,
   scheduleTodoFormPhotoPreviews,
   setTodoVideoUploadStatus,
   showAppConfirm,
@@ -90,8 +89,8 @@ function suggestedTimeRange(todo = {}) {
         .map((item) => dayTimelineMinutes(item.end))
         .filter((minutes) => minutes !== null)
         .reduce((latest, minutes) => Math.max(latest, minutes), null);
-      const startMinutes = latestEndMinutes ?? dayTimelineMinutes(rememberedTodoStartTime()) ?? (8 * 60);
-      return { start: dayTimelineTime(startMinutes), end: dayTimelineTime(Math.min(23 * 60 + 45, startMinutes + 60)) };
+      const startMinutes = latestEndMinutes ?? dayTimelineMinutes(rememberedTodoStartTime()) ?? dayTimelineMinutes(moduleValues.appConfig.editor.defaultStart);
+      return { start: dayTimelineTime(startMinutes), end: dayTimelineTime(Math.min(1440, startMinutes + moduleValues.appConfig.editor.defaultDurationMinutes)) };
     }
 
 function suggestedNoteTimeRange() {
@@ -118,7 +117,6 @@ function syncReportTodoDialogNavigation(todoId, navigationIds = null) {
     }
 
 async function openTodoDialog(todo = {}, { reportNavigationIds = null } = {}) {
-      const todoEditorOpenStartedAt = todo?.id ? performance.now() : 0;
       clearFormValidationError($("todoForm"));
       setTodoDialogSaving(false);
       const requestedCreationMode = todoCreationDraftMode(todo);
@@ -262,14 +260,12 @@ async function openTodoDialog(todo = {}, { reportNavigationIds = null } = {}) {
       setTodoVideoUploadStatus("");
       $("todoFormDriveLink").value = "";
       $("todoFormDriveLinkPanel").classList.add("hidden");
-      const todoEditorFormPreparedAt = editing ? performance.now() : 0;
       $("todoDialog").showModal();
       if (editing) {
         // The edit lock protects writes, not reading the form.  Showing the
         // read-only shell first avoids a multi-second blank wait after reload.
         setTodoDialogOpening(true);
         scheduleTodoFormPhotoPreviews();
-        const todoEditorLockStartedAt = performance.now();
         let todoEditorOpenResult = "error";
         try {
           if (!(await acquireTodoEditLockForDialog(todo.id))) {
@@ -298,13 +294,7 @@ async function openTodoDialog(todo = {}, { reportNavigationIds = null } = {}) {
           throw error;
         } finally {
           if (todoEditorOpenResult !== "ready" && $("todoDialog").open) setTodoDialogOpening(false);
-          reportTodoEditorOpenTiming(todo, {
-            result: todoEditorOpenResult,
-            formPrepareMs: todoEditorFormPreparedAt - todoEditorOpenStartedAt,
-            lockWaitMs: performance.now() - todoEditorLockStartedAt,
-            totalMs: performance.now() - todoEditorOpenStartedAt,
-            attachmentCount: (todo.photos || []).length + (todo.driveFiles || []).length
-          });
+
         }
       } else {
         scheduleTodoFormPhotoPreviews();

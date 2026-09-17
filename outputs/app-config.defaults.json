@@ -1,0 +1,47 @@
+{
+  "uploads": {
+    "maxAttachments": 40,
+    "pdfMaxMb": 50,
+    "imageMaxMb": 25,
+    "videoMaxMb": 200,
+    "imageDisplayMaxSide": 2560,
+    "imageThumbnailMaxSide": 420,
+    "imageProcessTimeoutSeconds": 90,
+    "pendingHours": 12
+  },
+  "history": {
+    "trashDays": 30,
+    "auditDays": 30,
+    "auditMaxEvents": 10000,
+    "undoActions": 20,
+    "eventVersions": 12
+  },
+  "reports": {
+    "pdfTotalMb": 100,
+    "gmailAttachmentMb": 5,
+    "gmailTotalMb": 8,
+    "downloadTicketMinutes": 5
+  },
+  "network": {
+    "requestTimeoutSeconds": 15,
+    "uploadTimeoutSeconds": 180,
+    "refreshSeconds": 60
+  },
+  "editor": {
+    "defaultStart": "08:00",
+    "defaultDurationMinutes": 60,
+    "clientSuggestions": 12,
+    "noticeSeconds": 8,
+    "photoBrushPixels": 2,
+    "photoTextPixels": 24,
+    "photoTouchPixels": 22,
+    "jpegMaxSide": 1280,
+    "jpegQuality": 82,
+    "dragHoldMs": 180,
+    "calendarDragHoldMs": 350,
+    "groupDragHoldMs": 200
+  },
+  "locks": { "leaseSeconds": 90, "heartbeatSeconds": 20 },
+  "calendar": { "pollSeconds": 30, "reconcileSeconds": 300, "debounceMs": 1500, "retryMaxSeconds": 900 },
+  "monitor": { "intervalSeconds": 300, "maxRssMb": 1800, "diskWarningPercent": 90, "backupStaleHours": 36, "alertCooldownHours": 6 }
+}

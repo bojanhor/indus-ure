@@ -43,6 +43,12 @@ testne dokaze in pravila; ta navodila jih ne nadomeščajo.
   tudi preklic že ustvarjenih podpornih sej; sprememba zastavice sama ne
   pomeni preklica obstoječega piškotka.
 
+## Tehnična konfiguracija
+
+Od 17. 9. 2026: `/var/lib/indus-ure/app-config.json`, šefovski obrazec v nastavitvah,
+atomaren zapis in prejšnja različica. Podrobnosti, privzete omejitve, validacija ter
+omejitve povrnitve: [TECHNICAL-CONFIG-2026-09-17.md](TECHNICAL-CONFIG-2026-09-17.md).
+
 ## Pravila shranjevanja in sočasnosti
 
 - HTTP branje ne shranjuje normalizacije. Združljivostna normalizacija
@@ -112,7 +118,7 @@ Stanje `indus_meta/planning_calendar_sync_v1` je ločeno od poslovnega CAS in
 ni del sanitiziranega recovery izvoza; po obnovi se povezava ponovno potrdi.
 
 - Recovery arhiv vsebuje `database.dump`, `sanitized-state.sql`, `media/`,
-  `application/`, `manifest.json` in generirani `RESTORE-INDUS-URE.txt`.
+  `application/`, `app-config.json` (od 17. 9. 2026), `manifest.json` in generirani `RESTORE-INDUS-URE.txt`.
   Dump in očiščeni uporabniki/nastavitve uporabljajo isti izvoženi PG posnetek.
 - Ohranita se poslovna baza in mediji; OAuth žetoni, gesla, seje, ICS žetoni
   in `/etc/indus-ure.env` so izključeni. Skrivnosti potrebujejo ločeno varno kopijo.

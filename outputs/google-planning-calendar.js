@@ -88,7 +88,7 @@ function safeError(error) {
 }
 function fail(message) { const error = new Error(message); error.safeMessage = message; return error; }
 
-function createGooglePlanningCalendar({ store, readDb, createApi, baseUrl, definitions, deploymentKey = "", runtimeEnabled = true, now = () => Date.now() }) {
+function createGooglePlanningCalendar({ store, readDb, createApi, baseUrl, definitions, deploymentKey = "", runtimeEnabled = true, config = () => require("./app-config.defaults.json").calendar, now = () => Date.now() }) {
   let timer = null, interval = null, running = false, rerun = false, forceNext = false;
   const instance = hash(baseUrl).slice(0, 24);
   const marker = key => `${APP}:${instance}:${hash(key).slice(0, 24)}`;
@@ -203,7 +203,7 @@ function createGooglePlanningCalendar({ store, readDb, createApi, baseUrl, defin
           const db = await readDb();
           const plans = calendarPlans(db, baseUrl, definitions);
           const signature = hash(plans.map(({ key, title, readers, events }) => ({ key, title, readers, events })));
-          if (!force && signature === state.signature && now() - Number(state.checkedAt || 0) < 5 * 60000) return;
+          if (!force && signature === state.signature && now() - Number(state.checkedAt || 0) < config().reconcileSeconds * 1000) return;
           const api = createApi(state.tokens);
           state.calendars ||= {};
           // Disabled/deleted workers lose access before their managed events
@@ -247,7 +247,7 @@ function createGooglePlanningCalendar({ store, readDb, createApi, baseUrl, defin
         } catch (error) {
           state.lastError = safeError(error);
           state.failures = (state.failures || 0) + 1;
-          state.retryAt = now() + Math.min(15 * 60000, 15000 * 2 ** Math.min(state.failures - 1, 6));
+          state.retryAt = now() + Math.min(config().retryMaxSeconds * 1000, 15000 * 2 ** Math.min(state.failures - 1, 6));
           await save(state);
         }
       });
@@ -260,13 +260,13 @@ function createGooglePlanningCalendar({ store, readDb, createApi, baseUrl, defin
     if (!runtimeEnabled) return;
     forceNext ||= force;
     if (timer) return;
-    timer = setTimeout(() => { timer = null; const forced = forceNext; forceNext = false; run({ force: forced }).catch(() => {}); }, 1500);
+    timer = setTimeout(() => { timer = null; const forced = forceNext; forceNext = false; run({ force: forced }).catch(() => {}); }, config().debounceMs);
     timer.unref?.();
   }
   function start() {
     if (interval) return;
     schedule();
-    interval = setInterval(() => schedule(), 30000);
+    interval = setInterval(() => schedule(), config().pollSeconds * 1000);
     interval.unref?.();
   }
   function stop() { if (timer) clearTimeout(timer); if (interval) clearInterval(interval); timer = interval = null; }

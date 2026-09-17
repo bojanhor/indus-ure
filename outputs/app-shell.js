@@ -6,6 +6,7 @@ const path = require("node:path");
 // Fixed, local source only. Assemble into the existing CSP-nonced inline script:
 // no dynamic URL/import/eval and no additional browser request on first edit.
 const browserModules = [
+  ["editor/app-config", "editor/app-config.js"],
   ["planning-calendar", "planning-calendar.js"],
   ["editor/planning-calendar", "editor/planning-calendar.js"],
   ["time-entry-editor", "editor/time-entry.js"],
@@ -27,7 +28,8 @@ const sources = browserModules.map(([name, file]) => {
   return { marker: `/* @indus-module:${name} */`, source };
 });
 
-function renderAppShell(template) {
+function renderAppShell(template, config = require("./app-config.defaults.json")) {
+  template = template.replace("/* @indus-config */ null", () => JSON.stringify(config).replace(/</g, "\\u003c"));
   for (const { marker, source } of sources) {
     if (template.split(marker).length !== 2) throw new Error(`Expected exactly one browser module marker: ${marker}`);
     template = template.replace(marker, () => source);

@@ -303,10 +303,10 @@ function photoEditorTextHitTest(point) {
         const localX = Math.cos(angle) * deltaX + Math.sin(angle) * deltaY;
         const localY = -Math.sin(angle) * deltaX + Math.cos(angle) * deltaY;
         const scale = canvas.width / Math.max(1, canvas.getBoundingClientRect().width);
-        const pad = Math.max(22 * scale, text.size * 0.24);
+        const pad = Math.max(moduleValues.appConfig.editor.photoTouchPixels * scale, text.size * 0.24);
         const handleY = -height / 2 - Math.max(9, text.size * 0.22) * 2.3;
         if (Math.abs(localX) <= width / 2 + 6 * scale && Math.abs(localY) <= height / 2 + 6 * scale) return { text, action: "move" };
-        if (text.id === editor.selectedTextId && Math.hypot(localX, localY - handleY) <= Math.max(22 * scale, text.size * 0.3)) return { text, action: "rotate" };
+        if (text.id === editor.selectedTextId && Math.hypot(localX, localY - handleY) <= Math.max(moduleValues.appConfig.editor.photoTouchPixels * scale, text.size * 0.3)) return { text, action: "rotate" };
         if (Math.abs(localX) <= width / 2 + pad && Math.abs(localY) <= height / 2 + pad) return { text, action: "move" };
       }
       return null;
@@ -717,7 +717,7 @@ function openPhotoEditorTextEntry() {
       editor.textDraftActive = true;
       const canvas = $("photoEditorCanvas");
       const scale = canvas.width / Math.max(1, canvas.getBoundingClientRect().width);
-      $("photoEditorTextSize").value = Math.round(Math.max(24, Math.min(512, 24 * scale)));
+      $("photoEditorTextSize").value = Math.round(Math.max(16, Math.min(512, moduleValues.appConfig.editor.photoTextPixels * scale)));
       $("photoEditorText").value = "";
       setPhotoEditorTextSelection();
       redrawPhotoEditor();
@@ -1113,7 +1113,7 @@ function installMediaPreviewBindings1() {
         color: $("photoEditorColor").value,
         // The control describes visible pixels, not invisible fractions of
         // a pixel when a full-resolution photo is fitted on a phone.
-        size: Math.max(2, Number($("photoEditorSize").value)) * canvas.width / Math.max(1, canvas.getBoundingClientRect().width),
+        size: Math.max(moduleValues.appConfig.editor.photoBrushPixels, Number($("photoEditorSize").value)) * canvas.width / Math.max(1, canvas.getBoundingClientRect().width),
         points: [point]
       };
       drawPhotoEditorStroke(canvas.getContext("2d"), editor.activeStroke);

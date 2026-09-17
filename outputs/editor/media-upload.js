@@ -152,13 +152,14 @@ function updateTodoVideoUploadDraft(draft, percent) {
       if (label) label.textContent = `Nalagam video: ${value} %`;
     }
 
-function uploadTodoVideoFile(file, onProgress = null, csrfRetried = false) {
+function uploadTodoVideoFile(file, onProgress = null, csrfRetried = false, pdf = false) {
       return new Promise((resolve, reject) => {
         const request = new XMLHttpRequest();
-        request.open("POST", "/api/todos/video", true);
+        request.open("POST", pdf ? "/api/todos/pdf" : "/api/todos/video", true);
+        request.timeout = moduleValues.appConfig.network.uploadTimeoutSeconds * 1000;
         request.responseType = "json";
         request.withCredentials = true;
-        request.setRequestHeader("Content-Type", todoVideoMimeType(file));
+        request.setRequestHeader("Content-Type", pdf ? "application/pdf" : todoVideoMimeType(file));
         request.setRequestHeader("X-Indus-File-Name", encodeURIComponent(file.name));
         if (state.csrfToken) request.setRequestHeader("X-CSRF-Token", state.csrfToken);
         request.upload.addEventListener("progress", (event) => {
@@ -175,7 +176,7 @@ function uploadTodoVideoFile(file, onProgress = null, csrfRetried = false) {
           if (csrfFailure && !csrfRetried && navigator.onLine) {
             try {
               await refreshSessionSecurityContext();
-              resolve(await uploadTodoVideoFile(file, onProgress, true));
+              resolve(await uploadTodoVideoFile(file, onProgress, true, pdf));
               return;
             } catch (error) {
               reject(error);
@@ -185,29 +186,41 @@ function uploadTodoVideoFile(file, onProgress = null, csrfRetried = false) {
           if (request.status < 200 || request.status >= 300 || !data?.photo) {
             const tooLarge = request.status === 413;
             const error = new Error(data?.error || (tooLarge
-              ? "Video je prevelik za nalaganje. Največja dovoljena velikost je 200 MB."
-              : request.status ? "Video ni bil naložen (HTTP " + request.status + ")." : "Prenos videa ni uspel."));
+              ? `Datoteka je prevelika. Omejitev: ${pdf ? moduleValues.appConfig.uploads.pdfMaxMb : moduleValues.appConfig.uploads.videoMaxMb} MB.`
+              : request.status ? "Datoteka ni bila naložena (HTTP " + request.status + ")." : "Prenos priloge ni uspel."));
             error.status = request.status;
             reject(error);
             return;
           }
           resolve(data);
         });
-        request.addEventListener("error", () => reject(new Error("Povezava med nalaganjem videa je bila prekinjena.")));
-        request.addEventListener("abort", () => reject(new Error("Nalaganju videa je bilo prekinjeno.")));
+        request.addEventListener("error", () => reject(new Error("Povezava med nalaganjem priloge je bila prekinjena.")));
+        request.addEventListener("abort", () => reject(new Error("Nalaganje priloge je bilo prekinjeno.")));
+        request.addEventListener("timeout", () => reject(new Error("Nalaganje je trajalo predolgo. Preveri povezavo in poskusi znova.")));
         request.send(file);
       });
+    }
+
+async function uploadTodoPdfFile(file) {
+      const maximum = moduleValues.appConfig.uploads.pdfMaxMb;
+      if (!file.size || file.size > maximum * 1048576) throw new Error("PDF mora biti neprazen in velik največ " + maximum + " MB.");
+      setTodoVideoUploadStatus("Nalagam PDF: 0 %", "uploading", 0);
+      try {
+        const data = await uploadTodoVideoFile(file, percent => setTodoVideoUploadStatus("Nalagam PDF: " + percent + " %", "uploading", percent), false, true);
+        setTodoVideoUploadStatus("PDF je naložen. Shrani obrazec, da ga pripneš dogodku.", "success", 100);
+        return { ...data.photo, temporaryUpload: true };
+      } catch (error) { setTodoVideoUploadStatus(error.message, "error"); throw error; }
     }
 
 async function uploadTodoVideoFiles(files) {
       const selectedFiles = [...(files || [])];
       if (!selectedFiles.length) return;
-      const maxBytes = 200 * 1024 * 1024;
+      const maxBytes = moduleValues.appConfig.uploads.videoMaxMb * 1048576;
       try {
         for (const [index, file] of selectedFiles.entries()) {
           if (state.todoDialogPhotos.length >= moduleValues.maxTodoAttachments) throw new Error(`Največ je ${moduleValues.maxTodoAttachments} prilog na opravilo.`);
           if (!file.size) throw new Error("Praznega videa ni mogoče dodati.");
-          if (file.size > maxBytes) throw new Error("Video je prevelik. Največja dovoljena velikost je 200 MB.");
+          if (file.size > maxBytes) throw new Error(`Video je prevelik. Največja dovoljena velikost je ${moduleValues.appConfig.uploads.videoMaxMb} MB.`);
           const draft = {
             id: createLocalUuid(),
             name: "Video",
@@ -272,6 +285,7 @@ function uploadTodoImageFile(file, onProgress = null, csrfRetried = false) {
       return new Promise((resolve, reject) => {
         const request = new XMLHttpRequest();
         request.open("POST", "/api/todos/image", true);
+        request.timeout = moduleValues.appConfig.network.uploadTimeoutSeconds * 1000;
         request.responseType = "json";
         request.withCredentials = true;
         request.setRequestHeader("Content-Type", todoImageMimeType(file));
@@ -300,7 +314,7 @@ function uploadTodoImageFile(file, onProgress = null, csrfRetried = false) {
           }
           if (request.status < 200 || request.status >= 300 || !data?.photo) {
             const error = new Error(data?.error || (request.status === 413
-              ? "Slika je prevelika za nalaganje. Največja dovoljena velikost je 25 MB."
+              ? `Slika je prevelika. Največja dovoljena velikost je ${moduleValues.appConfig.uploads.imageMaxMb} MB.`
               : request.status ? "Slike ni bilo mogoče naložiti (HTTP " + request.status + ")." : "Prenos slike ni uspel."));
             error.status = request.status;
             reject(error);
@@ -310,17 +324,18 @@ function uploadTodoImageFile(file, onProgress = null, csrfRetried = false) {
         });
         request.addEventListener("error", () => reject(new Error("Povezava med nalaganjem slike je bila prekinjena.")));
         request.addEventListener("abort", () => reject(new Error("Nalaganje slike je bilo prekinjeno.")));
+        request.addEventListener("timeout", () => reject(new Error("Nalaganje slike je trajalo predolgo.")));
         request.send(file);
       });
     }
 
 async function uploadTodoImageFiles(files) {
       const selectedFiles = [...(files || [])];
-      const maxBytes = 25 * 1024 * 1024;
+      const maxBytes = moduleValues.appConfig.uploads.imageMaxMb * 1048576;
       for (const file of selectedFiles) {
         if (state.todoDialogPhotos.length >= moduleValues.maxTodoAttachments) throw new Error(`Največ je ${moduleValues.maxTodoAttachments} prilog na opravilo.`);
         if (!file.size) throw new Error("Prazne slike ni mogoče dodati.");
-        if (file.size > maxBytes) throw new Error("Slika je prevelika. Največja dovoljena velikost je 25 MB.");
+        if (file.size > maxBytes) throw new Error(`Slika je prevelika. Največja dovoljena velikost je ${moduleValues.appConfig.uploads.imageMaxMb} MB.`);
         const draft = {
           id: createLocalUuid(),
           name: file.name || "Fotografija",
@@ -401,7 +416,7 @@ function renderTodoFormPhotos({ imagePreviews = true } = {}) {
         const video = isVideoAttachment(photo);
         const uploading = Boolean(photo.uploading);
         const uploadError = String(photo.uploadError || "");
-        const uploadLabel = photo.uploadKind === "image" ? "Slika se obdeluje" : "Video se nalaga";
+        const uploadLabel = isPdfAttachment(photo) ? "PDF se nalaga" : photo.uploadKind === "image" ? "Slika se obdeluje" : "Video se nalaga";
         const label = uploading ? uploadLabel : attachmentLabel(photo);
         const displayName = uploading ? label : attachmentDisplayName(photo);
         const imageThumbnail = imagePreviews && !video && !isPdfAttachment(photo) && attachmentThumbnailSource(photo);
@@ -445,6 +460,9 @@ async function attachmentDataForProcessing(photo) {
 async function fillMissingPdfThumbnailsForDialog(photos) {
       for (const photo of photos) {
         if (!isPdfAttachment(photo) || photo.thumbnailData || photo.thumbnailUrl) continue;
+        // Legacy inline PDFs are small. Streamed PDFs can be 50 MB: never
+        // download/base64-decode those automatically on opening an event.
+        if (photo.attachmentId && !photo.data) continue;
         const thumbnailData = await createPdfThumbnailSafely(await attachmentDataForProcessing(photo));
         if (state.todoDialogPhotos !== photos) return;
         const current = photos.find((item) => item.id === photo.id);
@@ -459,7 +477,7 @@ function markTodoDialogAttachmentsSaved() {
     }
 
 async function discardTemporaryTodoAttachment(photo) {
-      if (!photo?.temporaryUpload || !isVideoAttachment(photo) || !/^[a-f0-9]{64}$/.test(String(photo?.attachmentId || ""))) return;
+      if (!photo?.temporaryUpload || (!isVideoAttachment(photo) && !isPdfAttachment(photo)) || !/^[a-f0-9]{64}$/.test(String(photo?.attachmentId || ""))) return;
       // Avoid a duplicate request if this same temporary video is removed and
       // the form is subsequently closed before the first cleanup completes.
       delete photo.temporaryUpload;
@@ -492,9 +510,22 @@ async function handleTodoAttachmentsFromInput(event) {
         const standardFiles = files.filter((file) => !isTodoVideoFile(file) && !isTodoImageFile(file));
         if (imageFiles.length) await uploadTodoImageFiles(imageFiles);
         for (const file of standardFiles) {
-          const attachment = await todoAttachmentFromFile(file);
-          if (todoAttachmentsDataLength(state.todoDialogPhotos) + attachment.data.length > 4_800_000) throw new Error("Priloge so skupaj prevelike. Odstrani katero od njih.");
-          state.todoDialogPhotos.push(attachment);
+          const draft = { id: createLocalUuid(), name: file.name, mimeType: "application/pdf", uploading: true };
+          state.todoDialogPhotos.push(draft);
+          renderTodoFormPhotos();
+          try {
+            const attachment = await todoAttachmentFromFile(file);
+            const index = state.todoDialogPhotos.indexOf(draft);
+            if (index >= 0) state.todoDialogPhotos.splice(index, 1, attachment);
+            // If the user closed/discarded the form meanwhile, do not attach
+            // the completed upload to a subsequently opened event.
+            else discardTemporaryTodoAttachment(attachment);
+          } catch (error) {
+            const index = state.todoDialogPhotos.indexOf(draft);
+            if (index >= 0) state.todoDialogPhotos.splice(index, 1);
+            renderTodoFormPhotos();
+            throw error;
+          }
         }
         renderTodoFormPhotos();
         if (videoFiles.length) await uploadTodoVideoFiles(videoFiles);
@@ -568,6 +599,7 @@ function installMediaUploadBindings1() {
 }
 
   return {
+    uploadTodoPdfFile,
     renderTodoDriveFilesHtml,
     renderTodoFormDriveFiles,
     setTodoVideoUploadStatus,

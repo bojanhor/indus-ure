@@ -585,6 +585,10 @@
       {
         "name": "Transform",
         "writable": false
+      },
+      {
+        "name": "MAX_PDF_BYTES",
+        "writable": false
       }
     ],
     "direct": [],
@@ -652,6 +656,10 @@
     "values": [
       {
         "name": "attachmentPreviewBody",
+        "writable": false
+      },
+      {
+        "name": "appConfig",
         "writable": false
       }
     ],
@@ -760,7 +768,8 @@
       "markTodoDialogAttachmentsSaved",
       "discardTemporaryTodoAttachments",
       "installDriveAttachmentBindings1",
-      "installMediaUploadBindings1"
+      "installMediaUploadBindings1",
+      "uploadTodoPdfFile"
     ],
     "callbacks": [
       "api",
@@ -794,6 +803,10 @@
       {
         "name": "todoDialogPhotoPreviewTimer",
         "writable": true
+      },
+      {
+        "name": "appConfig",
+        "writable": false
       }
     ],
     "direct": [
@@ -845,7 +858,8 @@
       "markTodoDialogAttachmentsSaved",
       "discardTemporaryTodoAttachment",
       "discardTemporaryTodoAttachments",
-      "handleTodoAttachmentsFromInput"
+      "handleTodoAttachmentsFromInput",
+      "uploadTodoPdfFile"
     ]
   },
   {
@@ -867,6 +881,14 @@
       {
         "name": "pdfJsModulePromise",
         "writable": true
+      },
+      {
+        "name": "appConfig",
+        "writable": false
+      },
+      {
+        "name": "uploadTodoPdfFile",
+        "writable": false
       }
     ],
     "direct": [
@@ -1183,7 +1205,6 @@
       "renderTodoFormSourceProject",
       "renderTodoStatusChoices",
       "renderTodoTaskSuggestions",
-      "reportTodoEditorOpenTiming",
       "scheduleTodoFormPhotoPreviews",
       "setTodoVideoUploadStatus",
       "showAppConfirm",
@@ -1220,6 +1241,10 @@
       {
         "name": "todoOrderStatusIds",
         "writable": false
+      },
+      {
+        "name": "appConfig",
+        "writable": false
       }
     ],
     "direct": [
@@ -1238,7 +1263,6 @@
       "location",
       "Math",
       "Number",
-      "performance",
       "Promise",
       "requestAnimationFrame",
       "Set",
@@ -1409,7 +1433,6 @@
     "source": "html",
     "exports": [
       "todoLockUrl",
-      "reportTodoEditorOpenTiming",
       "clearTodoEditLockState",
       "pauseTodoLockHeartbeat",
       "resumeTodoLockHeartbeat",
@@ -1454,6 +1477,10 @@
       {
         "name": "todoHandoverWatch",
         "writable": true
+      },
+      {
+        "name": "appConfig",
+        "writable": false
       }
     ],
     "direct": [
@@ -1477,8 +1504,6 @@
     ],
     "originalFunctions": [
       "todoLockUrl",
-      "todoEditorDiagnosticMetric",
-      "reportTodoEditorOpenTiming",
       "todoHandoverApi",
       "stopTodoHandoverWatch",
       "finishTodoHandover",
@@ -1893,6 +1918,36 @@
       "renderUndoHistory",
       "openUndoHistory",
       "undoHistoryAction"
+    ]
+  },
+  {
+    "name": "editor/app-config",
+    "source": "browser",
+    "factory": "createAppConfigEditor",
+    "direct": [
+      "$"
+    ],
+    "callbacks": [
+      "api",
+      "showAppConfirm",
+      "showNotice"
+    ],
+    "exports": [
+      "openTechnicalConfig",
+      "installAppConfigBindings"
+    ],
+    "originalFunctions": [
+      "render",
+      "openTechnicalConfig",
+      "installAppConfigBindings"
+    ],
+    "values": [],
+    "globals": [
+      "Object",
+      "JSON",
+      "Number",
+      "document",
+      "location"
     ]
   }
 ]

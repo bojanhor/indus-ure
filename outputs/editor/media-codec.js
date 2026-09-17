@@ -14,8 +14,8 @@ function readImageAsDataUrl(file) {
     }
 
 function canvasAsLimitedJpegDataUrl(canvas, maxLength = 680_000) {
-      const targets = [1280, 1024, 800, 640];
-      const qualities = [0.82, 0.72, 0.62, 0.52, 0.42];
+      const targets = [...new Set([moduleValues.appConfig.editor.jpegMaxSide, 1024, 800, 640].filter(value => value <= moduleValues.appConfig.editor.jpegMaxSide))];
+      const qualities = [...new Set([moduleValues.appConfig.editor.jpegQuality / 100, 0.72, 0.62, 0.52, 0.42].filter(value => value <= moduleValues.appConfig.editor.jpegQuality / 100))];
       const maxSide = Math.max(canvas.width, canvas.height);
       let lastData = "";
       for (const target of targets) {
@@ -61,7 +61,7 @@ function resizeImageAsDataUrl(file) {
         reader.onload = () => {
           const image = new Image();
           image.onload = () => {
-            const maxSide = 1280;
+            const maxSide = moduleValues.appConfig.editor.jpegMaxSide;
             const scale = Math.min(1, maxSide / Math.max(image.width, image.height));
             const canvas = document.createElement("canvas");
             canvas.width = Math.max(1, Math.round(image.width * scale));
@@ -146,19 +146,13 @@ async function createPdfThumbnailSafely(data) {
 async function todoAttachmentFromFile(file) {
       const pdf = file.type === "application/pdf" || /\.pdf$/i.test(file.name);
       if (pdf) {
-        if (file.size > 1_500_000) throw new Error("PDF je prevelik. Največja dovoljena velikost je 1,5 MB.");
-        let data = await readFileAsDataUrl(file, "PDF datoteke ni bilo mogoče prebrati.");
-        data = data.replace(/^data:[^;]*;base64,/, "data:application/pdf;base64,");
-        const thumbnailData = await createPdfThumbnailSafely(data);
-        return {
-          id: createLocalUuid(),
-          name: file.name || "priloga.pdf",
-          data,
-          thumbnailData,
-          createdBy: state.user?.id || "",
-          createdByName: state.user?.name || "",
-          createdAt: new Date().toISOString()
-        };
+        const attachment = await moduleValues.uploadTodoPdfFile(file);
+        // No full document decoding on a phone merely for a large PDF card.
+        if (file.size <= 1_500_000) {
+          const data = await readFileAsDataUrl(file, "PDF datoteke ni bilo mogoče prebrati.");
+          attachment.thumbnailData = await createPdfThumbnailSafely(data.replace(/^data:[^;]*;base64,/, "data:application/pdf;base64,"));
+        }
+        return attachment;
       }
       if (isSupportedImageFile(file)) return resizeImageAsDataUrl(file);
       throw new Error("Izberi sliko ali PDF datoteko.");

@@ -32,6 +32,8 @@ const PUBLIC_BASE_URL = String(process.env.PUBLIC_BASE_URL || "").replace(/\/$/,
 const root = __dirname;
 const dataDir = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(root, "data");
 const dbFile = path.join(dataDir, "db.json");
+const appConfigStore = require("./app-config").createAppConfig({ file: path.join(NODE_ENV === "production" ? "/var/lib/indus-ure" : dataDir, "app-config.json") });
+const config = () => appConfigStore.get();
 const MEDIA_DIR = process.env.MEDIA_DIR ? path.resolve(process.env.MEDIA_DIR) : path.join(dataDir, "media");
 const DATABASE_URL = process.env.DATABASE_URL || "";
 // A deliberately separate, LAN-only browser test instance may use a password
@@ -82,43 +84,43 @@ const SESSION_COOKIE_NAME = NODE_ENV === "production" ? "__Host-indus-ure" : "in
 const ALERT_SMTP_URL = String(process.env.ALERT_SMTP_URL || "").trim();
 const ALERT_EMAIL_FROM = String(process.env.ALERT_EMAIL_FROM || "").trim();
 const ALERT_EMAIL_TO = String(process.env.ALERT_EMAIL_TO || "bojan@indus.si").trim();
-const MONITOR_INTERVAL_MS = Math.max(60_000, Number(process.env.MONITOR_INTERVAL_MS || 5 * 60_000));
+let MONITOR_INTERVAL_MS = config().monitor.intervalSeconds * 1000;
 const OPERATIONAL_MONITOR_ENABLED = process.env.DISABLE_OPERATIONAL_MONITOR !== "true";
 const ARCHIVE_RETENTION_CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
 // A normal delete is intentionally reversible. Keeping a short, fixed
 // retention period avoids turning the trash into a second long-term archive.
-const DELETED_TODO_RETENTION_DAYS = 30;
-const DELETED_TODO_RETENTION_MS = DELETED_TODO_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+let DELETED_TODO_RETENTION_DAYS = config().history.trashDays;
+let DELETED_TODO_RETENTION_MS = DELETED_TODO_RETENTION_DAYS * 24 * 60 * 60 * 1000;
 // A small, privacy-conscious activity trail is kept alongside application
 // state. It is deliberately not a raw HTTP/request-body log: passwords,
 // OAuth/session material and attachment contents must never reach it.
-const AUDIT_LOG_RETENTION_DAYS = 30;
-const AUDIT_LOG_RETENTION_MS = AUDIT_LOG_RETENTION_DAYS * 24 * 60 * 60 * 1000;
-const AUDIT_LOG_MAX_EVENTS = 10_000;
+let AUDIT_LOG_RETENTION_DAYS = config().history.auditDays;
+let AUDIT_LOG_RETENTION_MS = AUDIT_LOG_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+let AUDIT_LOG_MAX_EVENTS = config().history.auditMaxEvents;
 // Undo is intentionally a short, ordered safety net. It keeps business-state
 // snapshots only: sessions, OAuth credentials, notifications and attachment
 // payloads never enter the journal.
-const UNDO_JOURNAL_LIMIT = 20;
+let UNDO_JOURNAL_LIMIT = config().history.undoActions;
 const UNDO_JOURNAL_SCHEMA_VERSION = 2;
 const UNDO_MAX_PATCH_BYTES = 512 * 1024;
 // A per-event version view is intentionally compact and separate from Undo.
 // It lets the boss inspect prior form content without retaining file payloads.
-const TODO_REVISION_HISTORY_LIMIT = 12;
+let TODO_REVISION_HISTORY_LIMIT = config().history.eventVersions;
 const TODO_REVISION_TEXT_LIMIT = 12_000;
 const UNDO_ARRAY_SNAPSHOT_KEYS = [
   "todos", "entries", "debts", "advances", "personalPurchases",
   "clients", "billingLocks", "payrolls", "clientBills", "settlementCorrections"
 ];
 const UNDO_VALUE_SNAPSHOT_KEYS = ["settings", "calendarToken"];
-const MONITOR_MAX_RSS_MB = Math.max(256, Number(process.env.MONITOR_MAX_RSS_MB || 1_800));
-const MONITOR_DISK_WARNING_PERCENT = Math.min(99, Math.max(90, Number(process.env.MONITOR_DISK_WARNING_PERCENT || 90)));
-const REPORT_PDF_MAX_TOTAL_BYTES = 50 * 1024 * 1024;
-const REPORT_GMAIL_MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;
-const REPORT_GMAIL_MAX_TOTAL_BYTES = 8 * 1024 * 1024;
+let MONITOR_MAX_RSS_MB = config().monitor.maxRssMb;
+let MONITOR_DISK_WARNING_PERCENT = config().monitor.diskWarningPercent;
+let REPORT_PDF_MAX_TOTAL_BYTES = config().reports.pdfTotalMb * 1048576;
+let REPORT_GMAIL_MAX_ATTACHMENT_BYTES = config().reports.gmailAttachmentMb * 1048576;
+let REPORT_GMAIL_MAX_TOTAL_BYTES = config().reports.gmailTotalMb * 1048576;
 // A direct browser navigation is more reliable than a fetch-to-Blob download
 // on mobile Firefox.  The ticket contains no report data, expires quickly and
 // is bound to the session that created it.
-const CLIENT_REPORT_DOWNLOAD_TICKET_TTL_MS = 5 * 60 * 1000;
+let CLIENT_REPORT_DOWNLOAD_TICKET_TTL_MS = config().reports.downloadTicketMinutes * 60000;
 const MAX_CLIENT_REPORT_DOWNLOAD_TICKETS = 200;
 const WORKER_DIGEST_RUN_RETENTION_MS = 400 * 24 * 60 * 60 * 1000;
 // A late time-entry report is kept independently of the ordinary daily
@@ -127,14 +129,6 @@ const WORKER_DIGEST_RUN_RETENTION_MS = 400 * 24 * 60 * 60 * 1000;
 const LATE_TIME_ENTRY_REPORT_RETENTION_MS = 400 * 24 * 60 * 60 * 1000;
 const LATE_TIME_ENTRY_REPORT_SENDING_TIMEOUT_MS = 30 * 60 * 1000;
 const MAX_LATE_TIME_ENTRY_REPORTS = 10_000;
-// Temporary, privacy-minimised instrumentation for the slow event-editor
-// investigation. The samples remain only in process memory, automatically
-// expire after one day and never retain event titles, notes or attachment
-// names. Remove this block once the production cause has been confirmed.
-const TODO_EDITOR_DIAGNOSTICS_RETENTION_MS = 24 * 60 * 60 * 1000;
-const TODO_EDITOR_DIAGNOSTICS_MAX_SAMPLES = 600;
-const TODO_EDITOR_DIAGNOSTIC_MAX_DURATION_MS = 120_000;
-const TODO_EDITOR_DIAGNOSTIC_SLOW_MS = 1_000;
 let auditLogStoreReady = null;
 let workerDigestStoreReady = null;
 let auditLogStoreCleanupAt = 0;
@@ -148,7 +142,6 @@ const testLoginFailures = new Map();
 const auditLogCooldowns = new Map();
 const clientReportDownloadTickets = new Map();
 const todoSharePdfDownloadTickets = new Map();
-const todoEditorDiagnostics = [];
 let archiveRetentionCleanupLastAt = 0;
 let archiveRetentionCleanupPromise = null;
 let lateTimeEntryReportDeliveryScheduled = false;
@@ -193,20 +186,21 @@ const MAX_TODO_ATTACHMENTS_DATA_LENGTH = 5_000_000;
 // Server-stored image/video attachments contain only metadata in the task
 // record, so a field visit can safely keep a substantial photo set. Keep
 // this in sync with the form limit in index.html.
-const MAX_TODO_ATTACHMENTS = 40;
+// Storage safety ceiling: lowering the UI limit must never truncate saved files.
+const MAX_TODO_ATTACHMENTS = 200;
 const MAX_TODO_THUMBNAIL_DATA_LENGTH = 100_000;
 // Video is streamed to the application's private media storage. Keep a finite
 // limit so a slow or malicious upload cannot exhaust the server disk.
-const MAX_VIDEO_BYTES = Math.min(500 * 1024 * 1024, Math.max(20 * 1024 * 1024, Number(process.env.MAX_VIDEO_BYTES || process.env.MAX_DRIVE_VIDEO_BYTES || 200 * 1024 * 1024)));
+let MAX_VIDEO_BYTES = config().uploads.videoMaxMb * 1048576;
 // Photos are streamed directly to the server and converted there. This keeps
 // HEIC/HEIF usable even where the browser cannot decode it, while the saved
 // JPEG remains small enough for the editor and report viewer.
-const MAX_TODO_IMAGE_BYTES = Math.min(50 * 1024 * 1024, Math.max(5 * 1024 * 1024, Number(process.env.MAX_TODO_IMAGE_BYTES || 25 * 1024 * 1024)));
-const TODO_IMAGE_DISPLAY_MAX_SIDE = 2_560;
-const TODO_IMAGE_THUMBNAIL_MAX_SIDE = 420;
-const TODO_IMAGE_PROCESS_TIMEOUT_MS = 90_000;
+let MAX_TODO_IMAGE_BYTES = config().uploads.imageMaxMb * 1048576;
+let TODO_IMAGE_DISPLAY_MAX_SIDE = config().uploads.imageDisplayMaxSide;
+let TODO_IMAGE_THUMBNAIL_MAX_SIDE = config().uploads.imageThumbnailMaxSide;
+let TODO_IMAGE_PROCESS_TIMEOUT_MS = config().uploads.imageProcessTimeoutSeconds * 1000;
 const IMAGE_PROCESSOR = String(process.env.INDUS_IMAGE_PROCESSOR || "vips").trim() || "vips";
-const PENDING_ATTACHMENT_TTL_MS = 12 * 60 * 60 * 1000;
+let PENDING_ATTACHMENT_TTL_MS = config().uploads.pendingHours * 3600000;
 const TODO_CREATE_RECEIPT_TTL_MS = 90 * 24 * 60 * 60 * 1000;
 const MAX_TODO_CREATE_RECEIPTS = 10_000;
 
@@ -509,10 +503,10 @@ const defaultUsers = {
 
 const pendingGoogleLogins = new Map();
 const pendingGoogleConnections = new Map();
-const ENTRY_EDIT_LOCK_TTL_MS = 90_000;
+let ENTRY_EDIT_LOCK_TTL_MS = config().locks.leaseSeconds * 1000;
 const TODO_COMPLETION_REQUEST_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 const entryEditLocks = new Map();
-const TODO_EDIT_LOCK_TTL_MS = 90_000;
+let TODO_EDIT_LOCK_TTL_MS = config().locks.leaseSeconds * 1000;
 const todoEditLocks = new Map();
 const todoHandovers = new (require("./edit-handover").EditHandover)();
 
@@ -863,127 +857,6 @@ function auditRequestSource(req) {
   // HMAC keeps the same source correlatable for incident response while making
   // the database value unusable as a raw IP address or a reversible hash.
   return `source-${crypto.createHmac("sha256", AUDIT_LOG_HMAC_KEY).update(source).digest("hex").slice(0, 16)}`;
-}
-
-function todoEditorDiagnosticDuration(value) {
-  const duration = Number(value);
-  return Number.isFinite(duration) && duration >= 0 && duration <= TODO_EDITOR_DIAGNOSTIC_MAX_DURATION_MS
-    ? Math.round(duration)
-    : null;
-}
-
-function todoEditorDiagnosticTodoKey(todoId) {
-  const source = String(todoId || "").trim();
-  if (!source) return "";
-  // A stable opaque key lets us correlate a client sample with a lock request
-  // without placing the event ID, title or customer name in diagnostics.
-  return crypto.createHmac("sha256", AUDIT_LOG_HMAC_KEY)
-    .update(`todo-editor:${source}`)
-    .digest("hex")
-    .slice(0, 16);
-}
-
-function pruneTodoEditorDiagnostics(now = Date.now()) {
-  const cutoff = now - TODO_EDITOR_DIAGNOSTICS_RETENTION_MS;
-  while (todoEditorDiagnostics.length && Number(todoEditorDiagnostics[0].recordedAtMs || 0) < cutoff) todoEditorDiagnostics.shift();
-  if (todoEditorDiagnostics.length > TODO_EDITOR_DIAGNOSTICS_MAX_SAMPLES) {
-    todoEditorDiagnostics.splice(0, todoEditorDiagnostics.length - TODO_EDITOR_DIAGNOSTICS_MAX_SAMPLES);
-  }
-}
-
-function recordTodoEditorDiagnostic(sample = {}) {
-  const now = Date.now();
-  const kind = sample.kind === "client-open" ? "client-open" : sample.kind === "server-lock" ? "server-lock" : "";
-  if (!kind) return;
-  const result = ["ready", "rejected", "closed", "error", "offline", "not-found", "not-editable", "locked", "trashed"]
-    .includes(String(sample.result || "")) ? String(sample.result) : "error";
-  const normalized = {
-    kind,
-    operation: sample.operation === "renew" ? "renew" : "open",
-    result,
-    recordedAt: new Date(now).toISOString(),
-    recordedAtMs: now,
-    todoKey: todoEditorDiagnosticTodoKey(sample.todoId),
-    formPrepareMs: todoEditorDiagnosticDuration(sample.formPrepareMs),
-    lockWaitMs: todoEditorDiagnosticDuration(sample.lockWaitMs),
-    totalMs: todoEditorDiagnosticDuration(sample.totalMs),
-    authMs: todoEditorDiagnosticDuration(sample.authMs),
-    bodyMs: todoEditorDiagnosticDuration(sample.bodyMs),
-    lookupMs: todoEditorDiagnosticDuration(sample.lookupMs),
-    lockMs: todoEditorDiagnosticDuration(sample.lockMs),
-    attachmentCount: Math.max(0, Math.min(40, Math.round(Number(sample.attachmentCount) || 0))),
-    assignmentCount: Math.max(0, Math.min(40, Math.round(Number(sample.assignmentCount) || 0)))
-  };
-  todoEditorDiagnostics.push(normalized);
-  pruneTodoEditorDiagnostics(now);
-  if (Number(normalized.totalMs || 0) >= TODO_EDITOR_DIAGNOSTIC_SLOW_MS) {
-    const phases = kind === "client-open"
-      ? `priprava=${normalized.formPrepareMs ?? "-"}ms zaklep=${normalized.lockWaitMs ?? "-"}ms`
-      : `prijava=${normalized.authMs ?? "-"}ms telo=${normalized.bodyMs ?? "-"}ms poizvedba=${normalized.lookupMs ?? "-"}ms zaklep=${normalized.lockMs ?? "-"}ms`;
-    console.warn(`[todo-editor-diagnostic] ${kind} rezultat=${result} skupno=${normalized.totalMs}ms ${phases}`);
-  }
-}
-
-function todoEditorDiagnosticPercentile(values, percentile) {
-  const sorted = values.filter(Number.isFinite).sort((left, right) => left - right);
-  if (!sorted.length) return null;
-  const index = Math.min(sorted.length - 1, Math.max(0, Math.ceil(sorted.length * percentile) - 1));
-  return sorted[index];
-}
-
-function todoEditorDiagnosticTimingSummary(samples, field) {
-  const values = samples.map((sample) => Number(sample[field])).filter(Number.isFinite);
-  return {
-    count: values.length,
-    p50Ms: todoEditorDiagnosticPercentile(values, 0.5),
-    p95Ms: todoEditorDiagnosticPercentile(values, 0.95),
-    maxMs: values.length ? Math.max(...values) : null
-  };
-}
-
-function todoEditorDiagnosticSummary() {
-  pruneTodoEditorDiagnostics();
-  const client = todoEditorDiagnostics.filter((sample) => sample.kind === "client-open");
-  const server = todoEditorDiagnostics.filter((sample) => sample.kind === "server-lock" && sample.operation === "open" && sample.result === "ready");
-  return {
-    enabled: true,
-    retentionHours: Math.round(TODO_EDITOR_DIAGNOSTICS_RETENTION_MS / 3_600_000),
-    latestAt: todoEditorDiagnostics.at(-1)?.recordedAt || "",
-    client: {
-      samples: client.length,
-      slowSamples: client.filter((sample) => Number(sample.totalMs || 0) >= TODO_EDITOR_DIAGNOSTIC_SLOW_MS).length,
-      formPrepare: todoEditorDiagnosticTimingSummary(client, "formPrepareMs"),
-      lockWait: todoEditorDiagnosticTimingSummary(client, "lockWaitMs"),
-      total: todoEditorDiagnosticTimingSummary(client, "totalMs")
-    },
-    server: {
-      samples: server.length,
-      total: todoEditorDiagnosticTimingSummary(server, "totalMs"),
-      auth: todoEditorDiagnosticTimingSummary(server, "authMs"),
-      lookup: todoEditorDiagnosticTimingSummary(server, "lookupMs")
-    }
-  };
-}
-
-function todoEditorServerTimingHeader(sample) {
-  const fields = [["auth", sample.authMs], ["body", sample.bodyMs], ["lookup", sample.lookupMs], ["lock", sample.lockMs], ["total", sample.totalMs]];
-  return fields
-    .filter(([, value]) => Number.isFinite(value))
-    .map(([name, value]) => `${name};dur=${Math.max(0, Number(value)).toFixed(1)}`)
-    .join(", ");
-}
-
-function todoEditorElapsedMs(startedAt) {
-  return Number(process.hrtime.bigint() - startedAt) / 1_000_000;
-}
-
-function sendTodoEditorLockResponse(res, status, data, sample) {
-  const normalized = { ...sample, kind: "server-lock", totalMs: todoEditorDiagnosticDuration(sample.totalMs) };
-  // Heartbeats happen every 20 seconds while one form is open. They are not
-  // part of the opening problem and would otherwise crowd out actual clicks.
-  if (normalized.operation === "open") recordTodoEditorDiagnostic(normalized);
-  const serverTiming = todoEditorServerTimingHeader(normalized);
-  sendJson(res, status, data, serverTiming ? { "Server-Timing": serverTiming } : {});
 }
 
 function auditRoute(pathname) {
@@ -4122,7 +3995,7 @@ function validateDebt(debt) {
   return "";
 }
 
-function validateTodo(todo, { requireClientId = false, db = null } = {}) {
+function validateTodo(todo, { requireClientId = false, db = null, previousTodo = null } = {}) {
   if (!todo.title) return "Manjka opis opravila.";
   const requiresHoursClient = TIME_ENTRY_TODO_STATUSES.has(todo.status) && todo.status !== "meal";
   if (requiresHoursClient && !String(todo.client || "").trim() && !String(todo.clientId || "").trim()) {
@@ -4148,6 +4021,8 @@ function validateTodo(todo, { requireClientId = false, db = null } = {}) {
   }
   if (todo.start && todo.end && todo.endDate && todo.endDate !== todo.date) return "Opravilo z uro je lahko samo za en dan. Za večdnevno opravilo pusti uri prazni.";
   if (todo.start && todo.end <= todo.start) return "Ura do mora biti kasneje kot ura od.";
+  const previousPhotoCount = (previousTodo || db?.todos?.find(item => item.id === todo.id))?.photos?.length || 0;
+  if (db && (todo.photos || []).length > Math.max(config().uploads.maxAttachments, previousPhotoCount)) return `Največ je ${config().uploads.maxAttachments} prilog na opravilo.`;
   if ((todo.photos || []).some((photo) => !validTodoAttachmentDataUrl(photo.data) && !validTodoAttachmentId(photo.attachmentId))) return "Priloga ni veljavna slika ali PDF.";
   if ((todo.photos || []).reduce((total, photo) => total + String(photo.data || "").length, 0) > MAX_TODO_ATTACHMENTS_DATA_LENGTH) return "Priloge so skupaj prevelike.";
   if ((todo.photos || []).some((photo) => photo.thumbnailData && !validTodoThumbnailDataUrl(photo.thumbnailData))) return "Predogled PDF priloge ni veljaven.";
@@ -4699,7 +4574,7 @@ function serveStatic(req, res) {
         : "/manifest.webmanifest";
       let html;
       try {
-        html = renderAppShell(data.toString("utf8"));
+        html = renderAppShell(data.toString("utf8"), config());
       } catch (error) {
         console.error("App shell assembly failed:", error.message);
         sendText(res, 500, "Application unavailable", "text/plain");
@@ -4971,8 +4846,7 @@ async function serverRuntimeStatus() {
     attachments,
     uptimeSeconds: Math.max(0, Number(os.uptime() || 0)),
     appUptimeSeconds: Math.max(0, Number(process.uptime() || 0)),
-    lastBackup,
-    todoEditorDiagnostics: todoEditorDiagnosticSummary()
+    lastBackup
   };
 }
 
@@ -5081,7 +4955,7 @@ async function recordDeniedGoogleLogin(email, req = null) {
 }
 async function recordOperationalAlert({ code, severity = "warning", title, message }) {
   const last = Number(monitorAlertCooldowns.get(code) || 0);
-  if (Date.now() - last < 6 * 60 * 60 * 1000) return false;
+  if (Date.now() - last < config().monitor.alertCooldownHours * 3600000) return false;
   monitorAlertCooldowns.set(code, Date.now());
   const notification = { id: crypto.randomUUID(), code, severity, title, message, createdAt: new Date().toISOString() };
   if (DATABASE_URL) {
@@ -5115,7 +4989,7 @@ async function recordOperationalAlert({ code, severity = "warning", title, messa
     targetId: cleanAuditLogText(code, 120),
     severity: auditLogSeverity(severity),
     context: { code: cleanAuditLogText(code, 120) }
-  }, { dedupeMs: 6 * 60 * 60 * 1000 });
+  }, { dedupeMs: config().monitor.alertCooldownHours * 3600000 });
   return true;
 }
 
@@ -5156,7 +5030,7 @@ async function runOperationalMonitor() {
       }
       const backup = await getPgPool().query("select finished_at from indus_backup_runs where status = 'success' order by finished_at desc limit 1");
       const latest = new Date(backup.rows[0]?.finished_at || 0).getTime();
-      if (recent?.status !== "failed" && (!latest || Date.now() - latest > 36 * 60 * 60 * 1000)) {
+      if (recent?.status !== "failed" && (!latest || Date.now() - latest > config().monitor.backupStaleHours * 3600000)) {
         issues.push({ code: "backup-stale", severity: "warning", title: "Varnostna kopija je zastarela", message: "Ni preverjene recovery varnostne kopije v zadnjih 36 urah." });
       }
     } catch {
@@ -5256,41 +5130,6 @@ async function handleApi(req, res) {
     if (url.pathname === "/api/health" && req.method === "GET") {
       if (DATABASE_URL) await getPgPool().query("select 1");
       sendJson(res, 200, { ok: true });
-      return;
-    }
-
-    if (url.pathname === "/api/todo-editor-diagnostics") {
-      if (req.method === "POST") {
-        // The browser sends only rounded durations and counts; it never sends
-        // an event title, notes, customer name, attachment name or file data.
-        // Use the lightweight session lookup so collecting diagnostics cannot
-        // itself make an editor opening wait for the full application state.
-        const user = await requireUserForLightweightSession(req, res);
-        if (!user) return;
-        const body = await readBody(req);
-        recordTodoEditorDiagnostic({
-          kind: "client-open",
-          todoId: body.todoId,
-          result: body.result,
-          formPrepareMs: body.formPrepareMs,
-          lockWaitMs: body.lockWaitMs,
-          totalMs: body.totalMs,
-          attachmentCount: body.attachmentCount
-        });
-        sendJson(res, 200, { ok: true });
-        return;
-      }
-      if (req.method === "GET") {
-        const user = await requireUserForLightweightSession(req, res);
-        if (!user) return;
-        if (user.role !== "boss") {
-          sendJson(res, 403, { error: "Diagnostiko urejevalnika vidi samo šef." });
-          return;
-        }
-        sendJson(res, 200, { diagnostics: todoEditorDiagnosticSummary() });
-        return;
-      }
-      sendJson(res, 405, { error: "Ta metoda ni podprta." });
       return;
     }
 
@@ -6148,6 +5987,25 @@ async function handleApi(req, res) {
       return;
     }
 
+    if (url.pathname === "/api/app-config" && ["GET", "PUT"].includes(req.method)) {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      if (user.role !== "boss") { sendJson(res, 403, { error: "Tehnične nastavitve so na voljo samo šefu." }); return; }
+      if (req.method === "PUT") {
+        try {
+          const body = await readBody(req);
+          await appConfigStore.save(body.config, body.revision);
+          applyRuntimeConfig();
+          scheduleAuditLog({ actor: user, action: "settings.technical.updated", targetType: "settings", targetLabel: "Tehnične nastavitve", severity: "info" });
+        } catch (error) { sendJson(res, error.status || 400, { error: error.message }); return; }
+      }
+      const oldRevision = appConfigStore.snapshot().revision;
+      const snapshot = appConfigStore.reload();
+      if (snapshot.revision !== oldRevision) applyRuntimeConfig();
+      sendJson(res, 200, { ...snapshot, previous: appConfigStore.previous() });
+      return;
+    }
+
     if (url.pathname === "/api/settings" && req.method === "GET") {
       const user = await requireUser(req, res);
       if (!user) return;
@@ -6893,79 +6751,53 @@ async function handleApi(req, res) {
     const todoLockMatch = url.pathname.match(/^\/api\/todos\/([^/]+)\/lock$/);
     if (todoLockMatch && req.method === "POST") {
       const id = decodeURIComponent(todoLockMatch[1]);
-      const requestStartedAt = process.hrtime.bigint();
       const user = await requireUserForFocusedTodo(req, res);
       if (!user) return;
-      const authMs = todoEditorElapsedMs(requestStartedAt);
-      const bodyStartedAt = process.hrtime.bigint();
       const body = await readBody(req);
-      const bodyMs = todoEditorElapsedMs(bodyStartedAt);
-      const operation = String(body.lockToken || "").trim() ? "renew" : "open";
-      const reply = (status, data, result, { lookupMs = 0, lockMs = 0, assignmentCount = 0 } = {}) => {
-        sendTodoEditorLockResponse(res, status, data, {
-          todoId: id,
-          operation,
-          result,
-          authMs,
-          bodyMs,
-          lookupMs,
-          lockMs,
-          assignmentCount,
-          totalMs: todoEditorElapsedMs(requestStartedAt)
-        });
-      };
+      const reply = (status, data) => sendJson(res, status, data);
       if (DATABASE_URL) {
-        const lookupStartedAt = process.hrtime.bigint();
         const focused = await getFocusedPgStore().focusedTodoForLock(id);
-        const lookupMs = todoEditorElapsedMs(lookupStartedAt);
         const todo = focused?.todo;
         if (!todo) {
-          reply(404, { code: "todo_not_found", error: "Opravilo ne obstaja več." }, "not-found", { lookupMs });
+          reply(404, { code: "todo_not_found", error: "Opravilo ne obstaja več." });
           return;
         }
         if (!canManageTodo(user, todo)) {
-          reply(403, { code: "todo_not_editable", error: "Tega opravila ne moreš urejati." }, "not-editable", { lookupMs, assignmentCount: focused.assignmentIds.length });
+          reply(403, { code: "todo_not_editable", error: "Tega opravila ne moreš urejati." });
           return;
         }
         if (isTrashedTodo(todo)) {
-          reply(409, { error: "Opravilo je v Izbrisano. Najprej ga obnovi." }, "trashed", { lookupMs, assignmentCount: focused.assignmentIds.length });
+          reply(409, { error: "Opravilo je v Izbrisano. Najprej ga obnovi." });
           return;
         }
-        const lockStartedAt = process.hrtime.bigint();
         const result = acquireTodoEditLockGroup(id, focused.assignmentIds, user, body.lockToken);
-        const lockMs = todoEditorElapsedMs(lockStartedAt);
         if (!result.ok) {
-          reply(409, { error: `Opravilo trenutno ureja ${result.lock.lockedByName || result.lock.lockedById}.`, lock: result.lock }, "locked", { lookupMs, lockMs, assignmentCount: focused.assignmentIds.length });
+          reply(409, { error: `Opravilo trenutno ureja ${result.lock.lockedByName || result.lock.lockedById}.`, lock: result.lock });
           return;
         }
-        reply(200, { lockToken: result.token, lock: result.lock }, "ready", { lookupMs, lockMs, assignmentCount: focused.assignmentIds.length });
+        reply(200, { lockToken: result.token, lock: result.lock });
         return;
       }
-      const lookupStartedAt = process.hrtime.bigint();
       const db = req.indusDb || await readDbAsync();
       const todo = db.todos.find((item) => item.id === id);
-      const lookupMs = todoEditorElapsedMs(lookupStartedAt);
       if (!todo) {
-        reply(404, { code: "todo_not_found", error: "Opravilo ne obstaja več." }, "not-found", { lookupMs });
+        reply(404, { code: "todo_not_found", error: "Opravilo ne obstaja več." });
         return;
       }
       if (!canManageTodo(user, todo)) {
-        reply(403, { code: "todo_not_editable", error: "Tega opravila ne moreš urejati." }, "not-editable", { lookupMs, assignmentCount: todoAssignmentItems(db, todo).length });
+        reply(403, { code: "todo_not_editable", error: "Tega opravila ne moreš urejati." });
         return;
       }
       if (isTrashedTodo(todo)) {
-        reply(409, { error: "Opravilo je v Izbrisano. Najprej ga obnovi." }, "trashed", { lookupMs, assignmentCount: todoAssignmentItems(db, todo).length });
+        reply(409, { error: "Opravilo je v Izbrisano. Najprej ga obnovi." });
         return;
       }
-      const lockStartedAt = process.hrtime.bigint();
       const result = acquireTodoAssignmentEditLock(db, todo, user, body.lockToken);
-      const lockMs = todoEditorElapsedMs(lockStartedAt);
-      const assignmentCount = todoAssignmentItems(db, todo).length;
       if (!result.ok) {
-        reply(409, { error: `Opravilo trenutno ureja ${result.lock.lockedByName || result.lock.lockedById}.`, lock: result.lock }, "locked", { lookupMs, lockMs, assignmentCount });
+        reply(409, { error: `Opravilo trenutno ureja ${result.lock.lockedByName || result.lock.lockedById}.`, lock: result.lock });
         return;
       }
-      reply(200, { lockToken: result.token, lock: result.lock }, "ready", { lookupMs, lockMs, assignmentCount });
+      reply(200, { lockToken: result.token, lock: result.lock });
       return;
     }
 
@@ -7575,7 +7407,7 @@ async function handleApi(req, res) {
         return;
       }
       todo = contactSelection.todo;
-      const resolvedValidation = validateTodo(todo, { requireClientId: true, db });
+      const resolvedValidation = validateTodo(todo, { requireClientId: true, db, previousTodo });
       if (resolvedValidation) {
         sendJson(res, 400, { error: resolvedValidation });
         return;
@@ -7839,6 +7671,7 @@ releaseTodoAssignmentEditLock(db, previousTodo, user, editLockToken);
       sendJson(res, 409, { code: error.code, error: error.message });
       return;
     }
+    if ([400, 413].includes(error.status)) { sendJson(res, error.status, { error: error.message }); return; }
     console.error("API napaka:", error);
     const message = NODE_ENV === "production" ? "Napaka na strežniku." : (error.message || "Napaka na strežniku.");
     sendJson(res, 500, { error: message });
@@ -7899,6 +7732,7 @@ function actionableGoogleDriveError(error) {
   return null;
 }
 function handleUnexpectedRequestError(error, res) {
+  if ([400, 413].includes(error.status) && !res.headersSent) { sendJson(res, error.status, { error: error.message }); return; }
   if (error.code === "STALE_SNAPSHOT" && !res.headersSent) {
     sendJson(res, 409, { code: error.code, error: error.message });
     return;
@@ -7951,7 +7785,36 @@ function runSerializedMutation(req, res) {
   mutationQueue = execution.catch((error) => handleUnexpectedRequestError(error, res));
 }
 
+function applyRuntimeConfig() {
+  MONITOR_INTERVAL_MS = config().monitor.intervalSeconds * 1000;
+  DELETED_TODO_RETENTION_DAYS = config().history.trashDays;
+  AUDIT_LOG_RETENTION_DAYS = config().history.auditDays;
+  AUDIT_LOG_MAX_EVENTS = config().history.auditMaxEvents;
+  UNDO_JOURNAL_LIMIT = config().history.undoActions;
+  TODO_REVISION_HISTORY_LIMIT = config().history.eventVersions;
+  MONITOR_MAX_RSS_MB = config().monitor.maxRssMb;
+  MONITOR_DISK_WARNING_PERCENT = config().monitor.diskWarningPercent;
+  REPORT_PDF_MAX_TOTAL_BYTES = config().reports.pdfTotalMb * 1048576;
+  REPORT_GMAIL_MAX_ATTACHMENT_BYTES = config().reports.gmailAttachmentMb * 1048576;
+  REPORT_GMAIL_MAX_TOTAL_BYTES = config().reports.gmailTotalMb * 1048576;
+  CLIENT_REPORT_DOWNLOAD_TICKET_TTL_MS = config().reports.downloadTicketMinutes * 60000;
+  MAX_VIDEO_BYTES = config().uploads.videoMaxMb * 1048576;
+  MAX_TODO_IMAGE_BYTES = config().uploads.imageMaxMb * 1048576;
+  TODO_IMAGE_DISPLAY_MAX_SIDE = config().uploads.imageDisplayMaxSide;
+  TODO_IMAGE_THUMBNAIL_MAX_SIDE = config().uploads.imageThumbnailMaxSide;
+  TODO_IMAGE_PROCESS_TIMEOUT_MS = config().uploads.imageProcessTimeoutSeconds * 1000;
+  PENDING_ATTACHMENT_TTL_MS = config().uploads.pendingHours * 3600000;
+  ENTRY_EDIT_LOCK_TTL_MS = config().locks.leaseSeconds * 1000;
+  TODO_EDIT_LOCK_TTL_MS = config().locks.leaseSeconds * 1000;
+  DELETED_TODO_RETENTION_MS = DELETED_TODO_RETENTION_DAYS * 86400000;
+  AUDIT_LOG_RETENTION_MS = AUDIT_LOG_RETENTION_DAYS * 86400000;
+  if (monitorTimer) { clearInterval(monitorTimer); monitorTimer = null; startOperationalMonitor(); }
+  googlePlanningCalendar.stop();
+  googlePlanningCalendar.start();
+}
+
 async function start() {
+  await appConfigStore.ensure();
   if (NODE_ENV === "production" && !DATABASE_URL) {
     throw new Error("V produkciji mora biti nastavljen DATABASE_URL.");
   }
@@ -7969,21 +7832,18 @@ async function start() {
       // Media uploads only stage a protected attachment; they do not alter an
       // event until its form is saved. Do not hold the global mutation queue
       // while a large body is streaming or while an image is being converted.
-      const streamedMediaUpload = req.method === "POST" && (/^\/api\/todos\/(?:video|image)(?:[/?]|$)/).test(req.url);
+      const streamedMediaUpload = req.method === "POST" && (/^\/api\/todos\/(?:video|image|pdf)(?:[/?]|$)/).test(req.url);
       // An edit lock changes only the short-lived in-memory lock map.  It is
       // not an undoable business change and must never wait behind a slow
       // save, image processing, backup or another serialized mutation.
       const todoEditLockRequest = /^\/api\/todos\/[^/?]+\/lock(?:[/?]|$)/.test(req.url);
-      // Editor timing reports are explicitly best-effort and must never wait
-      // behind a save or another mutation. They carry no business data.
-      const todoEditorDiagnosticRequest = /^\/api\/todo-editor-diagnostics(?:[/?]|$)/.test(req.url);
       // This endpoint only creates a short-lived session-bound download ticket;
       // it does not mutate the database and must not wait behind an unrelated
       // long-running save before the user can share an event.
       const todoSharePdfTicketRequest = /^\/api\/todos\/[^/?]+\/share-pdf-ticket(?:[/?]|$)/.test(req.url);
       const planningCalendarRequest = req.url.startsWith("/api/planning-calendar/")
         || (req.url.startsWith("/api/google/callback") && String(new URL(req.url, "http://localhost").searchParams.get("state") || "").startsWith("planning:"));
-      if (streamedMediaUpload || todoEditLockRequest || todoEditorDiagnosticRequest || todoSharePdfTicketRequest || planningCalendarRequest) {
+      if (streamedMediaUpload || todoEditLockRequest || todoSharePdfTicketRequest || planningCalendarRequest) {
         handleApi(req, res).catch((error) => handleUnexpectedRequestError(error, res));
       } else if (req.method !== "GET" || req.url.startsWith("/api/google/callback")) {
         runSerializedMutation(req, res);
@@ -8248,6 +8108,7 @@ const {
       get INDUS_GOOGLE_APP_ID() { return INDUS_GOOGLE_APP_ID; },
       get MAX_TODO_IMAGE_BYTES() { return MAX_TODO_IMAGE_BYTES; },
       get MAX_VIDEO_BYTES() { return MAX_VIDEO_BYTES; },
+      get MAX_PDF_BYTES() { return config().uploads.pdfMaxMb * 1048576; },
       get MEDIA_DIR() { return MEDIA_DIR; },
       get path() { return path; },
       get PENDING_ATTACHMENT_TTL_MS() { return PENDING_ATTACHMENT_TTL_MS; },
@@ -8262,6 +8123,7 @@ const {
 const calendarSyncStore = createCalendarSyncStore({ databaseUrl: DATABASE_URL, file: path.join(dataDir, "planning-calendar-private.json") });
 const googlePlanningCalendar = createGooglePlanningCalendar({
   store: calendarSyncStore, readDb: readDbAsync, baseUrl: PUBLIC_BASE_URL,
+  config: () => config().calendar,
   runtimeEnabled: NODE_ENV === "production" && process.env.DISABLE_GOOGLE_CALENDAR_SYNC !== "true",
   deploymentKey: crypto.createHash("sha256").update(DATABASE_URL || dataDir).digest("hex"),
   definitions: TODO_STATUS_DEFINITIONS,

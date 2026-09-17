@@ -23,9 +23,9 @@ test("opravilo sprejme do 40 prilog v obrazcu in na strežniku", async () => {
     readAppHtml(),
     readServerSource()
   ]);
-  assert.match(html, /const maxTodoAttachments = 40;/);
+  assert.match(html, /const maxTodoAttachments = appConfig\.uploads\.maxAttachments;/);
   assert.match(html, /maxTodoAttachments - state\.todoDialogPhotos\.length/);
-  assert.match(server, /const MAX_TODO_ATTACHMENTS = 40;/);
+  assert.match(server, /const MAX_TODO_ATTACHMENTS = 200;/);
   const attachments = await fs.readFile(path.join(__dirname, "..", "outputs", "attachment-model.js"), "utf8");
   assert.match(server, /require\("\.\/attachment-model"\)\.createAttachmentModel/);
   assert.match(attachments, /filter\(Boolean\)\.slice\(0, MAX_TODO_ATTACHMENTS\)/);
@@ -124,8 +124,8 @@ test("front-end naročila in foto urejevalnik ohranita dogovorjeni mobilni prika
   assert.match(html, /\.todo-title-row \.todo-client-name \{[\s\S]*?flex: 1 1 0;/);
   assert.doesNotMatch(html, /serverStatusPanel/);
   assert.match(server, /async function receiveLocalTodoImage\(input = \{\}\)/);
-  assert.match(server, /TODO_IMAGE_DISPLAY_MAX_SIDE = 2_560/);
-  assert.match(server, /TODO_IMAGE_THUMBNAIL_MAX_SIDE = 420/);
+  assert.match(server, /TODO_IMAGE_DISPLAY_MAX_SIDE = config\(\)\.uploads\.imageDisplayMaxSide/);
+  assert.match(server, /TODO_IMAGE_THUMBNAIL_MAX_SIDE = config\(\)\.uploads\.imageThumbnailMaxSide/);
   assert.match(server, /url\.pathname === "\/api\/todos\/image" && req\.method === "POST"/);
   assert.match(server, /\["thumbnail", inputPath, `\$\{outputPath\}\[Q=\$\{quality\},strip\]`, String\(maxSide\)\]/);
 });
@@ -638,31 +638,10 @@ test("lokalna testna instanca omogoča ločeno prijavo samo v testnem načinu", 
     });
     assert.equal(focusedLock.status, 200, focusedLock.body);
     assert.match(JSON.parse(focusedLock.body).lockToken || "", /^[a-f0-9]+$/);
-    assert.match(focusedLock.headers["server-timing"] || "", /auth;dur=.*lookup;dur=.*total;dur=/);
+    assert.equal(focusedLock.headers["server-timing"], undefined);
 
-    const editorDiagnostic = await request(port, "/api/todo-editor-diagnostics", {
-      method: "POST",
-      headers: bossTodoHeaders,
-      body: JSON.stringify({
-        todoId: createdTodo.id,
-        result: "ready",
-        formPrepareMs: 38,
-        lockWaitMs: 1240,
-        totalMs: 1281,
-        attachmentCount: 2,
-        // Sensitive/free-text fields must be ignored even if an old client
-        // ever accidentally includes them.
-        title: "Ne sme v diagnostiko",
-        notes: "Ne sme v diagnostiko"
-      })
-    });
-    assert.equal(editorDiagnostic.status, 200, editorDiagnostic.body);
-    const editorDiagnostics = await request(port, "/api/todo-editor-diagnostics", { headers: { Cookie: cookie } });
-    assert.equal(editorDiagnostics.status, 200, editorDiagnostics.body);
-    const editorDiagnosticsData = JSON.parse(editorDiagnostics.body).diagnostics;
-    assert.ok(editorDiagnosticsData.client.samples >= 1);
-    assert.ok(editorDiagnosticsData.client.lockWait.p95Ms >= 1240);
-    assert.doesNotMatch(editorDiagnostics.body, /Ne sme v diagnostiko/);
+    const removedDiagnostics = await request(port, "/api/todo-editor-diagnostics", { headers: { Cookie: cookie } });
+    assert.equal(removedDiagnostics.status, 404);
 
     const noAssignee = await request(port, "/api/todos", {
       method: "POST",
@@ -778,7 +757,7 @@ test("zapiranje obstoječega opravila ne odstranjuje že shranjenih videov", asy
   const html = await readAppHtml();
   assert.match(html, /\{ \.\.\.data\.photo, temporaryUpload: true \}/);
   assert.match(html, /function markTodoDialogAttachmentsSaved\(\)/);
-  assert.match(html, /if \(!photo\?\.temporaryUpload \|\| !isVideoAttachment\(photo\)/);
+  assert.match(html, /if \(!photo\?\.temporaryUpload \|\| \(!isVideoAttachment\(photo\) && !isPdfAttachment\(photo\)\)/);
   assert.match(html, /delete photo\.temporaryUpload;/);
   assert.match(html, /data = await saveTodoToServer\(todo\);[\s\S]*?markTodoDialogAttachmentsSaved\(\);/);
 });
@@ -827,19 +806,13 @@ test("e-poštna povezava odpre ciljno opravilo pred celotnim nalaganjem", async 
   assert.match(server, /function acquireTodoEditLockGroup\(todoId, assignmentIds, user, lockToken = "", now = Date\.now\(\)\) \{/);
   assert.match(server, /function releaseTodoEditLockGroup\(todoId, assignmentIds, user, lockToken = "", now = Date\.now\(\)\) \{/);
   assert.match(server, /const todoEditLockRequest = .*lock.*\.test\(req\.url\);/);
-  assert.match(server, /const todoEditorDiagnosticRequest = .*todo-editor-diagnostics.*\.test\(req\.url\);/);
   assert.match(server, /const todoSharePdfTicketRequest = .*share-pdf-ticket.*\.test\(req\.url\);/);
-  assert.match(server, /if \(streamedMediaUpload \|\| todoEditLockRequest \|\| todoEditorDiagnosticRequest \|\| todoSharePdfTicketRequest \|\| planningCalendarRequest\) \{\s*handleApi\(req, res\)/);
-  assert.match(server, /TODO_EDITOR_DIAGNOSTICS_RETENTION_MS = 24 \* 60 \* 60 \* 1000/);
-  assert.match(server, /function todoEditorDiagnosticSummary\(\)/);
-  assert.match(server, /Server-Timing/);
+  assert.match(server, /if \(streamedMediaUpload \|\| todoEditLockRequest \|\| todoSharePdfTicketRequest \|\| planningCalendarRequest\) \{\s*handleApi\(req, res\)/);
   assert.match(store, /async focusedTodo\(id, \{ includeAttachments = true \} = \{\}\) \{/);
   assert.match(store, /async focusedTodoForLock\(id\) \{\s*return this\.focusedTodo\(id, \{ includeAttachments: false \}\);\s*\}/);
   assert.match(store, /async completionRequestGroup\(requestedAssignmentId, tokenHash\) \{/);
   assert.match(html, /function hasTodoLink\(\) \{/);
   assert.match(html, /async function openTodoFromLink\(\{ render = true \} = \{\}\)/);
-  assert.match(html, /function reportTodoEditorOpenTiming\(todo, metrics = \{\}\)/);
-  assert.match(html, /\/api\/todo-editor-diagnostics/);
   const bootSource = html.slice(html.indexOf("async function boot()"), html.indexOf("async function reconnectAfterOffline()"));
   assert.match(bootSource, /const bootstrapPromise = api\("\/api\/bootstrap\?initial=1", \{ recoverSession: false \}\);[\s\S]*?const me = await api\("\/api\/me", \{ recoverSession: false \}\);[\s\S]*?applyLightweightSession\(me, \[me\.user\]\.filter\(Boolean\)\);[\s\S]*?const snapshot = await bootstrapPromise;[\s\S]*?applyBootstrapSnapshot\(snapshot\);[\s\S]*?refreshBootstrapAfterTodoLink\(\{ defer: true \}\);[\s\S]*?await openTodoFromLink\(\);/);
   assert.doesNotMatch(bootSource, /await loadAll\(\);/);
@@ -1012,7 +985,7 @@ test("zgodovina opravila je šefovski pogled z navigacijo po dejanskih prejšnji
     readAppHtml(),
     readServerSource()
   ]);
-  assert.match(server, /const TODO_REVISION_HISTORY_LIMIT = 12/);
+  assert.match(server, /let TODO_REVISION_HISTORY_LIMIT = config\(\)\.history\.eventVersions/);
   assert.match(server, /function appendTodoRevision\(previousTodo, nextTodo, user, action/);
   assert.match(server, /user\.role === "boss" \? \{ history, revisionHistory \} : \{\}/);
   assert.match(server, /updatedTodo\.revisionHistory = appendTodoRevision\(existing, updatedTodo, user, action, now\)/);

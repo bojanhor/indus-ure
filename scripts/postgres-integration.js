@@ -260,6 +260,19 @@ async function main() {
     assert.equal(fullLoads(), loadCount);
     check("http.attachment_zero_full_snapshots_and_unauthorized_404");
 
+    const pdfBytes = Buffer.alloc(2 * 1048576, 32); pdfBytes.write("%PDF-1.4\\n");
+    const pdfUpload = await request("/api/todos/pdf", { method: "POST", headers: { ...boss, "Content-Type": "application/pdf", "X-Indus-File-Name": "pg-qa.pdf" }, body: pdfBytes });
+    assert.equal(pdfUpload.status, 201, await pdfUpload.clone().text());
+    const { photo: pdfPhoto } = await pdfUpload.json();
+    const pdfDownload = await request(pdfPhoto.url);
+    assert.equal(pdfDownload.status, 200);
+    assert.deepEqual(Buffer.from(await pdfDownload.arrayBuffer()), pdfBytes);
+    assert.equal((await request(pdfPhoto.url, { headers: worker })).status, 404);
+    const pdfStore = await store.load();
+    assert.equal(pdfStore.attachments[pdfPhoto.attachmentId].mimeType, "application/pdf");
+    assert.equal(pdfStore.attachments[pdfPhoto.attachmentId].data || "", "");
+    check("http.streamed_pdf_persists_private_metadata_and_downloads_exact_bytes");
+
     const createBody = name => ({ title: name, clientId, client: "Izolirana QA stranka", status: "open", syncUser: "ibro", assigneeIds: ["ibro"], clientMutationId: crypto.randomUUID() });
     const two = await Promise.all([request("/api/todos", { method: "POST", body: JSON.stringify(createBody("HTTP boss")) }), request("/api/todos", { method: "POST", headers: worker, body: JSON.stringify(createBody("HTTP worker")) })]);
     for (const response of two) assert.equal(response.status, 200, await response.text());

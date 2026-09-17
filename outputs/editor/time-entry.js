@@ -1,5 +1,5 @@
 // Time picker and independent client-billable hours. No HTTP/server dependency.
-function createTimeEntryEditor({ $, state, parseBillingNumber, clearFormValidationError, updateTodoFormLateTimeEntryNotice, localStorage }) {
+function createTimeEntryEditor({ $, state, parseBillingNumber, clearFormValidationError, updateTodoFormLateTimeEntryNotice, localStorage, config = { defaultStart: "08:00", defaultDurationMinutes: 60 } }) {
 // BEGIN preserved time-entry editor
     function dayTimelineMinutes(value) {
       const match = /^(\d{2}):(\d{2})$/.exec(String(value || ""));
@@ -98,9 +98,9 @@ function createTimeEntryEditor({ $, state, parseBillingNumber, clearFormValidati
     function todoTimePickerDefault(target) {
       if (target === "end") {
         const start = dayTimelineMinutes($("todoFormStart").value);
-        if (start !== null) return dayTimelineTime(Math.min(1440, start + 60));
+        if (start !== null) return dayTimelineTime(Math.min(1440, start + config.defaultDurationMinutes));
       }
-      return rememberedTodoStartTime() || "08:00";
+      return rememberedTodoStartTime() || config.defaultStart;
     }
 
     function renderTodoFormQuickTimePicker() {
@@ -118,9 +118,9 @@ function createTimeEntryEditor({ $, state, parseBillingNumber, clearFormValidati
       const parts = todoTimePickerParts(input.value, todoTimePickerDefault(target));
       const currentHour = parts.hour;
       const currentMinute = parts.minute;
-      const startValue = roundTimeToQuarter($("todoFormStart").value || todoTimePickerDefault("start")) || "08:00";
+      const startValue = roundTimeToQuarter($("todoFormStart").value || todoTimePickerDefault("start")) || config.defaultStart;
       const startMinutes = dayTimelineMinutes(startValue);
-      const endFallback = dayTimelineTime(Math.min(1440, (startMinutes === null ? 8 * 60 : startMinutes) + 60));
+      const endFallback = dayTimelineTime(Math.min(1440, (startMinutes === null ? dayTimelineMinutes(config.defaultStart) : startMinutes) + config.defaultDurationMinutes));
       const endValue = roundTimeToQuarter($("todoFormEnd").value || endFallback, true) || endFallback;
       $("todoFormQuickTimeStart").classList.toggle("active", isOpen && target === "start");
       $("todoFormQuickTimeEnd").classList.toggle("active", isOpen && target === "end");
@@ -157,7 +157,7 @@ function createTimeEntryEditor({ $, state, parseBillingNumber, clearFormValidati
       // Keep one duration through both hour and minute selection, even if
       // the intermediate hour choice hits the midnight cap.
       const duration = target === "start"
-        ? (minute !== null && state.todoTimeShiftDuration != null ? state.todoTimeShiftDuration : (todoFormWorkerMinutes() || 60))
+        ? (minute !== null && state.todoTimeShiftDuration != null ? state.todoTimeShiftDuration : (todoFormWorkerMinutes() || config.defaultDurationMinutes))
         : 0;
       if (target === "start" && hour !== null) state.todoTimeShiftDuration = duration;
       const fallback = todoTimePickerParts(input.value, todoTimePickerDefault(target));
