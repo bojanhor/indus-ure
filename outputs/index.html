@@ -1697,6 +1697,15 @@
     a.inline-url:visited { color: #551a8b; }
 
     .todo-item.urgent { border-left: 4px solid #d93025; }
+    .client-billing-return-marker { border-top: 4px solid var(--accent); margin: 12px 0; color: var(--accent); font-size: 12px; padding-top: 4px; }
+    .client-billing-row.is-reassigned { background: #e5f3ee; box-shadow: inset 4px 0 #24745c; }
+    .report-client-transfer { display: flex; align-items: end; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+    .report-client-transfer label { flex: 1 1 220px; }
+    .client-autocomplete-row { display: flex; align-items: stretch; }
+    .client-autocomplete-row .client-autocomplete-option { flex: 1; min-width: 0; }
+    .client-autocomplete-edit { flex: 0 0 44px; min-height: 44px; padding: 8px; border-radius: 6px; }
+    .client-autocomplete-edit svg { width: 20px; height: 20px; }
+    .day-todo.multi-assignee:not(.urgent):not(.has-change-notice), .day-multiday-event.multi-assignee.is-span-start:not(.urgent):not(.has-change-notice) { border-left: 7px solid #67716f; }
     .todo-urgent-chip { background: #d93025; color: #fff; white-space: nowrap; }
     .todo-item.has-change-notice {
       border-left: 4px solid #2f9a57;
@@ -4230,7 +4239,12 @@
     .photo-editor-text-editor[hidden] { display: none; }
 
     .photo-editor-text-entry { flex: 1 1 160px; min-width: 0; }
-    .photo-editor-text-entry input { width: 100%; min-width: 0; }
+    .photo-editor-text-entry input, .photo-editor-text-entry textarea { width: 100%; min-width: 0; font-size: 16px; }
+    .photo-editor-text-entry textarea { min-height: 60px; max-height: 110px; resize: vertical; }
+    .photo-editor-text-hint { flex-basis: 100%; font-size: 12px; color: var(--muted); }
+    #photoEditorFinishText { width: auto; padding-inline: 10px; }
+    #photoEditorDialog.is-text-active .photo-editor-size-control { display: none; }
+    #photoEditorDialog.is-text-active .photo-editor-main-tools > button:not(#photoEditorPan):not(#photoEditorAddText):not(#photoEditorUndo) { display: none; }
 
     .photo-editor-text-tools {
       display: flex;
@@ -5428,17 +5442,19 @@
       }
       #photoEditorDialog .photo-editor-toolbar > label,
       #photoEditorDialog .photo-editor-toolbar > button { min-width: 0; min-height: 38px; }
-      #photoEditorDialog .photo-editor-main-tools { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; width: 100%; }
-      #photoEditorDialog .photo-editor-main-tools > button { width: 100%; min-width: 0; }
+      #photoEditorDialog .photo-editor-main-tools { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px; width: 100%; }
+      #photoEditorDialog .photo-editor-main-tools > button { width: 44px; min-width: 44px; min-height: 44px; }
+      #photoEditorDialog .photo-editor-tool { min-height: 44px; min-width: 44px; }
+      #photoEditorDialog .photo-editor-toolbar:has(#photoEditorTextEditor:not([hidden])) { max-height: 48dvh; }
       #photoEditorDialog .photo-editor-size-control { grid-column: span 2; }
       #photoEditorDialog .photo-editor-size-control input { width: 100%; min-width: 0; flex: 1 1 auto; }
       #photoEditorDialog .photo-editor-text-editor,
       #photoEditorDialog .gesture-zoom-controls { grid-column: 1 / -1; width: 100%; }
       #photoEditorDialog .photo-editor-text-editor { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
       #photoEditorDialog .photo-editor-text-editor[hidden] { display: none; }
-      #photoEditorDialog .photo-editor-text-tools { display: grid; grid-template-columns: 1fr; gap: 6px; }
-      #photoEditorDialog .photo-editor-text-tools label { display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; }
-      #photoEditorDialog .photo-editor-text-tools input[type="range"] { width: 100%; min-width: 0; }
+      #photoEditorDialog .photo-editor-text-tools { display: flex; flex-wrap: wrap; gap: 6px; }
+      #photoEditorDialog .photo-editor-text-tools label { display: flex; width: 100%; }
+      #photoEditorDialog .photo-editor-text-tools input[type="range"] { width: 100%; min-width: 0; min-height: 40px; flex: 1; }
       #photoEditorDialog .gesture-zoom-controls { display: grid; grid-template-columns: 38px minmax(0, 1fr) 38px 38px; gap: 6px; }
       #photoEditorDialog .photo-editor-pending-actions { display: inline-flex; grid-column: 1 / -1; justify-content: stretch; }
       #photoEditorDialog .photo-editor-pending-actions[hidden] { display: none; }
@@ -5877,7 +5893,6 @@
             <button class="secondary hidden" id="reportNewEntry" type="button">Nov vpis</button>
             <button class="secondary hidden" id="selectAllClientBill" type="button">Označi vse</button>
             <button class="secondary hidden" id="clearClientBillSelection" type="button">Počisti izbor</button>
-            <button class="secondary hidden" id="bulkChangeReportClient" type="button">Zamenjaj stranko</button>
             <button class="primary hidden" id="confirmClientBill" type="button">Potrdi izbrane vpise</button>
             <button class="secondary hidden" id="exportReportPdf" type="button">Prenesi PDF</button>
             <button class="secondary hidden" id="createReportGmailDraft" type="button">Gmail osnutek</button>
@@ -5923,6 +5938,10 @@
           <div class="todo-head">
             <div>
               <strong id="clientDetailTitle">Zaklju&#269;ene storitve</strong>
+              <div id="reportClientTransfer" class="report-client-transfer hidden">
+                <label>Stranka za označene vpise<input id="bulkClientTarget" type="text" list="clientList" autocomplete="off" maxlength="240" placeholder="Naziv ali vzdevek, tudi adhoc"></label>
+                <button class="secondary" id="bulkChangeReportClient" type="button">Prestavi označene</button>
+              </div>
               <span class="todo-meta" id="clientDetailRange"></span>
             </div>
             <span class="todo-meta" id="reportLineCount"></span>
@@ -6178,7 +6197,7 @@
                 <input id="todoFormStart" type="time" step="900">
               </label>
               <label>Ura do
-                <input id="todoFormEnd" type="time" step="900">
+                <input id="todoFormEnd" type="text" inputmode="numeric" pattern="(?:[01][0-9]|2[0-3]):[0-5][0-9]|24:00" aria-label="Ura do">
               </label>
             </div>
             <section class="todo-time-picker" id="todoFormQuickTimePicker" aria-label="Krožni izbirnik ure">
@@ -6455,7 +6474,7 @@
         </div>
         <label class="photo-editor-size-control" title="Debelina črte">
           <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="5" cy="10" r="2"></circle><circle cx="14" cy="10" r="5"></circle></svg>
-          <input id="photoEditorSize" type="range" min="1" max="30" value="1" aria-label="Debelina črte">
+          <input id="photoEditorSize" type="range" min="2" max="30" value="2" aria-label="Debelina črte">
         </label>
         <div class="gesture-zoom-controls" aria-label="Povečava urejevalnika">
           <button class="photo-editor-tool" id="photoEditorZoomOut" type="button" aria-label="Pomanjšaj">&minus;</button>
@@ -6467,12 +6486,12 @@
         <div class="photo-editor-text-editor" id="photoEditorTextEditor" hidden>
           <label class="photo-editor-text-entry">
             <span class="sr-only">Besedilo</span>
-            <input id="photoEditorText" type="text" maxlength="160" placeholder="Vpiši oznako za sliko">
+            <textarea id="photoEditorText" rows="2" maxlength="500" placeholder="Vpiši oznako za sliko" aria-label="Besedilo na sliki"></textarea>
           </label>
           <div class="photo-editor-text-tools" id="photoEditorTextTools" hidden>
             <label title="Velikost besedila">
               <button class="photo-editor-tool photo-editor-text-step" id="photoEditorTextSmaller" type="button" aria-label="Manjša pisava">&minus;</button>
-              <input id="photoEditorTextSize" type="range" min="12" max="160" value="32" aria-label="Velikost besedila">
+              <input id="photoEditorTextSize" type="range" min="12" max="512" value="32" aria-label="Velikost besedila">
               <button class="photo-editor-tool photo-editor-text-step" id="photoEditorTextLarger" type="button" aria-label="Večja pisava">&plus;</button>
             </label>
             <label title="Vrtenje besedila">
@@ -6480,6 +6499,8 @@
               <input id="photoEditorTextRotation" type="range" min="-180" max="180" value="0" aria-label="Vrtenje besedila">
             </label>
             <button class="photo-editor-tool danger" id="photoEditorDeleteText" type="button" title="Odstrani napis" aria-label="Odstrani napis">&#128465;</button>
+            <button class="photo-editor-tool" id="photoEditorFinishText" type="button">Končaj napis</button>
+            <small class="photo-editor-text-hint">Napis premakni z enim prstom. Sliko povečaj z dvema; za premik slike izberi roko.</small>
           </div>
         </div>
         <div class="photo-editor-pending-actions" id="photoEditorPendingActions" hidden>
@@ -6636,19 +6657,6 @@
     <form method="dialog">
       <div class="modal-head"><h3 id="appPromptTitle">Vnos</h3><button class="icon-btn" id="appPromptClose" type="button" title="Zapri">&times;</button></div>
       <div class="modal-body"><p class="app-dialog-message" id="appPromptMessage"></p><label id="appPromptLabel">Vrednost<input id="appPromptInput" type="text" autocomplete="off"></label><div class="actions"><button class="secondary" id="appPromptCancel" type="button">Prekliči</button><button class="primary" id="appPromptAccept" type="button">Potrdi</button></div></div>
-    </form>
-  </dialog>
-  <dialog id="bulkClientDialog">
-    <form method="dialog" id="bulkClientForm">
-      <div class="modal-head"><h3>Zamenjaj stranko</h3><button class="icon-btn" id="closeBulkClientDialog" type="button" title="Zapri" aria-label="Zapri">&times;</button></div>
-      <div class="modal-body">
-        <p class="app-dialog-message" id="bulkClientDialogMessage"></p>
-        <label>Nova stranka
-          <input id="bulkClientTarget" type="text" list="clientList" autocomplete="off" placeholder="Začni tipkati naziv ali vzdevek" required>
-        </label>
-        <p class="todo-meta">Spremenijo se samo še neobračunani izbrani vpisi. Kontakti stare stranke se pri tem varno odstranijo.</p>
-        <div class="actions"><button class="secondary" id="cancelBulkClientDialog" type="button">Prekliči</button><button class="primary" type="submit">Zamenjaj stranko</button></div>
-      </div>
     </form>
   </dialog>
   <dialog id="quickClientDialog">
@@ -8937,6 +8945,7 @@ function restoreReportOverviewSnapshot(snapshot = {}) {
       state.showClientPending = snapshot?.pending !== false;
       state.showClientBilled = snapshot?.billed === true;
       state.reportOverviewFocusKey = String(snapshot?.focusKey || "");
+      state.reportOverviewReturnKeys = Array.isArray(snapshot?.returnKeys) ? snapshot.returnKeys : [];
       if ($("reportShowPending")) $("reportShowPending").checked = state.showClientPending;
       if ($("reportShowBilled")) $("reportShowBilled").checked = state.showClientBilled;
       if ($("reportClientSort")) $("reportClientSort").value = state.reportClientSort;
@@ -9914,6 +9923,7 @@ function clientSuggestionValues() {
         const key = stableId ? `id:${stableId}` : normalizeText(`${alias}|${name}`);
         if (!alias || !key || suggestions.has(key)) return;
         suggestions.set(key, {
+          clientId: stableId,
           value: alias,
           label: normalizeText(name) === normalizeText(alias) ? "" : name
         });
@@ -9939,10 +9949,10 @@ function renderTodoClientSuggestions() {
       state.todoClientSuggestionIndex = matches.length ? 0 : -1;
       const list = $("todoFormClientSuggestions");
       list.innerHTML = matches.map((item, index) => `
-        <button class="client-autocomplete-option ${index === 0 ? "active" : ""}" type="button" role="option" data-index="${index}" aria-selected="${index === 0}">
+        <div class="client-autocomplete-row"><button class="client-autocomplete-option ${index === 0 ? "active" : ""}" type="button" role="option" data-index="${index}" aria-selected="${index === 0}">
           <strong>${escapeHtml(item.value)}</strong>
           ${item.label && normalizeText(item.label) !== normalizeText(item.value) ? `<small>${escapeHtml(item.label)}</small>` : ""}
-        </button>
+        </button>${item.clientId ? `<button type="button" class="secondary client-autocomplete-edit" data-edit-suggested-client="${escapeHtml(item.clientId)}" aria-label="Uredi stranko: ${escapeHtml(item.value)}" title="Uredi podatke stranke"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25Zm17.71-10.21a1 1 0 0 0 0-1.41l-2.55-2.55a1 1 0 0 0-1.41 0l-1.99 1.99 3.75 3.75 2.2-2.2Z"/></svg></button>` : ""}</div>
       `).join("");
       list.classList.toggle("hidden", !matches.length);
       $("todoFormClient").setAttribute("aria-expanded", String(Boolean(matches.length)));
@@ -10191,7 +10201,7 @@ function appendMonthMultiDayLanes(day, key, weekIndex, layout) {
           const actualEnd = todoEndDate(todo) === key;
           const item = document.createElement('button');
           item.type = 'button';
-          item.className = `day-multiday-event todo-status-color ${todoStatusClass(todo.status)} ${todo.urgent ? 'urgent' : ''} ${todoChangeNotice(todo) ? 'has-change-notice' : ''} ${actualStart ? 'is-span-start' : 'is-span-continuation'} ${actualEnd ? 'is-span-end' : ''}`;
+          item.className = `day-multiday-event todo-status-color ${todoStatusClass(todo.status)} ${todoAssigneeIds(todo).length > 1 ? 'multi-assignee' : ''} ${todo.urgent ? 'urgent' : ''} ${todoChangeNotice(todo) ? 'has-change-notice' : ''} ${actualStart ? 'is-span-start' : 'is-span-continuation'} ${actualEnd ? 'is-span-end' : ''}`;
           const title = `${todo.urgent ? `NUJNO ${String.fromCharCode(183)} ` : ''}${todo.title || 'Brez naslova'}`;
           item.setAttribute('aria-label', `${title}; ${todoDateTimeLabel(todo)}`);
           // A span crosses the grid's weekly rows on Monday. Repeat its title
@@ -10481,7 +10491,7 @@ function renderMonth() {
             item.type = 'button';
             const settlementIndicators = dayTodoSettlementIndicators(todo);
             const changeNotice = todoChangeNotice(todo);
-            item.className = `day-todo todo-status-color ${todoStatusClass(todo.status)} ${todo.done ? 'done' : ''} ${todo.urgent ? 'urgent' : ''} ${changeNotice ? 'has-change-notice' : ''} ${settlementIndicators ? 'has-settlements' : ''}`;
+            item.className = `day-todo todo-status-color ${todoStatusClass(todo.status)} ${todoAssigneeIds(todo).length > 1 ? 'multi-assignee' : ''} ${todo.done ? 'done' : ''} ${todo.urgent ? 'urgent' : ''} ${changeNotice ? 'has-change-notice' : ''} ${settlementIndicators ? 'has-settlements' : ''}`;
             const time = todo.start && todo.end ? `${escapeHtml(todo.start)}&ndash;${escapeHtml(todo.end)}` : 'Brez ure';
             const client = todoClientCalendarName(todo, 'Brez stranke');
             const title = `${todo.urgent ? `NUJNO ${String.fromCharCode(183)} ` : ''}${todo.title || 'Brez naslova'}`;
@@ -11957,6 +11967,7 @@ function openClientEditDialog(clientId) {
         return;
       }
       $("clientEditId").value = client.clientId || client.id || "";
+      state.clientEditTodoContext = $("todoDialog").open ? { clientId: String(client.clientId || client.id), selectedId: String(findTodoClient($("todoFormClient").value)?.clientId || "") } : null;
       $("clientEditName").value = client.name || "";
       $("clientEditSearch").value = client.search || client.name || "";
       $("clientEditTax").value = client.taxId || "";
@@ -12005,6 +12016,13 @@ async function saveClientFromDialog() {
         vatPayer: $("clientEditVatPayer").value === "true"
       });
       $("clientEditDialog").close();
+      const todoContext = state.clientEditTodoContext;
+      if (todoContext?.clientId === todoContext?.selectedId && $("todoDialog").open) {
+        $("todoFormClient").value = search;
+        syncTodoFormClientContacts();
+      }
+      if ($("todoDialog").open) renderTodoClientSuggestions();
+      state.clientEditTodoContext = null;
       showNotice("Spremembe stranke so shranjene v bazi INDUS URE.");
     }
 
@@ -12617,9 +12635,9 @@ async function reorderTodos(sourceId, targetId = "", targetPlacement = "before",
     }
 
 function renderTodoReorderOrigin() {
+          document.querySelectorAll('.todo-reorder-origin').forEach((marker) => marker.remove());
           if (state.todoSortMode === "manual" && state.todoReorderOrigin) {
             const {previousId, nextId} = state.todoReorderOrigin;
-            document.querySelectorAll('.todo-reorder-origin').forEach((marker) => marker.remove());
             const rows = [...document.querySelectorAll('#todoItems .todo-item[data-todo-id]:not([data-todo-ordering-reference])')];
             const before = rows.find((row) => row.dataset.todoId === nextId);
             const after = rows.find((row) => row.dataset.todoId === previousId);
@@ -12634,6 +12652,25 @@ function renderTodoReorderOrigin() {
             }
           }
     }
+    // This marker is orientation for the current sorting action, not a
+    // persistent unread-change signal. Scroll and detail toggles preserve it.
+    document.addEventListener("click", (event) => {
+      const target = event.target;
+      const editClient = target.closest("[data-edit-suggested-client]");
+      if (editClient) { hideTodoClientSuggestions(); openClientEditDialog(editClient.dataset.editSuggestedClient); }
+      if (!state.todoReorderOrigin || target.closest(".drag-handle, .todo-details-toggle, .client-todo-group-toggle")) return;
+      if (target.closest("button, a, input, select, [role=button]")) {
+        state.todoReorderOrigin = null;
+        renderTodoReorderOrigin();
+      }
+    }, true);
+    document.addEventListener("input", () => {
+      if (state.todoReorderOrigin) { state.todoReorderOrigin = null; renderTodoReorderOrigin(); }
+    }, true);
+    document.addEventListener("keydown", (event) => {
+      if (!["Enter", " "].includes(event.key) || !state.todoReorderOrigin || event.target.closest(".drag-handle, .todo-details-toggle, .client-todo-group-toggle")) return;
+      if (event.target.closest("button, a, input, select, [role=button]")) { state.todoReorderOrigin = null; renderTodoReorderOrigin(); }
+    }, true);
 function normalizeText(value) {
       return String(value || "")
         .toLowerCase()

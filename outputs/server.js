@@ -1250,6 +1250,7 @@ function normalizeLateTimeEntryReports(input, users = {}, now = Date.now()) {
 
 function lateTimeEntryMinutes(todo) {
   const parse = (value) => {
+    if (value === "24:00") return 1440;
     const match = /^(\d{2}):(\d{2})$/.exec(String(value || ""));
     if (!match) return null;
     const hours = Number(match[1]);
@@ -3679,12 +3680,12 @@ function appendTodoRevision(previousTodo, nextTodo, user, action, at = new Date(
   }]);
 }
 
-function roundTimeToQuarterHour(value) {
+function roundTimeToQuarterHour(value, allowMidnight = false) {
   const time = String(value || "").trim();
   const match = /^(\d{2}):(\d{2})$/.exec(time);
   if (!match) return time;
   const minutes = Number(match[1]) * 60 + Number(match[2]);
-  const rounded = Math.min(23 * 60 + 45, Math.round(minutes / 15) * 15);
+  const rounded = Math.min(allowMidnight ? 1440 : 23 * 60 + 45, Math.round(minutes / 15) * 15);
   return `${String(Math.floor(rounded / 60)).padStart(2, "0")}:${String(rounded % 60).padStart(2, "0")}`;
 }
 
@@ -3692,7 +3693,7 @@ function cleanEntry(input) {
   const entry = {
     date: String(input.date || ""),
     start: roundTimeToQuarterHour(input.start),
-    end: roundTimeToQuarterHour(input.end),
+    end: roundTimeToQuarterHour(input.end, true),
     client: String(input.client || "").trim(),
     clientId: String(input.clientId || "").trim(),
     status: ["billed", "warranty", "unbilled", "errand", "vacation"].includes(input.status) ? input.status : "unbilled",
@@ -3869,7 +3870,7 @@ function cleanTodo(input) {
     endDate: String(input.endDate || input.date || ""),
     calendarOnly: Boolean(!isTimeEntry && !isClientOnly && input.calendarOnly && input.date),
     start: roundTimeToQuarterHour(input.start),
-    end: roundTimeToQuarterHour(input.end),
+    end: roundTimeToQuarterHour(input.end, true),
     client: isMeal ? "" : String(input.client || "").trim(),
     clientId: isMeal ? "" : String(input.clientId || "").trim(),
     clientContactIds: isMeal ? [] : cleanTodoClientContactIds(input.clientContactIds),
@@ -4159,6 +4160,7 @@ function validateTodo(todo, { requireClientId = false, db = null } = {}) {
 }
 
 function timeOfDayMinutes(value) {
+  if (value === "24:00") return 1440;
   const match = /^(\d{2}):(\d{2})$/.exec(String(value || ""));
   if (!match) return null;
   const hours = Number(match[1]);
@@ -4212,6 +4214,7 @@ function icsEscape(value) {
 }
 
 function icsDateTime(date, time) {
+  if (time === "24:00") return `${addDays(date, 1).replaceAll("-", "")}T000000`;
   return `${date.replaceAll("-", "")}T${time.replace(":", "")}00`;
 }
 
@@ -6064,9 +6067,10 @@ async function handleApi(req, res) {
         return;
       }
       const db = await readRequestDb(req);
-      const client = clientForBilling(db, body);
-      if (!client) {
-        sendJson(res, 400, { error: "Izberi obstoječo stranko iz baze." });
+      let client = clientForBilling(db, body);
+      const requestedClientName = String(body.clientName || "").trim();
+      if (!client && (body.clientId || !requestedClientName || requestedClientName.length > 240)) {
+        sendJson(res, 400, { error: "Izberi obstoječo ali vpiši novo adhoc stranko (največ 240 znakov)." });
         return;
       }
       const selected = new Set(eventIds);
@@ -6095,6 +6099,14 @@ async function handleApi(req, res) {
         }
       }
       const selectedTodoIds = new Set([...groups.values()].flat().map((todo) => String(todo.id || "")).filter(Boolean));
+      if (body.sourceClientId && [...groups.values()].flat().some((todo) => todo.clientId !== body.sourceClientId)) {
+        sendJson(res, 409, { error: "Stranka izbranega vpisa se je medtem spremenila. Osveži poročilo." });
+        return;
+      }
+      if (!client) {
+        const resolved = attachResolvedClient(db, { client: requestedClientName }, { createAdHoc: true, user });
+        client = clientForBilling(db, resolved);
+      }
       const now = new Date().toISOString();
       db.todos = (db.todos || []).map((todo) => !selectedTodoIds.has(String(todo.id || "")) ? todo : {
         ...todo,
@@ -7240,7 +7252,7 @@ async function handleApi(req, res) {
           return;
         }
         const start = roundTimeToQuarterHour(requested.start);
-        const end = roundTimeToQuarterHour(requested.end);
+        const end = roundTimeToQuarterHour(requested.end, true);
         const date = isDateKey(requested.date) ? String(requested.date) : previousTodo.date;
         const previousDate = String(previousTodo.date || "");
         const dayShift = previousDate && date ? Math.round((new Date(`${date}T00:00:00`) - new Date(`${previousDate}T00:00:00`)) / 86400000) : 0;

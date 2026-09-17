@@ -71,6 +71,9 @@ test("all-day, multi-day, DST and timed values retain Ljubljana wall-clock and e
   const db = dbFixture();
   let event = Object.values(calendarPlans(db, baseUrl, definitions)[0].events)[0];
   assert.deepEqual(event.start, { dateTime: "2026-10-25T08:00:00", timeZone: "Europe/Ljubljana" });
+  db.todos[0].end = "24:00";
+  event = Object.values(calendarPlans(db, baseUrl, definitions)[0].events)[0];
+  assert.deepEqual(event.end, { dateTime: "2026-10-26T00:00:00", timeZone: "Europe/Ljubljana" });
   db.todos[0].start = ""; db.todos[0].end = ""; db.todos[0].endDate = "2026-10-27";
   event = Object.values(calendarPlans(db, baseUrl, definitions)[0].events)[0];
   assert.deepEqual(event.end, { date: "2026-10-28" });

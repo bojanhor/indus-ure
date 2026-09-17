@@ -14,16 +14,16 @@ function createTimeEntryEditor({ $, state, parseBillingNumber, clearFormValidati
       return String(hours).padStart(2, "0") + ":" + String(mins).padStart(2, "0");
     }
 
-    function roundTimeToQuarter(value) {
+    function roundTimeToQuarter(value, allowMidnight = false) {
       const minutes = dayTimelineMinutes(value);
       if (minutes === null) return "";
-      return dayTimelineTime(Math.min(23 * 60 + 45, Math.round(minutes / 15) * 15));
+      return dayTimelineTime(Math.min(allowMidnight ? 1440 : 23 * 60 + 45, Math.round(minutes / 15) * 15));
     }
 
     function normalizeTodoFormTimes() {
       ["todoFormStart", "todoFormEnd"].forEach((id) => {
         const input = $(id);
-        if (input.value) input.value = roundTimeToQuarter(input.value);
+        if (input.value) input.value = roundTimeToQuarter(input.value, id === "todoFormEnd");
       });
     }
 
@@ -90,7 +90,7 @@ function createTimeEntryEditor({ $, state, parseBillingNumber, clearFormValidati
     }
 
     function todoTimePickerParts(value, fallback = "") {
-      const normalized = roundTimeToQuarter(value || fallback || "");
+      const normalized = roundTimeToQuarter(value || fallback || "", true);
       const match = /^(\d{2}):(\d{2})$/.exec(normalized);
       return match ? { hour: Number(match[1]), minute: Number(match[2]) } : null;
     }
@@ -98,7 +98,7 @@ function createTimeEntryEditor({ $, state, parseBillingNumber, clearFormValidati
     function todoTimePickerDefault(target) {
       if (target === "end") {
         const start = dayTimelineMinutes($("todoFormStart").value);
-        if (start !== null) return dayTimelineTime(Math.min(23 * 60 + 45, start + 60));
+        if (start !== null) return dayTimelineTime(Math.min(1440, start + 60));
       }
       return rememberedTodoStartTime() || "08:00";
     }
@@ -120,8 +120,8 @@ function createTimeEntryEditor({ $, state, parseBillingNumber, clearFormValidati
       const currentMinute = parts.minute;
       const startValue = roundTimeToQuarter($("todoFormStart").value || todoTimePickerDefault("start")) || "08:00";
       const startMinutes = dayTimelineMinutes(startValue);
-      const endFallback = dayTimelineTime(Math.min(23 * 60 + 45, (startMinutes === null ? 8 * 60 : startMinutes) + 60));
-      const endValue = roundTimeToQuarter($("todoFormEnd").value || endFallback) || endFallback;
+      const endFallback = dayTimelineTime(Math.min(1440, (startMinutes === null ? 8 * 60 : startMinutes) + 60));
+      const endValue = roundTimeToQuarter($("todoFormEnd").value || endFallback, true) || endFallback;
       $("todoFormQuickTimeStart").classList.toggle("active", isOpen && target === "start");
       $("todoFormQuickTimeEnd").classList.toggle("active", isOpen && target === "end");
       $("todoFormQuickTimeStart").setAttribute("aria-pressed", String(isOpen && target === "start"));
@@ -154,6 +154,12 @@ function createTimeEntryEditor({ $, state, parseBillingNumber, clearFormValidati
       const id = target === "end" ? "todoFormEnd" : "todoFormStart";
       const input = $(id);
       if (input.disabled) return;
+      // Keep one duration through both hour and minute selection, even if
+      // the intermediate hour choice hits the midnight cap.
+      const duration = target === "start"
+        ? (minute !== null && state.todoTimeShiftDuration != null ? state.todoTimeShiftDuration : (todoFormWorkerMinutes() || 60))
+        : 0;
+      if (target === "start" && hour !== null) state.todoTimeShiftDuration = duration;
       const fallback = todoTimePickerParts(input.value, todoTimePickerDefault(target));
       const nextHour = hour === null ? fallback.hour : Math.max(0, Math.min(23, Number(hour)));
       const nextMinute = minute === null ? fallback.minute : Math.max(0, Math.min(45, Number(minute)));
@@ -163,15 +169,11 @@ function createTimeEntryEditor({ $, state, parseBillingNumber, clearFormValidati
       if (target === "start") {
         rememberTodoStartTime(input.value);
         const endInput = $("todoFormEnd");
-        // The initial end time is merely a one-hour suggestion. Until the
-        // user chooses an end time, keep that suggestion one hour after the
-        // start time they pick in the circular selector.
-        if (!endInput.value || endInput.dataset.autoSuggested === "true") {
-          const start = dayTimelineMinutes(input.value);
-          endInput.value = dayTimelineTime(Math.min(23 * 60 + 45, start + 60));
-          endInput.dataset.autoSuggested = "true";
-        }
+        const start = dayTimelineMinutes(input.value);
+        endInput.value = dayTimelineTime(Math.min(1440, start + duration));
+        if (minute !== null) state.todoTimeShiftDuration = null;
       } else {
+        state.todoTimeShiftDuration = null;
         $("todoFormEnd").dataset.autoSuggested = "false";
       }
       updateTodoFormLateTimeEntryNotice();

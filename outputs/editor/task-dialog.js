@@ -182,6 +182,7 @@ async function openTodoDialog(todo = {}, { reportNavigationIds = null } = {}) {
       $("todoFormStart").value = todo.start || suggestedTimes?.start || noteTimeSuggestion?.start || "";
       $("todoFormEnd").value = todo.end || suggestedTimes?.end || noteTimeSuggestion?.end || "";
       $("todoFormEnd").dataset.autoSuggested = String(!editing && !todo.end && Boolean(suggestedTimes || noteTimeSuggestion));
+      state.todoTimeShiftDuration = null;
       $("todoFormDate").value = todo.date || (needsTimeSuggestion ? dateKey(new Date()) : noteTimeSuggestion?.date || "");
       $("todoFormEndDate").value = todo.date ? todoEndDate(todo) : "";
       $("todoFormEndDate").dataset.auto = String(!todo.date || todoEndDate(todo) === todo.date);

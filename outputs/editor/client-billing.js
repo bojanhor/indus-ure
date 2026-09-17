@@ -472,7 +472,7 @@ function renderClientBillingRow(line) {
       const title = inlineEditable
         ? `<textarea class="client-billing-inline-title" rows="1" data-client-billing-inline-field="title" data-todo-id="${escapeHtml(todo.id)}" aria-label="Naslov dogodka">${escapeHtml(todo.title || "")}</textarea>`
         : `<button class="client-billing-title-trigger open-report-todo" type="button" data-todo-id="${escapeHtml(todo.id)}" aria-label="Odpri vpis: ${escapeHtml(todo.title || "Brez naziva")}">${escapeHtml(todo.title || "Brez naziva")}</button>`;
-      return `<article class="client-billing-row">
+      return `<article class="client-billing-row${state.reportMovedEventIds?.has(eventId) ? " is-reassigned" : ""}">
         <div class="client-billing-selection-slot">${billSelection}</div>
         <div class="client-billing-when"><strong>${todo.date ? formatDate(todo.date) : "Brez datuma"}</strong><span>${escapeHtml(time)}</span></div>
         <div class="client-billing-main">
@@ -516,6 +516,12 @@ function renderReportContent() {
       // In the client bill detail, the summary is the amount currently being confirmed.
       const totals = reportTotals(detail ? selectedClientBillLines : lines);
       $("clientDetailTitle").textContent = detail ? `Poročilo: ${selection.name}` : "Povzetek po strankah";
+      $("reportClientTransfer").classList.toggle("hidden", !detail || state.user?.role !== "boss");
+      const transferKey = selection.id || selection.name;
+      if ($("bulkClientTarget").dataset.clientKey !== transferKey) {
+        $("bulkClientTarget").value = selection.name || "";
+        $("bulkClientTarget").dataset.clientKey = transferKey;
+      }
       $("clientDetailRange").textContent = $("reportFrom").value || $("reportTo").value ? reportRangeLabel() : "";
       $("reportLineCount").textContent = detail
         ? `${selectedClientBillLines.length} / ${pendingClientBillLines.length} označenih za obračun`
@@ -537,6 +543,7 @@ function renderReportContent() {
       $("selectAllClientBill").disabled = selectedClientBillCount === pendingClientBillLines.length;
       $("clearClientBillSelection").disabled = !selectedClientBillCount;
       $("bulkChangeReportClient").disabled = !selectedClientBillCount;
+      $("bulkChangeReportClient").textContent = `Prestavi označene (${selectedClientBillCount})`;
       $("bulkChangeReportClient").title = selectedClientBillCount ? "" : "Označi vsaj en še neobračunan vpis.";
       $("exportReportPdf").classList.toggle("hidden", !detail);      $("reportHoursModeOption").classList.toggle("hidden", !detail);
       $("createReportGmailDraft").classList.toggle("hidden", !detail);
@@ -570,16 +577,27 @@ function renderReportContent() {
           || `<p class="todo-meta">Za ta izbor ni zaključenih storitev.</p>`;
         requestAnimationFrame(autosizeClientBillingFields);
       } else {
-        $("clientDetailList").innerHTML = summaries.map(renderReportClientCard).join("")
-          || `<p class="todo-meta">Za ta izbor ni zaključenih storitev.</p>`;
+        const rows = summaries.map(renderReportClientCard);
+        const keys = state.reportOverviewReturnKeys || [];
+        const oldIndex = keys.indexOf(state.reportOverviewFocusKey);
+        if (oldIndex >= 0 && !summaries.some((item) => item.key === state.reportOverviewFocusKey)) {
+          let at = summaries.findIndex((item) => keys.indexOf(item.key) > oldIndex);
+          if (at < 0) {
+            const previous = [...keys.slice(0, oldIndex)].reverse().find((key) => summaries.some((item) => item.key === key));
+            at = previous ? summaries.findIndex((item) => item.key === previous) + 1 : Math.min(oldIndex, rows.length);
+          }
+          rows.splice(at, 0, '<div class="client-billing-return-marker" role="separator" aria-label="Prejšnje mesto zaključene stranke"><span>Tukaj ste zaključili stranko</span></div>');
+        }
+        $("clientDetailList").innerHTML = rows.join("") || `<p class="todo-meta">Za ta izbor ni zaključenih storitev.</p>`;
       }
     }
 
 function openClientReport(client, clientId = "", { fromHistory = false, returnSnapshot = null } = {}) {
       window.clearTimeout(moduleValues.reportSearchRenderTimer);
       const clientDescriptor = reportClientDescriptor({ client, clientId });
-      const snapshot = returnSnapshot || { ...reportOverviewSnapshot(), focusKey: clientDescriptor.key };
+      const snapshot = returnSnapshot || { ...reportOverviewSnapshot(), focusKey: clientDescriptor.key, returnKeys: reportClientSummaries().map((item) => item.key) };
       if (!fromHistory) {
+        state.reportMovedEventIds = null;
         state.reportOverviewFocusKey = clientDescriptor.key;
         state.reportReturnSnapshot = snapshot;
         const currentReportState = history.state?.[moduleValues.reportHistoryStateKey];
@@ -642,7 +660,8 @@ function clearClientReportSelection({ fromHistory = false, snapshot = null } = {
         const target = state.reportOverviewFocusKey
           ? document.querySelector(`.open-client-report[data-client-key="${CSS.escape(state.reportOverviewFocusKey)}"]`)
           : null;
-        if (target) target.scrollIntoView({ block: "center", behavior: "auto" });
+        const marker = document.querySelector(".client-billing-return-marker");
+        if (target || marker) (target || marker).scrollIntoView({ block: "center", behavior: "auto" });
         else window.scrollTo({ top: Number(returnSnapshot?.scrollY || 0), behavior: "auto" });
       });
     }
@@ -661,10 +680,7 @@ function openBulkClientDialog() {
       const selection = reportClientSelection();
       const lines = syncClientBillSelection(reportTodos().map(reportTodoLine), selection);
       if (!lines.length) { showNotice("Označi vsaj en še neobračunan vpis."); return; }
-      $("bulkClientDialogMessage").textContent = `${lines.length} ${lines.length === 1 ? "vpis bo" : "vpisi bodo"} premaknjeni z izbrane stranke.`;
-      $("bulkClientTarget").value = "";
-      $("bulkClientDialog").showModal();
-      requestAnimationFrame(() => $("bulkClientTarget").focus());
+      saveBulkClientFromDialog().catch((error) => showNotice(error.message || "Stranke ni bilo mogoče zamenjati."));
     }
 
 async function saveBulkClientFromDialog() {
@@ -674,22 +690,30 @@ async function saveBulkClientFromDialog() {
       if (!eventIds.length) throw new Error("Označi vsaj en še neobračunan vpis.");
       const requestedClient = String($("bulkClientTarget").value || "").trim();
       const client = findClient(requestedClient);
-      if (!client?.clientId) throw new Error("Izberi obstoječo stranko iz predlogov.");
-      if (String(client.clientId) === String(selection.id)) throw new Error("Izbrana je že ista stranka.");
-      if (!await showAppConfirm(`${eventIds.length} ${eventIds.length === 1 ? "vpis" : "vpisov"} premaknem na stranko ${client.name}?`, { title: "Zamenjaj stranko" })) return;
+      if (!requestedClient || requestedClient.length > 240) throw new Error("Vpiši naziv stranke (največ 240 znakov).");
+      if (client && String(client.clientId || client.id) === String(selection.id)) throw new Error("Izbrana je že ista stranka.");
+      const clientName = client?.name || requestedClient;
+      if (!await showAppConfirm(`Samo ${eventIds.length} označenih vpisov premaknem na ${clientName}?${client ? "" : "\nUstvarjena bo nova adhoc stranka."}\nObstoječi vpisi ciljne stranke ostanejo nespremenjeni. Kontakti prejšnje stranke se odstranijo.`, { title: "Zamenjaj stranko" })) return;
+      setClientBillProcessing(true);
+      try {
       const data = await api("/api/todos/bulk-client", {
         method: "POST",
-        body: JSON.stringify({ eventIds, clientId: client.clientId })
+        body: JSON.stringify({ eventIds, clientId: client?.clientId || client?.id || "", clientName, sourceClientId: selection.id })
       });
-      $("bulkClientDialog").close();
       state.todos = data.todos || state.todos;
       state.clientBillSelectionKey = "";
       state.clientBillSelectedEventIds = new Set();
       state.reportAttachmentSelectionKey = "";
       state.reportIncludedAttachmentIds = new Set();
       await loadAll();
-      openClientReport(data.client?.name || client.name, data.client?.clientId || client.clientId);
-      showNotice(`${eventIds.length} ${eventIds.length === 1 ? "vpis je prestavljen" : "vpisov je prestavljenih"} na novo stranko.`);
+      state.reportMovedEventIds = new Set(eventIds);
+      state.clientBillSelectionKey = reportClientBillSelectionKey({ id: data.client.clientId, name: data.client.name });
+      state.clientBillSelectedEventIds = new Set(eventIds);
+      const snapshot = state.reportReturnSnapshot;
+      openClientReport(data.client.name, data.client.clientId, { fromHistory: true, returnSnapshot: snapshot });
+      history.replaceState(reportClientHistoryState(data.client.name, data.client.clientId, snapshot), "", location.href);
+      showNotice(`${eventIds.length} vpisov je prestavljenih in poudarjenih. Prikazani so tudi obstoječi vpisi ciljne stranke v izbranem obdobju.`);
+      } finally { setClientBillProcessing(false); }
     }
 
 async function confirmClientBillFromReport() {
@@ -975,9 +999,7 @@ function installClientBillingBindings1() {
     $("selectAllClientBill").addEventListener("click", () => setClientBillSelectionForCurrentReport(true));
     $("clearClientBillSelection").addEventListener("click", () => setClientBillSelectionForCurrentReport(false));
     $("bulkChangeReportClient").addEventListener("click", openBulkClientDialog);
-    $("bulkClientForm").addEventListener("submit", (event) => { event.preventDefault(); saveBulkClientFromDialog().catch((error) => showFormValidationError($("bulkClientForm"), error.message || "Stranke ni bilo mogoče zamenjati.", $("bulkClientTarget"))); });
-    $("closeBulkClientDialog").addEventListener("click", () => $("bulkClientDialog").close());
-    $("cancelBulkClientDialog").addEventListener("click", () => $("bulkClientDialog").close());
+    $("bulkClientTarget").addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); openBulkClientDialog(); } });
     $("confirmClientBill").addEventListener("click", () => confirmClientBillFromReport().catch((error) => showNotice(error.message)));
     $("exportReportPdf").addEventListener("click", () => downloadClientReportPdf().catch((error) => showNotice(error.message)));
     $("createReportGmailDraft").addEventListener("click", () => createClientReportGmailDraft().catch((error) => showNotice(error.message)));

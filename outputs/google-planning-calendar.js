@@ -25,7 +25,7 @@ function eventBody(todo, db, baseUrl, definitions) {
       `Status: ${status.label}`, todo.notes || "", `Odpri v INDUS Ure: ${link}`,
       "Samo prikaz. Urejanje poteka v INDUS Ure."].filter(Boolean).join("\n\n"),
     start: timed ? { dateTime: `${todo.date}T${todo.start}:00`, timeZone: "Europe/Ljubljana" } : { date: todo.date },
-    end: timed ? { dateTime: `${endDate}T${todo.end}:00`, timeZone: "Europe/Ljubljana" } : { date: planning.nextDay(endDate) },
+    end: timed ? { dateTime: todo.end === "24:00" ? `${planning.nextDay(endDate)}T00:00:00` : `${endDate}T${todo.end}:00`, timeZone: "Europe/Ljubljana" } : { date: planning.nextDay(endDate) },
     colorId: status.googleColorId, visibility: "default", transparency: "opaque",
     guestsCanModify: false, guestsCanInviteOthers: false, guestsCanSeeOtherGuests: false,
     reminders: { useDefault: false },

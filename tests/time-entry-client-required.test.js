@@ -2,6 +2,60 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 const { TEST_PASSWORD, startIsolatedTestApp } = require("./e2e/test-app.cjs");
 
+test("selected bulk client transfer merges safely, creates adhoc clients, and Undo restores only that batch; midnight survives API", { timeout: 40_000 }, async () => {
+  const app = await startIsolatedTestApp();
+  try {
+    const login = await fetch(`${app.baseUrl}/api/test-login`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ userId: "bojan", password: TEST_PASSWORD }) });
+    const session = await login.json();
+    const headers = { "Content-Type": "application/json", Cookie: login.headers.get("set-cookie").split(";", 1)[0], "X-CSRF-Token": session.csrfToken };
+    const api = async (path, method = "GET", body) => {
+      const response = await fetch(app.baseUrl + path, { method, headers, ...(body ? { body: JSON.stringify(body) } : {}) });
+      return { status: response.status, data: await response.json() };
+    };
+    const create = async (title, client, start, end) => {
+      const result = await api("/api/todos", "POST", { title, client, status: "execution", date: "2032-03-18", start, end, assigneeIds: ["ibro"], syncUser: "ibro" });
+      assert.equal(result.status, 200, JSON.stringify(result.data));
+      return result.data.todos.find(t => t.title === title);
+    };
+    const first = await create("Bulk selected", "Source", "08:00", "09:00");
+    const unselected = await create("Bulk unselected", "Source", "09:00", "10:00");
+    let target = await create("Target existing", "Target", "23:00", "24:00");
+    assert.equal(target.end, "24:00");
+    const overlap = await api("/api/todos", "POST", { title: "Overlap", client: "Target", status: "execution", date: "2032-03-18", start: "23:30", end: "24:00", assigneeIds: ["ibro"], syncUser: "ibro" });
+    assert.equal(overlap.status, 409);
+    target = (await api(`/api/todos/${target.id}`)).data.todo;
+    const move = await api("/api/todos/bulk-client", "POST", { eventIds: [first.assignmentGroupId || first.id], clientId: target.clientId, sourceClientId: first.clientId });
+    assert.equal(move.status, 200, JSON.stringify(move.data));
+    assert.equal(move.data.todos.find(t => t.id === first.id).clientId, target.clientId);
+    assert.equal(move.data.todos.find(t => t.id === unselected.id).clientId, unselected.clientId);
+    assert.deepEqual(move.data.todos.find(t => t.id === target.id), target);
+    const undo = async () => {
+      const journal = await api("/api/undo-journal");
+      const action = journal.data.actions.find(a => a.canUndo);
+      assert.match(action.action, /paketno/);
+      const result = await api(`/api/undo-journal/${action.id}`, "POST", { confirm: true });
+      assert.equal(result.status, 200, JSON.stringify(result.data));
+    };
+    await undo();
+    assert.equal((await api(`/api/todos/${first.id}`)).data.todo.clientId, first.clientId);
+    assert.deepEqual((await api(`/api/todos/${target.id}`)).data.todo, target);
+    const adhoc = await api("/api/todos/bulk-client", "POST", { eventIds: [first.assignmentGroupId || first.id], clientName: "New adhoc target", sourceClientId: first.clientId });
+    assert.equal(adhoc.status, 200, JSON.stringify(adhoc.data));
+    assert.equal(adhoc.data.client.name, "New adhoc target");
+    assert.ok(adhoc.data.client.clientId);
+    await undo();
+    assert.equal((await api(`/api/todos/${first.id}`)).data.todo.clientId, first.clientId);
+    const stale = await api("/api/todos/bulk-client", "POST", { eventIds: [first.assignmentGroupId || first.id], clientName: "Must not exist", sourceClientId: target.clientId });
+    assert.equal(stale.status, 409);
+    const clients = await api("/api/clients");
+    assert.ok(!clients.data.clients.some(c => ["Must not exist", "New adhoc target"].includes(c.name)));
+    const billed = await api("/api/client-bills", "POST", { clientId: first.clientId, eventIds: [first.assignmentGroupId || first.id] });
+    assert.equal(billed.status, 201, JSON.stringify(billed.data));
+    const locked = await api("/api/todos/bulk-client", "POST", { eventIds: [first.assignmentGroupId || first.id], clientName: "Locked target" });
+    assert.equal(locked.status, 409);
+  } finally { await app.stop(); }
+});
+
 test("API zavrne vpis ur brez stranke tudi pri urejanju in spremembi opravila v ure", { timeout: 30_000 }, async () => {
   const app = await startIsolatedTestApp();
   try {

@@ -371,7 +371,8 @@ test("client billing supports bulk selection and safe client reassignment", asyn
   assert.match(html, /id="selectAllClientBill"/);
   assert.match(html, /id="clearClientBillSelection"/);
   assert.match(html, /id="bulkChangeReportClient"/);
-  assert.match(html, /id="bulkClientDialog"/);
+  assert.match(html, /id="reportClientTransfer"/);
+  assert.match(html, /id="bulkClientTarget"/);
   assert.match(html, /data-client-bill-event-id/);
   assert.match(html, /function setClientBillSelectionForCurrentReport\(selectAll\)/);
   assert.match(html, /function saveBulkClientFromDialog\(\)/);

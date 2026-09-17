@@ -172,3 +172,31 @@ test("app shell assembles exactly once without another script request", () => {
   assert.throws(() => renderAppShell(html), /exactly one/);
   assert.throws(() => renderAppShell(template + "/* @indus-module:time-entry-editor */"), /exactly one/);
 });
+
+test("time picker preserves edited duration and caps at same-day midnight without changing manual client hours", () => {
+  const { editor, $, state } = editorFixture();
+  $("todoFormStart").value = "08:15";
+  $("todoFormEnd").value = "10:45";
+  $("todoFormClientBillableHours").dataset.manual = "true";
+  $("todoFormClientBillableHours").value = "4";
+  editor.setTodoFormQuickTime("start", { hour: 12 });
+  editor.setTodoFormQuickTime("start", { minute: 30 });
+  assert.equal($("todoFormEnd").value, "15:00");
+  editor.setTodoFormQuickTime("start", { hour: 23 });
+  editor.setTodoFormQuickTime("start", { minute: 0 });
+  assert.equal($("todoFormEnd").value, "24:00");
+  assert.equal(editor.todoFormWorkerMinutes(), 60);
+  assert.equal($("todoFormQuickTimeEnd").textContent, "Do 24:00");
+  assert.equal($("todoFormClientBillableHours").value, "4");
+  assert.equal(state.todoTimeShiftDuration, null);
+  editor.normalizeTodoFormTimes();
+  assert.equal($("todoFormEnd").value, "24:00");
+});
+
+test("payroll counts midnight as the end of the same day", () => {
+  const rules = createPayrollRules({ PAYROLL_PAID_TODO_STATUSES: new Set(["execution"]) });
+  const todo = { date: "2026-09-17", start: "23:00", end: "24:00", status: "execution" };
+  assert.equal(rules.scheduledPayrollMinutesForTodo(todo), 60);
+  assert.equal(rules.payrollMinutesForTodo({}, todo), 60);
+  assert.equal(rules.scheduledPayrollMinutesForTodo({ ...todo, end: "24:15" }), null);
+});

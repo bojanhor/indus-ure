@@ -74,7 +74,7 @@ function payrollPeriodEnded(value, now = new Date()) {
 function scheduledPayrollMinutesForTodo(todo) {
   if (!todo || !/^\d{4}-\d{2}-\d{2}$/.test(String(todo.date || ""))) return null;
   const start = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(String(todo.start || ""));
-  const end = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(String(todo.end || ""));
+  const end = todo.end === "24:00" ? ["24:00", "24", "00"] : /^([01]\d|2[0-3]):([0-5]\d)$/.exec(String(todo.end || ""));
   if (!start || !end) return null;
   const minutes = (Number(end[1]) * 60 + Number(end[2])) - (Number(start[1]) * 60 + Number(start[2]));
   return minutes > 0 ? minutes : null;

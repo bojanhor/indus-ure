@@ -242,13 +242,14 @@ function selectedPhotoEditorText() {
 function photoEditorTextMetrics(context, text) {
       context.save();
       context.font = `800 ${text.size}px system-ui, -apple-system, sans-serif`;
-      const width = Math.max(text.size * 0.8, context.measureText(text.text || " ").width);
+      const lines = String(text.text || " ").split("\n");
+      const width = Math.max(text.size * 0.8, ...lines.map((line) => context.measureText(line || " ").width));
       context.restore();
-      return { width, height: text.size * 1.18 };
+      return { width, height: text.size * 1.25 * lines.length, lines };
     }
 
 function drawPhotoEditorText(context, text, selected = false) {
-      const { width, height } = photoEditorTextMetrics(context, text);
+      const { width, height, lines } = photoEditorTextMetrics(context, text);
       const rotation = Number(text.rotation || 0) * Math.PI / 180;
       context.save();
       context.translate(text.x, text.y);
@@ -260,8 +261,11 @@ function drawPhotoEditorText(context, text, selected = false) {
       context.lineWidth = Math.max(2, text.size * 0.09);
       context.strokeStyle = "rgba(0, 0, 0, .66)";
       context.fillStyle = text.color;
-      context.strokeText(text.text, 0, 0);
-      context.fillText(text.text, 0, 0);
+      lines.forEach((line, index) => {
+        const y = (index - (lines.length - 1) / 2) * text.size * 1.25;
+        context.strokeText(line, 0, y);
+        context.fillText(line, 0, y);
+      });
       if (selected) {
         const pad = Math.max(9, text.size * 0.22);
         const handleY = -height / 2 - pad * 2.3;
@@ -298,9 +302,11 @@ function photoEditorTextHitTest(point) {
         const deltaY = point.y - text.y;
         const localX = Math.cos(angle) * deltaX + Math.sin(angle) * deltaY;
         const localY = -Math.sin(angle) * deltaX + Math.cos(angle) * deltaY;
-        const pad = Math.max(10, text.size * 0.24);
-        const handleY = -height / 2 - pad * 2.3;
-        if (Math.hypot(localX, localY - handleY) <= Math.max(16, text.size * 0.3)) return { text, action: "rotate" };
+        const scale = canvas.width / Math.max(1, canvas.getBoundingClientRect().width);
+        const pad = Math.max(22 * scale, text.size * 0.24);
+        const handleY = -height / 2 - Math.max(9, text.size * 0.22) * 2.3;
+        if (Math.abs(localX) <= width / 2 + 6 * scale && Math.abs(localY) <= height / 2 + 6 * scale) return { text, action: "move" };
+        if (text.id === editor.selectedTextId && Math.hypot(localX, localY - handleY) <= Math.max(22 * scale, text.size * 0.3)) return { text, action: "rotate" };
         if (Math.abs(localX) <= width / 2 + pad && Math.abs(localY) <= height / 2 + pad) return { text, action: "move" };
       }
       return null;
@@ -446,12 +452,13 @@ function setPhotoEditorTextSelection(textId = "") {
       editor.selectedTextId = textId;
       const text = selectedPhotoEditorText();
       if (text) editor.textDraftActive = false;
+      $("photoEditorDialog").classList.toggle("is-text-active", Boolean(text));
       const pending = photoEditorHasPendingOperation(editor);
       $("photoEditorTextEditor").hidden = !text && !editor.textDraftActive;
       $("photoEditorTextTools").hidden = !text || pending;
       if (text) {
         $("photoEditorText").value = text.text;
-        $("photoEditorTextSize").value = Math.round(Math.max(12, Math.min(160, text.size)));
+        $("photoEditorTextSize").value = Math.round(Math.max(12, Math.min(512, text.size)));
         $("photoEditorTextRotation").value = Math.round(Number(text.rotation || 0));
         $("photoEditorColor").value = text.color;
       } else if (!editor.textDraftActive) {
@@ -637,7 +644,7 @@ function openPhotoEditor(photo) {
           gestureUsed: false
         };
         $("photoEditorText").value = "";
-        $("photoEditorSize").value = "1";
+        $("photoEditorSize").value = "2";
         $("photoEditorTextSize").value = "32";
         $("photoEditorTextRotation").value = "0";
         $("photoEditorTitle").textContent = "Uredi fotografijo";
@@ -667,6 +674,7 @@ function addPhotoEditorText() {
         return;
       }
       const point = photoEditorVisiblePoint();
+      $("photoEditorText").blur();
       const text = {
         id: "photo-text-" + Date.now() + "-" + Math.random().toString(36).slice(2, 8),
         text: value,
@@ -707,6 +715,9 @@ function openPhotoEditorTextEntry() {
       editor.cropInteraction = null;
       editor.selectedTextId = "";
       editor.textDraftActive = true;
+      const canvas = $("photoEditorCanvas");
+      const scale = canvas.width / Math.max(1, canvas.getBoundingClientRect().width);
+      $("photoEditorTextSize").value = Math.round(Math.max(24, Math.min(512, 24 * scale)));
       $("photoEditorText").value = "";
       setPhotoEditorTextSelection();
       redrawPhotoEditor();
@@ -951,7 +962,7 @@ function commitPhotoEditorTextControlChange() {
 function updateSelectedPhotoEditorTextFromControls() {
       const text = selectedPhotoEditorText();
       if (!text) return;
-      text.text = $("photoEditorText").value.slice(0, 160);
+      text.text = $("photoEditorText").value.slice(0, 500);
       text.size = Number($("photoEditorTextSize").value) || 32;
       text.rotation = Number($("photoEditorTextRotation").value) || 0;
       text.color = $("photoEditorColor").value;
@@ -962,7 +973,7 @@ function changePhotoEditorTextSize(delta) {
       const text = selectedPhotoEditorText();
       if (!text) return;
       const before = photoEditorTextSnapshot(text);
-      text.size = Math.max(12, Math.min(160, text.size + delta));
+      text.size = Math.max(12, Math.min(512, text.size + delta));
       $("photoEditorTextSize").value = Math.round(text.size);
       rememberPhotoEditorTextChange(text, before);
       redrawPhotoEditor();
@@ -1100,7 +1111,9 @@ function installMediaPreviewBindings1() {
       editor.activeStroke = {
         pointerId: event.pointerId,
         color: $("photoEditorColor").value,
-        size: Number($("photoEditorSize").value),
+        // The control describes visible pixels, not invisible fractions of
+        // a pixel when a full-resolution photo is fitted on a phone.
+        size: Math.max(2, Number($("photoEditorSize").value)) * canvas.width / Math.max(1, canvas.getBoundingClientRect().width),
         points: [point]
       };
       drawPhotoEditorStroke(canvas.getContext("2d"), editor.activeStroke);
@@ -1132,8 +1145,8 @@ function installMediaPreviewBindings1() {
         if (!text) return;
         const point = photoEditorPoint(event);
         if (interaction.type === "move") {
-          text.x = point.x - interaction.offsetX;
-          text.y = point.y - interaction.offsetY;
+          text.x = Math.max(0, Math.min($("photoEditorCanvas").width, point.x - interaction.offsetX));
+          text.y = Math.max(0, Math.min($("photoEditorCanvas").height, point.y - interaction.offsetY));
         } else {
           const angle = Math.atan2(point.y - text.y, point.x - text.x) * 180 / Math.PI + 90;
           text.rotation = ((angle + 180) % 360 + 360) % 360 - 180;
@@ -1185,12 +1198,17 @@ function installMediaPreviewBindings1() {
     $("photoEditorConfirmPending").addEventListener("click", confirmPhotoEditorPendingOperation);
     $("photoEditorCancelPending").addEventListener("click", cancelPhotoEditorPendingOperation);
     $("photoEditorText").addEventListener("keydown", (event) => {
-      if (event.key !== "Enter" || event.isComposing || !state.photoEditor?.textDraftActive) return;
+      if (event.key !== "Enter" || !(event.ctrlKey || event.metaKey) || event.isComposing || !state.photoEditor?.textDraftActive) return;
       event.preventDefault();
       confirmPhotoEditorPendingOperation();
     });
-    $("photoEditorTextSmaller").addEventListener("click", () => changePhotoEditorTextSize(-2));
-    $("photoEditorTextLarger").addEventListener("click", () => changePhotoEditorTextSize(2));
+    $("photoEditorTextSmaller").addEventListener("click", () => changePhotoEditorTextSize(-Math.max(2, Math.round((selectedPhotoEditorText()?.size || 32) * .1))));
+    $("photoEditorTextLarger").addEventListener("click", () => changePhotoEditorTextSize(Math.max(2, Math.round((selectedPhotoEditorText()?.size || 32) * .1))));
+    $("photoEditorFinishText").addEventListener("click", () => {
+      commitPhotoEditorTextControlChange();
+      $("photoEditorText").blur();
+      if (state.photoEditor) { state.photoEditor.mode = "text"; setPhotoEditorTextSelection(); redrawPhotoEditor(); }
+    });
     $("photoEditorDeleteText").addEventListener("click", () => {
       const editor = state.photoEditor;
       const text = selectedPhotoEditorText();

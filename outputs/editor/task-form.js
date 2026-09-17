@@ -654,6 +654,7 @@ function installTaskFormBindings1() {
     $("todoFormQuickTimePicker").addEventListener("click", (event) => {
       const targetButton = event.target.closest("[data-time-picker-target]");
       if (targetButton) {
+        state.todoTimeShiftDuration = null;
         state.todoTimePickerTarget = targetButton.dataset.timePickerTarget === "end" ? "end" : "start";
         state.todoTimePickerMode = "hour";
         state.todoTimePickerOpen = true;
