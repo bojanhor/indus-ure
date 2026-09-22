@@ -4046,6 +4046,8 @@
     #todoDialog .todo-modal-action.primary { background: var(--accent); color: #fff; }
     #todoDialog .todo-modal-action.danger { background: #fff1f1; color: #9f3636; border: 1px solid #e3bcbc; }
     #todoDialog button:not(:disabled):active { transform: scale(.94); filter: brightness(.96); }
+    /* A wide suggestion must keep its hit area while pressed, including edges. */
+    #todoDialog .client-autocomplete-list button:not(:disabled):active { transform: none; }
     #todoDialog .todo-modal-action.is-saving {
       position: relative;
       color: transparent;
@@ -10024,10 +10026,12 @@ function chooseTodoClientSuggestion(index) {
       const item = state.todoClientSuggestions[index];
       if (!item) return;
       $("todoFormClient").value = item.value;
-      hideTodoClientSuggestions();
       syncTodoFormClientContacts();
       renderTodoTaskSuggestions();
-      $("todoFormClient").focus();
+      $("todoFormClient").focus({ preventScroll: true });
+      // Focusing from a keyboard-selected option renders suggestions again;
+      // close only after restoring focus, once the selecting click is complete.
+      hideTodoClientSuggestions();
     }
 
 const manualOrderingStatusIds = new Set([...todoOrderStatusIds, "add_to_car"]);

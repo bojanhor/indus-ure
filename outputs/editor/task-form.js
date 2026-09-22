@@ -802,11 +802,22 @@ function installTaskFormBindings1() {
         hideTodoClientSuggestions();
       }
     });
-    $("todoFormClient").addEventListener("blur", () => setTimeout(hideTodoClientSuggestions, 120));
-    $("todoFormClientSuggestions").addEventListener("pointerdown", (event) => {
+    $("todoFormClientAutocomplete").addEventListener("focusout", (event) => {
+      // Keep the list available while keyboard focus moves to an option or
+      // its edit button. A blur timer can hide it during a held touch.
+      if (!event.currentTarget.contains(event.relatedTarget)) hideTodoClientSuggestions();
+    });
+    $("todoFormClientSuggestions").addEventListener("mousedown", (event) => {
+      // Retain input focus without cancelling touch scrolling. Never select
+      // or remove the overlay on pointerdown: the remaining gesture could
+      // otherwise activate a checkbox that was underneath it.
+      if (event.target.closest("button")) event.preventDefault();
+    });
+    $("todoFormClientSuggestions").addEventListener("click", (event) => {
       const option = event.target.closest("[data-index]");
       if (!option) return;
       event.preventDefault();
+      event.stopPropagation();
       chooseTodoClientSuggestion(Number(option.dataset.index));
     });
     $("todoFormClientContactPickerToggle").addEventListener("click", () => {
