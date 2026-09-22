@@ -260,7 +260,10 @@ async function openTodoDialog(todo = {}, { reportNavigationIds = null } = {}) {
       setTodoVideoUploadStatus("");
       $("todoFormDriveLink").value = "";
       $("todoFormDriveLinkPanel").classList.add("hidden");
+      // The content now scrolls independently of the dialog/header. Do not
+      // carry the previous entry's scroll position into a newly opened form.
       $("todoDialog").showModal();
+      $("todoDialogScroll").scrollTop = 0;
       if (editing) {
         // The edit lock protects writes, not reading the form.  Showing the
         // read-only shell first avoids a multi-second blank wait after reload.

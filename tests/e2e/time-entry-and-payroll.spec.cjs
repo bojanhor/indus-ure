@@ -64,9 +64,9 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
         // header must stay reachable so Save and Cancel are never stranded
         // below the fold.
         await page.locator("#todoFormNotes").fill("Podroben opis. ".repeat(650));
-        const scrollState = await page.locator("#todoDialog").evaluate((dialog) => {
-          const before = { scrollHeight: dialog.scrollHeight, clientHeight: dialog.clientHeight };
-          dialog.scrollTop = Math.max(0, dialog.scrollHeight - dialog.clientHeight);
+        const scrollState = await page.locator("#todoDialogScroll").evaluate((scroller) => {
+          const before = { scrollHeight: scroller.scrollHeight, clientHeight: scroller.clientHeight };
+          scroller.scrollTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
           return before;
         });
         expect(scrollState.scrollHeight).toBeGreaterThan(scrollState.clientHeight);

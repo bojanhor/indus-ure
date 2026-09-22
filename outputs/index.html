@@ -3943,7 +3943,19 @@
       padding-top: 2px;
     }
 
-    #todoDialog { width: min(820px, calc(100vw - 26px)); max-height: calc(100dvh - 20px); overflow-y: auto; }
+    /* Keep the native dialog and its actions out of the scrolling layer.
+       Scrolling a tall top-layer dialog with a sticky header is fragile on
+       iOS/WebKit. A normal inner scroller also keeps fields below the actions
+       when Safari scrolls a focused input into view. */
+    #todoDialog { width: min(820px, calc(100vw - 26px)); max-height: calc(100dvh - 20px); overflow: hidden; }
+    #todoForm { display: flex; flex-direction: column; min-height: 0; max-height: inherit; }
+    #todoForm > .modal-head,
+    #todoForm > .modal-global-notice { position: relative; flex: 0 0 auto; }
+    #todoForm > .todo-dialog-scroll { min-height: 0; overflow: auto; overscroll-behavior: contain; }
+    #todoForm .modal-body { grid-template-columns: minmax(0, 1fr); }
+    #todoForm .modal-body > *,
+    #todoForm .modal-body input,
+    #todoForm .modal-body select { min-width: 0; }
     #completionRequestDialog { width: min(560px, calc(100vw - 26px)); }
     #completionRequestDialog textarea { min-height: 130px; resize: vertical; }
     #workerDailyDigestDialog { width: min(760px, calc(100vw - 26px)); max-height: calc(100dvh - 20px); overflow-y: auto; }
@@ -5373,7 +5385,13 @@
         grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 8px;
       }
+      #todoDialog .date-input-with-clear { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      #todoDialog #todoFormEndDateField .date-input-with-clear { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      #todoDialog .date-input-with-clear > input { grid-column: 1 / -1; }
+      #todoDialog .date-input-with-clear > button { width: auto; min-width: 0; }
       .todo-time-picker { padding: 10px; }
+      .todo-time-picker-target { min-width: 0; padding-inline: 6px; font-size: 14px; }
+      .todo-time-picker-duration { min-width: 0; padding-inline: 6px; font-size: 12px; }
       .todo-time-picker-dial { width: min(100%, 292px); }
       .todo-time-picker-choice { min-width: 36px; min-height: 36px; font-size: 13px; }
       .todo-time-picker-choice.minute { min-width: 48px; min-height: 48px; font-size: 16px; }
@@ -6046,6 +6064,7 @@
           <button class="icon-btn" id="closeTodoDialog" type="button" title="Zapri brez shranjevanja" aria-label="Zapri brez shranjevanja">&times;</button>
         </div>
       </div>
+      <div class="todo-dialog-scroll" id="todoDialogScroll">
       <div class="todo-creation-tabs hidden" id="todoCreationTabs" role="tablist" aria-label="Vrsta novega vnosa">
         <button class="todo-creation-tab" type="button" role="tab" data-create-mode="task">Nov dogodek</button>
         <button class="todo-creation-tab" type="button" role="tab" data-create-mode="hours">Vpis ur</button>
@@ -6267,6 +6286,7 @@
           <button class="primary" id="todoFooterSave" type="submit">Shrani</button>
         </div>
 
+      </div>
       </div>
     </form>
   </dialog>
