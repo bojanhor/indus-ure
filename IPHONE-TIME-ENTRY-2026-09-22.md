@@ -44,3 +44,15 @@ Prejšnja produkcijska koda je `514fd4e`. Ker ni spremembe podatkovne sheme,
 je povrnitev samo preklop kode z običajnim preverjenim deployment orodjem:
 `sudo /usr/local/sbin/deploy-indus-ure 514fd4e`. Poslovne baze se ne obnavlja.
 Fakture, Nginx in Google Calendar povezava niso predmet tega posega.
+
+## Rezultat objave
+
+Objavljeno `43c1994` dne 22. 9. 2026. Končna preverjanja: 266/266 testov,
+53/53 Chromium E2E, 13/13 izbranih WebKit E2E ter 19/19 strežniških
+PostgreSQL/restore/upgrade preverjanj (vključno s povrnitvijo na `514fd4e`).
+Obstoječi backup se je uspešno zaključil ob 12:34:52 UTC, pred preklopom kode.
+Po objavi: javni HTTP 200 vsebuje nov scroller, reset pomika in mobilni CSS;
+health `ok`, Ure in Fakture aktivni, brez novih opozoril storitve Ure.
+Vizualno preverjen lokalni obrazec; prijavljen produkcijski UI in fizični iPhone
+nista bila preizkušena. Končna potrditev prenehanja utripanja na napravi ostaja
+pri uporabniku. GitHub push ni izveden.
