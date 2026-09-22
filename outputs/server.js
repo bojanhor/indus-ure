@@ -172,6 +172,9 @@ const TODO_STATUS_DEFINITIONS = Object.freeze({
 });
 const TODO_STATUSES = new Set(Object.keys(TODO_STATUS_DEFINITIONS));
 const TIME_ENTRY_TODO_STATUSES = new Set(["execution", "meal", "drive", "purchase"]);
+// An allowlist keeps time entries, delivery-only material and notes from
+// accidentally becoming source projects. Covered against the browser list.
+const PROJECT_HOURS_SOURCE_STATUSES = new Set(["open", "in_progress", "internal", "order", "order_car", "order_warehouse", "add_to_car", "return", "return_and_bill"]);
 const ORDER_TODO_STATUSES = new Set(["order", "order_car", "order_warehouse"]);
 const TODO_VEHICLES = new Set(["personal", "van"]);
 
@@ -3001,7 +3004,7 @@ function preserveTimeEntrySourceProject(db, user, todo, previous = null) {
   if (!sourceId) return { todo, error: "" };
   const source = (db.todos || []).find((item) => item.id === sourceId);
   if (!source || isTrashedTodo(source) || !canManageTodo(user, source)
-      || TIME_ENTRY_TODO_STATUSES.has(source.status) || !["open", "in_progress"].includes(source.status)) {
+      || !PROJECT_HOURS_SOURCE_STATUSES.has(source.status)) {
     return { todo, error: "Izvorno opravilo ni na voljo za vpis ur." };
   }
   return {

@@ -1049,6 +1049,16 @@ test("calendar-only task controls are date-bound, unavailable for time entries, 
   assert.match(html, /function calendarTodos\(\{ includeArchived = false \} = \{\}\) \{[\s\S]*?!isImportedTodo\(todo\)/);
 });
 
+test("vpis ur uporablja enak seznam izvornih statusov v brskalniku in strežniku", async () => {
+  const [html, server] = await Promise.all([readAppHtml(), readServerSource()]);
+  const browserStatuses = JSON.parse(html.match(/const projectHoursSourceStatuses = new Set\((\[[^;]+?\])\);/)[1]);
+  const serverStatuses = JSON.parse(server.match(/const PROJECT_HOURS_SOURCE_STATUSES = new Set\((\[[^;]+?\])\);/)[1]);
+  assert.deepEqual(browserStatuses, serverStatuses);
+  assert.match(html, /projectHoursSourceStatuses\.has\(source\.status\)/);
+  assert.match(html, /projectHoursSourceStatuses\.has\(todo\.status\)/);
+  assert.match(server, /!PROJECT_HOURS_SOURCE_STATUSES\.has\(source\.status\)/);
+});
+
 test("izvorno opravilo se prikaže samo pri res povezanem vpisu ur", async () => {
   const [html, server] = await Promise.all([
     readAppHtml(),

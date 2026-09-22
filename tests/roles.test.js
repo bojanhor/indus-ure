@@ -361,6 +361,23 @@ test("izvor projekta vnosa ur je preverjen ob nastanku in ohrani zgodovinski nas
   assert.equal(historical.todo.sourceProjectTitle, "Montaža omare");
 });
 
+test("vpis ur dovoli delovna in logistična opravila, ne drugih vpisov ali tujih/izbrisanih opravil", () => {
+  const allowed = new Set(["open", "in_progress", "internal", "order", "order_car", "order_warehouse", "add_to_car", "return", "return_and_bill"]);
+  for (const status of [...Object.keys(TODO_STATUS_DEFINITIONS), "unknown"]) {
+    const source = { id: "source", title: "Izvorno opravilo", status, syncUser: "ibro" };
+    const entry = { status: "execution", sourceProjectTodoId: source.id };
+    const result = preserveTimeEntrySourceProject({ todos: [source] }, worker, entry);
+    assert.equal(result.error === "", allowed.has(status), status);
+    if (!allowed.has(status)) continue;
+    assert.equal(result.todo.sourceProjectTitle, source.title);
+    const foreign = { ...source, syncUser: "bojan" };
+    assert.match(preserveTimeEntrySourceProject({ todos: [foreign] }, worker, entry).error, /ni na voljo/);
+    assert.equal(preserveTimeEntrySourceProject({ todos: [foreign] }, boss, entry).error, "");
+    const deleted = { ...source, trashedAt: "2026-09-22T10:00:00Z" };
+    assert.match(preserveTimeEntrySourceProject({ todos: [deleted] }, boss, entry).error, /ni na voljo/);
+  }
+});
+
 test("lastnik opravila ga lahko preda veljavnemu delavcu", () => {
   const users = { bojan: boss, ibro: worker, marko: { id: "marko", role: "worker" } };
   assert.equal(todoAssigneeForUpdate(worker, "marko", "ibro", users), "marko");

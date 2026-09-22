@@ -377,14 +377,21 @@ async function openHoursTodoFromCurrent() {
       const sourceId = $("todoFormId").value;
       const source = state.todos.find((todo) => todo.id === sourceId);
       if (!source) return;
-      if (!moduleValues.projectHoursSourceStatuses.has(todoStatus(source.status).id)) throw new Error("Ure lahko pišeš samo na opravilo Čaka ali V teku.");
+      if (!moduleValues.projectHoursSourceStatuses.has(source.status)) throw new Error("Ta vrsta zapisa ni opravilo, na katero lahko vpišeš nove ure.");
       state.todoHoursSourceOriginal = {
         status: source.status,
         done: Boolean(source.done)
       };
       await releaseTodoEditLockForDialog();
-      $("todoDialog").close();
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      const dialog = $("todoDialog");
+      if (dialog.open) {
+        // close fires asynchronously. A zero-delay timer can reopen the form
+        // before its old close handlers run and clear the new source ID/photos.
+        await new Promise((resolve) => {
+          dialog.addEventListener("close", resolve, { once: true });
+          dialog.close();
+        });
+      }
       await openTodoDialog({
         _hoursSourceId: source.id,
         client: source.client,
@@ -456,7 +463,7 @@ async function openMaterialEntryDialog(date = dateKey(new Date()), { draft = {} 
 function syncTodoDialogEditActions(todo, editing = Boolean(todo?.id)) {
       $("deleteTodoFromDialog").classList.toggle("hidden", !editing);
       $("duplicateTodoFromDialog").classList.toggle("hidden", !editing || Boolean(state.todoHoursSourceId));
-      $("writeHoursFromTodo").classList.toggle("hidden", !editing || Boolean(state.todoHoursSourceId) || !moduleValues.projectHoursSourceStatuses.has(todoStatus(todo.status).id));
+      $("writeHoursFromTodo").classList.toggle("hidden", !editing || Boolean(state.todoHoursSourceId) || !moduleValues.projectHoursSourceStatuses.has(todo.status));
       $("todoFormChangeActions").classList.toggle("hidden", !editing || !todoCanMarkChangedForOthers(todo));
       $("shareTodoPdf").classList.toggle("hidden", !editing);
       const isExistingTimeEntry = editing && moduleValues.timeEntryStatusIds.has(todoStatus(todo.status).id);

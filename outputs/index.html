@@ -6759,7 +6759,9 @@ const reportClientSortModes = ["recent", "hours_desc", "oldest", "count_desc", "
 const timeEntryStatusIds = new Set(["execution", "meal", "drive", "purchase"]);
 const monthlyHiddenTodoStatusIds = new Set(["meal", "drive"]);
 const payrollPaidTodoStatuses = new Set(timeEntryStatusIds);
-const projectHoursSourceStatuses = new Set(["open", "in_progress"]);
+// Planning and logistics tasks can produce a separate worker time entry.
+// Keep in sync with PROJECT_HOURS_SOURCE_STATUSES on the server.
+const projectHoursSourceStatuses = new Set(["open", "in_progress", "internal", "order", "order_car", "order_warehouse", "add_to_car", "return", "return_and_bill"]);
 const statusLabels = {
       billed: "Že obračunano",
       warranty: "Garancija",
