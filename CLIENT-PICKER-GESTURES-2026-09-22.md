@@ -33,6 +33,11 @@ Testne stranke obstajajo samo v izolirani lokalni aplikaciji.
 Interaktivni brskalnik je dodatno vizualno preveril izbiro testne stranke
 brez obkljukanja delavcev. To ni fizični preizkus na iPhonu ali Androidu.
 
+Končni rezultati: 268/268 programskih testov, 59/59 celotnega Chromium
+sklopa in 9/9 ciljnih WebKit testov. Strežniški kandidat `00dee4c` je ponovno
+prestal 268/268 testov ter vseh 19 PostgreSQL/restore/upgrade/rollback
+preverjanj; preizkušena prejšnja izdaja je `80edb98`.
+
 ## Objava in povrnitev
 
 Običajna varovana objava zahteva programske/brskalniške teste,
@@ -40,3 +45,10 @@ PostgreSQL/restore/upgrade/rollback QA ter uspešno zasebno recovery kopijo.
 Podatkovne migracije ni. Prejšnja produkcijska izdaja je `80edb98`;
 povrnitev samo kode ne zahteva obnove poslovne baze.
 Fakture, Nginx, OAuth in GitHub push niso del posega.
+
+Izdaja `00dee4c` je objavljena 22. 9. 2026. Predhodna recovery kopija je
+uspešno končana ob 12:58:30 UTC (`Result=success`, `ExecMainStatus=0`).
+Po preklopu sta obe storitvi aktivni, Ure health vrne `ok: true`, javni
+naslov HTTP 200 in vse štiri preverjene spremembe izbirnika. V dnevniku
+storitve po objavi ni opozoril. Ob preverjanju je na korenskem disku še
+2,2 GiB prostega prostora (93 % zasedenost); čiščenje ni bilo del tega posega.
