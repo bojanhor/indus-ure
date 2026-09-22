@@ -46,3 +46,16 @@ Chromium brskalniškega sklopa in 5/5 ciljnih WebKit preizkusov (statusi ter
 regresija prikaza vnosa ur na ozkem zaslonu). V interaktivnem testnem
 brskalniku je bil vizualno preverjen omogočen gumb pri Naroči-projekt.
 Preizkusi so uporabljali izolirane sintetične podatke, ne poslovne baze.
+
+## Rezultat objave
+
+22. 9. 2026 je objavljena izdaja `80edb98`. Na strežniku je ponovno uspelo
+268/268 programskih testov in vseh 19 PostgreSQL/restore/upgrade/rollback
+preverjanj. Preklop je sledil uspešni varnostni kopiji (končana 12:46:49 UTC,
+`Result=success`, `ExecMainStatus=0`). Ure in Fakture sta aktivni; Ure health
+vrne `ok: true`, javni naslov HTTP 200 ter novo pravilo statusov in popravek
+čakanja na `close`. Po zagonu ni opozoril v dnevniku storitve.
+
+Prijavljenega produkcijskega UI ni bilo spreminjanega ali testno polnjenega;
+pisni brskalniški preizkusi so tekli na ločeni lokalni testni aplikaciji.
+Vsebinska povrnitev je možna na `43c1994`; GitHub push ni bil izveden.
