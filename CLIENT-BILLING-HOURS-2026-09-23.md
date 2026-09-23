@@ -29,3 +29,20 @@ stranko na izoliranem strežniku, preveri nespremenjen čas delavca in
 ponovitev po osvežitvi. Strežniški test prebere besedilo obeh vrst PDF
 prenosa, tudi ob poslani stari izbiri, in preveri nespremenjeno deljenje
 dogodka. Objavo varujeta sveži recovery backup in PostgreSQL QA.
+
+## Rezultat objave
+
+Objavljena izdaja `54d07c2`, prejšnja produkcija `7f00768`. Točen kandidat
+je na strežniku prestal 288/288 testov in 20/20 PostgreSQL, restore,
+upgrade ter rollback preverjanj. Celotni Chromium nabor: 65/65; ciljna
+WebKit preizkusa: 2/2. Vizualno pregledani posnetki telefonskega in
+namiznega prikaza, brez vodoravnega prelivanja pri 320/390/768/1280 px.
+
+Predobjavna kopija `indus-ure-recovery-20260923T103305Z.tar.gz`, zaključena
+ob 10:33:41 UTC, ima vseh pet preverjanj uspešnih in zaščiteno predobjavno
+oznako. Po preklopu obe aplikaciji aktivni, health uspešen, javna stran
+HTTP 200 brez izbirnika in z novim neurejevalnim poljem ter označevanjem
+razlike. Brez opozoril v dnevniku Ure. Google Koledar ostaja omogočen brez
+napak. Produkcijskih opravil, ur ali obračunov nismo testno spreminjali.
+Google TODO in njegov odloženi razdelek nista bila spreminjana. GitHub
+ni bil posodobljen.
