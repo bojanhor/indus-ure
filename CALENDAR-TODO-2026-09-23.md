@@ -36,4 +36,28 @@ soglasje in dejanski preizkus prenosa, spremembe ter odstranitve dogodka.
 
 ## Rezultat objave
 
-Bo dopolnjeno po objavi in preverjanju produkcije.
+Objavljena izdaja `9696a69`, prejšnja produkcija `48cd3e7`.
+
+Končni preizkusi: 280/280 strežniških testov na Linuxu, celotni brskalniški
+nabor 63/63; po zadnjem popravku širine izbornega polja še ciljna Chromium
+2/2 in WebKit 2/2. PostgreSQL, restore, upgrade in rollback: 20/20.
+Ročno preverjen filter ter preklop 15h/24h tudi v vgrajenem brskalniku,
+pregledane mobilne slike obeh brskalnikov.
+
+Preverjena predobjavna kopija `indus-ure-recovery-20260923T033603Z.tar.gz`,
+končana 23. 9. 2026 ob 03:36:31 UTC. Vseh pet preverjanj arhiva in Google Drive
+je uspešnih, kopija ima zaščiteno predobjavno oznako.
+
+Po objavi: aktivna izdaja pravilna, Ure in Fakture aktivni, health `ok: true`,
+javna stran HTTP 200 z obema filtroma in oznakama dni, brez starega odstotka
+povečave in brez opozoril v dnevniku Ure. Poslovni podatki in Google OAuth
+niso bili spreminjani. GitHub ni bil posodobljen.
+
+Med pripravo je zmanjkalo prostora v omejenem `/tmp` (glavni disk je imel
+11 GB prostih). Odstranjeni sta bili izključno lastni neobjavljeni
+pripravljalni mapi, kandidat je bil ponovno sveže pripravljen in preverjen.
+Po objavi je `/tmp` na 48 %. Prva različica novega testa je uporabljala napačen
+gumb za zapiranje modalnega obvestila in ni čakala na prehod zavihka;
+test je popravljen. Posamični starejši test direktnega branja testne JSON
+datoteke ter test predlogov strank sta ob ponovitvi uspela; končni celotni
+nabor ni imel napak. Produkcija uporablja PostgreSQL.
