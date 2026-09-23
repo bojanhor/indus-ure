@@ -181,7 +181,7 @@ function clientReportDownloadPayload(input = {}) {
     to: isDateKey(input.to) ? String(input.to) : "",
     eventIds: cleanList(input.eventIds),
     attachmentIds: cleanList(input.attachmentIds),
-    exportOptions: clientReportExportOptions(input.exportOptions)
+    exportOptions: { hoursMode: "client_billable" }
   };
 }
 
@@ -590,7 +590,7 @@ async function sendClientReportPdf(res, db, body) {
   }
   let pdf;
   try {
-    pdf = await buildClientReportPdf(db, report, attachments, body.exportOptions);
+    pdf = await buildClientReportPdf(db, report, attachments, { hoursMode: "client_billable" });
   } catch (error) {
     console.error("PDF poročila ni bilo mogoče ustvariti:", error?.message || error);
     sendJson(res, 500, { error: "PDF poročila ni bilo mogoče pripraviti. Poskusi znova." });
@@ -1134,7 +1134,7 @@ async function handleReportDownloads(req, res, url) {
       }
       const requestedAttachments = clientReportAttachmentSelection(report, body.attachmentIds);
       const attachments = await loadClientReportAttachments(db, requestedAttachments, { destination: "PDF" });
-      const pdf = await buildClientReportPdf(db, report, attachments, body.exportOptions);
+      const pdf = await buildClientReportPdf(db, report, attachments, { hoursMode: "client_billable" });
       const filename = clientReportFilename(report.client);
       res.writeHead(200, securityHeaders({
         "Content-Type": "application/pdf",
@@ -1180,7 +1180,7 @@ async function handleReportDownloads(req, res, url) {
         maxTotalBytes: moduleValues.REPORT_GMAIL_MAX_TOTAL_BYTES,
         destination: "Gmail"
       });
-      const pdf = await buildClientReportPdf(db, report, attachments, body.exportOptions);
+      const pdf = await buildClientReportPdf(db, report, attachments, { hoursMode: "client_billable" });
       const filename = clientReportFilename(report.client);
       try {
         const { google } = require("googleapis");

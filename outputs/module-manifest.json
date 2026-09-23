@@ -1777,10 +1777,6 @@
         "writable": false
       },
       {
-        "name": "reportHoursModes",
-        "writable": false
-      },
-      {
         "name": "reportSearchRenderTimer",
         "writable": true
       }
@@ -1822,13 +1818,10 @@
       "reportAttachmentSelectionKey",
       "reportAttachmentItems",
       "syncReportAttachmentSelection",
-      "reportHoursMode",
       "reportHoursModeLabel",
       "reportHoursSummaryLabel",
       "reportWorkerTodos",
-      "reportWorkerName",
       "reportAssigneeLabel",
-      "reportWorkerTimeSummary",
       "reportExportOptions",
       "reportExportPayload",
       "reportClientBillHistoryCutoff",
@@ -1853,6 +1846,8 @@
       "reportNumber",
       "reportInputNumber",
       "reportTransportText",
+      "reportHoursDifferenceText",
+      "updateClientBillingHoursComparison",
       "renderReportAttachments",
       "renderClientBillingRow",
       "renderReportClientCard",

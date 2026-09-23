@@ -109,3 +109,80 @@ test("billing title and notes grow and shrink at mobile and desktop widths; edit
   await expect.poll(() => saved?.title).toBe("Kratek naslov");
   await expect(page.locator(".client-billing-inline-title").first()).toHaveValue("Kratek naslov");
 });
+
+test("billing compares read-only recorded hours with billable hours, including groups, zero and locked entries", async ({ page }, testInfo) => {
+  await openFixture(page);
+  await page.evaluate(() => {
+    const make = (id, extra = {}) => ({ id, assignmentGroupId: id, title: id, clientId: "qa-client-0", client: "QA stranka 0", status: "execution", done: true, date: "2026-09-14", start: "08:00", end: "11:00", syncUser: "ibro", createdBy: "ibro", assigneeIds: ["ibro"], clientBillableMinutes: 240, ...extra });
+    state.todos = [make("More"), make("Equal", { clientBillableMinutes: null }), make("Zero", { clientBillableMinutes: 0 }),
+      make("Shared", { assignmentGroupId: "group", eventClientBillableMinutes: 240 }),
+      make("Shared other", { assignmentGroupId: "group", syncUser: "bojan", end: "10:00", eventClientBillableMinutes: 240 }),
+      make("Shared trashed", { assignmentGroupId: "group", trashedAt: "2026-09-20" }),
+      make("Locked", { clientBillId: "confirmed" }), make("Material", { status: "material" }), make("Note", { status: "note" }), make("Warranty", { warranty: true })];
+    state.clientBills = [{ id: "confirmed", status: "confirmed", eventIds: ["Locked"], confirmedAt: new Date().toISOString() }];
+    state.showClientBilled = true;
+    openClientReport("QA stranka 0", "qa-client-0");
+  });
+  await expect(page.locator("#reportHoursMode, #reportHoursModeOption")).toHaveCount(0);
+  const row = title => page.locator(".client-billing-row").filter({ has: page.locator(`textarea[data-todo-id="${title}"]`) });
+  const more = row("More"), equal = row("Equal"), zero = row("Zero"), shared = row("Shared");
+  for (const [item, recorded, billed, message] of [[more, "3", "4", "Za obračun je 1 h več."], [equal, "3", "3", ""], [zero, "3", "0", "Za obračun je 3 h manj."], [shared, "5", "4", "Za obračun je 1 h manj."]]) {
+    await expect(item.getByRole("textbox", { name: "Vpisane ure", exact: true })).toHaveValue(recorded);
+    await expect(item.getByRole("textbox", { name: "Vpisane ure", exact: true })).toHaveAttribute("readonly", "");
+    await expect(item.getByRole("spinbutton", { name: "Za obračun ur", exact: true })).toHaveValue(billed);
+    const notice = item.locator(".client-billing-hours-difference");
+    if (message) { await expect(notice).toHaveText(message); await expect(item.locator(".client-billing-inline-fields")).toHaveClass(/has-hours-difference/); }
+    else { await expect(notice).toBeHidden(); await expect(item.locator(".client-billing-inline-fields")).not.toHaveClass(/has-hours-difference/); }
+  }
+  const locked = page.locator(".client-billing-row").filter({ has: page.locator('[data-cancel-client-bill-id="confirmed"]') });
+  await expect(locked.locator(".client-billing-inline-fields")).toHaveCount(0);
+  await expect(locked).toContainText("Vpisane ure: 3 h");
+  await expect(locked).toContainText("Za obračun: 4 h");
+  for (const name of ["Material", "Note", "Warranty"]) await expect(row(name).locator(".client-billing-worker-hours")).toHaveCount(0);
+  for (const width of [320, 390, 768, 1280]) {
+    await page.setViewportSize({ width, height: 900 });
+    const recorded = await more.locator(".client-billing-worker-hours").boundingBox();
+    const billed = await more.getByRole("spinbutton", { name: "Za obračun ur", exact: true }).boundingBox();
+    expect(recorded.x).toBeLessThan(billed.x);
+    expect(Math.abs(recorded.y - billed.y)).toBeLessThan(2);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath(`billing-hours-${width}.png`), fullPage: true });
+  }
+  // Live feedback does not save or alter the recorded time until the existing
+  // change handler is triggered; returning to the stored value sends no write.
+  const input = more.getByRole("spinbutton", { name: "Za obračun ur", exact: true });
+  await input.fill("3");
+  await expect(more.locator(".client-billing-hours-difference")).toBeHidden();
+  await input.fill("4");
+  await expect(more.locator(".client-billing-hours-difference")).toHaveText("Za obračun je 1 h več.");
+  await expect(more.locator(".client-billing-worker-hours")).toHaveValue("3");
+});
+
+test("saving billable hours preserves worker time and survives refresh", async ({ page }) => {
+  await openFixture(page);
+  const id = await page.evaluate(async () => {
+    const result = await api("/api/todos", { method: "POST", body: JSON.stringify({ title: "Recorded hours integration", client: "Hours integration", status: "execution", date: "2032-05-10", start: "08:00", end: "11:00", syncUser: "ibro", assigneeIds: ["ibro"] }) });
+    const todo = result.todos.find(item => item.title === "Recorded hours integration");
+    await loadAll();
+    state.showClientPending = true;
+    openClientReport(todo.client, todo.clientId);
+    return todo.id;
+  });
+  const row = page.locator(".client-billing-row").filter({ has: page.locator(`[data-todo-id="${id}"]`) });
+  await expect(row.locator(".client-billing-worker-hours")).toHaveValue("3");
+  const field = row.getByRole("spinbutton", { name: "Za obračun ur", exact: true });
+  const saved = page.waitForResponse(response => response.url().includes(`/api/todos/${id}/client-billing-fields`) && response.request().method() === "POST");
+  await field.fill("4");
+  await field.press("Enter");
+  expect((await saved).status()).toBe(200);
+  await expect(row.locator(".client-billing-hours-difference")).toHaveText("Za obračun je 1 h več.");
+  const stored = await page.evaluate(async id => (await api(`/api/todos/${id}`)).todo, id);
+  expect(stored.start).toBe("08:00"); expect(stored.end).toBe("11:00"); expect(stored.clientBillableMinutes).toBe(240);
+  await page.reload();
+  await expect(page.locator("#app")).toBeVisible();
+  await page.waitForLoadState("networkidle");
+  await page.evaluate(async id => { await loadAll(); const todo = state.todos.find(t => t.id === id); setView("report"); openClientReport(todo.client, todo.clientId); }, id);
+  await expect(row.locator(".client-billing-worker-hours")).toHaveValue("3");
+  await expect(row.getByRole("spinbutton", { name: "Za obračun ur", exact: true })).toHaveValue("4");
+  await expect(row.locator(".client-billing-hours-difference")).toHaveText("Za obračun je 1 h več.");
+});

@@ -4834,7 +4834,7 @@
     .client-billing-inline-title:focus { border-color: #197e68; outline: 2px solid #a8d9ca; outline-offset: 1px; background: #fff; }
     .client-billing-inline-fields {
       display: grid;
-      grid-template-columns: repeat(2, minmax(132px, max-content));
+      grid-template-columns: repeat(2, minmax(88px, 140px)) minmax(132px, max-content);
       gap: 7px 10px;
       align-items: end;
       margin: 8px 0;
@@ -4859,6 +4859,12 @@
       font-weight: 750;
     }
     .client-billing-inline-fields input:focus { border-color: #197e68; outline: 2px solid #a8d9ca; outline-offset: 1px; background: #fff; }
+    .client-billing-inline-fields input[readonly] { background: #e5eeeb; color: #365b54; cursor: default; }
+    .client-billing-charges.has-hours-difference { background: #fff5df; box-shadow: inset 3px 0 #b26b00; }
+    .has-hours-difference .client-billing-hours-field { color: #714400; }
+    .has-hours-difference .client-billing-hours-field input { border-color: #b26b00; background: #fffaf0; color: #714400; font-weight: 900; }
+    .client-billing-hours-difference { grid-column: 1 / -1; color: #714400; font-size: 12px; font-weight: 850; }
+    .client-billing-hours-difference[hidden] { display: none; }
     .client-billing-inline-description {
       box-sizing: border-box;
       width: 100%;
@@ -4984,8 +4990,6 @@
 
     .client-row-actions { display: flex; gap: 7px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
 
-    .report-export-option { display: inline-grid; gap: 2px; color: var(--muted); font-size: 12px; font-weight: 800; }
-    .report-export-option select { min-height: 34px; font: inherit; color: var(--ink); }
     .client-billing-intro-actions {
       display: flex;
       align-items: center;
@@ -5511,6 +5515,8 @@
       .client-billing-when { grid-column: 2; grid-row: 1; grid-template-columns: auto 1fr; align-items: baseline; }
       .client-billing-when strong { grid-row: 1 / span 2; }
       .client-billing-main { grid-column: 1 / -1; }
+      .client-billing-inline-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .client-billing-travel-field { grid-column: 1 / -1; }
       .client-billing-open { width: 100%; }
       .client-billing-attachments { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .deleted-todo-card { grid-template-columns: minmax(0, 1fr); }
@@ -5930,13 +5936,6 @@
             <button class="primary hidden" id="confirmClientBill" type="button">Potrdi izbrane vpise</button>
             <button class="secondary hidden" id="exportReportPdf" type="button">Prenesi PDF</button>
             <button class="secondary hidden" id="createReportGmailDraft" type="button">Gmail osnutek</button>
-            <label class="hidden report-export-option" id="reportHoursModeOption">Prikaz ur
-              <select id="reportHoursMode">
-                <option value="client_billable">Obračunska vrednost za stranko</option>
-                <option value="worker_total">Skupne ure izvajalcev</option>
-                <option value="worker_time">Točen čas izvajalcev</option>
-              </select>
-            </label>
           </div>
         </div>
         <div class="report-controls client-billing-controls admin-only">
@@ -7636,7 +7635,6 @@ const {
     moduleValues: {
       get reportClientSortModes() { return reportClientSortModes; },
       get reportHistoryStateKey() { return reportHistoryStateKey; },
-      get reportHoursModes() { return reportHoursModes; },
       get reportSearchRenderTimer() { return reportSearchRenderTimer; },
       set reportSearchRenderTimer(value) { reportSearchRenderTimer = value; }
     }
@@ -12520,7 +12518,6 @@ let todoDialogPhotoPreviewTimer = 0;
 
 let todoDialogSaveInFlight = false;
 
-const reportHoursModes = ["client_billable", "worker_total", "worker_time"];
 
 function todoManualOrderDomain(todo) {
       if (!todo || todo.done || timeEntryStatusIds.has(todo.status)) return "";

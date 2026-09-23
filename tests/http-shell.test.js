@@ -275,12 +275,12 @@ test("poročilo stranke odpre isti vpis s klikom na naslov ali zeleni povzetek",
   assert.match(html, /closest\("\.open-report-todo"\)[\s\S]*?reportTodos\(\)\.map\(\(item\) => item\.id\)[\s\S]*?openTodoDialog\(todo, \{ reportNavigationIds: navigationIds \}\)/);
   assert.doesNotMatch(html, />Odpri vpis</);
 });
-test("client report can switch between billable and worker hours", async () => {
+test("client report uses billable hours only and compares recorded hours without editing them", async () => {
   const [html, server] = await Promise.all([
     readAppHtml(),
     readServerSource()
   ]);
-  assert.match(html, /id="reportHoursMode"/);
+  assert.doesNotMatch(html, /id="reportHoursMode(?:Option)?"/);
   assert.match(html, /id="todoFormQuickTimeDuration"/);
   assert.match(html, /function todoTimePickerDurationLabel\(\)/);
   assert.match(html, /function reportClientSortMode\(value = state\.reportClientSort\)/);
@@ -290,11 +290,14 @@ test("client report can switch between billable and worker hours", async () => {
   assert.match(html, /history\.pushState\(reportOverviewHistoryState\(snapshot\), "", location\.href\)/);
   assert.match(html, /currentReportState\?\.kind === "overview"[\s\S]*?history\.replaceState\(reportOverviewHistoryState\(snapshot\), "", location\.href\)/);
   assert.match(html, /history\.back\(\);/);
-  assert.match(html, /value="client_billable"/);
-  assert.match(html, /value="worker_total"/);
-  assert.match(html, /value="worker_time"/);
-  assert.match(html, /function reportWorkerTimeSummary\(todos\)/);
-  assert.match(html, /reportHoursMode\(\) === "worker_time"/);
+  assert.match(html, /function reportExportOptions\(\) \{\s*return \{ hoursMode: "client_billable" \}/);
+  assert.match(html, /Vpisane ure \(h\)/);
+  assert.match(html, /class="client-billing-worker-hours" type="text" readonly/);
+  assert.match(html, /function reportHoursDifferenceText\(/);
+  assert.match(html, /has-hours-difference/);
+  assert.doesNotMatch(html, /reportHoursMode\(\)/);
+  assert.doesNotMatch(server, /buildClientReportPdf\(db, report, attachments, body\.exportOptions\)/);
+  assert.equal((server.match(/buildClientReportPdf\(db, report, attachments, \{ hoursMode: "client_billable" \}\)/g) || []).length, 3);
   assert.match(server, /function clientReportExportOptions\(input = \{\}\) \{[\s\S]*?hoursMode/);
   assert.match(server, /options\.hoursMode === "worker_time"/);
   assert.match(server, /options\.hoursMode === "client_billable"/);
