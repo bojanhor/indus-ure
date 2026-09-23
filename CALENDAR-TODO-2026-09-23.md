@@ -61,3 +61,10 @@ gumb za zapiranje modalnega obvestila in ni čakala na prehod zavihka;
 test je popravljen. Posamični starejši test direktnega branja testne JSON
 datoteke ter test predlogov strank sta ob ponovitvi uspela; končni celotni
 nabor ni imel napak. Produkcija uporablja PostgreSQL.
+
+Po preverjeni objavi je iz skupnega Google TODO odstranjenih šest opravljenih
+točk z njihovimi štirimi referenčnimi slikami. Odprta aktivacija Google
+Koledarja in nova uporabnikova sekcija »TOLE ŠE PUSTI PRI MIRU« s celotno
+vsebino od tam navzdol sta ohranjeni. Uporabnik je izrecno potrdil mejo.
+Brisanje je uporabljalo preverjeno revizijo dokumenta; ponovni odčitek je
+potrdil nespremenjeno vsebino obeh ohranjenih delov.
