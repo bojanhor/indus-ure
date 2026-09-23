@@ -55,3 +55,35 @@ pokvarjeno ohranjeno kopijo, checkpoint rotacijo, označevanje, sporne
 zaklepe, oznake, simbolne povezave ter povezavo z deploy postopkom.
 Windows ne omogoča navadnemu procesu ustvariti testnih simbolnih povezav;
 ta test je tam izpuščen, na Linux kandidatu pa obvezen.
+
+## Rezultat
+
+Objavljena je izdaja `cc81854`. Lokalno: 278 uspešnih programskih testov,
+1 zgoraj pojasnjen preskok, 0 napak; 59/59 brskalniških testov. Na Linux
+kandidatu: 279/279 testov, brez preskokov, ter vseh 19 PostgreSQL,
+restore, upgrade in rollback preverjanj.
+
+Pred namestitvijo je bil stari root deploy helper preverjeno enak tistemu
+v izdaji `00dee4c` in ohranjen kot
+`/usr/local/sbin/deploy-indus-ure.before-retention-20260923`.
+Trije prej navedeni pre-deploy arhivi so dobili preverjene oznake.
+Objava je ustvarila in zaščitila novo kopijo `20260923T025945Z`.
+
+Po objavi je običajna backup storitev ustvarila `20260923T030023Z` in jo
+uspešno preverila lokalno ter na Drive. Končala je 23. 9. ob 03:00:52 UTC,
+`Result=success`, `ExecMainStatus=0`; vsa dokazila preverjanja so `true`.
+Čiščenje je nato odstranilo 42 lokalnih arhivov s spremljajočimi datotekami
+in sprostilo 6,37 GiB. Ostalo je 9 arhivov oziroma 1,59 GiB, kar ustreza
+7 dnevnim točkam in 3 checkpointom z enim prekrivanjem. Ročne kopije niso
+bile spreminjane. Ponovni read-only pregled nima kandidatov za brisanje
+ali nepopolnih/ignoriranih arhivov.
+
+Na korenskem disku je po preverjanju približno 11 GiB prostega (62 %
+zasedenost). Pred našim čiščenjem se je vmes prosto stanje spremenilo
+z 2,1 na 5,2 GiB izven tega posega; celotne razlike ne pripisujemo čiščenju.
+Naš sproščeni obseg je izmerjen v `indus_backup_runs.data.localRetention`.
+
+Ure in Fakture sta aktivni, Ure health vrne `ok: true`, javna aplikacija
+HTTP 200. Dnevnik Ure/backup po posegu nima opozoril. Dnevni backup timer
+ostaja aktiven; naslednji predvideni zagon je 24. 9. 2026 okoli 02:19 po
+lokalnem času. Google Drive pravilo 90 dni je nespremenjeno.
