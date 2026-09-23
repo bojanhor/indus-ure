@@ -2901,12 +2901,17 @@
       grid-template-rows: auto auto 1fr;
     }
 
+    .calendar-filters { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 24px; padding: 10px 12px 6px; }
+    .calendar-worker-filter { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; font-size: 13px; }
+    .calendar-worker-filter select { width: auto; min-width: 170px; max-width: 260px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--ink); font: inherit; }
+    .day-todo-worker { margin-left: 6px; font-weight: 600; overflow-wrap: anywhere; }
+
     .calendar-completed-filter {
       display: inline-flex;
       align-items: center;
       gap: 8px;
       width: max-content;
-      margin: 10px auto 6px 12px;
+      margin: 0;
       color: var(--muted);
       font-size: 13px;
       font-weight: 700;
@@ -5978,7 +5983,12 @@
       </section>
 
       <section class="panel calendar-shell calendar-view">
-        <label class="calendar-completed-filter"><input id="calendarCompletedFilter" type="checkbox">Prikazuj tudi zaključene</label>
+        <div class="calendar-filters">
+          <label class="calendar-completed-filter"><input id="calendarCompletedFilter" type="checkbox">Prikazuj tudi zaključene</label>
+          <label class="calendar-worker-filter hidden" id="calendarWorkerFilterField">Izvajalec
+            <select id="calendarWorkerFilter" aria-label="Izvajalec v koledarju"><option value="">Vsi izvajalci</option></select>
+          </label>
+        </div>
         <div class="weekdays">
           <div>Pon</div>
           <div>Tor</div>
@@ -6011,9 +6021,8 @@
       <div class="day-timeline-toolbar">
         <div class="gesture-zoom-controls" aria-label="Pove&#269;ava dnevne &#269;asovnice">
           <button class="secondary zoom-step day-timeline-control" id="dayTimelineZoomOut" type="button" title="Pomanj&#353;aj &#269;asovnico" aria-label="Pomanj&#353;aj &#269;asovnico">&minus;</button>
-          <span class="zoom-value" id="dayTimelineZoomValue">100 %</span>
           <button class="secondary zoom-step day-timeline-control" id="dayTimelineZoomIn" type="button" title="Pove&#269;aj &#269;asovnico" aria-label="Pove&#269;aj &#269;asovnico">&plus;</button>
-          <button class="secondary day-timeline-control" id="dayTimelineFit" type="button" title="Prika&#382;i vseh 24 ur" aria-label="Prika&#382;i vseh 24 ur">&#8597;</button>
+          <button class="secondary day-timeline-control" id="dayTimelineFit" type="button" title="Prika&#382;i vseh 24 ur" aria-label="Prika&#382;i vseh 24 ur">24h</button>
         </div>
       </div>
       <div class="day-all-day hidden" id="dayAllDay">
@@ -6200,7 +6209,7 @@
           <summary>Datum in ura</summary>
           <div class="todo-form-date-time-fields">
             <div class="todo-date-range-field">
-              <label>Datum od
+              <label><span>Datum od <span id="todoFormDateWeekday"></span></span>
                 <span class="date-input-with-clear">
                   <input id="todoFormDate" type="date">
                   <button class="secondary date-jump-button" id="setTodoFormDateToday" type="button">Danes</button>
@@ -6208,7 +6217,7 @@
                   <button class="date-clear-button" id="clearTodoFormDate" type="button" title="Odstrani datum" aria-label="Odstrani datum">&times;</button>
                 </span>
               </label>
-              <label id="todoFormEndDateField">Datum do
+              <label id="todoFormEndDateField"><span>Datum do <span id="todoFormEndDateWeekday"></span></span>
                 <span class="date-input-with-clear">
                   <input id="todoFormEndDate" type="date">
                   <button class="secondary date-jump-button" id="setTodoFormEndDateTomorrow" type="button">Jutri</button>
@@ -7045,6 +7054,7 @@ const state = {
       showBilledCompletedTodos: false,
       showUnbilledCompletedTodos: true,
       showCompletedCalendarTodos: false,
+      calendarWorkerId: "",
       searchReturnState: null,
       searchIncludeCompleted: false,
       searchIncludeOther: true,
@@ -7754,6 +7764,34 @@ function calendarCompletedFilterStorageKey() {
 function loadCalendarCompletedFilter() {
       state.showCompletedCalendarTodos = localStorage.getItem(calendarCompletedFilterStorageKey()) === "true";
       if ($("calendarCompletedFilter")) $("calendarCompletedFilter").checked = state.showCompletedCalendarTodos;
+      state.calendarWorkerId = localStorage.getItem(calendarWorkerFilterStorageKey()) || "";
+    }
+
+function calendarWorkerFilterStorageKey() {
+      return `indus-ure-calendar-worker:${state.user?.id || "anonymous"}`;
+    }
+
+function calendarWorkerMatches(todo) {
+      return !isAdminView() || !state.calendarWorkerId || todoAssigneeIds(todo).includes(state.calendarWorkerId);
+    }
+
+function renderCalendarWorkerFilter() {
+      $("calendarWorkerFilterField").classList.toggle("hidden", !isAdminView());
+      if (!isAdminView()) return;
+      // Include workers without a login and historical assignees, not only
+      // the people who can sign in. This is a display filter, not access control.
+      const workers = new Map([...state.workerBilling, ...state.users].map(worker => [worker.id, worker.name || worker.id]));
+      state.todos.forEach(todo => todoAssigneeIds(todo).forEach(id => {
+        if (!workers.has(id)) workers.set(id, userDisplayName(id));
+      }));
+      if (state.calendarWorkerId && !workers.has(state.calendarWorkerId)) {
+        // A minimal/offline bootstrap may not have loaded the full directory yet.
+        workers.set(state.calendarWorkerId, userDisplayName(state.calendarWorkerId));
+      }
+      const select = $("calendarWorkerFilter");
+      const options = [["", "Vsi izvajalci"], ...[...workers].sort((a, b) => a[1].localeCompare(b[1], "sl"))];
+      select.replaceChildren(...options.map(([id, name]) => new Option(name, id)));
+      select.value = state.calendarWorkerId;
     }
 
 function todoSectionCollapseStorageKey() {
@@ -9594,7 +9632,7 @@ function isImportedTodo(todo) {
     }
 
 function calendarTodos({ includeArchived = false } = {}) {
-      return uniqueTodosByEventId(contextTodos()).filter((todo) => !isImportedTodo(todo) && (includeArchived || !todo.archivedAt));
+      return uniqueTodosByEventId(contextTodos()).filter((todo) => !isImportedTodo(todo) && (includeArchived || !todo.archivedAt) && calendarWorkerMatches(todo));
     }
 
 /* @indus-module:planning-calendar */
@@ -10481,11 +10519,12 @@ function cancelMonthTodoPointerDrag(event) {
       clearMonthTodoPointerDrag();
     }
 function renderMonth() {
+      renderCalendarWorkerFilter();
       const calendar = $('calendar');
       calendar.innerHTML = '';
-      const entries = contextEntries();
+      const entries = contextEntries().filter(calendarWorkerMatches);
       const todos = state.showCompletedCalendarTodos ? calendarTodos()
-        : PlanningCalendar.select(state.todos, { combined: isAdminView(), userId: activeWorkerId() });
+        : PlanningCalendar.select(state.todos, { combined: isAdminView(), userId: activeWorkerId() }).filter(calendarWorkerMatches);
       const todayDate = new Date();
       $('todayDayNumber').textContent = todayDate.getDate();
       $('todayBtn').setAttribute('aria-label', `Danes, ${todayDate.toLocaleDateString('sl-SI')}`);
@@ -10561,7 +10600,8 @@ function renderMonth() {
             const client = todoClientCalendarName(todo, 'Brez stranke');
             const title = `${todo.urgent ? `NUJNO ${String.fromCharCode(183)} ` : ''}${todo.title || 'Brez naslova'}`;
             if (changeNotice) item.title = todoChangeNoticeText(todo);
-            item.innerHTML = `<span class="day-todo-topline"><span class="day-todo-time">${time}</span>${settlementIndicators}${changeNotice ? `<span class="day-todo-change-mark" aria-label="${escapeHtml(todoChangeNoticeLabel(todo))}">&#9679;</span>` : ''}</span><span class="day-todo-client">${escapeHtml(client)}</span><span class="day-todo-title">${escapeHtml(title)}</span>`;
+            const workerLabel = isAdminView() ? `<span class="day-todo-worker">${escapeHtml(todoAssigneeNames(todo))}</span>` : '';
+            item.innerHTML = `<span class="day-todo-topline"><span class="day-todo-time">${time}${workerLabel}</span>${settlementIndicators}${changeNotice ? `<span class="day-todo-change-mark" aria-label="${escapeHtml(todoChangeNoticeLabel(todo))}">&#9679;</span>` : ''}</span><span class="day-todo-client">${escapeHtml(client)}</span><span class="day-todo-title">${escapeHtml(title)}</span>`;
             item.addEventListener('pointerdown', (event) => beginMonthTodoPointerDrag(event, item, todo, key));
             item.addEventListener('lostpointercapture', cancelMonthTodoPointerDrag);
             item.addEventListener('click', (event) => {
@@ -11002,7 +11042,6 @@ function renderDayTimeline() {
       dayTimelineTitle.textContent = compactDayTimelineTitle(selectedDate);
       dayTimelineTitle.title = fullDayTitle;
       dayTimelineTitle.setAttribute("aria-label", fullDayTitle);
-      $("dayTimelineZoomValue").textContent = Math.round(state.dayTimelineMinuteHeight * 100) + " %";
       $("saveDayTimeline").disabled = state.dayTimelineSaving || state.dayTimelineDrafts.size === 0;
 
       const todos = dayTimelineTodos();
@@ -11102,8 +11141,9 @@ function renderDayTimeline() {
           ? todoAssigneeNames(todo)
           : "Za: " + todoAssigneeNames(todo);
         meta.textContent = dayTimelineTime(startMinute) + "-" + dayTimelineTime(endMinute)
+          + (isAdminView() ? " | " + assigneeLabel : "")
           + (client ? " | " + client : "")
-          + " | " + assigneeLabel;
+          + (isAdminView() ? "" : " | " + assigneeLabel);
         const endHandle = document.createElement("span");
         endHandle.className = "day-resize-handle end";
         endHandle.dataset.mode = "resize-end";
@@ -13802,6 +13842,11 @@ $("todoSortMode").addEventListener("change", (event) => {
 $("calendarCompletedFilter").addEventListener("change", (event) => {
       state.showCompletedCalendarTodos = Boolean(event.target.checked);
       localStorage.setItem(calendarCompletedFilterStorageKey(), String(state.showCompletedCalendarTodos));
+      renderMonth();
+    });
+$("calendarWorkerFilter").addEventListener("change", (event) => {
+      state.calendarWorkerId = event.target.value;
+      localStorage.setItem(calendarWorkerFilterStorageKey(), state.calendarWorkerId);
       renderMonth();
     });
 $("todoShowBilled").addEventListener("change", (event) => {

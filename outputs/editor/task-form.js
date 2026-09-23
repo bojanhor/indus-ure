@@ -412,6 +412,11 @@ function syncTodoFormDateRangeControls() {
         endDate.value = date;
         endDate.dataset.auto = 'true';
       }
+      [['todoFormDateWeekday', date], ['todoFormEndDateWeekday', endDate.value]].forEach(([id, value]) => {
+        // Noon in local time avoids shifting the weekday across UTC/DST boundaries.
+        const day = value ? new Date(value + 'T12:00:00').getDay() : NaN;
+        $(id).textContent = Number.isInteger(day) ? '(' + ['ned', 'pon', 'tor', 'sre', 'čet', 'pet', 'sob'][day] + ')' : '';
+      });
       const multiDay = Boolean(date && endDate.value && endDate.value > date);
       ['todoFormStart', 'todoFormEnd'].forEach((id) => {
         const field = $(id);
