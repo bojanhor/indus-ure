@@ -2903,7 +2903,7 @@
 
     .calendar-filters { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 24px; padding: 10px 12px 6px; }
     .calendar-worker-filter { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; font-size: 13px; }
-    .calendar-worker-filter select { width: auto; min-width: 170px; max-width: 260px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--ink); font: inherit; }
+    .calendar-worker-filter select { width: auto; min-width: 170px; max-width: min(260px, calc(100vw - 110px)); padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--ink); font: inherit; }
     .day-todo-worker { margin-left: 6px; font-weight: 600; overflow-wrap: anywhere; }
 
     .calendar-completed-filter {
@@ -3006,6 +3006,7 @@
 
     .day-timeline-toolbar {
       display: flex;
+      flex-wrap: wrap;
       align-items: center;
       justify-content: space-between;
       gap: 10px;
@@ -3015,6 +3016,7 @@
     }
 
     .day-timeline-toolbar .gesture-zoom-controls { flex-wrap: nowrap; }
+    .day-timeline-toolbar .zoom-step svg { width: 23px; height: 23px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
     .day-timeline-hint { color: var(--muted); font-size: 12px; }
 
     .day-all-day {
@@ -6020,10 +6022,13 @@
       </div>
       <div class="day-timeline-toolbar">
         <div class="gesture-zoom-controls" aria-label="Pove&#269;ava dnevne &#269;asovnice">
-          <button class="secondary zoom-step day-timeline-control" id="dayTimelineZoomOut" type="button" title="Pomanj&#353;aj &#269;asovnico" aria-label="Pomanj&#353;aj &#269;asovnico">&minus;</button>
-          <button class="secondary zoom-step day-timeline-control" id="dayTimelineZoomIn" type="button" title="Pove&#269;aj &#269;asovnico" aria-label="Pove&#269;aj &#269;asovnico">&plus;</button>
+          <button class="secondary zoom-step day-timeline-control" id="dayTimelineZoomOut" type="button" title="Pomanj&#353;aj &#269;asovnico" aria-label="Pomanj&#353;aj &#269;asovnico"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10" cy="10" r="7"/><path d="m15 15 6 6M7 10h6"/></svg></button>
+          <button class="secondary zoom-step day-timeline-control" id="dayTimelineZoomIn" type="button" title="Pove&#269;aj &#269;asovnico" aria-label="Pove&#269;aj &#269;asovnico"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10" cy="10" r="7"/><path d="m15 15 6 6M7 10h6M10 7v6"/></svg></button>
           <button class="secondary day-timeline-control" id="dayTimelineFit" type="button" title="Prika&#382;i vseh 24 ur" aria-label="Prika&#382;i vseh 24 ur">24h</button>
         </div>
+        <label class="calendar-worker-filter hidden" id="dayTimelineWorkerFilterField">Izvajalec
+          <select id="dayTimelineWorkerFilter" class="day-timeline-control" aria-label="Izvajalec v dnevnem koledarju"><option value="">Vsi izvajalci</option></select>
+        </label>
       </div>
       <div class="day-all-day hidden" id="dayAllDay">
         <span class="day-all-day-label">VES DAN</span>
@@ -7777,6 +7782,7 @@ function calendarWorkerMatches(todo) {
 
 function renderCalendarWorkerFilter() {
       $("calendarWorkerFilterField").classList.toggle("hidden", !isAdminView());
+      $("dayTimelineWorkerFilterField").classList.toggle("hidden", !isAdminView());
       if (!isAdminView()) return;
       // Include workers without a login and historical assignees, not only
       // the people who can sign in. This is a display filter, not access control.
@@ -7788,10 +7794,27 @@ function renderCalendarWorkerFilter() {
         // A minimal/offline bootstrap may not have loaded the full directory yet.
         workers.set(state.calendarWorkerId, userDisplayName(state.calendarWorkerId));
       }
-      const select = $("calendarWorkerFilter");
       const options = [["", "Vsi izvajalci"], ...[...workers].sort((a, b) => a[1].localeCompare(b[1], "sl"))];
-      select.replaceChildren(...options.map(([id, name]) => new Option(name, id)));
-      select.value = state.calendarWorkerId;
+      [$("calendarWorkerFilter"), $("dayTimelineWorkerFilter")].forEach(select => {
+        select.replaceChildren(...options.map(([id, name]) => new Option(name, id)));
+        select.value = state.calendarWorkerId;
+      });
+    }
+
+function changeCalendarWorkerFilter(event) {
+      if (state.dayTimelineSaving || state.dayTimelineDrafts.size) {
+        event.target.value = state.calendarWorkerId;
+        showNotice("Najprej shrani ali prekliči spremembe dnevne časovnice.");
+        return;
+      }
+      const wasFullDay = dayTimelineIsFullDay();
+      state.calendarWorkerId = event.target.value;
+      localStorage.setItem(calendarWorkerFilterStorageKey(), state.calendarWorkerId);
+      renderMonth();
+      if ($("dayTimelineDialog").open) {
+        renderDayTimeline();
+        if (wasFullDay) setDayTimelineZoom($("dayTimelineScroll").clientHeight / 1440);
+      }
     }
 
 function todoSectionCollapseStorageKey() {
@@ -11031,6 +11054,7 @@ function dayWorkBlocks(todos) {
     }
 function renderDayTimeline() {
       if (!state.dayTimelineDate) return;
+      renderCalendarWorkerFilter();
       const selectedDate = parseDate(state.dayTimelineDate);
       const fullDayTitle = selectedDate.toLocaleDateString("sl-SI", {
         weekday: "long",
@@ -11211,13 +11235,28 @@ function renderDayTimeline() {
         line.style.top = Math.round(currentMinute * minuteHeight) + "px";
         timeline.appendChild(line);
       }
+      updateDayTimelineFitButton();
+    }
+
+function dayTimelineIsFullDay() {
+      const height = $("dayTimelineScroll").clientHeight;
+      return height > 0 && Math.abs(height - 1440 * state.dayTimelineMinuteHeight) < 2;
+    }
+
+function updateDayTimelineFitButton() {
+      const hours = dayTimelineIsFullDay() ? 15 : 24;
+      $("dayTimelineFit").textContent = hours + "h";
+      const label = hours === 24 ? "Prikaži vseh 24 ur" : "Prikaži 15 ur";
+      $("dayTimelineFit").title = label;
+      $("dayTimelineFit").setAttribute("aria-label", label);
     }
 
 function setDayTimelineZoom(nextMinuteHeight, clientY = null) {
       const scroll = $("dayTimelineScroll");
       const oldHeight = state.dayTimelineMinuteHeight;
-      const nextHeight = Math.max(0.35, Math.min(2.4, Number(nextMinuteHeight) || 1));
-      if (Math.abs(nextHeight - oldHeight) < 0.001) return;
+      const minimumHeight = Math.min(0.35, Math.max(0.1, scroll.clientHeight / 1440));
+      const nextHeight = Math.max(minimumHeight, Math.min(2.4, Number(nextMinuteHeight) || 1));
+      if (Math.abs(nextHeight - oldHeight) < 0.001) { updateDayTimelineFitButton(); return; }
       const rect = scroll.getBoundingClientRect();
       const viewportY = clientY === null
         ? scroll.clientHeight / 2
@@ -11230,8 +11269,9 @@ function setDayTimelineZoom(nextMinuteHeight, clientY = null) {
 
 function fitDayTimeline() {
       const scroll = $("dayTimelineScroll");
-      setDayTimelineZoom(Math.max(0.35, scroll.clientHeight / 1440), scroll.getBoundingClientRect().top);
-      scroll.scrollTop = 0;
+      const hours = dayTimelineIsFullDay() ? 15 : 24;
+      setDayTimelineZoom(scroll.clientHeight / (hours * 60), scroll.getBoundingClientRect().top);
+      scroll.scrollTop = hours === 24 ? 0 : 5 * 60 * state.dayTimelineMinuteHeight;
     }
 
 function openDayTimeline(date, { includeArchived = false } = {}) {
@@ -13844,11 +13884,8 @@ $("calendarCompletedFilter").addEventListener("change", (event) => {
       localStorage.setItem(calendarCompletedFilterStorageKey(), String(state.showCompletedCalendarTodos));
       renderMonth();
     });
-$("calendarWorkerFilter").addEventListener("change", (event) => {
-      state.calendarWorkerId = event.target.value;
-      localStorage.setItem(calendarWorkerFilterStorageKey(), state.calendarWorkerId);
-      renderMonth();
-    });
+$("calendarWorkerFilter").addEventListener("change", changeCalendarWorkerFilter);
+$("dayTimelineWorkerFilter").addEventListener("change", changeCalendarWorkerFilter);
 $("todoShowBilled").addEventListener("change", (event) => {
       state.showBilledCompletedTodos = Boolean(event.target.checked);
       saveTodoBillingFilters();

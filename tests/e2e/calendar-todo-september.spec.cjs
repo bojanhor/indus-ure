@@ -60,6 +60,34 @@ test("boss calendar filters external workers, grouped planning and recorded hour
   await page.locator("#dayTimelineZoomOut").click();
   await page.locator("#dayTimelineFit").click();
   expect(await page.locator("#dayTimelineScroll").evaluate(element => element.scrollTop)).toBe(0);
+  await expect(page.locator("#dayTimelineFit")).toHaveText("15h");
+  await expect(page.locator("#dayTimelineZoomIn svg")).toHaveCount(1);
+  await expect(page.locator("#dayTimelineZoomOut svg")).toHaveCount(1);
+  await page.locator("#dayTimelineWorkerFilter").selectOption("bojan");
+  await expect(events).toHaveCount(1);
+  await expect(events).toContainText("Bojan planning QA");
+  await expect(page.locator("#calendarWorkerFilter")).toHaveValue("bojan");
+  await expect(page.locator("#dayTimelineFit")).toHaveText("15h");
+  await page.locator("#dayTimelineWorkerFilter").selectOption(external.id);
+  await expect(events).toHaveCount(3);
+  await page.locator("#dayTimelineFit").click();
+  await expect(page.locator("#dayTimelineFit")).toHaveText("24h");
+  expect(await page.locator("#dayTimelineScroll").evaluate(element => element.scrollTop)).toBeGreaterThan(0);
+  await page.evaluate(() => {
+    const todo = state.todos.find(todo => todo.title === "External planning QA");
+    saveDayTimelineDraft(todo, "08:15", "09:15", todo.date);
+    renderDayTimeline();
+  });
+  await page.locator("#dayTimelineWorkerFilter").selectOption("bojan");
+  await expect(page.getByText("Najprej shrani ali prekliči spremembe dnevne časovnice.", { exact: true })).toBeVisible();
+  await expect(page.locator("#dayTimelineWorkerFilter")).toHaveValue(external.id);
+  expect(await page.evaluate(() => state.dayTimelineDrafts.size)).toBe(1);
+  await page.locator("#dayTimelineDialog .modal-global-notice").getByRole("button", { name: "Zapri obvestilo" }).click();
+  await page.evaluate(() => {
+    const todo = state.todos.find(todo => todo.title === "External planning QA");
+    saveDayTimelineDraft(todo, todo.start, todo.end, todo.date);
+    renderDayTimeline();
+  });
   await page.screenshot({ path: test.info().outputPath("daily-calendar-controls.png") });
   await page.locator("#closeDayTimeline").click();
 
@@ -125,5 +153,10 @@ test("mobile weekday labels follow both date fields, shortcuts, clearing and sin
   await expect(page.locator("#dayTimelineFit")).toBeVisible();
   await expect(page.locator("#dayTimelineFit")).toHaveText("24h");
   await expect(page.locator("#dayTimelineDialog .gesture-zoom-controls")).not.toContainText("%");
+  await expect(page.locator("#dayTimelineWorkerFilter")).toBeVisible();
+  await page.locator("#dayTimelineFit").click();
+  await expect(page.locator("#dayTimelineFit")).toHaveText("15h");
+  const size = await page.locator("#dayTimelineScroll").evaluate(element => ({ viewport: element.clientHeight, timeline: element.querySelector("#dayTimeline").offsetHeight }));
+  expect(Math.abs(size.viewport - size.timeline)).toBeLessThanOrEqual(1);
   await page.screenshot({ path: test.info().outputPath("mobile-day-toolbar.png") });
 });

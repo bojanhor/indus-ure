@@ -4,6 +4,8 @@
 
 - Šefovski koledar ima ob kljukici »Prikazuj tudi zaključene« izbor izvajalca.
   Privzeto pokaže vse, vključuje tudi delavce brez prijave (zunanje izvajalce).
+  Enak, sinhroniziran izbor je tudi na vrhu dnevnega pregleda; ob neshranjenih
+  spremembah časovnice filter opozori in počaka na shranitev ali preklic.
   Filter velja za mesečni prikaz, dnevni pregled in označevanje dopustov.
   Skupni dogodek ostane prikazan enkrat in je viden pri vsakem svojem izvajalcu.
   Izbira se lokalno ohrani po osvežitvi; ne omejuje delavskih pogledov,
@@ -13,8 +15,9 @@
 - »Datum od« in »Datum do« v urejevalniku kažeta tričrkovni dan v tednu.
   Oznaki sledita ročnim spremembam, gumbom za premik datuma, praznjenju datuma
   in zaklepu vpisa ur na isti dan. Izračun uporablja lokalni datum, ne UTC.
-- Dnevni gumb za prikaz celotnega dne ima napis »24h«. Odstotek povečave
-  je odstranjen; gumba minus/plus in obstoječa logika povečave sta ohranjena.
+- Dnevni gumb preklaplja med 15-urnim in 24-urnim pogledom; napis kaže naslednji
+  pogled (»24h« oziroma »15h«). Celoten dan se prilega tudi nižjemu mobilnemu
+  pogledu. Odstotek povečave je odstranjen; gumba imata ikoni lupe z minus/plus.
 
 ## Preverjanje in varnost
 
