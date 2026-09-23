@@ -155,6 +155,7 @@ test("mobile weekday labels follow both date fields, shortcuts, clearing and sin
   await expect(page.locator("#dayTimelineFit")).toHaveText("24h");
   await expect(page.locator("#dayTimelineDialog .gesture-zoom-controls")).not.toContainText("%");
   await expect(page.locator("#dayTimelineWorkerFilter")).toBeVisible();
+  expect((await page.locator("#dayTimelineWorkerFilter").boundingBox()).width).toBeGreaterThanOrEqual(170);
   await page.locator("#dayTimelineFit").click();
   await expect(page.locator("#dayTimelineFit")).toHaveText("15h");
   const size = await page.locator("#dayTimelineScroll").evaluate(element => ({ viewport: element.clientHeight, timeline: element.querySelector("#dayTimeline").offsetHeight }));
