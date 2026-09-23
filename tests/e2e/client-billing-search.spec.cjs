@@ -131,8 +131,8 @@ test("billing compares read-only recorded hours with billable hours, including g
     await expect(item.getByRole("textbox", { name: "Vpisane ure", exact: true })).toHaveAttribute("readonly", "");
     await expect(item.getByRole("spinbutton", { name: "Za obračun ur", exact: true })).toHaveValue(billed);
     const notice = item.locator(".client-billing-hours-difference");
-    if (message) { await expect(notice).toHaveText(message); await expect(item.locator(".client-billing-inline-fields")).toHaveClass(/has-hours-difference/); }
-    else { await expect(notice).toBeHidden(); await expect(item.locator(".client-billing-inline-fields")).not.toHaveClass(/has-hours-difference/); }
+    if (message) { await expect(notice).toHaveText(message); await expect(item.locator(".client-billing-charges.client-billing-inline-fields")).toHaveClass(/has-hours-difference/); }
+    else { await expect(notice).toBeHidden(); await expect(item.locator(".client-billing-charges.client-billing-inline-fields")).not.toHaveClass(/has-hours-difference/); }
   }
   const locked = page.locator(".client-billing-row").filter({ has: page.locator('[data-cancel-client-bill-id="confirmed"]') });
   await expect(locked.locator(".client-billing-inline-fields")).toHaveCount(0);
