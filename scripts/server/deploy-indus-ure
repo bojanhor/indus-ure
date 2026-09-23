@@ -14,6 +14,10 @@ fi
 
 previous="$(readlink -f "$current" 2>/dev/null || true)"
 
+# Serialize deployments, including the verified backup and checkpoint marker.
+exec 9>/run/lock/indus-ure-deploy.lock
+flock -n 9 || { echo "Druga objava že poteka." >&2; exit 7; }
+
 # Do not publish an untested snapshot-store implementation, even when this
 # command is called manually rather than through deploy.ps1.
 candidate="$destination"
@@ -27,8 +31,19 @@ actual="$(cd "$candidate" && find outputs scripts tests package.json package-loc
 [[ "$actual" == "$(cat "$proof")" ]] || { echo "QA dokazilo ne pripada vsebini kandidata." >&2; exit 5; }
 
 # Verified off-site recovery snapshot before the production switch.
+# Wait for an existing scheduled run, then request a fresh deployment copy.
+while [[ "$(systemctl show indus-ure-backup.service -p ActiveState --value)" =~ ^(active|activating|deactivating)$ ]]; do sleep 1; done
+backup_started="$(date +%s)"
 systemctl start indus-ure-backup.service
 [[ "$(systemctl show indus-ure-backup.service -p Result --value)" == success ]] || exit 6
+checkpoint_tool="$candidate/scripts/mark-backup-deployment.js"
+# A code rollback can target a release from before checkpoint marking existed.
+[[ -f "$checkpoint_tool" ]] || checkpoint_tool="$current/scripts/mark-backup-deployment.js"
+if [[ -f "$checkpoint_tool" ]]; then
+  node "$checkpoint_tool" --env-file /etc/indus-ure.env --release "$release" --since "$backup_started"
+else
+  echo "Stari izdaji nimata označevalnika kopij; preverjena recovery kopija ostane po njunem pravilu hrambe." >&2
+fi
 
 if [[ ! -d "$destination" ]]; then
   if [[ ! -d "$staging" || -L "$staging" ]]; then

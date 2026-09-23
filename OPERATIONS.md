@@ -136,6 +136,43 @@ ni del sanitiziranega recovery izvoza; po obnovi se povezava ponovno potrdi.
 
 ## Datoteke po brisanju
 
+### Samodejna lokalna hramba recovery kopij (23. 9. 2026)
+
+Po novi, lokalno in na Google Drive preverjeni kopiji se lokalno ohrani
+zadnja kopija vsakega od zadnjih 7 koledarskih dni (Europe/Ljubljana) in
+zadnje 3 označene kopije pred objavami. Prekrivanje šteje samo enkrat;
+ob začetku obratovanja se vedno ohranijo vsaj 3 razpoložljive popolne kopije.
+To ni trda omejitev velikosti arhivov. Nastavitvi v `/etc/indus-ure.env` sta
+`BACKUP_LOCAL_RETENTION_DAYS=7` in `BACKUP_LOCAL_DEPLOYMENT_COPIES=3` (privzeto,
+minimuma 7 in 3). Google Drive hramba ostaja nespremenjena: 90 dni.
+
+`deploy-indus-ure` po uspešnem pre-deploy backupu in pred preklopom kodo
+kopije označi z `<archive>.deployment.json`. Ta vsebuje ime, SHA-256 in ciljno
+izdajo, ne skrivnosti. Nova oznaka lahko do naslednjega uspešnega backupa
+začasno poveča število zaščitenih kopij s 3 na 4. Takrat se presežna oznaka
+odstrani skupaj z arhivom, razen če ga ohranja dnevno pravilo.
+
+Čiščenje preveri SHA-256 vseh ohranjenih arhivov pred prvim brisanjem.
+Dotakne se samo popolnih prepoznanih arhivov neposredno v `BACKUP_DIR`
+ter njihovih kontrolnih datotek/oznak; ročne kopije, podmape, nepopolne
+kopije in neznane datoteke ostanejo. Napačna kontrolna vsota, neveljavna
+oznaka ali konflikt zaklepa ustavijo čiščenje in sprožijo obstoječe opozorilo
+backupa. Dnevnik `indus_backup_runs.data.localRetention` vsebuje seznam
+ohranjenih/odstranjenih kopij ter sproščene bajte.
+
+Backup ima PostgreSQL advisory lock proti sočasnim zagonom, označevanje in
+lokalno čiščenje pa skupni `.retention-lock`. Po nasilni prekinitvi lahko ta
+mapa ostane: odstrani jo samo po preverjanju, da noben backup ali deploy
+ne teče. Samodejnega nasilnega odstranjevanja zaklepa ni.
+
+Za pregled brez brisanja uporabi `node scripts/backup-retention.js --inspect
+<BACKUP_DIR>`; ločen nezaščiten ukaz za brisanje ne obstaja.
+Stare preverjene kopije pred objavami se ob uvedbi lahko označijo z
+`scripts/mark-backup-deployment.js --directory <BACKUP_DIR> --release <git-id>
+--archive <točno-ime-arhiva>`. Tudi ta korak preveri SHA-256 in ničesar ne briše.
+
+### Mediji aplikacije
+
 Brisanje metapodatkov je transakcijsko. `save()` po COMMIT ne briše fizične
 datoteke: drug zapis jo lahko medtem znova uporabi. Običajno datoteko varuje
 že content-addressed ključ; Undo dodatno zadrži potrebne metapodatke.

@@ -12,6 +12,7 @@ const { promisify } = require("util");
 const { Pool } = require("pg");
 const { google } = require("googleapis");
 const nodemailer = require("nodemailer");
+const { retentionPolicy, retainLocal } = require("./backup-retention");
 
 const execFileAsync = promisify(execFile);
 const DATABASE_URL = process.env.DATABASE_URL || "";
@@ -23,7 +24,6 @@ const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || "";
 const GOOGLE_REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI || "";
 const OWNER_EMAIL = String(process.env.GOOGLE_DRIVE_OWNER_EMAIL || "bojan@indus.si").trim().toLowerCase();
 const PARENT_FOLDER_ID = String(process.env.GOOGLE_DRIVE_BACKUP_PARENT_FOLDER_ID || process.env.GOOGLE_DRIVE_TASKS_FOLDER_ID || "").trim();
-const LOCAL_RETENTION_DAYS = Math.max(7, Number(process.env.BACKUP_LOCAL_RETENTION_DAYS || 30));
 const OFFSITE_RETENTION_DAYS = Math.max(30, Number(process.env.BACKUP_OFFSITE_RETENTION_DAYS || 90));
 const ALERT_SMTP_URL = String(process.env.ALERT_SMTP_URL || "").trim();
 const ALERT_EMAIL_FROM = String(process.env.ALERT_EMAIL_FROM || "").trim();
@@ -254,20 +254,14 @@ async function retainDrive(drive, folderId) {
   const expiredIds = new Set(files.filter((file) => file.appProperties?.purpose === PURPOSE.archive && new Date(file.createdTime || 0).getTime() < cutoff).map((file) => file.appProperties?.backupId).filter(Boolean));
   for (const file of files.filter((file) => expiredIds.has(file.appProperties?.backupId))) await drive.files.delete({ fileId: file.id });
 }
-async function retainLocal() {
-  const cutoff = Date.now() - LOCAL_RETENTION_DAYS * 86400000;
-  for (const item of await fsp.readdir(BACKUP_DIR, { withFileTypes: true })) {
-    if (!item.isFile() || !/^indus-ure-recovery-.*\.tar\.gz(?:\.sha256)?$/.test(item.name)) continue;
-    const file = path.join(BACKUP_DIR, item.name);
-    if ((await fsp.stat(file)).mtimeMs < cutoff) await fsp.rm(file, { force: true });
-  }
-}
-
 async function main() {
   const id = `backup-${stamp()}-${crypto.randomBytes(4).toString("hex")}`;
-  const pool = poolForDatabase(); let work = "";
+  const pool = poolForDatabase(); let work = "", backupLock = null;
   try {
     requireConfig();
+    const localRetentionPolicy = retentionPolicy();
+    backupLock = await pool.connect();
+    if (!(await backupLock.query("select pg_try_advisory_lock(hashtext('indus-ure-recovery-backup')) as locked")).rows[0].locked) throw new Error("Druga varnostna kopija že poteka.");
     await ensureTables(pool);
     await fsp.mkdir(BACKUP_DIR, { recursive: true, mode: 0o700 });
     work = await fsp.mkdtemp(path.join(BACKUP_DIR, ".working-"));
@@ -293,8 +287,9 @@ async function main() {
       upload(drive, folderId, archive, PURPOSE.archive, id), upload(drive, folderId, checksumPath, PURPOSE.checksum, id, "text/plain"), upsertInstructions(drive, folderId, guide)
     ]);
     const [archiveCheck, checksumCheck] = await Promise.all([verifyDrive(drive, folderId, archive, remoteArchive), verifyDrive(drive, folderId, checksumPath, remoteChecksum)]);
-    await retainDrive(drive, folderId); await retainLocal();
     const result = { id, status: "success", createdAt: manifest.createdAt, recoveryFile: path.basename(archive), checksumFile: path.basename(checksumPath), bytes: archiveCheck.bytes, sha256: checksum, driveFileId: archiveCheck.id, driveChecksumFileId: checksumCheck.id, driveFolderId: folderId, verified: { localArchive: true, driveSize: true, driveMd5: true, freshDriveRead: true, restoreInstructions: Boolean(instructions.id) } };
+    await retainDrive(drive, folderId);
+    result.localRetention = await retainLocal(BACKUP_DIR, { verifiedBackup: result, policy: localRetentionPolicy });
     await recordRun(pool, id, "success", result); await clearBackupAlerts(pool); process.stdout.write(`${JSON.stringify(result)}\n`);
   } catch (error) {
     const result = { id, status: "failed", finishedAt: new Date().toISOString(), error: error.message || String(error) };
@@ -304,6 +299,10 @@ async function main() {
     process.stderr.write(`INDUS URE backup failed: ${result.error}\n`); process.exitCode = 1;
   } finally {
     if (work) await fsp.rm(work, { recursive: true, force: true }).catch(() => {});
+    if (backupLock) {
+      await backupLock.query("select pg_advisory_unlock(hashtext('indus-ure-recovery-backup'))").catch(() => {});
+      backupLock.release();
+    }
     await pool.end().catch(() => {});
   }
 }
