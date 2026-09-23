@@ -272,6 +272,23 @@ test("šef lahko v poročilu neposredno spremeni obračunska polja, potrjen obra
     const afterHours = JSON.parse(hours.body).todos.filter((todo) => String(todo.assignmentGroupId || todo.id) === eventId);
     assert.ok(afterHours.every((todo) => todo.clientBillableMinutes === 135));
 
+    const material = await request(port, `/api/todos/${encodeURIComponent(created.id)}/client-billing-fields`, {
+      method: "POST", headers: bojan, body: JSON.stringify({ material: "2x kabel, 1x rele", baseUpdatedAt: afterHours[0].updatedAt })
+    });
+    assert.equal(material.status, 200, material.body);
+    const materialTodo = JSON.parse(material.body).todos.find(todo => todo.id === created.id);
+    assert.equal(materialTodo.material, "2x kabel, 1x rele");
+    assert.equal(materialTodo.start, created.start);
+    assert.equal(materialTodo.end, created.end);
+    const staleMaterial = await request(port, `/api/todos/${encodeURIComponent(created.id)}/client-billing-fields`, {
+      method: "POST", headers: bojan, body: JSON.stringify({ material: "Stale", baseUpdatedAt: created.updatedAt })
+    });
+    assert.equal(staleMaterial.status, 409);
+    const workerMaterial = await request(port, `/api/todos/${encodeURIComponent(created.id)}/client-billing-fields`, {
+      method: "POST", headers: ibro, body: JSON.stringify({ material: "Forbidden" })
+    });
+    assert.equal(workerMaterial.status, 403);
+
     const forbidden = await request(port, `/api/todos/${encodeURIComponent(created.id)}/client-billing-fields`, {
       method: "POST", headers: ibro, body: JSON.stringify({ clientKm: 12 })
     });
@@ -293,6 +310,10 @@ test("šef lahko v poročilu neposredno spremeni obračunska polja, potrjen obra
     });
     assert.equal(locked.status, 403, locked.body);
     assert.match(JSON.parse(locked.body).error, /zaklenjen/);
+    const lockedMaterial = await request(port, `/api/todos/${encodeURIComponent(created.id)}/client-billing-fields`, {
+      method: "POST", headers: bojan, body: JSON.stringify({ material: "Locked" })
+    });
+    assert.equal(lockedMaterial.status, 403);
   } finally {
     await stop(child);
     await fs.rm(dataDir, { recursive: true, force: true });

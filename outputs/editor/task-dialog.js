@@ -263,6 +263,9 @@ async function openTodoDialog(todo = {}, { reportNavigationIds = null } = {}) {
       // The content now scrolls independently of the dialog/header. Do not
       // carry the previous entry's scroll position into a newly opened form.
       $("todoDialog").showModal();
+      // Focus the shell immediately, before the user can tap a field. A late
+      // animation-frame focus would steal their input and close suggestions.
+      $("todoDialog").focus({ preventScroll: true });
       $("todoDialogScroll").scrollTop = 0;
       if (editing) {
         // The edit lock protects writes, not reading the form.  Showing the
@@ -310,7 +313,6 @@ async function openTodoDialog(todo = {}, { reportNavigationIds = null } = {}) {
         void clearTodoChangeNoticeAfterOpen(todo).catch((error) => console.warn("Oznake spremembe ni bilo mogoče označiti kot prebrano:", error));
       }
       if (state.todoCreationDraftRestored) showNotice("Nedokončan osnutek je obnovljen.");
-      requestAnimationFrame(() => $("todoDialog").focus({ preventScroll: true }));
       return true;
     }
 

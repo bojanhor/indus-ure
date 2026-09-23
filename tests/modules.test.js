@@ -11,6 +11,24 @@ const { createAttachmentModel } = require("../outputs/attachment-model");
 const { createPayrollRules } = require("../outputs/payroll-rules");
 const { renderAppShell } = require("../outputs/app-shell");
 
+test("contact links recognize phones, emails and URLs without linking dates, amounts, tax IDs or executable markup", () => {
+  const context = vm.createContext({ URL });
+  vm.runInContext(fs.readFileSync(path.join(__dirname, "../outputs/editor/contact-links.js"), "utf8"), context);
+  const escapeHtml = value => String(value).replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
+  const links = context.createContactLinks({ escapeHtml });
+  const html = links.render('041 123 456; +386 (0)41 234 567; servis@example.si; https://example.si/a?q=1&b=2; www.example.si.');
+  assert.match(html, /href="tel:041123456"/);
+  assert.match(html, /href="tel:\+38641234567"/);
+  assert.match(html, /href="mailto:servis@example.si"/);
+  assert.match(html, /href="https:\/\/www.example.si"/);
+  assert.match(html, /q=1&amp;b=2/);
+  assert.match(html, /rel="noopener noreferrer"/);
+  for (const value of ['23. 9. 2026', '2026-09-23', '08:00-09:00', '12345678', '1500,00 EUR', '1,5 h', 'javascript:alert(1)', '<img src=x onerror="alert(1)">']) {
+    assert.equal(links.matches(value).length, 0, value);
+    assert.doesNotMatch(links.render(value), /<img|<script|href=/);
+  }
+});
+
 function storageFixture(t) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "indus-module-test-"));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));

@@ -181,7 +181,7 @@ function clientReportDownloadPayload(input = {}) {
     to: isDateKey(input.to) ? String(input.to) : "",
     eventIds: cleanList(input.eventIds),
     attachmentIds: cleanList(input.attachmentIds),
-    exportOptions: { hoursMode: "client_billable" }
+    exportOptions: { ...clientReportExportOptions(input.exportOptions), hoursMode: "client_billable", heading: "" }
   };
 }
 
@@ -355,18 +355,19 @@ function clientReportExportOptions(input = {}) {
     ? String(input.hoursMode)
     : "client_billable";
   const heading = String(input?.heading || "").trim().slice(0, 120);
-  return { hoursMode, heading };
+  return { hoursMode, heading, showWorkerTitle: input?.showWorkerTitle !== false, showWorkerName: input?.showWorkerName !== false, showHours: input?.showHours !== false, showDates: input?.showDates !== false };
 }
 
-function reportPdfAssigneeTitle(db, todo) {
+function reportPdfAssigneeTitle(db, todo, options = {}) {
   const worker = db.users?.[todo?.syncUser || todo?.createdBy] || {};
   const title = String(worker.billing?.exportTitle || "").trim() || "Izvajalec";
   const name = String(worker.name || todo?.updatedByName || todo?.createdByName || "").trim();
-  return name ? `${title} (${name})` : title;
+  if (options.showWorkerTitle === false) return options.showWorkerName === false ? "" : name;
+  return name && options.showWorkerName !== false ? `${title} (${name})` : title;
 }
 
-function reportPdfAssignees(db, todos) {
-  return [...new Set((todos || []).map((todo) => reportPdfAssigneeTitle(db, todo)))].join(", ");
+function reportPdfAssignees(db, todos, options = {}) {
+  return [...new Set((todos || []).map((todo) => reportPdfAssigneeTitle(db, todo, options)).filter(Boolean))].join(", ");
 }
 
 function reportPdfVehicleLabel(vehicle) {
@@ -494,10 +495,10 @@ function buildClientReportPdf(db, report, attachments = [], exportOptions = {}) 
         const workerHours = warranty || materialEntry || noteEntry ? 0 : Number((group.todos || []).reduce((sum, item) => sum + todoDurationHours(item), 0).toFixed(2));
         const hours = options.hoursMode === "client_billable" ? clientBillableHours : workerHours;
         const clientKm = warranty || materialEntry || noteEntry ? 0 : Math.max(0, Number(todo.clientKm || 0));
-        doc.font(reportPdfFontPath('bold')).fontSize(13).fillColor('#143b34').text(reportPdfDate(todo.date));
+        if (options.showDates) doc.font(reportPdfFontPath('bold')).fontSize(13).fillColor('#143b34').text(reportPdfDate(todo.date));
         doc.font(reportPdfFontPath('bold')).fontSize(12).fillColor('#161f20').text(String(todo.title || 'Brez naziva'));
         doc.font(reportPdfFontPath()).fontSize(10).fillColor('#263634');
-        if (!materialEntry && !noteEntry) reportPdfLine(doc, 'Izvajalec', reportPdfAssignees(db, group.todos));
+        if (!materialEntry && !noteEntry && (options.showWorkerTitle || options.showWorkerName)) reportPdfLine(doc, 'Izvajalec', reportPdfAssignees(db, group.todos, options));
         if (options.hoursMode === "worker_time" && !materialEntry && !noteEntry) {
           const workerTimes = (group.todos || []).filter((item) => item.start && item.end)
             .map((item) => reportPdfAssigneeTitle(db, item) + ': ' + item.start + '-' + item.end).join(', ');
@@ -506,7 +507,7 @@ function buildClientReportPdf(db, report, attachments = [], exportOptions = {}) 
         if (materialEntry) reportPdfLine(doc, todo.externalDelivery ? 'Dostava' : 'Vrsta vpisa', todo.externalDelivery ? 'Material je neposredno dostavil zunanji dobavitelj.' : 'Material brez izvajalca.');
         if (noteEntry) reportPdfLine(doc, 'Vrsta vpisa', 'Zapisek brez obračuna ur in kilometrine.');
         if (warranty) reportPdfLine(doc, 'Garancija', 'Storitev se ne obra\u010dunava stranki.');
-        if (hours) reportPdfLine(doc, options.hoursMode === "client_billable" ? 'Za obra\u010dun' : 'Ure izvajalcev', hours.toLocaleString('sl-SI', { maximumFractionDigits: 2 }) + ' h');
+        if (options.showHours && hours) reportPdfLine(doc, options.hoursMode === "client_billable" ? 'Za obra\u010dun' : 'Ure izvajalcev', hours.toLocaleString('sl-SI', { maximumFractionDigits: 2 }) + ' h');
         if (clientKm) reportPdfLine(doc, 'Stro\u0161ki prevoza (obe smeri)', `${reportPdfVehicleLabel(todo.clientVehicle)} - ${clientKm.toLocaleString('sl-SI', { maximumFractionDigits: 1 })} km`);
         if (todo.notes) reportPdfLine(doc, 'Opis del', todo.notes);
         if (todo.material) reportPdfLine(doc, 'Material', todo.material);
@@ -543,13 +544,13 @@ function buildClientReportPdf(db, report, attachments = [], exportOptions = {}) 
       }, 0);
       reportPdfEnsureSpace(doc, 105);
       doc.moveDown(0.4);
-      doc.font(reportPdfFontPath('bold')).fontSize(13).fillColor('#0d536b').text(options.hoursMode === "client_billable" ? 'Ure za obra\u010dun' : 'Ure izvajalcev');
-      if (options.hoursMode !== "client_billable" && workerHoursByWorker.size) {
+      if (options.showHours) doc.font(reportPdfFontPath('bold')).fontSize(13).fillColor('#0d536b').text(options.hoursMode === "client_billable" ? 'Ure za obra\u010dun' : 'Ure izvajalcev');
+      if (options.showHours && options.hoursMode !== "client_billable" && workerHoursByWorker.size) {
         [...workerHoursByWorker.entries()].sort(([left], [right]) => left.localeCompare(right, 'sl')).forEach(([label, hours]) => {
           reportPdfLine(doc, label, hours.toLocaleString('sl-SI', { maximumFractionDigits: 2 }) + ' h');
         });
       }
-      reportPdfLine(doc, 'Skupaj', totalHours.toLocaleString('sl-SI', { maximumFractionDigits: 2 }) + ' h');
+      if (options.showHours) reportPdfLine(doc, 'Skupaj', totalHours.toLocaleString('sl-SI', { maximumFractionDigits: 2 }) + ' h');
       if (travel.personal || travel.van) {
         doc.moveDown(0.35);
         doc.font(reportPdfFontPath('bold')).fontSize(13).fillColor('#0d536b').text('Skupaj prevoza');
@@ -590,7 +591,7 @@ async function sendClientReportPdf(res, db, body) {
   }
   let pdf;
   try {
-    pdf = await buildClientReportPdf(db, report, attachments, { hoursMode: "client_billable" });
+    pdf = await buildClientReportPdf(db, report, attachments, { ...clientReportExportOptions(body.exportOptions), hoursMode: "client_billable", heading: "" });
   } catch (error) {
     console.error("PDF poročila ni bilo mogoče ustvariti:", error?.message || error);
     sendJson(res, 500, { error: "PDF poročila ni bilo mogoče pripraviti. Poskusi znova." });
@@ -1134,7 +1135,7 @@ async function handleReportDownloads(req, res, url) {
       }
       const requestedAttachments = clientReportAttachmentSelection(report, body.attachmentIds);
       const attachments = await loadClientReportAttachments(db, requestedAttachments, { destination: "PDF" });
-      const pdf = await buildClientReportPdf(db, report, attachments, { hoursMode: "client_billable" });
+      const pdf = await buildClientReportPdf(db, report, attachments, { ...clientReportExportOptions(body.exportOptions), hoursMode: "client_billable", heading: "" });
       const filename = clientReportFilename(report.client);
       res.writeHead(200, securityHeaders({
         "Content-Type": "application/pdf",
@@ -1180,7 +1181,7 @@ async function handleReportDownloads(req, res, url) {
         maxTotalBytes: moduleValues.REPORT_GMAIL_MAX_TOTAL_BYTES,
         destination: "Gmail"
       });
-      const pdf = await buildClientReportPdf(db, report, attachments, { hoursMode: "client_billable" });
+      const pdf = await buildClientReportPdf(db, report, attachments, { ...clientReportExportOptions(body.exportOptions), hoursMode: "client_billable", heading: "" });
       const filename = clientReportFilename(report.client);
       try {
         const { google } = require("googleapis");

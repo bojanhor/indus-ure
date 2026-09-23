@@ -12,6 +12,15 @@ async function login(page, user = "bojan") {
   await expect(page.locator("#app")).toBeVisible();
 }
 
+async function selectWorkers(page, pickerId, ids) {
+  const picker = page.locator(`#${pickerId}`);
+  if (!await picker.evaluate(el => el.open)) await picker.locator("summary").click();
+  const all = picker.locator('[data-calendar-worker-id=""]');
+  if (ids === null) { await all.check(); return; }
+  await all.check(); await all.uncheck();
+  for (const id of ids) await picker.locator(`[data-calendar-worker-id="${id}"]`).check();
+}
+
 test("boss calendar filters external workers, grouped planning and recorded hours; worker view stays independent", async ({ page, browser }) => {
   await login(page);
   const external = await page.evaluate(async () => {
@@ -40,7 +49,7 @@ test("boss calendar filters external workers, grouped planning and recorded hour
   await expect(cards.filter({ hasText: "Shared planning QA" })).toHaveCount(1);
   await expect(cards.filter({ hasText: "Shared planning QA" }).locator(".day-todo-worker")).toContainText("Ibro");
   await expect(cards.filter({ hasText: "Shared planning QA" }).locator(".day-todo-worker")).toContainText(external.name);
-  await page.locator("#calendarWorkerFilter").selectOption(external.id);
+  await selectWorkers(page, "calendarWorkerFilter", [external.id]);
   await expect(cards.filter({ hasText: "Bojan planning QA" })).toHaveCount(0);
   await expect(cards.filter({ hasText: "Ibro planning QA" })).toHaveCount(0);
   await expect(cards.filter({ hasText: "Shared planning QA" })).toHaveCount(1);
@@ -63,12 +72,12 @@ test("boss calendar filters external workers, grouped planning and recorded hour
   await expect(page.locator("#dayTimelineFit")).toHaveText("15h");
   await expect(page.locator("#dayTimelineZoomIn svg")).toHaveCount(1);
   await expect(page.locator("#dayTimelineZoomOut svg")).toHaveCount(1);
-  await page.locator("#dayTimelineWorkerFilter").selectOption("bojan");
+  await selectWorkers(page, "dayTimelineWorkerFilter", ["bojan"]);
   await expect(events).toHaveCount(1);
   await expect(events).toContainText("Bojan planning QA");
-  await expect(page.locator("#calendarWorkerFilter")).toHaveValue("bojan");
+  await expect(page.locator('#calendarWorkerFilter [data-calendar-worker-id="bojan"]')).toBeChecked();
   await expect(page.locator("#dayTimelineFit")).toHaveText("15h");
-  await page.locator("#dayTimelineWorkerFilter").selectOption(external.id);
+  await selectWorkers(page, "dayTimelineWorkerFilter", [external.id]);
   await expect(events).toHaveCount(3);
   await page.locator("#dayTimelineFit").click();
   await expect(page.locator("#dayTimelineFit")).toHaveText("24h");
@@ -78,9 +87,11 @@ test("boss calendar filters external workers, grouped planning and recorded hour
     saveDayTimelineDraft(todo, "08:15", "09:15", todo.date);
     renderDayTimeline();
   });
-  await page.locator("#dayTimelineWorkerFilter").selectOption("bojan");
+  if (!await page.locator("#dayTimelineWorkerFilter").evaluate(el => el.open)) await page.locator("#dayTimelineWorkerFilter summary").click();
+  await page.locator('#dayTimelineWorkerFilter [data-calendar-worker-id="bojan"]').click();
   await expect(page.getByText("Najprej shrani ali prekliči spremembe dnevne časovnice.", { exact: true })).toBeVisible();
-  await expect(page.locator("#dayTimelineWorkerFilter")).toHaveValue(external.id);
+  await expect(page.locator(`#dayTimelineWorkerFilter [data-calendar-worker-id="${external.id}"]`)).toBeChecked();
+  await expect(page.locator('#dayTimelineWorkerFilter [data-calendar-worker-id="bojan"]')).not.toBeChecked();
   expect(await page.evaluate(() => state.dayTimelineDrafts.size)).toBe(1);
   await page.locator("#dayTimelineDialog .modal-global-notice").getByRole("button", { name: "Zapri obvestilo" }).click();
   await page.evaluate(() => {
@@ -94,7 +105,7 @@ test("boss calendar filters external workers, grouped planning and recorded hour
   await page.reload();
   await expect(page.locator("#app")).toBeVisible();
   await page.evaluate(() => { state.current = new Date(2032, 3, 1); setView("calendar"); renderMonth(); });
-  await expect(page.locator("#calendarWorkerFilter")).toHaveValue(external.id);
+  await expect(page.locator(`#calendarWorkerFilter [data-calendar-worker-id="${external.id}"]`)).toBeChecked();
   await expect(page.locator("#calendarCompletedFilter")).toBeChecked();
   await expect(cards.filter({ hasText: "Bojan planning QA" })).toHaveCount(0);
   await page.evaluate(() => setWorkContext("worker:ibro"));
@@ -102,8 +113,20 @@ test("boss calendar filters external workers, grouped planning and recorded hour
   await expect(cards.filter({ hasText: "Ibro planning QA" })).toHaveCount(1);
   await expect(page.locator("#calendar .day-todo-worker")).toHaveCount(0);
   await page.evaluate(() => setWorkContext("admin"));
-  await expect(page.locator("#calendarWorkerFilter")).toHaveValue(external.id);
-  await page.locator("#calendarWorkerFilter").selectOption("");
+  await expect(page.locator(`#calendarWorkerFilter [data-calendar-worker-id="${external.id}"]`)).toBeChecked();
+  await selectWorkers(page, "calendarWorkerFilter", [external.id, "bojan"]);
+  await expect(cards.filter({ hasText: "Bojan planning QA" })).toHaveCount(1);
+  await expect(cards.filter({ hasText: "Ibro planning QA" })).toHaveCount(0);
+  await expect(cards.filter({ hasText: "Shared planning QA" })).toHaveCount(1);
+  await page.waitForLoadState("networkidle");
+  await page.reload(); await expect(page.locator("#app")).toBeVisible();
+  await page.evaluate(() => { state.current = new Date(2032, 3, 1); setView("calendar"); renderMonth(); });
+  await expect(page.locator('#calendarWorkerFilter [data-calendar-worker-id="bojan"]')).toBeChecked();
+  await expect(page.locator(`#calendarWorkerFilter [data-calendar-worker-id="${external.id}"]`)).toBeChecked();
+  await expect(page.locator('#calendarWorkerFilter [data-calendar-worker-id="ibro"]')).not.toBeChecked();
+  await selectWorkers(page, "calendarWorkerFilter", []);
+  await expect(cards).toHaveCount(0);
+  await selectWorkers(page, "calendarWorkerFilter", null);
   await expect(cards.filter({ hasText: "Bojan planning QA" })).toHaveCount(1);
 
   const context = await browser.newContext();

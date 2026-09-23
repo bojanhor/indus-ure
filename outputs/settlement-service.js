@@ -1121,7 +1121,7 @@ async function handleClientBillingFields(req, res, url) {
       }
       const id = decodeURIComponent(todoClientBillingFieldsMatch[1]);
       const body = await readBody(req);
-      const editableFields = ["title", "notes", "clientBillableHours", "clientKm"];
+      const editableFields = ["title", "notes", "material", "clientBillableHours", "clientKm"];
       const requested = editableFields.filter((field) => Object.hasOwn(body, field));
       if (requested.length !== 1) {
         sendJson(res, 400, { error: "Izberi natanko eno polje za hitro urejanje." });
@@ -1159,8 +1159,8 @@ async function handleClientBillingFields(req, res, url) {
           return true;
         }
         changes.title = title;
-      } else if (field === "notes") {
-        changes.notes = capitalizeTodoText(String(body.notes || "").slice(0, 10_000));
+      } else if (field === "notes" || field === "material") {
+        changes[field] = capitalizeTodoText(String(body[field] || "").slice(0, 10_000));
       } else {
         if (String(previousTodo.status || "") !== "execution") {
           sendJson(res, 409, { error: "Ure in strošek prevoza sta na voljo samo pri izvedeni storitvi." });
@@ -1183,6 +1183,7 @@ async function handleClientBillingFields(req, res, url) {
       const actionLabels = {
         title: "naslov",
         notes: "opis del",
+        material: "material",
         clientBillableHours: "ure za obračun",
         clientKm: "strošek prevoza"
       };

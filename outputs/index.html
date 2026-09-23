@@ -1701,12 +1701,22 @@
     }
 
     a.inline-url:visited { color: #551a8b; }
+    a.inline-url { -webkit-touch-callout: default; user-select: text; -webkit-user-select: text; }
+    .field-contact-links { display: flex; flex-wrap: wrap; gap: 6px 12px; margin-top: 4px; font-size: 13px; max-width: 100%; }
+    .field-contact-links a { padding: 5px 0; min-width: 0; overflow-wrap: anywhere; }
+    .hidden + .field-contact-links { display: none; }
 
     .todo-item.urgent { border-left: 4px solid #d93025; }
     .client-billing-return-marker { border-top: 4px solid var(--accent); margin: 12px 0; color: var(--accent); font-size: 12px; padding-top: 4px; }
     .client-billing-row.is-reassigned { background: #e5f3ee; box-shadow: inset 4px 0 #24745c; }
     .report-client-transfer { display: flex; align-items: end; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
     .report-client-transfer label { flex: 1 1 220px; }
+    .report-client-transfer .client-autocomplete { flex: 1 1 300px; }
+    .report-client-transfer input { display: block; width: 100%; min-height: 42px; padding: 9px 11px; border: 1px solid var(--line); border-radius: 8px; font: inherit; }
+    .report-export-settings { display: grid; gap: 16px; padding: 16px 20px; }
+    #reportExportSettingsDialog .todo-meta { margin: 0 20px 18px; }
+    .report-export-settings label { display: flex; align-items: center; gap: 10px; }
+    .report-export-settings input { width: 20px; height: 20px; }
     .client-autocomplete-row { display: flex; align-items: stretch; }
     .client-autocomplete-row .client-autocomplete-option { flex: 1; min-width: 0; }
     .client-autocomplete-edit { flex: 0 0 44px; min-height: 44px; padding: 8px; border-radius: 6px; }
@@ -2903,7 +2913,11 @@
 
     .calendar-filters { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 24px; padding: 10px 12px 6px; }
     .calendar-worker-filter { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; font-size: 13px; }
-    .calendar-worker-filter select { width: auto; min-width: 170px; max-width: min(260px, calc(100vw - 110px)); padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--ink); font: inherit; }
+    .calendar-worker-picker { position: relative; min-width: 170px; max-width: min(280px, calc(100vw - 110px)); }
+    .calendar-worker-picker summary { padding: 9px 12px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--ink); cursor: pointer; overflow-wrap: anywhere; }
+    .calendar-worker-choices { position: absolute; top: calc(100% + 4px); right: 0; z-index: 180; width: max-content; min-width: 100%; max-width: min(320px, calc(100vw - 40px)); max-height: 40vh; overflow-y: auto; overscroll-behavior: contain; padding: 5px; background: #fff; border: 1px solid var(--line); border-radius: 9px; box-shadow: 0 10px 25px #16372c30; }
+    .calendar-worker-choices label { display: flex; align-items: center; gap: 9px; padding: 10px; font-size: 14px; cursor: pointer; }
+    .calendar-worker-choices input { width: 19px; height: 19px; min-height: 0; margin: 0; flex: 0 0 19px; }
     .day-todo-worker { margin-left: 6px; font-weight: 600; overflow-wrap: anywhere; }
 
     .calendar-completed-filter {
@@ -5964,6 +5978,7 @@
             </select>
           </label>
           <button class="secondary" id="clearReportClient" type="button">Po&#269;isti iskanje</button>
+          <button class="secondary" id="reportExportSettings" type="button">Nastavitve PDF</button>
         </div>
         <p class="todo-meta client-billing-notice" id="reportBillingNotice"></p>
         <div class="client-billing-summary" id="reportSummary"></div>
@@ -5972,7 +5987,7 @@
             <div>
               <strong id="clientDetailTitle">Zaklju&#269;ene storitve</strong>
               <div id="reportClientTransfer" class="report-client-transfer hidden">
-                <label>Stranka za označene vpise<input id="bulkClientTarget" type="text" list="clientList" autocomplete="off" maxlength="240" placeholder="Naziv ali vzdevek, tudi adhoc"></label>
+                <div class="client-autocomplete" id="bulkClientAutocomplete"><label for="bulkClientTarget">Stranka za označene vpise</label><input id="bulkClientTarget" type="text" role="combobox" aria-autocomplete="list" aria-controls="bulkClientSuggestions" aria-expanded="false" autocomplete="off" maxlength="240" placeholder="Naziv ali vzdevek, tudi adhoc"><div id="bulkClientSuggestions" class="client-autocomplete-list hidden" role="listbox" aria-label="Stranke za prestavitev"></div></div>
                 <button class="secondary" id="bulkChangeReportClient" type="button">Prestavi označene</button>
               </div>
               <span class="todo-meta" id="clientDetailRange"></span>
@@ -5986,9 +6001,9 @@
       <section class="panel calendar-shell calendar-view">
         <div class="calendar-filters">
           <label class="calendar-completed-filter"><input id="calendarCompletedFilter" type="checkbox">Prikazuj tudi zaključene</label>
-          <label class="calendar-worker-filter hidden" id="calendarWorkerFilterField">Izvajalec
-            <select id="calendarWorkerFilter" aria-label="Izvajalec v koledarju"><option value="">Vsi izvajalci</option></select>
-          </label>
+          <div class="calendar-worker-filter hidden" id="calendarWorkerFilterField">Izvajalci
+            <details id="calendarWorkerFilter" class="calendar-worker-picker"><summary aria-label="Izvajalci v koledarju">Vsi izvajalci</summary><div class="calendar-worker-choices"></div></details>
+          </div>
         </div>
         <div class="weekdays">
           <div>Pon</div>
@@ -6005,6 +6020,19 @@
   </div>
 
   <div class="offline-sync-notice hidden" id="offlineSyncNotice" role="status"></div>
+
+  <dialog id="reportExportSettingsDialog">
+    <form method="dialog">
+      <div class="modal-head"><h3>Nastavitve PDF poročila</h3><button type="button" class="icon-btn" id="closeReportExportSettings" aria-label="Zapri nastavitve PDF">&times;</button></div>
+      <div class="report-export-settings">
+        <label><input type="checkbox" data-report-option="showWorkerTitle">Prikaži naziv izvajalca</label>
+        <label><input type="checkbox" data-report-option="showWorkerName">Prikaži vzdevek izvajalca</label>
+        <label><input type="checkbox" data-report-option="showHours">Prikaži št. delovnih ur</label>
+        <label><input type="checkbox" data-report-option="showDates">Prikaži datume vpisov</label>
+      </div>
+      <p class="todo-meta">Ure v PDF so obračunske ure za stranko. Izbor se samodejno shrani za trenutni kontekst; podatkov vpisov ne spreminja.</p>
+    </form>
+  </dialog>
 
   <dialog id="dayTimelineDialog">
     <form method="dialog">
@@ -6025,9 +6053,9 @@
           <button class="secondary zoom-step day-timeline-control" id="dayTimelineZoomIn" type="button" title="Pove&#269;aj &#269;asovnico" aria-label="Pove&#269;aj &#269;asovnico"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10" cy="10" r="7"/><path d="m15 15 6 6M7 10h6M10 7v6"/></svg></button>
           <button class="secondary day-timeline-control" id="dayTimelineFit" type="button" title="Prika&#382;i vseh 24 ur" aria-label="Prika&#382;i vseh 24 ur">24h</button>
         </div>
-        <label class="calendar-worker-filter hidden" id="dayTimelineWorkerFilterField">Izvajalec
-          <select id="dayTimelineWorkerFilter" class="day-timeline-control" aria-label="Izvajalec v dnevnem koledarju"><option value="">Vsi izvajalci</option></select>
-        </label>
+        <div class="calendar-worker-filter hidden" id="dayTimelineWorkerFilterField">Izvajalci
+          <details id="dayTimelineWorkerFilter" class="calendar-worker-picker"><summary aria-label="Izvajalci v dnevnem koledarju">Vsi izvajalci</summary><div class="calendar-worker-choices"></div></details>
+        </div>
       </div>
       <div class="day-all-day hidden" id="dayAllDay">
         <span class="day-all-day-label">VES DAN</span>
@@ -7058,7 +7086,7 @@ const state = {
       showBilledCompletedTodos: false,
       showUnbilledCompletedTodos: true,
       showCompletedCalendarTodos: false,
-      calendarWorkerId: "",
+      calendarWorkerIds: null,
       searchReturnState: null,
       searchIncludeCompleted: false,
       searchIncludeOther: true,
@@ -7087,6 +7115,10 @@ const state = {
     };
 
 const $ = (id) => document.getElementById(id);
+/* @indus-module:editor/contact-links */
+const contactLinks = createContactLinks({ escapeHtml });
+contactLinks.install();
+
 /* @indus-module:editor/app-config */
 const { openTechnicalConfig, installAppConfigBindings } = createAppConfigEditor({ $, api: (...args) => api(...args), showAppConfirm: (...args) => showAppConfirm(...args), showNotice: (...args) => showNotice(...args) });
 installAppConfigBindings();
@@ -7590,6 +7622,8 @@ const {
 } = createClientBilling({
     $,
     state,
+    clientSuggestionValues: (...args) => clientSuggestionValues(...args),
+    openClientEditDialog: (...args) => openClientEditDialog(...args),
     activeWorkerId: (...args) => activeWorkerId(...args),
     api: (...args) => api(...args),
     attachmentDisplayName: (...args) => attachmentDisplayName(...args),
@@ -7634,6 +7668,7 @@ const {
     withClientLookupSnapshot: (...args) => withClientLookupSnapshot(...args),
     moduleValues: {
       get reportClientSortModes() { return reportClientSortModes; },
+      get clientSuggestionLimit() { return appConfig.editor.clientSuggestions; },
       get reportHistoryStateKey() { return reportHistoryStateKey; },
       get reportSearchRenderTimer() { return reportSearchRenderTimer; },
       set reportSearchRenderTimer(value) { reportSearchRenderTimer = value; }
@@ -7767,7 +7802,9 @@ function calendarCompletedFilterStorageKey() {
 function loadCalendarCompletedFilter() {
       state.showCompletedCalendarTodos = localStorage.getItem(calendarCompletedFilterStorageKey()) === "true";
       if ($("calendarCompletedFilter")) $("calendarCompletedFilter").checked = state.showCompletedCalendarTodos;
-      state.calendarWorkerId = localStorage.getItem(calendarWorkerFilterStorageKey()) || "";
+      const saved = localStorage.getItem(calendarWorkerFilterStorageKey()) || "";
+      try { const parsed = JSON.parse(saved); state.calendarWorkerIds = Array.isArray(parsed) ? [...new Set(parsed.filter(id => typeof id === "string" && id))] : null; }
+      catch { state.calendarWorkerIds = saved ? [saved] : null; }
     }
 
 function calendarWorkerFilterStorageKey() {
@@ -7775,7 +7812,7 @@ function calendarWorkerFilterStorageKey() {
     }
 
 function calendarWorkerMatches(todo) {
-      return !isAdminView() || !state.calendarWorkerId || todoAssigneeIds(todo).includes(state.calendarWorkerId);
+      return !isAdminView() || state.calendarWorkerIds === null || todoAssigneeIds(todo).some(id => state.calendarWorkerIds.includes(id));
     }
 
 function renderCalendarWorkerFilter() {
@@ -7788,26 +7825,36 @@ function renderCalendarWorkerFilter() {
       state.todos.forEach(todo => todoAssigneeIds(todo).forEach(id => {
         if (!workers.has(id)) workers.set(id, userDisplayName(id));
       }));
-      if (state.calendarWorkerId && !workers.has(state.calendarWorkerId)) {
-        // A minimal/offline bootstrap may not have loaded the full directory yet.
-        workers.set(state.calendarWorkerId, userDisplayName(state.calendarWorkerId));
-      }
-      const options = [["", "Vsi izvajalci"], ...[...workers].sort((a, b) => a[1].localeCompare(b[1], "sl"))];
-      [$("calendarWorkerFilter"), $("dayTimelineWorkerFilter")].forEach(select => {
-        select.replaceChildren(...options.map(([id, name]) => new Option(name, id)));
-        select.value = state.calendarWorkerId;
+      (state.calendarWorkerIds || []).forEach(id => { if (!workers.has(id)) workers.set(id, userDisplayName(id)); });
+      const all = state.calendarWorkerIds === null;
+      const options = [...workers].sort((a, b) => a[1].localeCompare(b[1], "sl"));
+      const label = all ? "Vsi izvajalci" : !state.calendarWorkerIds.length ? "Nihče" : state.calendarWorkerIds.map(id => workers.get(id)).join(", ");
+      [$("calendarWorkerFilter"), $("dayTimelineWorkerFilter")].forEach(picker => {
+        const focus = picker.contains(document.activeElement) ? document.activeElement.dataset.calendarWorkerId : undefined;
+        picker.querySelector("summary").textContent = label;
+        picker.querySelector(".calendar-worker-choices").innerHTML = [["", "Vsi izvajalci"], ...options].map(([id, name]) => `<label><input type="checkbox" data-calendar-worker-id="${escapeHtml(id)}" ${(!id ? all : all || state.calendarWorkerIds.includes(id)) ? "checked" : ""}>${escapeHtml(name)}</label>`).join("");
+        picker.querySelector('[data-calendar-worker-id=""]').indeterminate = !all && state.calendarWorkerIds.length > 0;
+        if (focus !== undefined) picker.querySelector(`[data-calendar-worker-id="${CSS.escape(focus)}"]`)?.focus({ preventScroll: true });
       });
     }
 
 function changeCalendarWorkerFilter(event) {
+      const input = event.target.closest("[data-calendar-worker-id]");
+      if (!input) return;
       if (state.dayTimelineSaving || state.dayTimelineDrafts.size) {
-        event.target.value = state.calendarWorkerId;
+        renderCalendarWorkerFilter();
         showNotice("Najprej shrani ali prekliči spremembe dnevne časovnice.");
         return;
       }
       const wasFullDay = dayTimelineIsFullDay();
-      state.calendarWorkerId = event.target.value;
-      localStorage.setItem(calendarWorkerFilterStorageKey(), state.calendarWorkerId);
+      const id = input.dataset.calendarWorkerId;
+      if (!id) state.calendarWorkerIds = input.checked ? null : [];
+      else {
+        const selected = new Set(state.calendarWorkerIds === null ? [...input.closest(".calendar-worker-choices").querySelectorAll("[data-calendar-worker-id]")].map(item => item.dataset.calendarWorkerId).filter(Boolean) : state.calendarWorkerIds);
+        if (input.checked) selected.add(id); else selected.delete(id);
+        state.calendarWorkerIds = [...selected];
+      }
+      localStorage.setItem(calendarWorkerFilterStorageKey(), JSON.stringify(state.calendarWorkerIds));
       renderMonth();
       if ($("dayTimelineDialog").open) {
         renderDayTimeline();
@@ -11822,7 +11869,7 @@ function clientDirectoryRow(client, { showInternalId = false } = {}) {
           <div>
             <strong>${escapeHtml(client.name)}</strong>
             ${client.hiddenFromNewTasks ? '<span class="todo-meta">Skrita pri novih opravilih</span>' : ""}
-            ${detail ? `<span class="todo-meta">${escapeHtml(detail)}</span>` : ""}
+            ${detail ? `<span class="todo-meta">${linkifyText(detail)}</span>` : ""}
             ${identity ? `<span class="todo-meta">${escapeHtml(identity)}</span>` : ""}
             ${client.syncError ? `<span class="todo-meta error">${escapeHtml(client.syncError)}</span>` : ""}
           </div>
@@ -13292,20 +13339,7 @@ function compactExternalLinkLabel(value) {
     }
 
 function linkifyText(value) {
-      const text = String(value || "");
-      const pattern = /https?:\/\/[^\s<>"']+/gi;
-      let result = "";
-      let lastIndex = 0;
-      for (const match of text.matchAll(pattern)) {
-        const raw = match[0];
-        const url = raw.replace(/[),.;!?]+$/, "");
-        result += escapeHtml(text.slice(lastIndex, match.index));
-        result += `<a class="inline-url" href="${escapeHtml(url)}" title="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(compactExternalLinkLabel(url))}</a>`;
-        result += escapeHtml(raw.slice(url.length));
-        lastIndex = match.index + raw.length;
-      }
-      result += escapeHtml(text.slice(lastIndex));
-      return result;
+      return contactLinks.render(value);
     }
 
 function renderNotifications() {
@@ -13883,6 +13917,13 @@ $("calendarCompletedFilter").addEventListener("change", (event) => {
     });
 $("calendarWorkerFilter").addEventListener("change", changeCalendarWorkerFilter);
 $("dayTimelineWorkerFilter").addEventListener("change", changeCalendarWorkerFilter);
+document.addEventListener("click", event => document.querySelectorAll(".calendar-worker-picker[open]").forEach(picker => { if (!picker.contains(event.target)) picker.open = false; }));
+document.addEventListener("keydown", event => {
+      if (event.key !== "Escape") return;
+      const pickers = [...document.querySelectorAll(".calendar-worker-picker[open]")];
+      if (pickers.length) event.preventDefault();
+      pickers.forEach(picker => { picker.open = false; if (picker.contains(document.activeElement)) picker.querySelector("summary").focus(); });
+    });
 $("todoShowBilled").addEventListener("change", (event) => {
       state.showBilledCompletedTodos = Boolean(event.target.checked);
       saveTodoBillingFilters();

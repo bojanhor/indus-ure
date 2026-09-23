@@ -9,6 +9,8 @@ function createClientBilling({
   attachmentSource,
   attachmentSymbolMarkup,
   attachmentThumbnailSource,
+  clientSuggestionValues,
+  openClientEditDialog,
   dateKey,
   duration,
   editBillingSetting,
@@ -50,15 +52,15 @@ async function saveClientBillingInlineField(input) {
       const field = String(input?.dataset?.clientBillingInlineField || "");
       const todoId = String(input?.dataset?.todoId || "");
       const todo = state.todos.find((item) => item.id === todoId);
-      if (!todo || !["title", "notes", "clientBillableHours", "clientKm"].includes(field)) return;
+      if (!todo || !["title", "notes", "material", "clientBillableHours", "clientKm"].includes(field)) return;
       let value = input.value;
       if (field === "title") {
         value = String(value || "").trim();
         if (!value) throw new Error("Naslov dogodka ne sme biti prazen.");
         if (value === String(todo.title || "").trim()) return;
-      } else if (field === "notes") {
+      } else if (field === "notes" || field === "material") {
         value = String(value || "").trim();
-        if (value === String(todo.notes || "").trim()) return;
+        if (value === String(todo[field] || "").trim()) return;
       } else {
         const raw = String(value || "").trim().replace(",", ".");
         if (!raw) throw new Error(field === "clientKm" ? "Vpiši kilometre ali izrecno 0." : "Vpiši ure za obračun ali izrecno 0.");
@@ -180,7 +182,41 @@ function reportAssigneeLabel(todo) {
     }
 
 function reportExportOptions() {
-      return { hoursMode: "client_billable" };
+      let saved = {};
+      try { saved = JSON.parse(window.localStorage.getItem(reportExportOptionsKey()) || "{}"); } catch {}
+      return { hoursMode: "client_billable", ...Object.fromEntries(["showWorkerTitle", "showWorkerName", "showHours", "showDates"].map(key => [key, saved?.[key] !== false])) };
+    }
+
+function reportExportOptionsKey() {
+      return `indus-ure-report-options:${state.user?.id || "anonymous"}:${state.workContext || "admin"}`;
+    }
+
+function openReportExportOptions() {
+      const options = reportExportOptions();
+      $("reportExportSettingsDialog").querySelectorAll("[data-report-option]").forEach(input => { input.checked = options[input.dataset.reportOption]; });
+      $("reportExportSettingsDialog").showModal();
+    }
+
+let bulkSuggestions = [], bulkSuggestionIndex = -1;
+function hideBulkClientSuggestions() {
+      $("bulkClientSuggestions").classList.add("hidden");
+      $("bulkClientTarget").setAttribute("aria-expanded", "false");
+    }
+function renderBulkClientSuggestions() {
+      const query = normalizeText($("bulkClientTarget").value);
+      bulkSuggestions = clientSuggestionValues({ includeHidden: true }).filter(item => !query || normalizeText(`${item.value} ${item.label}`).includes(query)).slice(0, moduleValues.clientSuggestionLimit);
+      bulkSuggestionIndex = bulkSuggestions.length ? 0 : -1;
+      $("bulkClientSuggestions").innerHTML = bulkSuggestions.map((item, index) => `<div class="client-autocomplete-row"><button type="button" class="client-autocomplete-option${index === 0 ? " active" : ""}" role="option" aria-selected="${index === 0}" data-bulk-client-index="${index}"><strong>${escapeHtml(item.value)}</strong>${item.label ? `<small>${escapeHtml(item.label)}</small>` : ""}</button>${item.clientId ? `<button type="button" class="secondary client-autocomplete-edit" data-bulk-client-edit="${escapeHtml(item.clientId)}" aria-label="Uredi stranko: ${escapeHtml(item.value)}"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25Zm17.71-10.21a1 1 0 0 0 0-1.41l-2.55-2.55a1 1 0 0 0-1.41 0l-1.99 1.99 3.75 3.75 2.2-2.2Z"/></svg></button>` : ""}</div>`).join("") || '<div class="todo-meta">Ni zadetkov. Vpisani naziv lahko uporabiš kot adhoc stranko.</div>';
+      $("bulkClientSuggestions").classList.remove("hidden");
+      $("bulkClientTarget").setAttribute("aria-expanded", "true");
+    }
+function chooseBulkClientSuggestion(index) {
+      const item = bulkSuggestions[index];
+      if (!item) return;
+      $("bulkClientTarget").value = item.value;
+      $("bulkClientTarget").dataset.selectedClientId = item.clientId || "";
+      $("bulkClientTarget").focus({ preventScroll: true });
+      hideBulkClientSuggestions();
     }
 
 function reportExportPayload() {
@@ -448,7 +484,7 @@ function renderClientBillingRow(line) {
         : todo.notes ? `<section class="client-billing-section"><strong>Opis del</strong><div class="report-todo-description">${linkifyText(todo.notes)}</div></section>` : "";
       const details = [
         description,
-        todo.material ? `<section class="client-billing-section"><strong>Material</strong><div class="report-todo-description">${linkifyText(todo.material)}</div></section>` : "",
+        inlineEditable ? `<section class="client-billing-section"><strong>Material</strong><textarea class="client-billing-inline-description" data-client-billing-inline-field="material" data-todo-id="${escapeHtml(todo.id)}" placeholder="Dodaj material" aria-label="Material" maxlength="10000" rows="1">${escapeHtml(todo.material || "")}</textarea></section>` : todo.material ? `<section class="client-billing-section"><strong>Material</strong><div class="report-todo-description">${linkifyText(todo.material)}</div></section>` : "",
         renderReportAttachments(todo, { exportable: selectedForClientBill })
       ].filter(Boolean).join("");
       const hoursLabel = "Za obra\u010dun";
@@ -523,6 +559,8 @@ function renderReportContent() {
       if ($("bulkClientTarget").dataset.clientKey !== transferKey) {
         $("bulkClientTarget").value = selection.name || "";
         $("bulkClientTarget").dataset.clientKey = transferKey;
+        $("bulkClientTarget").dataset.selectedClientId = selection.id || "";
+        hideBulkClientSuggestions();
       }
       $("clientDetailRange").textContent = $("reportFrom").value || $("reportTo").value ? reportRangeLabel() : "";
       $("reportLineCount").textContent = detail
@@ -691,7 +729,7 @@ async function saveBulkClientFromDialog() {
       const eventIds = [...new Set(lines.map((line) => todoEventId(line.todo)).filter(Boolean))];
       if (!eventIds.length) throw new Error("Označi vsaj en še neobračunan vpis.");
       const requestedClient = String($("bulkClientTarget").value || "").trim();
-      const client = findClient(requestedClient);
+      const client = findClient($("bulkClientTarget").dataset.selectedClientId || requestedClient);
       if (!requestedClient || requestedClient.length > 240) throw new Error("Vpiši naziv stranke (največ 240 znakov).");
       if (client && String(client.clientId || client.id) === String(selection.id)) throw new Error("Izbrana je že ista stranka.");
       const clientName = client?.name || requestedClient;
@@ -1000,7 +1038,44 @@ function installClientBillingBindings1() {
     $("selectAllClientBill").addEventListener("click", () => setClientBillSelectionForCurrentReport(true));
     $("clearClientBillSelection").addEventListener("click", () => setClientBillSelectionForCurrentReport(false));
     $("bulkChangeReportClient").addEventListener("click", openBulkClientDialog);
-    $("bulkClientTarget").addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); openBulkClientDialog(); } });
+    $("bulkClientTarget").addEventListener("focus", renderBulkClientSuggestions);
+    $("bulkClientTarget").addEventListener("input", () => { $("bulkClientTarget").dataset.selectedClientId = ""; renderBulkClientSuggestions(); });
+    $("bulkClientTarget").addEventListener("keydown", event => {
+      if (event.key === "Escape") { event.stopPropagation(); hideBulkClientSuggestions(); }
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        if ($("bulkClientSuggestions").classList.contains("hidden")) renderBulkClientSuggestions();
+        if (!bulkSuggestions.length) return;
+        bulkSuggestionIndex = (bulkSuggestionIndex + (event.key === "ArrowDown" ? 1 : -1) + bulkSuggestions.length) % bulkSuggestions.length;
+        $("bulkClientSuggestions").querySelectorAll("[data-bulk-client-index]").forEach((button, index) => {
+          const active = index === bulkSuggestionIndex;
+          button.classList.toggle("active", active); button.setAttribute("aria-selected", String(active));
+          if (active) button.scrollIntoView({ block: "nearest" });
+        });
+      }
+      if (event.key === "Enter") {
+        event.preventDefault();
+        if (!$("bulkClientSuggestions").classList.contains("hidden") && bulkSuggestionIndex >= 0) chooseBulkClientSuggestion(bulkSuggestionIndex);
+        else { hideBulkClientSuggestions(); openBulkClientDialog(); }
+      }
+    });
+    $("bulkClientAutocomplete").addEventListener("focusout", event => { if (!event.currentTarget.contains(event.relatedTarget)) hideBulkClientSuggestions(); });
+    $("bulkClientSuggestions").addEventListener("mousedown", event => { if (event.target.closest("button")) event.preventDefault(); });
+    $("bulkClientSuggestions").addEventListener("click", event => {
+      event.preventDefault(); event.stopPropagation();
+      const option = event.target.closest("[data-bulk-client-index]");
+      if (option) chooseBulkClientSuggestion(Number(option.dataset.bulkClientIndex));
+      const edit = event.target.closest("[data-bulk-client-edit]");
+      if (edit) { hideBulkClientSuggestions(); openClientEditDialog(edit.dataset.bulkClientEdit); }
+    });
+    $("reportExportSettings").addEventListener("click", openReportExportOptions);
+    $("closeReportExportSettings").addEventListener("click", () => $("reportExportSettingsDialog").close());
+    $("reportExportSettingsDialog").addEventListener("change", event => {
+      if (!event.target.matches("[data-report-option]")) return;
+      const options = Object.fromEntries([...$("reportExportSettingsDialog").querySelectorAll("[data-report-option]")].map(input => [input.dataset.reportOption, input.checked]));
+      try { window.localStorage.setItem(reportExportOptionsKey(), JSON.stringify(options)); }
+      catch { showNotice("Nastavitev PDF v tem brskalniku ni mogoče shraniti. Preveri dovoljeno lokalno shranjevanje."); }
+    });
     $("confirmClientBill").addEventListener("click", () => confirmClientBillFromReport().catch((error) => showNotice(error.message)));
     $("exportReportPdf").addEventListener("click", () => downloadClientReportPdf().catch((error) => showNotice(error.message)));
     $("createReportGmailDraft").addEventListener("click", () => createClientReportGmailDraft().catch((error) => showNotice(error.message)));

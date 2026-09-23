@@ -290,14 +290,14 @@ test("client report uses billable hours only and compares recorded hours without
   assert.match(html, /history\.pushState\(reportOverviewHistoryState\(snapshot\), "", location\.href\)/);
   assert.match(html, /currentReportState\?\.kind === "overview"[\s\S]*?history\.replaceState\(reportOverviewHistoryState\(snapshot\), "", location\.href\)/);
   assert.match(html, /history\.back\(\);/);
-  assert.match(html, /function reportExportOptions\(\) \{\s*return \{ hoursMode: "client_billable" \}/);
+  assert.match(html, /return \{ hoursMode: "client_billable", \.\.\.Object\.fromEntries/);
   assert.match(html, /Vpisane ure \(h\)/);
   assert.match(html, /class="client-billing-worker-hours" type="text" readonly/);
   assert.match(html, /function reportHoursDifferenceText\(/);
   assert.match(html, /has-hours-difference/);
   assert.doesNotMatch(html, /reportHoursMode\(\)/);
   assert.doesNotMatch(server, /buildClientReportPdf\(db, report, attachments, body\.exportOptions\)/);
-  assert.equal((server.match(/buildClientReportPdf\(db, report, attachments, \{ hoursMode: "client_billable" \}\)/g) || []).length, 3);
+  assert.equal((server.match(/buildClientReportPdf\(db, report, attachments, \{ \.\.\.clientReportExportOptions\(body\.exportOptions\), hoursMode: "client_billable", heading: "" \}\)/g) || []).length, 3);
   assert.match(server, /function clientReportExportOptions\(input = \{\}\) \{[\s\S]*?hoursMode/);
   assert.match(server, /options\.hoursMode === "worker_time"/);
   assert.match(server, /options\.hoursMode === "client_billable"/);

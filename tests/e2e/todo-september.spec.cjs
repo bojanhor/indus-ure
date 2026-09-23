@@ -83,6 +83,7 @@ test("only checked billing rows transfer to adhoc target and transferred rows ar
   await expect(page.locator("#bulkChangeReportClient")).toBeDisabled();
   await page.locator('[data-client-bill-event-id]').first().check();
   await page.locator("#bulkClientTarget").fill("Bulk UI target");
+  await page.locator('#bulkClientSuggestions [data-bulk-client-index]').first().click();
   await page.locator("#bulkChangeReportClient").click();
   await expect(page.locator("#appConfirmMessage")).toContainText("Samo 1 označenih");
   await page.locator("#appConfirmAccept").click();
@@ -95,6 +96,7 @@ test("only checked billing rows transfer to adhoc target and transferred rows ar
   await page.locator("#clearClientBillSelection").click();
   await page.locator('.is-reassigned [data-client-bill-event-id]').check();
   await page.locator("#bulkClientTarget").fill("Brand new adhoc UI");
+  await page.locator("#bulkClientTarget").press("Tab");
   await page.locator("#bulkChangeReportClient").click();
   await expect(page.locator("#appConfirmMessage")).toContainText("nova adhoc");
   await page.locator("#appConfirmAccept").click();

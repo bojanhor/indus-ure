@@ -298,6 +298,22 @@ async function main() {
     assert.deepEqual(afterClientValidation.clients, beforeClientValidation.clients);
     check("http.hours_require_client_for_both_roles_without_partial_writes");
 
+    const materialCreate = await request("/api/todos", { method: "POST", body: JSON.stringify({ ...createBody("PG inline material"), status: "execution", date: "2032-03-20", start: "08:00", end: "09:00" }) });
+    assert.equal(materialCreate.status, 200);
+    const materialTodo = (await materialCreate.json()).todos.find(todo => todo.title === "PG inline material");
+    const materialEdit = await request(`/api/todos/${materialTodo.id}/client-billing-fields`, { method: "POST", body: JSON.stringify({ material: "2x rele PG", baseUpdatedAt: materialTodo.updatedAt }) });
+    assert.equal(materialEdit.status, 200, await materialEdit.text());
+    const materialStored = (await store.load()).todos.find(todo => todo.id === materialTodo.id);
+    assert.equal(materialStored.material, "2x rele PG");
+    assert.equal(materialStored.start, materialTodo.start);
+    assert.equal(materialStored.end, materialTodo.end);
+    assert.equal(materialStored.revisionHistory.at(-1).snapshot.material || "", materialTodo.material || "");
+    assert.match(materialStored.revisionHistory.at(-1).action, /material/);
+    const materialStale = await request(`/api/todos/${materialTodo.id}/client-billing-fields`, { method: "POST", body: JSON.stringify({ material: "Stale", baseUpdatedAt: materialTodo.updatedAt }) });
+    assert.equal(materialStale.status, 409);
+    assert.equal((await store.load()).todos.find(todo => todo.id === materialTodo.id).material, "2x rele PG");
+    check("http.inline_material_persists_history_without_changing_worker_time_or_accepting_stale_edits");
+
     const body = JSON.stringify(createBody("Must not partially save"));
     const countBeforeSlow = fullLoads();
     let finish;

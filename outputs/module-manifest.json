@@ -1731,6 +1731,8 @@
       "attachmentSource",
       "attachmentSymbolMarkup",
       "attachmentThumbnailSource",
+      "clientSuggestionValues",
+      "openClientEditDialog",
       "dateKey",
       "duration",
       "editBillingSetting",
@@ -1770,6 +1772,10 @@
     "values": [
       {
         "name": "reportClientSortModes",
+        "writable": false
+      },
+      {
+        "name": "clientSuggestionLimit",
         "writable": false
       },
       {
@@ -1823,6 +1829,11 @@
       "reportWorkerTodos",
       "reportAssigneeLabel",
       "reportExportOptions",
+      "reportExportOptionsKey",
+      "openReportExportOptions",
+      "hideBulkClientSuggestions",
+      "renderBulkClientSuggestions",
+      "chooseBulkClientSuggestion",
       "reportExportPayload",
       "reportClientBillHistoryCutoff",
       "reportTodoVisibleInClientBilling",
@@ -1914,6 +1925,17 @@
       "openUndoHistory",
       "undoHistoryAction"
     ]
+  },
+  {
+    "name": "editor/contact-links",
+    "source": "html",
+    "factory": "createContactLinks",
+    "direct": [],
+    "callbacks": ["escapeHtml"],
+    "exports": ["matches", "render", "install"],
+    "originalFunctions": ["matches", "anchor", "render", "enhanceField", "enhance", "install"],
+    "values": [],
+    "globals": ["String", "URL", "Map", "Set", "WeakMap", "document", "MutationObserver", "requestAnimationFrame"]
   },
   {
     "name": "editor/app-config",

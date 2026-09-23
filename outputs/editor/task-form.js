@@ -106,7 +106,7 @@ function renderTodoFormClientContacts() {
       const selectedContacts = contacts.filter((contact) => selectedIds.has(contact.id));
       selected.innerHTML = selectedContacts.map((contact) => `
         <div class="todo-client-contact-row">
-          <span><strong>${escapeHtml(contact.name || "Kontakt")}</strong> · ${escapeHtml(contact.phone)}</span>
+          <span><strong>${escapeHtml(contact.name || "Kontakt")}</strong> · <a class="inline-url" href="tel:${escapeHtml(String(contact.phone).replace(/[^0-9+]/g, ""))}">${escapeHtml(contact.phone)}</a></span>
           <span class="todo-client-contact-actions">
             <a class="secondary" href="tel:${escapeHtml(String(contact.phone).replace(/[^0-9+]/g, ""))}" title="Pokliči ${escapeHtml(contact.name || contact.phone)}" aria-label="Pokliči ${escapeHtml(contact.name || contact.phone)}">&#9742;</a>
             <button class="secondary" type="button" data-remove-todo-client-contact-id="${escapeHtml(contact.id)}" title="Odstrani kontakt" aria-label="Odstrani kontakt">&times;</button>
