@@ -24,8 +24,11 @@ function fakeApi() {
     calendars: {
       get: wrap("calendars.get", ({ calendarId }) => { if (!calendars.has(calendarId)) throw apiError(404); return calendars.get(calendarId); }),
       insert: wrap("calendars.insert", ({ requestBody }) => {
-        const id = `calendar-${++serial}`; calendars.set(id, { id, ...requestBody }); events.set(id, new Map());
-        acls.set(id, [{ id: "owner", role: "owner", scope: { type: "user", value: ownerEmail } }]); return calendars.get(id);
+        const id = `calendar-${++serial}@group.calendar.google.com`; calendars.set(id, { id, ...requestBody }); events.set(id, new Map());
+        acls.set(id, [
+          { id: `user:${id}`, role: "owner", scope: { type: "user", value: id } },
+          { id: "owner", role: "owner", scope: { type: "user", value: ownerEmail } }
+        ]); return calendars.get(id);
       }),
       patch: wrap("calendars.patch", ({ calendarId, requestBody }) => Object.assign(calendars.get(calendarId), requestBody))
     },
@@ -93,6 +96,59 @@ test("first sync creates separate calendars and grants only reader; stable retri
   assert.equal(rules.length, 1); assert.equal(rules[0].role, "reader"); assert.equal(rules[0].scope.value, "ibro@example.test");
   await f.run(); assert.equal(f.remote.calls.filter(([name]) => name === "events.insert").length, 2);
   assert.equal(f.remote.calls.filter(([name]) => name === "events.update").length, 0);
+  for (const [id, rules] of f.remote.acls) {
+    assert.equal(rules.filter(rule => rule.role === "owner").length, 2);
+    assert.ok(rules.some(rule => rule.role === "owner" && rule.scope.value === id));
+    assert.ok(rules.some(rule => rule.role === "owner" && rule.scope.value === ownerEmail));
+  }
+  assert.equal(f.remote.calls.filter(([name, args]) => ["acl.patch", "acl.delete"].includes(name) && (args.ruleId === "owner" || args.ruleId.startsWith("user:calendar-"))).length, 0);
+});
+
+test("calendar with only the connected owner still synchronizes", async t => {
+  const f = fixture(t), insert = f.remote.api.calendars.insert;
+  f.remote.api.calendars.insert = async args => {
+    const result = await insert(args);
+    f.remote.acls.set(result.data.id, f.remote.acls.get(result.data.id).filter(rule => rule.scope.value === ownerEmail));
+    return result;
+  };
+  await f.run();
+  assert.equal(f.state().lastError, "");
+  assert.equal(f.state().calendars.combined.count, 1);
+});
+
+for (const [label, extraOwner, removeHuman] of [
+  ["a different human owner", { role: "owner", scope: { type: "user", value: "other@example.test" } }, false],
+  ["another calendar's self-owner", { role: "owner", scope: { type: "user", value: "other@group.calendar.google.com" } }, false],
+  ["a group masquerading as the connected owner", { role: "owner", scope: { type: "group", value: ownerEmail } }, false],
+  ["the calendar identity without its connected human owner", null, true]
+]) {
+  test(`owner preflight rejects ${label} before ACL or event mutations`, async t => {
+    const f = fixture(t); await f.run();
+    const id = f.state().calendars.combined.id;
+    const existing = f.remote.acls.get(id).filter(rule => !removeHuman || rule.scope.value !== ownerEmail);
+    const unwantedReader = { id: "unwanted-reader", role: "reader", scope: { type: "user", value: "reader@example.test" } };
+    f.remote.acls.set(id, [unwantedReader, ...existing, ...(extraOwner ? [{ id: "unexpected-owner", ...extraOwner }] : [])]);
+    const before = copy(f.remote.acls.get(id));
+    const calls = f.remote.calls.length;
+    await f.run();
+    assert.match(f.state().lastError, removeHuman ? /Pravica povezanega lastnika/ : /dodatnega lastnika/);
+    assert.deepEqual(f.remote.acls.get(id), before);
+    assert.equal(f.remote.calls.slice(calls).filter(([name, args]) => args.calendarId === id
+      && /^(acl|events)\.(insert|update|patch|delete)$/.test(name)).length, 0);
+  });
+}
+
+test("owner preflight checks all ACL pages before any write", async t => {
+  const f = fixture(t); await f.run();
+  const id = f.state().calendars.combined.id, list = f.remote.api.acl.list;
+  const before = f.remote.calls.length;
+  f.remote.api.acl.list = async args => args.calendarId !== id ? list(args)
+    : args.pageToken ? { data: { items: [{ role: "owner", scope: { type: "user", value: "late-owner@example.test" } }] } }
+      : { data: { items: f.remote.acls.get(id), nextPageToken: "second-page" } };
+  await f.run();
+  assert.match(f.state().lastError, /dodatnega lastnika/);
+  assert.equal(f.remote.calls.slice(before).filter(([name, args]) => args.calendarId === id
+    && /^(acl|events)\.(insert|update|patch|delete)$/.test(name)).length, 0);
 });
 test("title/date/status/assignee edits update/remove only the app projection", async t => {
   const f = fixture(t); await f.run();

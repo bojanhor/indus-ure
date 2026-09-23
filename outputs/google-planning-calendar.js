@@ -134,13 +134,27 @@ function createGooglePlanningCalendar({ store, readDb, createApi, baseUrl, defin
   }
 
   async function reconcileAccess(api, record, readers, ownerEmail) {
-    const desired = new Set(readers.filter(email => email !== ownerEmail));
+    const owner = String(ownerEmail || "").trim().toLowerCase();
+    const desired = new Set(readers.map(email => String(email).trim().toLowerCase()).filter(email => email && email !== owner));
     const rules = await pages(args => api.acl.list(args), { calendarId: record.id, maxResults: 250 });
+    const isConnectedOwner = rule => rule.role === "owner" && rule.scope?.type === "user"
+      && String(rule.scope.value || "").toLowerCase() === owner;
+    // Google's secondary calendars also carry a built-in owner ACL whose user
+    // is the calendar itself. Accept only this exact calendar identity, and
+    // only alongside the explicitly authenticated human owner. Never exempt
+    // another calendar, a group/domain grant, or arbitrary owner identities.
+    const isCalendarSelfOwner = rule => rule.role === "owner" && rule.scope?.type === "user"
+      && typeof record.id === "string" && /^[^@\s]+@group\.calendar\.google\.com$/.test(record.id)
+      && rule.scope.value === record.id;
+    if (!owner || !rules.some(isConnectedOwner)) {
+      throw fail("Pravica povezanega lastnika koledarja ni potrjena. Preveri pravice v Googlu.");
+    }
+    // Validate the complete (paginated) owner set before changing any ACL.
+    if (rules.some(rule => rule.role === "owner" && !isConnectedOwner(rule) && !isCalendarSelfOwner(rule))) {
+      throw fail("Namenski koledar ima dodatnega lastnika. Preveri pravice v Googlu.");
+    }
     for (const rule of rules) {
-      if (rule.role === "owner") {
-        if (rule.scope?.value?.toLowerCase() !== ownerEmail) throw fail("Namenski koledar ima dodatnega lastnika. Preveri pravice v Googlu.");
-        continue;
-      }
+      if (rule.role === "owner") continue;
       const email = String(rule.scope?.value || "").toLowerCase();
       if (rule.scope?.type === "user" && desired.has(email)) {
         if (rule.role !== "reader") await api.acl.patch({ calendarId: record.id, ruleId: rule.id, sendNotifications: false, requestBody: { role: "reader" } });
