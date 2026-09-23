@@ -138,7 +138,8 @@ test("mobile weekday labels follow both date fields, shortcuts, clearing and sin
   await expect(page.locator("#todoFormDateWeekday")).toBeEmpty();
   await expect(page.locator("#todoFormEndDateWeekday")).toBeEmpty();
   await page.getByRole("tab", { name: "Vpis ur", exact: true }).click();
-  if (!await page.locator("#todoFormDate").isVisible()) await page.locator("#todoFormDateTimeSection > summary").click();
+  await expect(page.locator("#todoFormStatus")).toHaveValue("execution");
+  await expect(page.locator("#todoFormDate")).toBeVisible();
   await page.locator("#todoFormDate").fill("2026-10-25");
   await page.locator("#todoFormDate").dispatchEvent("change");
   await expect(page.locator("#todoFormDateWeekday")).toHaveText("(ned)");
