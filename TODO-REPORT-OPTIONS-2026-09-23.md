@@ -1,6 +1,6 @@
 # TODO: izbori, povezave in prikaz poročil
 
-Obseg: pet točk iz skupnega TODO, preverjenega 23. 9. 2026. Uporabnik je
+Obseg: sedem točk iz skupnega TODO, preverjenega 23. 9. 2026. Uporabnik je
 odstranil prejšnjo oznako »TOLE ŠE PUSTI PRI MIRU« in dopolnil material.
 
 ## Spremembe
@@ -34,6 +34,17 @@ odstranil prejšnjo oznako »TOLE ŠE PUSTI PRI MIRU« in dopolnil material.
   vsebina enako kot opis; tudi prazen material se lahko dopolni. Obstoječa
   šefovska API pot ohrani potrjene zaklepe, urejevalne zaklepe, baseUpdatedAt,
   zgodovino in Undo. Delavčevi časi se ne spreminjajo.
+- Dopolnitvi med delom: spodnji seštevek PDF loči obračunske ure po vidnih
+  oznakah izvajalcev (skrije jih, če so skrite ure ali obe imeni). Naziv in
+  vzdevek se lahko uredita neposredno ob posameznem vpisu ur; prazno polje
+  povrne privzeto vrednost. To sta lastnosti dogodka `reportWorkerTitle` in
+  `reportWorkerName`, ne sprememba identitete ali nastavitev delavca.
+  Veljajo potrjeni zaklepi, CAS, zgodovina in Undo; deljenje samega dogodka
+  ostaja nespremenjeno. Več izvajalcev je pri novem/urejenem vpisu ur zavrnjenih
+  tudi na API. Bralni pregled produkcije: 246 execution dogodkov, noben z več
+  izvajalci. Za morebitno staro skupno plansko postavko se uporabi skupna
+  oznaka in skupni znesek ur enkrat, brez izmišljene razdelitve. Enake vidne
+  oznake izvajalcev v seštevku se združijo.
 
 ## Preverjanje in objava
 

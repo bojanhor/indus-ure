@@ -1121,7 +1121,7 @@ async function handleClientBillingFields(req, res, url) {
       }
       const id = decodeURIComponent(todoClientBillingFieldsMatch[1]);
       const body = await readBody(req);
-      const editableFields = ["title", "notes", "material", "clientBillableHours", "clientKm"];
+      const editableFields = ["title", "notes", "material", "reportWorkerTitle", "reportWorkerName", "clientBillableHours", "clientKm"];
       const requested = editableFields.filter((field) => Object.hasOwn(body, field));
       if (requested.length !== 1) {
         sendJson(res, 400, { error: "Izberi natanko eno polje za hitro urejanje." });
@@ -1161,6 +1161,17 @@ async function handleClientBillingFields(req, res, url) {
         changes.title = title;
       } else if (field === "notes" || field === "material") {
         changes[field] = capitalizeTodoText(String(body[field] || "").slice(0, 10_000));
+      } else if (field === "reportWorkerTitle" || field === "reportWorkerName") {
+        if (assignmentItems.length !== 1 || previousTodo.status !== "execution") {
+          sendJson(res, 409, { error: "Naziv in vzdevek sta nastavljiva pri posameznem vpisu ur." });
+          return true;
+        }
+        if (typeof body[field] !== "string" || body[field].trim().length > 120) {
+          sendJson(res, 400, { error: "Naziv in vzdevek lahko vsebujeta največ 120 znakov." });
+          return true;
+        }
+        // Empty restores the worker default. Never change the worker profile.
+        changes[field] = body[field].trim() || null;
       } else {
         if (String(previousTodo.status || "") !== "execution") {
           sendJson(res, 409, { error: "Ure in strošek prevoza sta na voljo samo pri izvedeni storitvi." });
@@ -1184,6 +1195,8 @@ async function handleClientBillingFields(req, res, url) {
         title: "naslov",
         notes: "opis del",
         material: "material",
+        reportWorkerTitle: "naziv izvajalca",
+        reportWorkerName: "vzdevek izvajalca",
         clientBillableHours: "ure za obračun",
         clientKm: "strošek prevoza"
       };

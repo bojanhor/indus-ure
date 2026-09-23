@@ -13,6 +13,9 @@ test("customer PDF always uses billable hours; event sharing retains actual time
     assert.equal(created.status, 200);
     const todo = (await created.json()).todos.find(item => item.title === "PDF hour comparison");
     assert.equal(todo.clientBillableMinutes, 240);
+    const multipleWorkers = { ...todo, assigneeIds: ['ibro', 'bojan'], date: '2032-06-08', start: '08:00', end: '09:00' };
+    assert.equal((await call('/api/todos', 'POST', multipleWorkers)).status, 400);
+    assert.equal((await call(`/api/todos/${todo.id}`, 'PUT', multipleWorkers)).status, 400);
     const { getDocument } = await import("pdfjs-dist/legacy/build/pdf.mjs");
     const pdfText = async response => {
       assert.equal(response.status, 200);
@@ -48,11 +51,33 @@ test("customer PDF always uses billable hours; event sharing retains actual time
       assert.equal(text.includes("02. 06. 2032"), options.showDates, `date mask ${mask}`);
       assert.doesNotMatch(text, /08:00|11:00|3 h/);
     }
+    for (const [field, value] of [['reportWorkerTitle', 'Monter QA'], ['reportWorkerName', 'Izvajalec QA']]) {
+      const current = (await (await call(`/api/todos/${todo.id}`)).json()).todo;
+      assert.equal((await call(`/api/todos/${todo.id}/client-billing-fields`, 'POST', { [field]: value, baseUpdatedAt: current.updatedAt })).status, 200);
+    }
+    const secondResponse = await call('/api/todos', 'POST', { title: 'Drugi izvajalec QA', client: todo.client, clientId: todo.clientId, status: 'execution', date: todo.date, start: '08:00', end: '10:00', syncUser: 'bojan', assigneeIds: ['bojan'], clientBillableMinutes: 60 });
+    assert.equal(secondResponse.status, 200);
+    const second = (await secondResponse.json()).todos.find(item => item.title === 'Drugi izvajalec QA');
+    const summaryBody = { ...payload, eventIds: [todo.assignmentGroupId || todo.id, second.assignmentGroupId || second.id], exportOptions: {} };
+    const withSummary = await pdfText(await call('/api/client-report/pdf', 'POST', summaryBody));
+    const summaryText = withSummary.slice(withSummary.lastIndexOf('Ure za obračun'));
+    assert.match(summaryText, /Monter QA \(Izvajalec QA\)\s*:?\s*4 h/);
+    assert.match(summaryText, /Izvajalec \(Bojan\)\s*:?\s*1 h/);
+    assert.match(summaryText, /Skupaj\s*:?\s*5 h/);
+    const unnamed = await pdfText(await call('/api/client-report/pdf', 'POST', { ...summaryBody, exportOptions: { showWorkerTitle: false, showWorkerName: false } }));
+    assert.doesNotMatch(unnamed, /Monter QA|Izvajalec QA|Ibro|Bojan/);
+    assert.match(unnamed, /Skupaj\s*:?\s*5 h/);
+    // Normal event editing preserves report-only overrides and original worker identity.
+    const currentTodo = (await (await call(`/api/todos/${todo.id}`)).json()).todo;
+    assert.equal((await call(`/api/todos/${todo.id}`, 'PUT', { ...currentTodo, title: 'PDF hour comparison edited', assigneeIds: ['ibro'], baseUpdatedAt: currentTodo.updatedAt })).status, 200);
+    const afterEdit = (await (await call(`/api/todos/${todo.id}`)).json()).todo;
+    assert.equal(afterEdit.reportWorkerTitle, 'Monter QA'); assert.equal(afterEdit.reportWorkerName, 'Izvajalec QA'); assert.equal(afterEdit.syncUser, 'ibro');
     const shareTicket = await call(`/api/todos/${todo.id}/share-pdf-ticket`, "POST", {});
     assert.equal(shareTicket.status, 201);
     const shared = await pdfText(await call((await shareTicket.json()).downloadUrl));
     assert.match(shared, /08:00-11:00/);
     assert.match(shared, /3 h/);
+    assert.doesNotMatch(shared, /Monter QA|Izvajalec QA/);
     const stored = (await (await call(`/api/todos/${todo.id}`)).json()).todo;
     assert.equal(stored.start, "08:00"); assert.equal(stored.end, "11:00"); assert.equal(stored.clientBillableMinutes, 240);
   } finally { await app.stop(); }

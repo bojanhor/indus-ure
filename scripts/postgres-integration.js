@@ -313,6 +313,13 @@ async function main() {
     assert.equal(materialStale.status, 409);
     assert.equal((await store.load()).todos.find(todo => todo.id === materialTodo.id).material, "2x rele PG");
     check("http.inline_material_persists_history_without_changing_worker_time_or_accepting_stale_edits");
+    const usersBeforeLabel = (await store.load()).users;
+    const labelEdit = await request(`/api/todos/${materialTodo.id}/client-billing-fields`, { method: 'POST', body: JSON.stringify({ reportWorkerTitle: 'Monter PG', baseUpdatedAt: materialStored.updatedAt }) });
+    assert.equal(labelEdit.status, 200, await labelEdit.text());
+    const labelState = await store.load();
+    assert.deepEqual(labelState.users, usersBeforeLabel);
+    assert.equal(labelState.todos.find(todo => todo.id === materialTodo.id).reportWorkerTitle, 'Monter PG');
+    check('http.report_worker_label_is_event_only_and_persists_in_postgres');
 
     const body = JSON.stringify(createBody("Must not partially save"));
     const countBeforeSlow = fullLoads();

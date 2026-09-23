@@ -360,8 +360,9 @@ function clientReportExportOptions(input = {}) {
 
 function reportPdfAssigneeTitle(db, todo, options = {}) {
   const worker = db.users?.[todo?.syncUser || todo?.createdBy] || {};
-  const title = String(worker.billing?.exportTitle || "").trim() || "Izvajalec";
-  const name = String(worker.name || todo?.updatedByName || todo?.createdByName || "").trim();
+  const customerReport = options.hoursMode === "client_billable";
+  const title = String((customerReport && todo?.reportWorkerTitle) || worker.billing?.exportTitle || "").trim() || "Izvajalec";
+  const name = String((customerReport && todo?.reportWorkerName) || worker.name || todo?.updatedByName || todo?.createdByName || "").trim();
   if (options.showWorkerTitle === false) return options.showWorkerName === false ? "" : name;
   return name && options.showWorkerName !== false ? `${title} (${name})` : title;
 }
@@ -532,7 +533,12 @@ function buildClientReportPdf(db, report, attachments = [], exportOptions = {}) 
         travel[vehicle] += Math.max(0, Number(representative.clientKm || 0));
         const clientBillableHours = clientBillableHoursForTodos(group.todos || []);
         const workerHours = (group.todos || []).reduce((hours, item) => hours + todoDurationHours(item), 0);
-        if (options.hoursMode !== "client_billable") {
+        if (options.hoursMode === "client_billable" && (options.showWorkerTitle || options.showWorkerName)) {
+          // Each time entry belongs to one worker. Legacy shared planning
+          // records keep their combined label: never invent a split of hours.
+          const label = reportPdfAssignees(db, group.todos, options) || 'Brez naziva';
+          workerHoursByWorker.set(label, (workerHoursByWorker.get(label) || 0) + clientBillableHours);
+        } else if (options.hoursMode !== "client_billable") {
           for (const item of group.todos || []) {
             const workerHoursForItem = todoDurationHours(item);
             if (!workerHoursForItem) continue;
@@ -545,7 +551,7 @@ function buildClientReportPdf(db, report, attachments = [], exportOptions = {}) 
       reportPdfEnsureSpace(doc, 105);
       doc.moveDown(0.4);
       if (options.showHours) doc.font(reportPdfFontPath('bold')).fontSize(13).fillColor('#0d536b').text(options.hoursMode === "client_billable" ? 'Ure za obra\u010dun' : 'Ure izvajalcev');
-      if (options.showHours && options.hoursMode !== "client_billable" && workerHoursByWorker.size) {
+      if (options.showHours && (options.showWorkerTitle || options.showWorkerName) && workerHoursByWorker.size) {
         [...workerHoursByWorker.entries()].sort(([left], [right]) => left.localeCompare(right, 'sl')).forEach(([label, hours]) => {
           reportPdfLine(doc, label, hours.toLocaleString('sl-SI', { maximumFractionDigits: 2 }) + ' h');
         });

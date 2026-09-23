@@ -52,7 +52,7 @@ async function saveClientBillingInlineField(input) {
       const field = String(input?.dataset?.clientBillingInlineField || "");
       const todoId = String(input?.dataset?.todoId || "");
       const todo = state.todos.find((item) => item.id === todoId);
-      if (!todo || !["title", "notes", "material", "clientBillableHours", "clientKm"].includes(field)) return;
+      if (!todo || !["title", "notes", "material", "reportWorkerTitle", "reportWorkerName", "clientBillableHours", "clientKm"].includes(field)) return;
       let value = input.value;
       if (field === "title") {
         value = String(value || "").trim();
@@ -61,6 +61,9 @@ async function saveClientBillingInlineField(input) {
       } else if (field === "notes" || field === "material") {
         value = String(value || "").trim();
         if (value === String(todo[field] || "").trim()) return;
+      } else if (field === "reportWorkerTitle" || field === "reportWorkerName") {
+        value = String(value || "").trim();
+        if (value === String(input.defaultValue || "").trim()) return;
       } else {
         const raw = String(value || "").trim().replace(",", ".");
         if (!raw) throw new Error(field === "clientKm" ? "Vpiši kilometre ali izrecno 0." : "Vpiši ure za obračun ali izrecno 0.");
@@ -174,8 +177,8 @@ function reportWorkerTodos(todo) {
 function reportAssigneeLabel(todo) {
       const labels = todoAssigneeIds(todo).map((id) => {
         const worker = state.workerBilling.find((item) => item.id === id);
-        const name = String(worker?.name || state.users.find((user) => user.id === id)?.name || id || "Izvajalec");
-        const title = String(worker?.exportTitle || "").trim() || "Izvajalec";
+        const name = String(todo.reportWorkerName || worker?.name || state.users.find((user) => user.id === id)?.name || id || "Izvajalec");
+        const title = String(todo.reportWorkerTitle || worker?.exportTitle || "").trim() || "Izvajalec";
         return `${title} (${name})`;
       });
       return labels.length ? labels.join(", ") : "Ni dodeljeno";
@@ -510,12 +513,19 @@ function renderClientBillingRow(line) {
       const title = inlineEditable
         ? `<textarea class="client-billing-inline-title" rows="1" data-client-billing-inline-field="title" data-todo-id="${escapeHtml(todo.id)}" aria-label="Naslov dogodka">${escapeHtml(todo.title || "")}</textarea>`
         : `<button class="client-billing-title-trigger open-report-todo" type="button" data-todo-id="${escapeHtml(todo.id)}" aria-label="Odpri vpis: ${escapeHtml(todo.title || "Brez naziva")}">${escapeHtml(todo.title || "Brez naziva")}</button>`;
+      const workerId = todo.syncUser || todo.createdBy;
+      const worker = state.workerBilling.find(item => item.id === workerId);
+      const workerTitle = todo.reportWorkerTitle || worker?.exportTitle || "Izvajalec";
+      const workerName = todo.reportWorkerName || worker?.name || state.users.find(item => item.id === workerId)?.name || workerId;
+      const workerFields = inlineEditable && todo.status === "execution" && reportWorkerTodos(todo).length === 1
+        ? `<div class="client-billing-inline-fields report-worker-labels" title="Samo za ta dogodek. Prazno polje obnovi privzeto vrednost delavca."><label>Naziv izvajalca<input type="text" maxlength="120" data-client-billing-inline-field="reportWorkerTitle" data-todo-id="${escapeHtml(todo.id)}" value="${escapeHtml(workerTitle)}"></label><label>Vzdevek izvajalca<input type="text" maxlength="120" data-client-billing-inline-field="reportWorkerName" data-todo-id="${escapeHtml(todo.id)}" value="${escapeHtml(workerName || "")}"></label></div>`
+        : `<span>${escapeHtml(reportAssigneeLabel(todo))}</span>`;
       return `<article class="client-billing-row${state.reportMovedEventIds?.has(eventId) ? " is-reassigned" : ""}">
         <div class="client-billing-selection-slot">${billSelection}</div>
         <div class="client-billing-when"><strong>${todo.date ? formatDate(todo.date) : "Brez datuma"}</strong><span>${escapeHtml(time)}</span></div>
         <div class="client-billing-main">
           <div class="client-billing-title-row">${fullEditor}<h3>${title}</h3></div>
-          <div class="client-billing-meta">${materialEntry ? `<span>Dostava materiala</span>` : noteEntry ? `<span>Zapisek</span>` : `<span>${escapeHtml(reportAssigneeLabel(todo))}</span>`}${clientBill ? `<span>Obra\u010dun stranki potrjen ${escapeHtml(formatDateTime(clientBill.confirmedAt))}</span>` : ""}${clientBill?.directSettlement ? `<span>Prejeto: ${money(clientBill.receivedAmount || 0)} EUR${clientBill.creditedWorkerName ? ` &middot; v dobro ${escapeHtml(clientBill.creditedWorkerName)}` : ""}</span>` : ""}</div>
+          <div class="client-billing-meta">${materialEntry ? `<span>Dostava materiala</span>` : noteEntry ? `<span>Zapisek</span>` : workerFields}${clientBill ? `<span>Obra\u010dun stranki potrjen ${escapeHtml(formatDateTime(clientBill.confirmedAt))}</span>` : ""}${clientBill?.directSettlement ? `<span>Prejeto: ${money(clientBill.receivedAmount || 0)} EUR${clientBill.creditedWorkerName ? ` &middot; v dobro ${escapeHtml(clientBill.creditedWorkerName)}` : ""}</span>` : ""}</div>
           ${billingFields || `<button class="client-billing-charges client-billing-charges-trigger open-report-todo${hoursDifference ? " has-hours-difference" : ""}" type="button" data-todo-id="${escapeHtml(todo.id)}" aria-label="Odpri vpis: ${escapeHtml(todo.title || "Brez naziva")}">${charges}</button>`}
           ${details}
         </div>
@@ -1155,7 +1165,7 @@ function installClientReportBindings1() {
     $("clientDetailList").addEventListener("keydown", (event) => {
       const inlineField = event.target.closest("[data-client-billing-inline-field]");
       if (!inlineField || event.key !== "Enter") return;
-      if (inlineField.dataset.clientBillingInlineField === "notes" && !event.ctrlKey && !event.metaKey) return;
+      if (["notes", "material"].includes(inlineField.dataset.clientBillingInlineField) && !event.ctrlKey && !event.metaKey) return;
       event.preventDefault();
       inlineField.blur();
     });

@@ -288,6 +288,17 @@ test("šef lahko v poročilu neposredno spremeni obračunska polja, potrjen obra
       method: "POST", headers: ibro, body: JSON.stringify({ material: "Forbidden" })
     });
     assert.equal(workerMaterial.status, 403);
+    for (const field of ['reportWorkerTitle', 'reportWorkerName']) {
+      const set = await request(port, `/api/todos/${created.id}/client-billing-fields`, { method: 'POST', headers: bojan, body: JSON.stringify({ [field]: 'Oznaka QA' }) });
+      assert.equal(set.status, 200, set.body);
+      const changed = JSON.parse(set.body).todos.find(item => item.id === created.id);
+      assert.equal(changed[field], 'Oznaka QA'); assert.equal(changed.syncUser, 'ibro'); assert.equal(changed.start, created.start);
+      assert.equal(changed.revisionHistory.at(-1).snapshot[field], null);
+      assert.equal((await request(port, `/api/todos/${created.id}/client-billing-fields`, { method: 'POST', headers: ibro, body: JSON.stringify({ [field]: 'Forbidden' }) })).status, 403);
+      const reset = await request(port, `/api/todos/${created.id}/client-billing-fields`, { method: 'POST', headers: bojan, body: JSON.stringify({ [field]: '' }) });
+      assert.equal(reset.status, 200);
+      assert.equal(JSON.parse(reset.body).todos.find(item => item.id === created.id)[field], null);
+    }
 
     const forbidden = await request(port, `/api/todos/${encodeURIComponent(created.id)}/client-billing-fields`, {
       method: "POST", headers: ibro, body: JSON.stringify({ clientKm: 12 })
@@ -314,6 +325,7 @@ test("šef lahko v poročilu neposredno spremeni obračunska polja, potrjen obra
       method: "POST", headers: bojan, body: JSON.stringify({ material: "Locked" })
     });
     assert.equal(lockedMaterial.status, 403);
+    assert.equal((await request(port, `/api/todos/${created.id}/client-billing-fields`, { method: 'POST', headers: bojan, body: JSON.stringify({ reportWorkerName: 'Locked' }) })).status, 403);
   } finally {
     await stop(child);
     await fs.rm(dataDir, { recursive: true, force: true });

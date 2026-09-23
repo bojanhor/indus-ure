@@ -3502,6 +3502,8 @@ function todoRevisionSnapshot(todo = {}) {
     title: text(todo.title, 500),
     notes: text(todo.notes),
     material: text(todo.material),
+    reportWorkerTitle: text(todo.reportWorkerTitle, 120) || null,
+    reportWorkerName: text(todo.reportWorkerName, 120) || null,
     date: text(todo.date, 16),
     endDate: text(todo.endDate, 16),
     start: text(todo.start, 12),

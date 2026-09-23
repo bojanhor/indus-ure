@@ -119,3 +119,39 @@ test('PDF options persist per user context and are sent unchanged to PDF/Gmail; 
   await page.locator('#todoFormNotes').fill('Brez kontaktov');
   await expect(page.locator('label:has(#todoFormNotes) + .field-contact-links')).toHaveCount(0);
 });
+
+test('per-event worker title and nickname save independently, reset to defaults and support Undo', async ({ page }, info) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await login(page);
+  const before = await page.evaluate(async () => {
+    const data = await api('/api/todos', { method: 'POST', body: JSON.stringify({ title: 'Worker label QA', client: 'Worker label client QA', status: 'execution', date: '2032-06-06', start: '08:00', end: '09:00', syncUser: 'ibro', assigneeIds: ['ibro'] }) });
+    const todo = data.todos.find(item => item.title === 'Worker label QA');
+    await loadAll(); setView('report'); openClientReport(todo.client, todo.clientId);
+    return { id: todo.id, workers: state.workerBilling, users: state.users };
+  });
+  const title = page.locator('[data-client-billing-inline-field="reportWorkerTitle"]');
+  const name = page.locator('[data-client-billing-inline-field="reportWorkerName"]');
+  await expect(title).toHaveValue('Izvajalec'); await expect(name).toHaveValue('Ibro');
+  for (const [input, value] of [[title, 'Monter'], [name, 'Ibro na objektu']]) {
+    await input.fill(value);
+    const saved = page.waitForResponse(r => r.url().includes('/client-billing-fields') && r.status() === 200);
+    await input.press('Enter'); await saved; await expect(input).toHaveValue(value); await expect(input).toBeEnabled();
+  }
+  await title.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: info.outputPath('worker-labels-mobile.png') });
+  expect(await page.evaluate(() => ({ workers: state.workerBilling, users: state.users }))).toEqual({ workers: before.workers, users: before.users });
+  await page.evaluate(async () => {
+    const journal = await api('/api/undo-journal');
+    const action = journal.actions.find(item => item.canUndo);
+    await api(`/api/undo-journal/${action.id}`, { method: 'POST', body: JSON.stringify({ confirm: true }) });
+    await loadAll(); renderReport();
+  });
+  await expect(name).toHaveValue('Ibro'); await expect(title).toHaveValue('Monter');
+  await title.fill('');
+  const reset = page.waitForResponse(r => r.url().includes('/client-billing-fields') && r.status() === 200);
+  await title.press('Enter'); await reset; await expect(title).toHaveValue('Izvajalec');
+  const material = page.locator('[data-client-billing-inline-field="material"]');
+  await material.fill('Prva vrstica'); await material.press('End'); await material.press('Enter'); await material.pressSequentially('Druga vrstica');
+  await expect(material).toHaveValue('Prva vrstica\nDruga vrstica');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+});
