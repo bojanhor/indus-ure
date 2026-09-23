@@ -73,7 +73,12 @@ function controlledEvent(event) {
     extendedProperties: { private: { indusApp: event.extendedProperties?.private?.indusApp, indusKey: event.extendedProperties?.private?.indusKey } } };
   for (const key of ["start", "end"]) {
     const value = event[key] || {};
-    result[key] = value.date ? { date: value.date } : { dateTime: String(value.dateTime || "").slice(0, 19), timeZone: value.timeZone || "Europe/Ljubljana" };
+    // Google canonicalizes the IANA Ljubljana link to Europe/Belgrade.
+    // Keep sending Ljubljana, but do not rewrite identical events forever.
+    // Do not collapse arbitrary zones just because today's offset matches.
+    const zone = value.timeZone || "Europe/Ljubljana";
+    const timeZone = zone === "Europe/Belgrade" ? "Europe/Ljubljana" : zone;
+    result[key] = value.date ? { date: value.date } : { dateTime: String(value.dateTime || "").slice(0, 19), timeZone };
   }
   return result;
 }

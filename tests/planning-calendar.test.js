@@ -82,6 +82,25 @@ test("all-day, multi-day, DST and timed values retain Ljubljana wall-clock and e
   assert.deepEqual(event.end, { date: "2026-10-28" });
   assert.equal(planning.nextDay("2026-12-31"), "2027-01-01");
 });
+test("Google's canonical Ljubljana alias is idempotent, without masking real time/zone changes", async t => {
+  const f = fixture(t); await f.run();
+  for (const events of f.remote.events.values()) for (const event of events.values()) {
+    for (const part of ["start", "end"]) event[part] = { ...event[part], dateTime: `${event[part].dateTime}+01:00`, timeZone: "Europe/Belgrade" };
+  }
+  await f.run();
+  assert.equal(f.state().lastError, "");
+  assert.equal(f.remote.calls.filter(([name]) => name === "events.update").length, 0);
+  for (const [date, offset] of [["2026-01-15", "+01:00"], ["2026-07-15", "+02:00"], ["2026-10-25", "+01:00"]]) {
+    const expected = { start: { dateTime: `${date}T08:00:00`, timeZone: "Europe/Ljubljana" } };
+    const actual = { start: { dateTime: `${date}T08:00:00${offset}`, timeZone: "Europe/Belgrade" } };
+    assert.deepEqual(controlledEvent(actual), controlledEvent(expected));
+    assert.notDeepEqual(controlledEvent({ start: { ...actual.start, timeZone: "Europe/Berlin" } }), controlledEvent(expected));
+    assert.notDeepEqual(controlledEvent({ start: { ...actual.start, dateTime: `${date}T09:00:00${offset}` } }), controlledEvent(expected));
+  }
+  f.db.todos[0].start = "08:30";
+  await f.run();
+  assert.equal(f.remote.calls.filter(([name]) => name === "events.update").length, 2);
+});
 test("projection contains a deep link and no billing fields or attachments", () => {
   const db = dbFixture(); Object.assign(db.todos[0], { amount: 1234, hourlyRate: 99, photos: [{ secret: "hidden.jpg" }], clientBillableMinutes: 120 });
   const body = Object.values(calendarPlans(db, baseUrl, definitions)[0].events)[0];

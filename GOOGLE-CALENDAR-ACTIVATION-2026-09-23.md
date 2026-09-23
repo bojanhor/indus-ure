@@ -14,6 +14,15 @@ lastniška pravica povezanega človeškega računa. Drug človek, drug koledar,
 skupina ali domena niso izjema. Vse strani ACL se preverijo pred kakršnimkoli
 spreminjanjem pravic. Pravice dejanskih dodatnih lastnikov ostanejo varovane.
 
+Prvi dejanski preizkus po objavi `712d982` je potrdil prenos, vendar je
+stroga primerjava projekcije odkrila še Googlovo preimenovanje časovnega
+pasa `Europe/Ljubljana` v njegov IANA cilj `Europe/Belgrade`. Primerjava
+izenači samo ta dva identifikatorja; odhodni podatki ostanejo Ljubljana.
+Drugi časovni pasovi in dejanske spremembe ur se še vedno zaznajo.
+S tem se prepreči ponavljajoče posodabljanje nespremenjenih dogodkov.
+Regresijski test vključuje zimski/poletni čas ter dejansko spremembo ure.
+IANA vir: https://www.iana.org/time-zones/releases
+
 OAuth dovoljenja, izbor poslovnih dogodkov in obstoječi ID-ji koledarjev se
 ne spreminjajo. Ni migracije poslovne baze. Povrnitev kode na `9696a69`
 vrne prejšnjo kontrolo (in njeno napako); že preneseni dogodki ostanejo v
