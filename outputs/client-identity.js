@@ -103,6 +103,8 @@ function normalizeStoredClient(client = {}) {
     taxId,
     registryNumber,
     vatPayer: Boolean(client.vatPayer),
+    // Keep existing visible clients byte-compatible with older releases.
+    ...(client.hiddenFromNewTasks === true ? { hiddenFromNewTasks: true } : {}),
     source,
     needsReview: client.needsReview === undefined ? Boolean(!taxId || importIssue) : Boolean(client.needsReview),
     importIssue,

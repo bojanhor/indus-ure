@@ -128,7 +128,7 @@ async function main() {
   await other.ensure({});
   let db = await store.load();
   const clientId = crypto.randomUUID();
-  db.clients.push({ clientId, id: clientId, name: "Izolirana QA stranka", alias: "QA", source: "ad-hoc" });
+  db.clients.push({ clientId, id: clientId, name: "Izolirana QA stranka", alias: "QA", source: "ad-hoc", hiddenFromNewTasks: true });
   const ids = Array.from({ length: 500 }, () => crypto.randomUUID());
   for (const [index, id] of ids.entries()) db.todos.push({ id, assignmentGroupId: id, title: `QA ${index}`, status: "open", clientId, client: "Izolirana QA stranka", syncUser: index === 1 ? "ibro" : "bojan", createdBy: "bojan", billingWorkerKm: 19, photos: [] });
   const bytes = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aX1sAAAAASUVORK5CYII=", "base64");
@@ -142,6 +142,8 @@ async function main() {
   const boss = headers(bossToken), worker = headers(workerToken);
   await store.save(db);
   db = await store.load();
+  assert.equal(db.clients.find(item => item.clientId === clientId).hiddenFromNewTasks, true);
+  check("relational.roundtrip_hidden_client");
   assert.equal(db.todos.find(item => item.id === ids[0]).billingWorkerKm, 19);
   check("relational.roundtrip_worker_km");
 

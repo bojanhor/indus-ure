@@ -2714,6 +2714,7 @@
     }
 
     .client-edit-delete-hint { margin: 8px 0 0; color: var(--muted); font-size: 12px; line-height: 1.35; }
+    #clientEditVisibilityArea { margin-top: 16px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
 
     .day-todo {
       position: relative;
@@ -6420,6 +6421,10 @@
             </select>
           </label>
         </div>
+        <div class="hidden" id="clientEditVisibilityArea">
+          <label class="todo-form-option"><input id="clientEditHiddenFromNewTasks" type="checkbox"><span>Skrij pri novih opravilih</span></label>
+          <p class="client-edit-delete-hint">Iskalnik je ne bo ponujal pri novih opravilih, vpisih ur, materiala in zapiskih. Obstoječi zapisi in obračuni ostanejo nespremenjeni. Kljukico lahko kadarkoli odstraniš.</p>
+        </div>
         <p class="client-edit-delete-hint" id="clientEditDeleteHint" aria-live="polite"></p>
         <div class="client-edit-danger-row hidden" id="clientEditDeleteArea">
           <button class="danger" id="deleteClientEdit" type="button">Izbriši stranko</button>
@@ -9966,12 +9971,18 @@ function findTodoClient(value) {
       return matches.length === 1 ? matches[0] : null;
     }
 
-function clientSuggestionValues() {
+function clientSuggestionValues({ includeHidden = false } = {}) {
       const suggestions = new Map();
+      const hiddenClients = (state.clients || []).filter((client) => client.hiddenFromNewTasks);
+      const hiddenIds = new Set(hiddenClients.map((client) => String(client.clientId || client.id || "")));
+      const hiddenNames = new Set(hiddenClients.flatMap((client) => [client.name, client.search]).filter(Boolean).map(normalizeText));
       const add = (client) => {
         const alias = String(client?.search || client?.name || "").trim();
         const name = String(client?.name || alias).trim();
         const stableId = String(client?.clientId || client?.id || "").trim();
+        // Legacy name-only references must not reintroduce a hidden canonical client.
+        if (!includeHidden && (client.hiddenFromNewTasks || hiddenIds.has(stableId)
+          || (!stableId && (hiddenNames.has(normalizeText(name)) || hiddenNames.has(normalizeText(alias)))))) return;
         const key = stableId ? `id:${stableId}` : normalizeText(`${alias}|${name}`);
         if (!alias || !key || suggestions.has(key)) return;
         suggestions.set(key, {
@@ -9994,7 +10005,7 @@ function hideTodoClientSuggestions() {
 
 function renderTodoClientSuggestions() {
       const query = normalizeText($("todoFormClient").value);
-      const matches = clientSuggestionValues()
+      const matches = clientSuggestionValues({ includeHidden: Boolean($("todoFormId").value) })
         .filter((item) => !query || normalizeText(`${item.value} ${item.label}`).includes(query))
         .slice(0, appConfig.editor.clientSuggestions);
       state.todoClientSuggestions = matches;
@@ -11732,6 +11743,7 @@ function clientDirectoryRow(client, { showInternalId = false } = {}) {
         <div class="client-row">
           <div>
             <strong>${escapeHtml(client.name)}</strong>
+            ${client.hiddenFromNewTasks ? '<span class="todo-meta">Skrita pri novih opravilih</span>' : ""}
             ${detail ? `<span class="todo-meta">${escapeHtml(detail)}</span>` : ""}
             ${identity ? `<span class="todo-meta">${escapeHtml(identity)}</span>` : ""}
             ${client.syncError ? `<span class="todo-meta error">${escapeHtml(client.syncError)}</span>` : ""}
@@ -12032,11 +12044,13 @@ function openClientEditDialog(clientId) {
       $("clientEditPostal").value = client.postal || "";
       $("clientEditCountry").value = client.country || "Slovenija";
       $("clientEditVatPayer").value = client.vatPayer ? "true" : "false";
+      $("clientEditHiddenFromNewTasks").checked = Boolean(client.hiddenFromNewTasks);
+      $("clientEditVisibilityArea").classList.toggle("hidden", state.user?.role !== "boss");
       renderClientEditContacts(contactsForClientEdit(client));
       const deletionAllowed = canDeleteClient() && Boolean(client.clientId || client.id);
       $("clientEditDeleteArea").classList.toggle("hidden", !deletionAllowed);
       $("clientEditDeleteHint").textContent = deletionAllowed
-        ? "Brisanje je mogoče samo, kadar stranka nima aktivnih opravil ali vnosov."
+        ? "Brisanje je mogoče samo, kadar stranka nima aktivnih opravil ali vnosov. Namesto brisanja jo lahko skriješ pri novih opravilih."
         : "";
       $("clientEditDialog").showModal();
       requestAnimationFrame(() => $("clientEditName").focus());
@@ -12068,7 +12082,8 @@ async function saveClientFromDialog() {
         city: $("clientEditCity").value.trim(),
         postal: $("clientEditPostal").value.trim(),
         country: $("clientEditCountry").value.trim() || "Slovenija",
-        vatPayer: $("clientEditVatPayer").value === "true"
+        vatPayer: $("clientEditVatPayer").value === "true",
+        ...(state.user?.role === "boss" ? { hiddenFromNewTasks: $("clientEditHiddenFromNewTasks").checked } : {})
       });
       $("clientEditDialog").close();
       const todoContext = state.clientEditTodoContext;
@@ -12097,7 +12112,7 @@ async function deleteClientFromDialog() {
         showNotice("Stranka je izbrisana iz baze.");
       } catch (error) {
         if (Number(error?.status) === 409) {
-          showNotice("Stranke ni mogoče izbrisati, ker ima aktivna opravila ali vnose. Najprej jih zapri, prestavi ali izbriši.");
+          showNotice("Stranke ni mogoče izbrisati, ker ima aktivna opravila ali vnose. Namesto brisanja označi »Skrij pri novih opravilih« in shrani spremembe.");
           return;
         }
         throw error;
@@ -12818,6 +12833,7 @@ function allClientRecords() {
           postal: existing?.postal || source.postal || "",
           country: existing?.country || source.country || "",
           vatPayer: existing?.vatPayer ?? source.vatPayer ?? false,
+          hiddenFromNewTasks: existing?.hiddenFromNewTasks ?? source.hiddenFromNewTasks ?? false,
           syncError: existing?.syncError || source.syncError || ""
         });
       };
@@ -12999,7 +13015,7 @@ function revealTodoFromSearch(todo) {
       });
     }
 function refreshClientList() {
-      $("clientList").innerHTML = clientSuggestionValues()
+      $("clientList").innerHTML = clientSuggestionValues({ includeHidden: true })
         .map((item) => `<option value="${escapeHtml(item.value)}" ${item.label && normalizeText(item.label) !== normalizeText(item.value) ? `label="${escapeHtml(item.label)}"` : ""}></option>`)
         .join("");
     }

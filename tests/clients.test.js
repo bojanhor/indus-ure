@@ -90,6 +90,20 @@ test("telefon stranke se varno prevede v stabilne kontakte", () => {
   assert.equal(preserved.contacts[1].id, valid.contacts[1].id);
 });
 
+test("skrivanje stranke je izrecno, povrnljivo in ohranjeno pri starejših zahtevkih", () => {
+  const client = normalizeStoredClient({ name: "Arhivska stranka", hiddenFromNewTasks: true });
+  assert.equal(client.hiddenFromNewTasks, true);
+  assert.equal(normalizeStoredClient({ name: "Nova" }).hiddenFromNewTasks, undefined);
+  assert.equal(normalizeStoredClient({ name: "Nova", hiddenFromNewTasks: "false" }).hiddenFromNewTasks, undefined);
+  const updated = cleanClient({ name: client.name, search: "Nov vzdevek" }, { existingClient: client });
+  assert.equal(updated.hiddenFromNewTasks, true);
+  assert.equal(cleanClient({ name: client.name, hiddenFromNewTasks: false }, { existingClient: client }).hiddenFromNewTasks, undefined);
+  const db = { clients: [client], todos: [], entries: [] };
+  normalizeDb(db);
+  assert.equal(db.clients.find((row) => row.clientId === client.clientId).hiddenFromNewTasks, true);
+  assert.equal(resolveStableClientId(db.clients, client.name), client.clientId);
+});
+
 test("AJPES mati\u010dna \u0161tevilka je zunanji podatek, lokalni ID pa ostane UUID", () => {
   const client = normalizeStoredClient({
     name: "Primer d.o.o.",

@@ -3857,6 +3857,8 @@ function cleanClient(input = {}, { existingClient = null } = {}) {
     taxId,
     registryNumber,
     vatPayer: Boolean(input.vatPayer),
+    hiddenFromNewTasks: input.hiddenFromNewTasks === undefined
+      ? existingClient?.hiddenFromNewTasks === true : input.hiddenFromNewTasks === true,
     source: input.source || existingClient?.source || (registryNumber ? "ajpes" : (taxId ? "local" : "ad-hoc")),
     needsReview: input.needsReview === undefined ? (existingClient?.needsReview ?? !taxId) : Boolean(input.needsReview),
     createdBy: input.createdBy || existingClient?.createdBy || "system",
@@ -6282,6 +6284,14 @@ async function handleApi(req, res) {
         || [row.name, row.search].some((value) => clientText.includes(String(value || "").trim().toLowerCase())));
       const existingClient = existingIndex >= 0 ? db.clients[existingIndex] : null;
       let client = cleanClient(body, { existingClient });
+      if (Object.hasOwn(body, "hiddenFromNewTasks") && typeof body.hiddenFromNewTasks !== "boolean") {
+        sendJson(res, 400, { error: "Nastavitev skrivanja stranke mora biti da ali ne." });
+        return;
+      }
+      if ((client.hiddenFromNewTasks === true) !== (existingClient?.hiddenFromNewTasks === true) && user.role !== "boss") {
+        sendJson(res, 403, { error: "Samo šef lahko skrije ali ponovno prikaže stranko pri novih opravilih." });
+        return;
+      }
       const validation = validateClient(client);
       if (validation) {
         sendJson(res, 400, { error: validation });
@@ -6292,6 +6302,7 @@ async function handleApi(req, res) {
         client = normalizeStoredClient({
           ...existingClient,
           ...client,
+          hiddenFromNewTasks: client.hiddenFromNewTasks === true,
           id: existingClient.clientId,
           clientId: existingClient.clientId,
           updatedAt: now
