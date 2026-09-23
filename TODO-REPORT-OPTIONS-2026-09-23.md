@@ -55,9 +55,28 @@ PDF/Gmail API. Vsi poslovni zapisni testi tečejo izključno na izoliranih
 testnih podatkih. PDF-ja z vključenimi/izključenimi možnostmi sta vizualno
 pregledana po renderiranju s Popplerjem.
 
-Pred objavo: celotni npm in Chromium E2E, ciljni WebKit, nato obvezni Linux
-in PostgreSQL/restore/upgrade/rollback testi točno pripravljene izdaje ter
-preverjen recovery backup. Končne rezultate in izdajo dopolnimo po objavi.
+Objavljeno 23. 9. 2026: `f3b166c` (GitHub main in produkcija).
+
+- Windows npm: 289 uspešnih, 1 pričakovano preskočen symlink test, 0 napak.
+- Linux npm na kandidatu: 290/290.
+- Chromium: 68/68; ciljni WebKit: 8/8. Ročno vizualno preverjeni izbirnik,
+  PDF nastavitve, mobilni polji naziv/vzdevek ter izris PDF s seštevki.
+- PostgreSQL: 18 kontrol, dump restore, dejanski sanitizirani recovery,
+  nadgradnja produkcijske kopije ter rollback/ponovni prehod so uspešni.
+  Dokazi: `/var/lib/indus-ure/qa/f3b166c.*`.
+- Pre-deploy backup `indus-ure-recovery-20260923T111635Z.tar.gz`:
+  191.667.076 bajtov, uspešno lokalno in Drive preverjanje, zaščitena oznaka
+  pred objavo. Objava je izvedena prek `deploy-indus-ure`.
+- Po objavi javni HTTP 200, health OK, obe aplikaciji active, brez novih
+  opozoril storitve Ure. Javno dostavljena lupina vsebuje vse nove funkcije.
+  Produkcijski testni brskalnik ni imel prijavljene seje in LAN obrazec ni
+  bil ponujen; poslovni UI testi so zato opravljeni v izolirani aplikaciji.
+- Google TODO je po ponovnem preverjanju revizije očiščen vseh sedmih
+  dokončanih točk, branje po zapisu potrjuje prazen dokument.
+
+Med preverjanjem povrnitve smo odstranili dodajanje praznih novih polj v
+stare revizijske posnetke: obstoječa zgodovina se zato ne prepisuje zgolj
+zaradi objave. Prikazni preglasitvi se v revizijo vključita šele, ko obstajata.
 
 Povrnitev ne zahteva migracije podatkov: z obstoječim postopkom se lahko
 vrne prejšnja izdaja 54d07c2. Nastavitve prikaza so lokalne, vsebina materiala
