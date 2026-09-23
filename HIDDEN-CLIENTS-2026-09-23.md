@@ -38,4 +38,19 @@ veljavna, kot tudi neposredno vpisano ime.
   obnovitve backup formata z enakimi podatki.
 - Ročni vizualni preizkus v izolirani aplikaciji prek vgrajenega brskalnika.
 
-Rezultat objave se dopolni po preverjeni varnostni kopiji in preklopu izdaje.
+## Objava
+
+Objavljena izdaja `48cd3e7`, prejšnja produkcijska izdaja `cc81854`.
+Končni testi: 279 uspešnih lokalnih testov + 1 preskok Windows symlink testa;
+na Linux kandidatu 280/280 brez preskokov; Chromium 61/61; ciljni WebKit
+2/2 na mobilni širini; PostgreSQL/restore/upgrade/rollback 20/20.
+
+Pred objavo je nastala preverjena kopija
+`indus-ure-recovery-20260923T031513Z.tar.gz`; končana 23. 9. 2026 ob
+03:15:42 UTC, vseh pet preverjanj lokalnega arhiva in Google Drive uspešnih.
+Kopija je označena kot zaščitena predobjavna točka.
+
+Po preklopu: aktivna izdaja pravilna, Ure in Fakture aktivni, health `ok: true`,
+javna stran HTTP 200 z novo nastavitvijo, brez opozoril v dnevniku Ure.
+Poslovnih zapisov in nastavitev skrivanja obstoječih strank nismo spreminjali;
+Fakture, Nginx, Google OAuth in GitHub niso bili spreminjani.
