@@ -31,8 +31,9 @@ prejšnjo izdajo `48cd3e7` vrne prejšnji prikaz; nov lokalni ključ filtra star
 izdaja ignorira. Objavo varuje obstoječi preverjeni recovery backup in
 PostgreSQL/restore/upgrade/rollback prehod.
 
-Google Koledar ni aktiviran: ločena odprta TODO točka zahteva prijavo uporabnika,
-soglasje in dejanski preizkus prenosa, spremembe ter odstranitve dogodka.
+Ob objavi te izdaje Google Koledar še ni bil aktiviran. Pozneje isti dan je
+uporabnik potrdil povezavo; aktivacija in dejanski preizkusi so zaključeni v
+`GOOGLE-CALENDAR-ACTIVATION-2026-09-23.md`.
 
 ## Rezultat objave
 
