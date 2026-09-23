@@ -293,7 +293,7 @@ test("šef lahko v poročilu neposredno spremeni obračunska polja, potrjen obra
       assert.equal(set.status, 200, set.body);
       const changed = JSON.parse(set.body).todos.find(item => item.id === created.id);
       assert.equal(changed[field], 'Oznaka QA'); assert.equal(changed.syncUser, 'ibro'); assert.equal(changed.start, created.start);
-      assert.equal(changed.revisionHistory.at(-1).snapshot[field], null);
+      assert.equal(changed.revisionHistory.at(-1).snapshot[field], undefined);
       assert.equal((await request(port, `/api/todos/${created.id}/client-billing-fields`, { method: 'POST', headers: ibro, body: JSON.stringify({ [field]: 'Forbidden' }) })).status, 403);
       const reset = await request(port, `/api/todos/${created.id}/client-billing-fields`, { method: 'POST', headers: bojan, body: JSON.stringify({ [field]: '' }) });
       assert.equal(reset.status, 200);
