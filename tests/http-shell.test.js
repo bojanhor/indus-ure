@@ -1008,7 +1008,8 @@ test("todo polish persists client report sorting and closes the daily view after
   assert.match(html, /const reportClientSortModes = \["recent", "hours_desc", "oldest", "count_desc", "name_asc", "name_desc"\]/);
   assert.match(html, /sort: state\.reportClientSort/);
   assert.match(html, /saveDayTimelineDrafts\(\{ closeAfterSave: true \}\)/);
-  assert.match(html, /if \(closeAfterSave && \$\("dayTimelineDialog"\)\.open[\s\S]*?\$\("dayTimelineDialog"\)\.close\(\);/);
+  assert.match(html, /const sameView = \(\) => \$\("dayTimelineDialog"\)\.open && state\.dayTimelineSessionId === sessionId/);
+  assert.match(html, /if \(closeAfterSave && sameView\(\)[\s\S]*?\$\("dayTimelineDialog"\)\.close\(\);/);
   assert.match(html, /function capitalizeTodoText\(value\)/);
   assert.match(server, /function capitalizeTodoText\(value\)/);
 });

@@ -7076,6 +7076,7 @@ const state = {
       dayTimelineIncludeArchived: false,
       dayTimelineDrafts: new Map(),
       dayTimelineSaving: false,
+      dayTimelineSessionId: 0,
       dayTimelineHoursWarning: null,
       dayTimelineHoursPendingSourceId: "",
       dayTimelineHoursResolvedSourceId: "",
@@ -10918,11 +10919,12 @@ function saveDayTimelineDraft(todo, start, end, date) {
 
 async function saveDayTimelineDrafts({ announce = true, closeAfterSave = false } = {}) {
       if (!state.dayTimelineDrafts.size || state.dayTimelineSaving) return;
-      const button = $("saveDayTimeline");
-      const closeButton = $("closeDayTimeline");
       const day = state.dayTimelineDate;
-      const draftIds = new Set(state.dayTimelineDrafts.keys());
-      const items = [...state.dayTimelineDrafts.entries()].map(([id, draft]) => ({
+      const sessionId = state.dayTimelineSessionId;
+      const submittedDrafts = new Map(state.dayTimelineDrafts);
+      const pendingHoursSourceId = state.dayTimelineHoursPendingSourceId;
+      const sameView = () => $("dayTimelineDialog").open && state.dayTimelineSessionId === sessionId;
+      const items = [...submittedDrafts.entries()].map(([id, draft]) => ({
         id,
         start: draft.start,
         end: draft.end,
@@ -10931,8 +10933,7 @@ async function saveDayTimelineDrafts({ announce = true, closeAfterSave = false }
       }));
       const editLockTokens = state.todoEditLock ? { [state.todoEditLock.todoId]: state.todoEditLock.token } : {};
       state.dayTimelineSaving = true;
-      button.disabled = true;
-      closeButton.disabled = true;
+      syncDayTimelineActions();
       try {
         const data = await api("/api/todos/time-batch", {
           method: "POST",
@@ -10942,9 +10943,11 @@ async function saveDayTimelineDrafts({ announce = true, closeAfterSave = false }
         state.todoRevision += 1;
         // Remove precisely the submitted drafts. New changes are blocked while
         // saving, but this also keeps the operation correct if that changes.
-        draftIds.forEach((id) => state.dayTimelineDrafts.delete(id));
-        if (state.dayTimelineHoursPendingSourceId) {
-          state.dayTimelineHoursResolvedSourceId = state.dayTimelineHoursPendingSourceId;
+        submittedDrafts.forEach((draft, id) => {
+          if (state.dayTimelineDrafts.get(id) === draft) state.dayTimelineDrafts.delete(id);
+        });
+        if (sameView() && pendingHoursSourceId) {
+          state.dayTimelineHoursResolvedSourceId = pendingHoursSourceId;
           state.dayTimelineHoursPendingSourceId = "";
         }
         refreshClientList();
@@ -10953,15 +10956,17 @@ async function saveDayTimelineDrafts({ announce = true, closeAfterSave = false }
         announceQueuedLateTimeEntryReport(data);
         (data.clientBillableHoursWarnings || []).forEach(announceClientBillableHoursWarning);
         if (announce) showNotice("Spremembe dnevnega pogleda so shranjene.");
-        if (closeAfterSave && $("dayTimelineDialog").open && state.dayTimelineDate === day && state.dayTimelineDrafts.size === 0) {
+        if (closeAfterSave && sameView() && state.dayTimelineDrafts.size === 0) {
           $("dayTimelineDialog").close();
         }
+      } catch (error) {
+        if (!sameView()) {
+          throw new Error(`${error.message || "Shranjevanje ni uspelo."} Spremembe so ohranjene v dnevnem pogledu; ponovno ga odpri in shrani ali prekliči spremembe.`);
+        }
+        throw error;
       } finally {
         state.dayTimelineSaving = false;
-        if ($("dayTimelineDialog").open) {
-          $("saveDayTimeline").disabled = state.dayTimelineDrafts.size === 0;
-          closeButton.disabled = false;
-        }
+        syncDayTimelineActions();
       }
     }
 
@@ -10979,7 +10984,10 @@ async function openTodoFromDayTimeline(todo) {
           showNotice("Najprej shrani ali prekli\u010di spremembe dnevne \u010dasovnice.");
           return;
         }
+        const sessionId = state.dayTimelineSessionId;
         await saveDayTimelineDrafts({ announce: false });
+        // Closing the day while the write is pending cancels only navigation.
+        if (!$("dayTimelineDialog").open || state.dayTimelineSessionId !== sessionId) return;
         todo = state.todos.find((item) => item.id === todo.id) || todo;
       }
       state.todoDialogReturnDayDate = state.dayTimelineDate;
@@ -11180,6 +11188,15 @@ function dayWorkBlocks(todos) {
       });
       return blocks;
     }
+function syncDayTimelineActions() {
+      $("saveDayTimeline").disabled = state.dayTimelineSaving || state.dayTimelineDrafts.size === 0;
+      const close = $("closeDayTimeline");
+      close.disabled = false;
+      close.title = state.dayTimelineSaving ? "Zapri; shranjevanje se nadaljuje" : "Prekliči spremembe";
+      close.setAttribute("aria-label", state.dayTimelineSaving
+        ? "Zapri dnevni pregled; shranjevanje se nadaljuje"
+        : "Prekliči spremembe in zapri dnevni pregled");
+    }
 function renderDayTimeline() {
       if (!state.dayTimelineDate) return;
       renderCalendarWorkerFilter();
@@ -11194,7 +11211,7 @@ function renderDayTimeline() {
       dayTimelineTitle.textContent = compactDayTimelineTitle(selectedDate);
       dayTimelineTitle.title = fullDayTitle;
       dayTimelineTitle.setAttribute("aria-label", fullDayTitle);
-      $("saveDayTimeline").disabled = state.dayTimelineSaving || state.dayTimelineDrafts.size === 0;
+      syncDayTimelineActions();
 
       const todos = dayTimelineTodos();
       // Date ranges are all-day planning tasks. They never expose clock drag
@@ -11413,6 +11430,7 @@ function openDayTimeline(date, { includeArchived = false } = {}) {
         showNotice(state.dayTimelineSaving ? "Dnevni pogled se še shranjuje." : "Najprej shrani ali prekliči spremembe dnevne časovnice.");
         return;
       }
+      const sessionId = ++state.dayTimelineSessionId;
       state.dayTimelineDate = date;
       state.dayTimelineIncludeArchived = Boolean(includeArchived);
       state.dayTimelineInteraction = null;
@@ -11423,6 +11441,7 @@ function openDayTimeline(date, { includeArchived = false } = {}) {
       renderDayTimeline();
       if (!dialog.open) dialog.showModal();
       requestAnimationFrame(() => {
+        if (!dialog.open || state.dayTimelineSessionId !== sessionId) return;
         const scroll = $("dayTimelineScroll");
         state.dayTimelineMinuteHeight = Math.max(0.35, Math.min(2.4, scroll.clientHeight / 900));
         renderDayTimeline();
@@ -14234,10 +14253,6 @@ $("saveDayTimeline").addEventListener("click", () => {
       saveDayTimelineDrafts({ closeAfterSave: true }).catch((error) => showNotice(error.message));
     });
 $("closeDayTimeline").addEventListener("click", () => {
-      if (state.dayTimelineSaving) {
-        showNotice("Dnevni pogled se še shranjuje.");
-        return;
-      }
       $("dayTimelineDialog").close();
     });
 $("prevDayTimeline").addEventListener("click", () => navigateDayTimeline(-1));
@@ -14262,12 +14277,8 @@ document.addEventListener("pointerup", (event) => {
 document.addEventListener("pointercancel", (event) => {
       finishDayTimelineEventPointer(event, true).catch(() => {});
     });
-$("dayTimelineDialog").addEventListener("cancel", (event) => {
-      if (!state.dayTimelineSaving) return;
-      event.preventDefault();
-      showNotice("Dnevni pogled se še shranjuje.");
-    });
 $("dayTimelineDialog").addEventListener("close", () => {
+      state.dayTimelineSessionId += 1;
       const interaction = state.dayTimelineInteraction;
       state.dayTimelineInteraction = null;
       state.dayTimelinePointers.clear();
@@ -14275,9 +14286,10 @@ $("dayTimelineDialog").addEventListener("close", () => {
       if (interaction?.autoScrollFrame) cancelAnimationFrame(interaction.autoScrollFrame);
       state.dayTimelineGesture = null;
       $("dayTimelineScroll").classList.remove("is-panning");
-      state.dayTimelineDrafts.clear();
-      // X intentionally discards drafts. Only a successfully saved correction
-      // may continue into the project-completion question.
+      // X discards unsent drafts, but cannot cancel an already submitted write.
+      // Retain that snapshot until success so a failed request can be retried.
+      if (!state.dayTimelineSaving) state.dayTimelineDrafts.clear();
+      // Only a successfully saved correction may continue into completion.
       const hoursSourceId = state.dayTimelineHoursResolvedSourceId;
       state.dayTimelineHoursWarning = null;
       state.dayTimelineHoursPendingSourceId = "";
