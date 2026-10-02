@@ -47,8 +47,8 @@ test("boss calendar filters external workers, grouped planning and recorded hour
   await expect(cards.filter({ hasText: "External planning QA" })).toHaveCount(1);
   await expect(cards.filter({ hasText: "External hours QA" })).toHaveCount(0);
   await expect(cards.filter({ hasText: "Shared planning QA" })).toHaveCount(1);
-  await expect(cards.filter({ hasText: "Shared planning QA" }).locator(".day-todo-worker")).toContainText("Ibro");
-  await expect(cards.filter({ hasText: "Shared planning QA" }).locator(".day-todo-worker")).toContainText(external.name);
+  await expect(cards.filter({ hasText: "Shared planning QA" }).locator(".day-todo-workers")).toContainText("Ibro");
+  await expect(cards.filter({ hasText: "Shared planning QA" }).locator(".day-todo-workers")).toContainText(external.name);
   await selectWorkers(page, "calendarWorkerFilter", [external.id]);
   await expect(cards.filter({ hasText: "Bojan planning QA" })).toHaveCount(0);
   await expect(cards.filter({ hasText: "Ibro planning QA" })).toHaveCount(0);
@@ -111,7 +111,7 @@ test("boss calendar filters external workers, grouped planning and recorded hour
   await page.evaluate(() => setWorkContext("worker:ibro"));
   await expect(page.locator("#calendarWorkerFilter")).toBeHidden();
   await expect(cards.filter({ hasText: "Ibro planning QA" })).toHaveCount(1);
-  await expect(page.locator("#calendar .day-todo-worker")).toHaveCount(0);
+  await expect(cards.filter({ hasText: "Ibro planning QA" }).locator(".day-todo-worker-name")).toHaveText("Ibro");
   await page.evaluate(() => setWorkContext("admin"));
   await expect(page.locator(`#calendarWorkerFilter [data-calendar-worker-id="${external.id}"]`)).toBeChecked();
   await selectWorkers(page, "calendarWorkerFilter", [external.id, "bojan"]);

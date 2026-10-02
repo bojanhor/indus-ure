@@ -2784,7 +2784,9 @@
     }
 
     .day-multiday-event {
-      display: block;
+      display: flex;
+      align-items: center;
+      gap: 6px;
       width: 100%;
       min-height: 29px;
       padding: 5px 8px;
@@ -2830,6 +2832,7 @@
 
     .day-multiday-event-title {
       display: block;
+      min-width: 0;
       overflow: hidden;
       text-overflow: ellipsis;
     }
@@ -2863,6 +2866,8 @@
       font-weight: 800;
       font-variant-numeric: tabular-nums;
       opacity: 0.92;
+      text-align: right;
+      overflow-wrap: normal;
     }
 
     .day-todo-client {
@@ -2883,6 +2888,17 @@
       gap: 4px;
       min-width: 0;
     }
+
+    .day-todo-topline-end { min-width: 0; }
+    .day-todo-flags { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 3px; }
+    .day-todo-time-part { white-space: nowrap; }
+    .day-todo-workers { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 6px; min-width: 0; }
+    .day-todo-worker { display: inline-flex; align-items: center; gap: 4px; min-width: 0; max-width: 100%; font-size: 0.92em; font-weight: 700; }
+    .day-todo-worker-name { min-width: 0; overflow-wrap: anywhere; white-space: normal; }
+    .day-todo-worker .avatar { position: relative; width: 18px; height: 18px; font-size: 10px; }
+    .day-todo-worker .avatar img { position: absolute; inset: 0; }
+    .day-multiday-event .day-todo-workers { flex-wrap: nowrap; max-width: 55%; flex: 0 1 auto; }
+    .day-multiday-event .day-todo-worker-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
     .day-todo-settlements {
       display: inline-flex;
@@ -2919,7 +2935,6 @@
     .calendar-worker-choices { position: absolute; top: calc(100% + 4px); right: 0; z-index: 180; width: max-content; min-width: 100%; max-width: min(320px, calc(100vw - 40px)); max-height: 40vh; overflow-y: auto; overscroll-behavior: contain; padding: 5px; background: #fff; border: 1px solid var(--line); border-radius: 9px; box-shadow: 0 10px 25px #16372c30; }
     .calendar-worker-choices label { display: flex; align-items: center; gap: 9px; padding: 10px; font-size: 14px; cursor: pointer; }
     .calendar-worker-choices input { width: 19px; height: 19px; min-height: 0; margin: 0; flex: 0 0 19px; }
-    .day-todo-worker { margin-left: 6px; font-weight: 600; overflow-wrap: anywhere; }
 
     .calendar-completed-filter {
       display: inline-flex;
@@ -5332,6 +5347,10 @@
       .day-todo .day-todo-title { display: block; font-size: 9px; line-height: 1.1; overflow-wrap: anywhere; }
       .day-todo .day-todo-client,
       .day-todo .day-todo-title { margin-top: 2px; }
+      .day-todo-topline { gap: 3px; }
+      .day-todo-topline-end { max-width: 3.3em; }
+      .day-todo-worker { gap: 3px; font-size: 9px; }
+      .day-todo-worker .avatar { width: 14px; height: 14px; font-size: 8px; }
       .todo-item {
         padding: 8px;
       }
@@ -9613,6 +9632,37 @@ function todoAssigneeNames(todo) {
       return names.length ? names.join(", ") : "Ni dodeljeno";
     }
 
+function calendarTodoWorkers(todo) {
+      const workers = document.createElement("span");
+      workers.className = "day-todo-workers";
+      // Material deliveries have no worker; do not turn their creator into one.
+      const ids = todo.status === "material" ? [] : todoAssigneeIds(todo);
+      ids.forEach((id) => {
+        const user = state.users.find((item) => item.id === id);
+        const name = userDisplayName(id);
+        const worker = document.createElement("span");
+        worker.className = "day-todo-worker";
+        const avatar = document.createElement("span");
+        avatar.className = "avatar";
+        avatar.setAttribute("aria-hidden", "true");
+        avatar.textContent = (name || "?").slice(0, 1).toUpperCase();
+        if (user?.avatar) {
+          const image = document.createElement("img");
+          image.alt = "";
+          image.draggable = false;
+          image.src = user.avatar;
+          image.addEventListener("error", () => image.remove(), { once: true });
+          avatar.appendChild(image);
+        }
+        const label = document.createElement("span");
+        label.className = "day-todo-worker-name";
+        label.textContent = name;
+        worker.append(avatar, label);
+        workers.appendChild(worker);
+      });
+      return workers;
+    }
+
 function contextEntries() {
       if (isAdminView()) return state.entries;
       const workerId = activeWorkerId();
@@ -10374,12 +10424,13 @@ function appendMonthMultiDayLanes(day, key, weekIndex, layout) {
           const item = document.createElement('button');
           item.type = 'button';
           item.className = `day-multiday-event todo-status-color ${todoStatusClass(todo.status)} ${todoAssigneeIds(todo).length > 1 ? 'multi-assignee' : ''} ${todo.urgent ? 'urgent' : ''} ${todoChangeNotice(todo) ? 'has-change-notice' : ''} ${actualStart ? 'is-span-start' : 'is-span-continuation'} ${actualEnd ? 'is-span-end' : ''}`;
-          const title = `${todo.urgent ? `NUJNO ${String.fromCharCode(183)} ` : ''}${todo.title || 'Brez naslova'}`;
-          item.setAttribute('aria-label', `${title}; ${todoDateTimeLabel(todo)}`);
+          const title = todo.title || 'Brez naslova';
+          item.setAttribute('aria-label', `${todo.urgent ? 'Nujno opravilo; ' : ''}${todoAssigneeNames(todo)}; ${title}; ${todoDateTimeLabel(todo)}`);
           // A span crosses the grid's weekly rows on Monday. Repeat its title
           // there so the pale continuation has meaning on its own.
           const startsNewWeek = parseDate(key)?.getDay() === 1;
           if (actualStart || (startsNewWeek && !actualEnd)) {
+            item.appendChild(calendarTodoWorkers(todo));
             const titleElement = document.createElement('span');
             titleElement.className = 'day-multiday-event-title';
             titleElement.textContent = title;
@@ -10665,12 +10716,14 @@ function renderMonth() {
             const settlementIndicators = dayTodoSettlementIndicators(todo);
             const changeNotice = todoChangeNotice(todo);
             item.className = `day-todo todo-status-color ${todoStatusClass(todo.status)} ${todoAssigneeIds(todo).length > 1 ? 'multi-assignee' : ''} ${todo.done ? 'done' : ''} ${todo.urgent ? 'urgent' : ''} ${changeNotice ? 'has-change-notice' : ''} ${settlementIndicators ? 'has-settlements' : ''}`;
-            const time = todo.start && todo.end ? `${escapeHtml(todo.start)}&ndash;${escapeHtml(todo.end)}` : 'Brez ure';
+            const time = todo.start && todo.end ? `<span class="day-todo-time-part">${escapeHtml(todo.start)}&ndash;</span><wbr><span class="day-todo-time-part">${escapeHtml(todo.end)}</span>` : 'Brez ure';
             const client = todoClientCalendarName(todo, 'Brez stranke');
-            const title = `${todo.urgent ? `NUJNO ${String.fromCharCode(183)} ` : ''}${todo.title || 'Brez naslova'}`;
+            const title = todo.title || 'Brez naslova';
             if (changeNotice) item.title = todoChangeNoticeText(todo);
-            const workerLabel = isAdminView() ? `<span class="day-todo-worker">${escapeHtml(todoAssigneeNames(todo))}</span>` : '';
-            item.innerHTML = `<span class="day-todo-topline"><span class="day-todo-time">${time}${workerLabel}</span>${settlementIndicators}${changeNotice ? `<span class="day-todo-change-mark" aria-label="${escapeHtml(todoChangeNoticeLabel(todo))}">&#9679;</span>` : ''}</span><span class="day-todo-client">${escapeHtml(client)}</span><span class="day-todo-title">${escapeHtml(title)}</span>`;
+            const flags = `${settlementIndicators}${changeNotice ? `<span class="day-todo-change-mark" aria-label="${escapeHtml(todoChangeNoticeLabel(todo))}">&#9679;</span>` : ''}`;
+            item.innerHTML = `<span class="day-todo-topline"><span class="day-todo-topline-end"><span class="day-todo-time">${time}</span>${flags ? `<span class="day-todo-flags">${flags}</span>` : ''}</span></span><span class="day-todo-client">${escapeHtml(client)}</span><span class="day-todo-title">${escapeHtml(title)}</span>`;
+            item.querySelector('.day-todo-topline').prepend(calendarTodoWorkers(todo));
+            item.setAttribute('aria-label', `${todo.urgent ? 'Nujno opravilo; ' : ''}${todo.status === 'material' ? 'Dostava materiala' : todoAssigneeNames(todo)}; ${todo.start && todo.end ? `${todo.start}–${todo.end}` : 'Brez ure'}; ${client}; ${title}${changeNotice ? `; ${todoChangeNoticeLabel(todo)}` : ''}`);
             item.addEventListener('pointerdown', (event) => beginMonthTodoPointerDrag(event, item, todo, key));
             item.addEventListener('lostpointercapture', cancelMonthTodoPointerDrag);
             item.addEventListener('click', (event) => {
