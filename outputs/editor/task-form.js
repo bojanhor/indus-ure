@@ -35,6 +35,7 @@ function createTaskForm({
   renderTodos,
   renderTodoStatusChoices,
   setTodoClientSuggestionIndex,
+  setTodoFormAllDay,
   setTodoFormQuickTime,
   shiftDateKey,
   showFormValidationError,
@@ -657,6 +658,12 @@ function installTaskFormBindings1() {
       });
     });
     $("todoFormQuickTimePicker").addEventListener("click", (event) => {
+      if (event.target.closest("#todoFormQuickTimeAllDay")) {
+        if (setTodoFormAllDay()) {
+          $(state.todoTimePickerTarget === "end" ? "todoFormQuickTimeEnd" : "todoFormQuickTimeStart").focus();
+        }
+        return;
+      }
       const targetButton = event.target.closest("[data-time-picker-target]");
       if (targetButton) {
         state.todoTimeShiftDuration = null;

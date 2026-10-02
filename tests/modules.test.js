@@ -143,12 +143,66 @@ function editorFixture() {
   };
   const state = { user: { id: "ibro" } }, stored = new Map();
   const editor = context.createTimeEntryEditor({ $, state,
+    canSetAllDay: () => !state.timeRequired,
     parseBillingNumber: (value) => Number(value.replace(",", ".")),
     clearFormValidationError() {}, updateTodoFormLateTimeEntryNotice() {},
     localStorage: { getItem: (key) => stored.get(key), setItem: (key, value) => stored.set(key, value) }
   });
   return { editor, $, state, stored, context };
 }
+
+test("untimed task labels stay empty even with a remembered dial suggestion", () => {
+  const { editor, $, stored } = editorFixture();
+  stored.set("indus-ure-last-time-ibro", "13:30");
+  editor.renderTodoFormQuickTimePicker();
+  assert.equal($("todoFormQuickTimeStart").textContent, "Od ---");
+  assert.equal($("todoFormQuickTimeEnd").textContent, "Do ---");
+  assert.equal($("todoFormStart").value, "");
+  assert.equal($("todoFormEnd").value, "");
+  assert.equal(editor.todoTimePickerDefault("start"), "13:30");
+});
+
+test("all-day action clears both times, keeps dates and manual billing, and resets the picker", () => {
+  const { editor, $, state } = editorFixture();
+  $("todoFormDate").value = $("todoFormEndDate").value = "2026-10-02";
+  $("todoFormStart").value = "10:15";
+  $("todoFormEnd").value = "24:00";
+  $("todoFormEnd").dataset.autoSuggested = "true";
+  $("todoFormClientBillableHours").dataset.manual = "true";
+  $("todoFormClientBillableHours").value = "4";
+  state.todoTimePickerOpen = true;
+  state.todoTimePickerMode = "minute";
+  state.todoTimeShiftDuration = 825;
+  assert.equal(editor.setTodoFormAllDay(), true);
+  assert.equal($("todoFormStart").value, "");
+  assert.equal($("todoFormEnd").value, "");
+  assert.equal($("todoFormQuickTimeStart").textContent, "Od ---");
+  assert.equal($("todoFormQuickTimeEnd").textContent, "Do ---");
+  assert.equal($("todoFormDate").value, "2026-10-02");
+  assert.equal($("todoFormEndDate").value, "2026-10-02");
+  assert.equal($("todoFormClientBillableHours").value, "4");
+  assert.equal($("todoFormEnd").dataset.autoSuggested, "false");
+  assert.equal(state.todoTimePickerOpen, false);
+  assert.equal(state.todoTimePickerMode, "hour");
+  assert.equal(state.todoTimeShiftDuration, null);
+  editor.setTodoFormQuickTime("start", { hour: 9, minute: 0 });
+  assert.equal($("todoFormEnd").value, "10:00");
+});
+
+test("all-day action cannot clear required or locked times", () => {
+  const { editor, $, state } = editorFixture();
+  $("todoFormStart").value = "08:00";
+  $("todoFormEnd").value = "09:00";
+  state.timeRequired = true;
+  editor.renderTodoFormQuickTimePicker();
+  assert.equal($("todoFormQuickTimeAllDay").classList.contains("hidden"), true);
+  assert.equal(editor.setTodoFormAllDay(), false);
+  state.timeRequired = false;
+  $("todoFormStart").disabled = true;
+  assert.equal(editor.setTodoFormAllDay(), false);
+  assert.equal($("todoFormStart").value, "08:00");
+  assert.equal($("todoFormEnd").value, "09:00");
+});
 
 test("editor keeps manual client hours independent from worker time", () => {
   const { editor, $ } = editorFixture();

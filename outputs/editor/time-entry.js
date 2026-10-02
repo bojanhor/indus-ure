@@ -1,5 +1,5 @@
 // Time picker and independent client-billable hours. No HTTP/server dependency.
-function createTimeEntryEditor({ $, state, parseBillingNumber, clearFormValidationError, updateTodoFormLateTimeEntryNotice, localStorage, config = { defaultStart: "08:00", defaultDurationMinutes: 60 } }) {
+function createTimeEntryEditor({ $, state, parseBillingNumber, clearFormValidationError, updateTodoFormLateTimeEntryNotice, localStorage, canSetAllDay = () => false, config = { defaultStart: "08:00", defaultDurationMinutes: 60 } }) {
 // BEGIN preserved time-entry editor
     function dayTimelineMinutes(value) {
       const match = /^(\d{2}):(\d{2})$/.exec(String(value || ""));
@@ -107,6 +107,11 @@ function createTimeEntryEditor({ $, state, parseBillingNumber, clearFormValidati
       const picker = $("todoFormQuickTimePicker");
       const timeFields = $("todoFormTimeFields");
       if (!picker || !timeFields) return;
+      // Defaults are suggestions for the dial, never the task's saved time.
+      $("todoFormQuickTimeStart").textContent = `Od ${roundTimeToQuarter($("todoFormStart").value) || "---"}`;
+      $("todoFormQuickTimeEnd").textContent = `Do ${roundTimeToQuarter($("todoFormEnd").value, true) || "---"}`;
+      $("todoFormQuickTimeDuration").textContent = todoTimePickerDurationLabel();
+      $("todoFormQuickTimeAllDay").classList.toggle("hidden", !canSetAllDay());
       const unavailable = timeFields.classList.contains("hidden") || $("todoFormStart").disabled || $("todoFormEnd").disabled;
       picker.classList.toggle("hidden", unavailable);
       if (unavailable) return;
@@ -118,17 +123,10 @@ function createTimeEntryEditor({ $, state, parseBillingNumber, clearFormValidati
       const parts = todoTimePickerParts(input.value, todoTimePickerDefault(target));
       const currentHour = parts.hour;
       const currentMinute = parts.minute;
-      const startValue = roundTimeToQuarter($("todoFormStart").value || todoTimePickerDefault("start")) || config.defaultStart;
-      const startMinutes = dayTimelineMinutes(startValue);
-      const endFallback = dayTimelineTime(Math.min(1440, (startMinutes === null ? dayTimelineMinutes(config.defaultStart) : startMinutes) + config.defaultDurationMinutes));
-      const endValue = roundTimeToQuarter($("todoFormEnd").value || endFallback, true) || endFallback;
       $("todoFormQuickTimeStart").classList.toggle("active", isOpen && target === "start");
       $("todoFormQuickTimeEnd").classList.toggle("active", isOpen && target === "end");
       $("todoFormQuickTimeStart").setAttribute("aria-pressed", String(isOpen && target === "start"));
       $("todoFormQuickTimeEnd").setAttribute("aria-pressed", String(isOpen && target === "end"));
-      $("todoFormQuickTimeStart").textContent = `Od ${startValue}`;
-      $("todoFormQuickTimeEnd").textContent = `Do ${endValue}`;
-      $("todoFormQuickTimeDuration").textContent = todoTimePickerDurationLabel();
       $("todoFormQuickTimeHourMode").classList.toggle("active", mode === "hour");
       $("todoFormQuickTimeMinuteMode").classList.toggle("active", mode === "minute");
       $("todoFormQuickTimeHourMode").setAttribute("aria-pressed", String(mode === "hour"));
@@ -148,6 +146,23 @@ function createTimeEntryEditor({ $, state, parseBillingNumber, clearFormValidati
             return `<button class="todo-time-picker-choice minute minute-${minute} ${currentMinute === minute ? "active" : ""}" type="button" data-time-picker-minute="${minute}" aria-label="${value} minut" aria-pressed="${currentMinute === minute}">${value}</button>`;
           }).join("");
       $("todoFormQuickTimeDial").innerHTML = `${center}${choices}`;
+    }
+
+    function setTodoFormAllDay() {
+      if (!canSetAllDay() || $("todoFormTimeFields").classList.contains("hidden")
+        || $("todoFormStart").disabled || $("todoFormEnd").disabled) return false;
+      for (const id of ["todoFormStart", "todoFormEnd"]) {
+        $(id).value = "";
+        clearFormValidationError($("todoForm"), $(id));
+      }
+      $("todoFormEnd").dataset.autoSuggested = "false";
+      state.todoTimeShiftDuration = null;
+      state.todoTimePickerMode = "hour";
+      state.todoTimePickerOpen = false;
+      updateTodoFormLateTimeEntryNotice();
+      syncTodoFormClientBillableHours();
+      renderTodoFormQuickTimePicker();
+      return true;
     }
 
     function setTodoFormQuickTime(target, { hour = null, minute = null } = {}) {
@@ -181,5 +196,5 @@ function createTimeEntryEditor({ $, state, parseBillingNumber, clearFormValidati
       renderTodoFormQuickTimePicker();
     }
 // END preserved time-entry editor
-  return { dayTimelineMinutes, dayTimelineTime, roundTimeToQuarter, normalizeTodoFormTimes, todoFormWorkerMinutes, todoTimePickerDurationLabel, formatClientBillableHours, todoFormClientBillableHoursIsManual, syncTodoFormClientBillableHours, todoFormClientBillableMinutes, todoTimePickerStorageKey, rememberedTodoStartTime, rememberTodoStartTime, todoTimePickerParts, todoTimePickerDefault, renderTodoFormQuickTimePicker, setTodoFormQuickTime };
+  return { dayTimelineMinutes, dayTimelineTime, roundTimeToQuarter, normalizeTodoFormTimes, todoFormWorkerMinutes, todoTimePickerDurationLabel, formatClientBillableHours, todoFormClientBillableHoursIsManual, syncTodoFormClientBillableHours, todoFormClientBillableMinutes, todoTimePickerStorageKey, rememberedTodoStartTime, rememberTodoStartTime, todoTimePickerParts, todoTimePickerDefault, renderTodoFormQuickTimePicker, setTodoFormAllDay, setTodoFormQuickTime };
 }

@@ -3800,6 +3800,7 @@
       font-weight: 800;
     }
     .todo-time-picker.is-closed .todo-time-picker-detail { display: none; }
+    .todo-time-picker-all-day { min-height: 44px; padding: 8px 14px; }
     .todo-time-picker-dial {
       position: relative;
       width: min(100%, 318px);
@@ -6325,6 +6326,7 @@
                   <button class="todo-time-picker-mode-button active" id="todoFormQuickTimeHourMode" type="button" data-time-picker-mode="hour">Ura</button>
                   <button class="todo-time-picker-mode-button" id="todoFormQuickTimeMinuteMode" type="button" data-time-picker-mode="minute">Minute</button>
                 </div>
+                <button class="secondary todo-time-picker-all-day hidden" id="todoFormQuickTimeAllDay" type="button" title="Počisti obe uri in ohrani datum">Cel dan</button>
               </div>
               <div class="todo-time-picker-dial todo-time-picker-detail" id="todoFormQuickTimeDial" aria-live="polite"></div>
             </section>
@@ -7352,6 +7354,7 @@ const {
     renderTodos: (...args) => renderTodos(...args),
     renderTodoStatusChoices: (...args) => renderTodoStatusChoices(...args),
     setTodoClientSuggestionIndex: (...args) => setTodoClientSuggestionIndex(...args),
+    setTodoFormAllDay: (...args) => setTodoFormAllDay(...args),
     setTodoFormQuickTime: (...args) => setTodoFormQuickTime(...args),
     shiftDateKey: (...args) => shiftDateKey(...args),
     showFormValidationError: (...args) => showFormValidationError(...args),
@@ -10781,6 +10784,7 @@ const {
       todoTimePickerParts,
       todoTimePickerDefault,
       renderTodoFormQuickTimePicker,
+      setTodoFormAllDay,
       setTodoFormQuickTime
     } = createTimeEntryEditor({
       $,
@@ -10788,6 +10792,8 @@ const {
       parseBillingNumber,
       clearFormValidationError,
       updateTodoFormLateTimeEntryNotice,
+      canSetAllDay: () => !timeEntryStatusIds.has($("todoFormStatus").value)
+        && !["material", "note"].includes($("todoFormStatus").value),
       config: appConfig.editor,
       localStorage: {
         getItem: (key) => localStorage.getItem(key),
