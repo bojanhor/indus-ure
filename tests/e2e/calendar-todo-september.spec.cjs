@@ -60,7 +60,8 @@ test("boss calendar filters external workers, grouped planning and recorded hour
   await page.evaluate(() => openDayTimeline("2032-04-05"));
   const events = page.locator("#dayTimelineEvents .day-timeline-event");
   await expect(events).toHaveCount(3);
-  await expect(events.filter({ hasText: "External hours QA" }).locator(".day-timeline-event-meta")).toHaveText("09:00-10:00 | Zunanji izvajalci QA | Calendar QA");
+  await expect(events.filter({ hasText: "External hours QA" }).locator(".day-todo-worker-name")).toHaveText("Zunanji izvajalci QA");
+  await expect(events.filter({ hasText: "External hours QA" }).locator(".day-timeline-event-meta")).toHaveText("09:00-10:00 | Calendar QA");
   await expect(page.locator("#dayTimelineFit")).toHaveText("24h");
   await expect(page.locator("#dayTimelineZoomValue")).toHaveCount(0);
   const height = await page.locator("#dayTimeline").evaluate(element => element.offsetHeight);

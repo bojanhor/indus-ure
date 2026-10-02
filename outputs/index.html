@@ -3215,7 +3215,20 @@
     .day-timeline-event.has-change-notice { box-shadow: inset 4px 0 0 #176e37, 0 0 0 2px rgba(47, 154, 87, 0.45); }
     .day-hours-warning { display: inline-grid; place-items: center; width: 18px; height: 18px; margin-left: 5px; border-radius: 50%; background: #c93131; color: #fff; font-weight: 900; line-height: 1; }
     .day-timeline-event-title { display: block; font-size: 13px; line-height: 1.2; overflow-wrap: anywhere; }
+    .day-event-heading { display: block; min-width: 0; font-size: 13px; line-height: 1.2; overflow-wrap: anywhere; }
+    .day-event-heading > .day-todo-workers { display: inline-flex; max-width: 100%; margin-right: 6px; vertical-align: middle; }
+    .day-event-heading > .day-todo-workers:empty { display: none; }
+    .day-event-heading .day-todo-worker { gap: 3px; font-size: 11px; }
+    .day-event-heading .day-todo-worker .avatar { width: 16px; height: 16px; font-size: 9px; }
+    .day-event-heading > .day-timeline-event-title { display: inline; vertical-align: middle; }
     .day-timeline-event-meta { display: block; min-width: 0; margin-top: 2px; font-size: 11px; line-height: 1.15; overflow-wrap: anywhere; word-break: break-word; opacity: 0.86; }
+    .day-timeline-event.is-short-event { padding: 1px 6px; }
+    .day-timeline-event.is-short-event .day-event-heading { line-height: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .day-timeline-event.is-short-event .day-todo-workers { flex-wrap: nowrap; max-width: 60%; }
+    .day-timeline-event.is-short-event .day-todo-worker { font-size: 10px; }
+    .day-timeline-event.is-short-event .day-todo-worker .avatar { width: 14px; height: 14px; font-size: 8px; }
+    .day-timeline-event.is-short-event .day-timeline-event-title { font-size: 11px; }
+    .day-timeline-event.is-short-event .day-timeline-event-meta { display: none; }
     .day-resize-handle {
       position: absolute;
       width: 54px;
@@ -11190,7 +11203,13 @@ function renderDayTimeline() {
         button.type = "button";
         button.className = "day-all-day-item todo-status-color " + todoStatusClass(todo.status);
         const client = todoClientCalendarName(todo);
-        button.textContent = todo.title + (client ? " - " + client : "");
+        const heading = document.createElement("span");
+        heading.className = "day-event-heading";
+        const title = document.createElement("strong");
+        title.className = "day-timeline-event-title";
+        title.textContent = todo.title + (client ? " - " + client : "");
+        heading.append(calendarTodoWorkers(todo), title);
+        button.appendChild(heading);
         const movableToTimeline = !todoIsMultiDayCalendarSpan(todo);
         if (movableToTimeline) {
           button.title = "Povleci v časovnico za enourni termin";
@@ -11244,11 +11263,12 @@ function renderDayTimeline() {
         event.dataset.end = dayTimelineTime(endMinute);
         event.tabIndex = 0;
         event.setAttribute("role", "button");
-        event.setAttribute("aria-label", todo.title + ", " + dayTimelineTime(startMinute) + " do " + dayTimelineTime(endMinute) + (todoChangeNotice(todo) ? ". Spremenjeno." : ""));
+        event.setAttribute("aria-label", (todo.status === "material" ? "Dostava materiala" : todoAssigneeNames(todo)) + "; " + todo.title + ", " + dayTimelineTime(startMinute) + " do " + dayTimelineTime(endMinute) + (todoChangeNotice(todo) ? ". Spremenjeno." : ""));
         if (todoChangeNotice(todo)) event.title = todoChangeNoticeText(todo);
         // Small vertical gap keeps touching events visually separate and easier to grab.
         event.style.top = (Math.round(startMinute * minuteHeight) + 1) + "px";
         event.style.height = Math.max(18, Math.round((endMinute - startMinute) * minuteHeight) - 2) + "px";
+        event.classList.toggle("is-short-event", parseFloat(event.style.height) < 32);
         event.style.left = "calc(" + (lane * 100 / laneCount) + "% + 2px)";
         event.style.width = "calc(" + (100 / laneCount) + "% - 4px)";
 
@@ -11257,6 +11277,8 @@ function renderDayTimeline() {
         startHandle.dataset.mode = "resize-start";
         startHandle.title = "Podaljšaj ali skrajšaj začetek";
         startHandle.setAttribute("aria-label", "Podaljšaj ali skrajšaj začetek dogodka");
+        const heading = document.createElement("span");
+        heading.className = "day-event-heading";
         const title = document.createElement("strong");
         title.className = "day-timeline-event-title";
         title.textContent = todo.title;
@@ -11268,21 +11290,17 @@ function renderDayTimeline() {
           warning.setAttribute("aria-label", "Popravi delovne ure");
           title.appendChild(warning);
         }
+        heading.append(calendarTodoWorkers(todo), title);
         const meta = document.createElement("span");
         meta.className = "day-timeline-event-meta";
-        const assigneeLabel = timeEntryStatusIds.has(todo.status)
-          ? todoAssigneeNames(todo)
-          : "Za: " + todoAssigneeNames(todo);
         meta.textContent = dayTimelineTime(startMinute) + "-" + dayTimelineTime(endMinute)
-          + (isAdminView() ? " | " + assigneeLabel : "")
-          + (client ? " | " + client : "")
-          + (isAdminView() ? "" : " | " + assigneeLabel);
+          + (client ? " | " + client : "");
         const endHandle = document.createElement("span");
         endHandle.className = "day-resize-handle end";
         endHandle.dataset.mode = "resize-end";
         endHandle.title = "Podaljšaj ali skrajšaj konec";
         endHandle.setAttribute("aria-label", "Podaljšaj ali skrajšaj konec dogodka");
-        event.append(startHandle, title, meta, endHandle);
+        event.append(startHandle, heading, meta, endHandle);
         const dayEventPointerOptions = { passive: false };
         event.addEventListener("pointerdown", (pointerEvent) => beginDayTimelineEventPointer(pointerEvent, todo), dayEventPointerOptions);
         event.addEventListener("pointermove", updateDayTimelineEventPointer, dayEventPointerOptions);
@@ -11561,6 +11579,7 @@ function refreshDayTimelineEventPreview(interaction) {
       }
       interaction.element.style.top = Math.round(interaction.startMinute * state.dayTimelineMinuteHeight) + "px";
       interaction.element.style.height = Math.max(18, Math.round((interaction.endMinute - interaction.startMinute) * state.dayTimelineMinuteHeight)) + "px";
+      interaction.element.classList.toggle("is-short-event", parseFloat(interaction.element.style.height) < 32);
       const meta = interaction.element.querySelector(".day-timeline-event-meta");
       if (meta) {
         const suffix = meta.textContent.includes(" | ") ? meta.textContent.slice(meta.textContent.indexOf(" | ")) : "";

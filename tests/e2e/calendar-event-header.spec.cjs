@@ -95,3 +95,89 @@ test("calendar headers show profile then name on the left and time on the right,
   // Worker calendars retain their existing per-worker assignment projection.
   await expect(cards.filter({ hasText: "Skupno opravilo QA" }).locator(".day-todo-worker-name")).toHaveText("Ibro");
 });
+
+test("daily events put worker profiles before the title without duplicating names in the time row", async ({ page }) => {
+  await page.goto(app.baseUrl);
+  await page.locator("#localTestUser").selectOption("bojan");
+  await page.locator("#localTestPassword").fill(TEST_PASSWORD);
+  await page.locator("#localTestLoginBtn").click();
+  await expect(page.locator("#app")).toBeVisible();
+  await page.evaluate(async () => {
+    const avatar = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aF9sAAAAASUVORK5CYII=";
+    await api("/api/profile", { method: "PUT", body: JSON.stringify({ name: "Bojan", avatar }) });
+    const { worker } = await api("/api/workers", { method: "POST", body: JSON.stringify({ name: 'Zelo dolgo ime <izvajalca> "Daily"' }) });
+    const { client } = await api("/api/clients", { method: "POST", body: JSON.stringify({ name: "Daily QA" }) });
+    for (const item of [
+      { title: "Daily samostojno", assigneeIds: ["bojan"], start: "08:00", end: "09:00" },
+      { title: "Daily skupaj", assigneeIds: ["ibro", "bojan"], start: "09:00", end: "11:00" },
+      { title: "Daily vzporedno", assigneeIds: ["ibro"], start: "09:00", end: "11:00" },
+      { title: "Daily kratko", assigneeIds: ["bojan"], start: "11:00", end: "11:15" },
+      { title: "Daily dolgo ime", assigneeIds: [worker.id], start: "11:15", end: "12:15" },
+      { title: "Daily brez ure", assigneeIds: ["ibro"] },
+      { title: "Daily vec dni", assigneeIds: ["bojan"], endDate: "2032-05-12" },
+      { title: "Daily material", status: "material", assigneeIds: [] },
+      { title: "Daily vpis ur", status: "execution", assigneeIds: ["ibro"], syncUser: "ibro", start: "12:15", end: "13:15" }
+    ]) {
+      await api("/api/todos", { method: "POST", body: JSON.stringify({ status: "open", date: "2032-05-10", client: client.name, clientId: client.clientId, ...item }) });
+    }
+    await refreshAfterWorkerManagement();
+    setWorkContext("admin");
+    openDayTimeline("2032-05-10");
+    state.dayTimelineIncludeArchived = true;
+    renderDayTimeline();
+  });
+  const events = page.locator("#dayTimelineEvents .day-timeline-event");
+  const single = events.filter({ hasText: "Daily samostojno" });
+  const shared = events.filter({ hasText: "Daily skupaj" });
+  await expect(single.locator(".day-todo-worker-name")).toHaveText("Bojan");
+  await expect(single.locator(".avatar img")).toHaveCount(1);
+  expect(await single.locator(".avatar img").evaluate(img => img.complete && img.naturalWidth > 0)).toBe(true);
+  await expect(shared.locator(".day-todo-worker-name")).toHaveText(["Ibro", "Bojan"]);
+  await expect(shared.locator(".day-timeline-event-meta")).toHaveText("09:00-11:00 | Daily QA");
+  await expect(shared).toHaveAttribute("aria-label", /Ibro, Bojan; Daily skupaj/);
+  await expect(events.filter({ hasText: "Daily vpis ur" }).locator(".day-todo-worker-name")).toHaveText("Ibro");
+  await expect(page.locator(".day-all-day-item").filter({ hasText: "Daily brez ure" }).locator(".avatar")).toHaveText("I");
+  await expect(page.locator(".day-all-day-item").filter({ hasText: "Daily vec dni" }).locator(".day-todo-worker-name")).toHaveText("Bojan");
+  await expect(page.locator(".day-all-day-item").filter({ hasText: "Daily material" }).locator(".day-todo-worker")).toHaveCount(0);
+  for (const width of [390, 760, 900, 1280]) {
+    await page.setViewportSize({ width, height: 1000 });
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    await page.evaluate(() => { state.dayTimelineMinuteHeight = 1.5; renderDayTimeline(); });
+    await single.evaluate(el => { document.querySelector("#dayTimelineScroll").scrollTop = el.offsetTop - 25; });
+    const layout = await page.locator(".day-event-heading").evaluateAll(headings => headings.map(heading => {
+      const workers = heading.querySelector(".day-todo-workers");
+      const title = heading.querySelector(".day-timeline-event-title");
+      const parent = heading.closest(".day-timeline-event, .day-all-day-item");
+      return {
+        profilesBeforeTitle: workers.nextElementSibling === title,
+        fits: parent.scrollWidth <= parent.clientWidth + 1,
+        namesOneLine: [...workers.querySelectorAll(".day-todo-worker-name")].every(name => name.getBoundingClientRect().height < 20)
+      };
+    }));
+    for (const result of layout) expect(result, `daily header at ${width}px`).toEqual({ profilesBeforeTitle: true, fits: true, namesOneLine: true });
+    const order = await single.evaluate(el => {
+      const profile = el.querySelector(".day-todo-workers").getBoundingClientRect();
+      const range = document.createRange();
+      range.selectNodeContents(el.querySelector(".day-timeline-event-title"));
+      const firstTitleLine = range.getClientRects()[0];
+      return profile.right <= firstTitleLine.left && Math.abs(profile.top - firstTitleLine.top) < 5;
+    });
+    expect(order, `profile to the left of the daily title at ${width}px`).toBe(true);
+    const shortIconFits = await events.filter({ hasText: "Daily kratko" }).evaluate(el => {
+      const card = el.getBoundingClientRect(), icon = el.querySelector(".avatar").getBoundingClientRect();
+      return icon.top >= card.top && icon.bottom <= card.bottom;
+    });
+    expect(shortIconFits, `short daily event avatar at ${width}px is not clipped`).toBe(true);
+    await page.screenshot({ path: test.info().outputPath(`daily-profile-${width}.png`) });
+  }
+  // Profile clicks keep the normal editor action, including the safe left half.
+  await single.locator(".avatar").click();
+  await expect(page.locator("#todoDialog")).toBeVisible();
+  await expect(page.locator("#todoFormTask")).toHaveValue("Daily samostojno");
+  await page.locator("#closeTodoDialog").click();
+  await page.evaluate(() => { setWorkContext("worker:ibro"); openDayTimeline("2032-05-10"); });
+  await expect(events.filter({ hasText: "Daily samostojno" })).toHaveCount(0);
+  // Daily view preserves the existing shared-event assignees, unlike the
+  // planning-only monthly projection; only Ibro's assigned events are listed.
+  await expect(shared.locator(".day-todo-worker-name")).toHaveText(["Ibro", "Bojan"]);
+});
