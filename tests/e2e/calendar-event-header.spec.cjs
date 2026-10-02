@@ -45,13 +45,14 @@ test("calendar headers show profile then name on the left and time on the right,
   await expect(cards.filter({ hasText: "Brez časa QA" }).locator(".avatar")).toHaveText("I");
   await expect(cards.filter({ hasText: "Brez časa QA" }).locator(".day-todo-time")).toHaveText("Brez ure");
   await expect(cards.filter({ hasText: "Dolgo ime QA" }).locator(".day-todo-worker-name")).toHaveText('Dolgo ime <delavca> "QA"');
+  await expect(cards.filter({ hasText: "Dolgo ime QA" }).locator(".day-todo-worker")).toHaveAttribute("title", 'Dolgo ime <delavca> "QA"');
   const span = page.locator('.day-multiday-event.is-span-start').filter({ hasText: "Večdnevni obisk QA" });
   await expect(span.locator(".day-todo-worker-name")).toHaveText("Ibro");
   await expect(span.locator(".day-multiday-event-title")).toHaveText("Večdnevni obisk QA");
   await expect(span).toHaveCSS("border-left-color", "rgb(217, 48, 37)");
   await page.locator("#calendarCompletedFilter").check();
   await expect(cards.filter({ hasText: "Dostava QA" }).locator(".day-todo-worker")).toHaveCount(0);
-  for (const width of [1280, 390]) {
+  for (const width of [390, 760, 761, 800, 900, 1024, 1100, 1101, 1200, 1250, 1280, 1600]) {
     await page.setViewportSize({ width, height: 900 });
     const layout = await urgent.evaluate(card => {
       const worker = card.querySelector(".day-todo-workers").getBoundingClientRect();
@@ -64,6 +65,22 @@ test("calendar headers show profile then name on the left and time on the right,
         pageFits: document.documentElement.scrollWidth <= window.innerWidth };
     });
     expect(layout).toEqual({ beforeTime: true, iconBeforeName: true, sameRow: true, fits: true, pageFits: true });
+    const textLayout = await cards.evaluateAll(items => items.map(item => {
+      const names = [...item.querySelectorAll(".day-todo-worker-name")].map(name => {
+        const style = getComputedStyle(name);
+        const lineHeight = parseFloat(style.lineHeight) || parseFloat(style.fontSize) * 1.5;
+        return { text: name.textContent, oneLine: name.getBoundingClientRect().height <= lineHeight + 1, fits: name.scrollWidth <= name.clientWidth + 1 };
+      });
+      const times = [...item.querySelectorAll(".day-todo-time-part")].map(part => part.getBoundingClientRect());
+      return { names, allowsEllipsis: item.textContent.includes("Dolgo ime QA"), wrappedTimeAligned: times.length !== 2 || times[1].top <= times[0].top + 1 || Math.abs(times[0].left - times[1].left) < 1 };
+    }));
+    for (const cardText of textLayout) {
+      expect(cardText.wrappedTimeAligned, `time alignment at ${width}px`).toBe(true);
+      for (const name of cardText.names) {
+        expect(name.oneLine, `${name.text} at ${width}px stays on one line`).toBe(true);
+        if (!cardText.allowsEllipsis) expect(name.fits, `${name.text} at ${width}px is fully visible`).toBe(true);
+      }
+    }
     await page.screenshot({ path: test.info().outputPath(`calendar-profile-${width}.png`) });
   }
   // The avatar remains inside the event button and opens the usual editor.

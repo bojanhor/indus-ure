@@ -2866,7 +2866,7 @@
       font-weight: 800;
       font-variant-numeric: tabular-nums;
       opacity: 0.92;
-      text-align: right;
+      text-align: left;
       overflow-wrap: normal;
     }
 
@@ -2894,7 +2894,7 @@
     .day-todo-time-part { white-space: nowrap; }
     .day-todo-workers { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 6px; min-width: 0; }
     .day-todo-worker { display: inline-flex; align-items: center; gap: 4px; min-width: 0; max-width: 100%; font-size: 0.92em; font-weight: 700; }
-    .day-todo-worker-name { min-width: 0; overflow-wrap: anywhere; white-space: normal; }
+    .day-todo-worker-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .day-todo-worker .avatar { position: relative; width: 18px; height: 18px; font-size: 10px; }
     .day-todo-worker .avatar img { position: absolute; inset: 0; }
     .day-multiday-event .day-todo-workers { flex-wrap: nowrap; max-width: 55%; flex: 0 1 auto; }
@@ -2970,6 +2970,8 @@
     .calendar { min-height: 540px; }
 
     .day {
+      container-type: inline-size;
+      container-name: calendar-day;
       min-height: 128px;
       padding: 9px;
       border-right: 1px solid var(--line);
@@ -2979,6 +2981,31 @@
       flex-direction: column;
       gap: 7px;
       overflow: hidden;
+    }
+
+    /* Compact event cards depend on their actual day-column width, not just
+       the phone breakpoint. Tablet/narrow desktop columns need this too. */
+    @container calendar-day (max-width: 155px) {
+      .day-todo {
+        min-width: 0;
+        max-width: 100%;
+        min-height: 27px;
+        padding: 4px 3px;
+        border-left-width: 3px;
+        font-size: 10px;
+        line-height: 1.1;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .day-todo .day-todo-time,
+      .day-todo .day-todo-client,
+      .day-todo .day-todo-title { display: block; font-size: 9px; line-height: 1.1; overflow-wrap: anywhere; }
+      .day-todo .day-todo-client,
+      .day-todo .day-todo-title { margin-top: 2px; }
+      .day-todo-topline { gap: 3px; }
+      .day-todo-topline-end { max-width: 3.3em; }
+      .day-todo-worker { gap: 3px; font-size: 9px; }
+      .day-todo-worker .avatar { width: 14px; height: 14px; font-size: 8px; }
     }
 
     .day:nth-child(7n) { border-right: 0; }
@@ -5142,6 +5169,7 @@
       .weekdays,
       .calendar { grid-template-columns: repeat(7, minmax(104px, 1fr)); }
       .calendar-shell { overflow-x: auto; }
+      .day { padding: 4px; gap: 3px; }
     }
 
     @media (max-width: 760px) {
@@ -5328,30 +5356,10 @@
         background: #f1f8f5;
       }
       .quick-add-hours { font-size: 15px; }
-      .day-todo {
-        min-width: 0;
-        max-width: 100%;
-        min-height: 27px;
-        padding: 4px 3px;
-        border-left-width: 3px;
-        font-size: 10px;
-        line-height: 1.1;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
       .day-multiday-lanes { margin-inline: -4px; margin-bottom: 4px; }
       .day-multiday-slot,
       .day-multiday-event { min-height: 25px; }
       .day-multiday-event { padding: 4px 3px; font-size: 9px; }
-      .day-todo .day-todo-time,
-      .day-todo .day-todo-client,
-      .day-todo .day-todo-title { display: block; font-size: 9px; line-height: 1.1; overflow-wrap: anywhere; }
-      .day-todo .day-todo-client,
-      .day-todo .day-todo-title { margin-top: 2px; }
-      .day-todo-topline { gap: 3px; }
-      .day-todo-topline-end { max-width: 3.3em; }
-      .day-todo-worker { gap: 3px; font-size: 9px; }
-      .day-todo-worker .avatar { width: 14px; height: 14px; font-size: 8px; }
       .todo-item {
         padding: 8px;
       }
@@ -9643,6 +9651,7 @@ function calendarTodoWorkers(todo) {
         const name = userDisplayName(id);
         const worker = document.createElement("span");
         worker.className = "day-todo-worker";
+        worker.title = name;
         const avatar = document.createElement("span");
         avatar.className = "avatar";
         avatar.setAttribute("aria-hidden", "true");
