@@ -3193,14 +3193,15 @@
       position: absolute;
       width: 54px;
       height: 30px;
+      max-width: 50%;
+      max-height: 50%;
       right: 0;
       z-index: 4;
       cursor: ns-resize;
       touch-action: none;
     }
 
-    /* The top and bottom edges get an additional safe resize zone in JS on
-       touch screens; this larger visible grip makes that affordance clear. */
+    /* Larger touch grips remain in the right half, even on narrow cards. */
     @media (pointer: coarse) {
       .day-resize-handle { width: 68px; height: 40px; }
     }
@@ -11409,10 +11410,11 @@ function navigateDayTimeline(dayOffset) {
 
 function dayTimelineResizeModeAtPointer(event, eventElement) {
       const bounds = eventElement.getBoundingClientRect();
+      // The starting point decides the entire gesture. Crossing into the
+      // right half later must not turn a scroll into a time/date edit.
+      if (event.clientX < bounds.left + bounds.width / 2) return "pan";
       const relativeY = Math.max(0, Math.min(bounds.height, event.clientY - bounds.top));
-      // A phone needs a forgiving edge zone.  This deliberately applies to the
-      // whole event width: a hold started near either time boundary always
-      // resizes and can never accidentally move the event to another day.
+      // Forgiving edge zones apply only to the right half of the event.
       const preferredZone = event.pointerType === "touch" ? 42 : 28;
       const edgeZone = Math.min(preferredZone, bounds.height / 2);
       if (relativeY <= edgeZone) return "resize-start";
@@ -11425,6 +11427,7 @@ function beginDayTimelineEventPointer(event, todo) {
       if (event.pointerType === "mouse" && event.button !== 0) return;
       const eventElement = event.currentTarget;
       const mode = dayTimelineResizeModeAtPointer(event, eventElement);
+      if (mode === "pan") return;
       const startMinute = dayTimelineMinutes(todo.start);
       const endMinute = dayTimelineMinutes(todo.end);
       if (startMinute === null || endMinute === null) return;
@@ -11649,11 +11652,12 @@ function dayTimelinePointerMetrics() {
 function startDayTimelineViewportPointer(event) {
       const eventCard = event.target.closest(".day-timeline-event");
       const touchCandidate = state.dayTimelineInteraction;
-      if (eventCard && !(touchCandidate && touchCandidate.pointerId === event.pointerId && touchCandidate.pointerType === "touch" && !touchCandidate.touchReady)) return;
+      const safeEventPan = eventCard && dayTimelineResizeModeAtPointer(event, eventCard) === "pan";
+      if (eventCard && !safeEventPan && !(touchCandidate && touchCandidate.pointerId === event.pointerId && touchCandidate.pointerType === "touch" && !touchCandidate.touchReady)) return;
       if (event.pointerType === "mouse" && event.button !== 0) return;
       event.preventDefault();
       const scroll = $("dayTimelineScroll");
-      if (!eventCard) scroll.setPointerCapture?.(event.pointerId);
+      if (!eventCard || safeEventPan) scroll.setPointerCapture?.(event.pointerId);
       state.dayTimelinePointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
       scroll.classList.add("is-panning");
       const metrics = dayTimelinePointerMetrics();
@@ -11666,6 +11670,7 @@ function startDayTimelineViewportPointer(event) {
           startY: event.clientY,
           lastX: event.clientX,
           lastY: event.clientY,
+          tapTodoId: safeEventPan ? eventCard.dataset.todoId : "",
           moved: false
         };
     }
@@ -11706,7 +11711,10 @@ function finishDayTimelineViewportPointer(event) {
       const isEmptyTap = gesture?.type === "pan"
         && gesture.pointerId === event.pointerId
         && !gesture.moved
+        && !gesture.tapTodoId
         && !event.target.closest(".day-timeline-event");
+      const tappedTodoId = gesture?.type === "pan" && gesture.pointerId === event.pointerId && !gesture.moved
+        ? gesture.tapTodoId : "";
       state.dayTimelinePointers.delete(event.pointerId);
       const remaining = [...state.dayTimelinePointers.entries()][0];
       if (remaining) {
@@ -11723,7 +11731,11 @@ function finishDayTimelineViewportPointer(event) {
         state.dayTimelineGesture = null;
         $("dayTimelineScroll").classList.remove("is-panning");
       }
-      if (horizontalSwipe && !remaining) {
+      if (event.type === "pointercancel" || event.type === "lostpointercapture") return;
+      if (tappedTodoId && !remaining) {
+        const todo = state.todos.find((item) => item.id === tappedTodoId);
+        if (todo) openTodoFromDayTimeline(todo).catch((error) => showNotice(error.message));
+      } else if (horizontalSwipe && !remaining) {
         navigateDayTimeline(event.clientX < gesture.startX ? 1 : -1);
       } else if (isEmptyTap && !remaining) {
         openNewTodoFromDayTimeline(event.clientY).catch((error) => showNotice(error.message));
@@ -14205,6 +14217,7 @@ $("dayTimelineScroll").addEventListener("pointerdown", startDayTimelineViewportP
 $("dayTimelineScroll").addEventListener("pointermove", updateDayTimelineViewportPointer);
 $("dayTimelineScroll").addEventListener("pointerup", finishDayTimelineViewportPointer);
 $("dayTimelineScroll").addEventListener("pointercancel", finishDayTimelineViewportPointer);
+$("dayTimelineScroll").addEventListener("lostpointercapture", finishDayTimelineViewportPointer);
 document.addEventListener("pointermove", updateTodoPointerDrag, { passive: false });
 document.addEventListener("pointerup", finishTodoPointerDrag, { passive: false });
 document.addEventListener("pointercancel", cancelTodoPointerDrag, { passive: false });

@@ -1186,9 +1186,9 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
       await expect(event).toBeVisible();
       const box = await event.boundingBox();
       expect(box).toBeTruthy();
-      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await page.mouse.move(box.x + box.width * 0.7, box.y + box.height / 2);
       await page.mouse.down();
-      await page.mouse.move(box.x + box.width / 2 + 128, box.y + box.height / 2, { steps: 8 });
+      await page.mouse.move(box.x + box.width * 0.7 + 128, box.y + box.height / 2, { steps: 8 });
       await page.mouse.up();
       expect(await page.evaluate(() => state.dayTimelineDate)).toBe(dates.next);
       await expect(page.locator("#saveDayTimeline")).toBeEnabled();
