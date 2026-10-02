@@ -948,7 +948,8 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
       await page.locator("#calendarViewBtn").click();
       const startSpan = page.locator(`.day[data-date="${span.start}"] .day-multiday-event.is-span-start`);
       const continuation = page.locator(`.day[data-date="${span.end}"] .day-multiday-event.is-span-continuation`);
-      await expect(startSpan).toHaveText(title);
+      await expect(startSpan.locator(".day-multiday-event-title")).toHaveText(title);
+      await expect(startSpan.locator(".day-todo-worker-name")).toHaveText("Ibro");
       await expect(continuation).toHaveText("");
       expect(await page.locator(".day-multiday-event").evaluateAll((items) => items.every((item) => !item.textContent.includes("Brez ure")))).toBeTruthy();
     } finally {
