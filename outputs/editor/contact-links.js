@@ -1,5 +1,5 @@
 // Progressive enhancement: native links outside editable text, never intercept typing.
-function createContactLinks({ escapeHtml }) {
+function createContactLinks({ escapeHtml, showNotice = () => {} }) {
   const fieldActions = new WeakMap();
   function matches(value) {
     const text = String(value || "");
@@ -74,5 +74,23 @@ function createContactLinks({ escapeHtml }) {
     });
     observer.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["open"] });
   }
-  return { matches, render, install };
+  function contactValues(contact) {
+    return [contact.phone ? anchor({ kind: "phone", label: contact.phone, href: `tel:${String(contact.phone).replace(/[^+0-9]/g, "")}` }) : "",
+      contact.email ? anchor({ kind: "email", label: contact.email, href: `mailto:${encodeURIComponent(contact.email)}` }) : ""].filter(Boolean).join("<br>");
+  }
+  function shareIcon() { return '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 10.5 6.8-4M8.6 13.5l6.8 4"/></svg>'; }
+  async function shareContact(contact) {
+    const text = [contact.name, contact.phone, contact.email].filter(Boolean).join("\n");
+    if (!contact.phone && !contact.email) { showNotice("Najprej vpiši telefon ali e-pošto kontakta."); return; }
+    try {
+      if (typeof navigator.share === "function") await navigator.share({ title: contact.name || "Kontakt", text });
+      else if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+        showNotice("Kontakt je kopiran. Prilepi ga v sporočilo.");
+      } else showNotice("Ta brskalnik ne podpira deljenja. Kontakt kopiraj iz prikazanega besedila.");
+    } catch (error) {
+      if (error.name !== "AbortError") showNotice("Kontakta ni bilo mogoče deliti. Kopiraj ga iz prikazanega besedila.");
+    }
+  }
+  return { matches, render, install, contactValues, shareIcon, shareContact };
 }

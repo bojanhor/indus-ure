@@ -482,6 +482,8 @@ function renderClientBillingRow(line) {
       const billSelection = clientBill
         ? `<button class="client-billing-select is-billed" type="button" data-cancel-client-bill-id="${escapeHtml(clientBill.id)}" title="Prekliči obračun stranki" aria-label="Prekliči obračun stranki"><span class="client-billing-select-icon" aria-hidden="true">&#10003;</span></button>`
         : `<label class="client-billing-select ${selectedForClientBill ? "is-selected" : ""}" title="Označi za obračun"><input type="checkbox" data-client-bill-event-id="${escapeHtml(eventId)}" ${selectedForClientBill ? "checked" : ""} aria-label="Označi vpis za obračun stranki"><span class="client-billing-select-icon" aria-hidden="true">&#10003;</span></label>`;
+      const confirmOne = !clientBill && state.user?.role === "boss"
+        ? `<button class="client-billing-confirm-one secondary" type="button" data-confirm-client-event-id="${escapeHtml(eventId)}" title="Potrdi samo ta vpis" aria-label="Potrdi samo ta vpis: ${escapeHtml(todo.title || "Brez naziva")}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6M5 21h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>` : "";
       const description = inlineEditable
         ? `<section class="client-billing-section"><strong>Opis del</strong><textarea class="client-billing-inline-description" data-client-billing-inline-field="notes" data-todo-id="${escapeHtml(todo.id)}" placeholder="Dodaj opis del">${escapeHtml(todo.notes || "")}</textarea></section>`
         : todo.notes ? `<section class="client-billing-section"><strong>Opis del</strong><div class="report-todo-description">${linkifyText(todo.notes)}</div></section>` : "";
@@ -518,10 +520,10 @@ function renderClientBillingRow(line) {
       const workerTitle = todo.reportWorkerTitle || worker?.exportTitle || "Izvajalec";
       const workerName = todo.reportWorkerName || worker?.name || state.users.find(item => item.id === workerId)?.name || workerId;
       const workerFields = inlineEditable && todo.status === "execution" && reportWorkerTodos(todo).length === 1
-        ? `<div class="client-billing-inline-fields report-worker-labels" title="Samo za ta dogodek. Prazno polje obnovi privzeto vrednost delavca."><label>Naziv izvajalca<input type="text" maxlength="120" data-client-billing-inline-field="reportWorkerTitle" data-todo-id="${escapeHtml(todo.id)}" value="${escapeHtml(workerTitle)}"></label><label>Vzdevek izvajalca<input type="text" maxlength="120" data-client-billing-inline-field="reportWorkerName" data-todo-id="${escapeHtml(todo.id)}" value="${escapeHtml(workerName || "")}"></label></div>`
+        ? `<div class="client-billing-inline-fields report-worker-labels" title="Samo za ta dogodek. Prazno polje obnovi privzeto vrednost delavca."><label>Vzdevek izvajalca<input type="text" maxlength="120" data-client-billing-inline-field="reportWorkerName" data-todo-id="${escapeHtml(todo.id)}" value="${escapeHtml(workerName || "")}"></label><label>Naziv izvajalca<input type="text" maxlength="120" data-client-billing-inline-field="reportWorkerTitle" data-todo-id="${escapeHtml(todo.id)}" value="${escapeHtml(workerTitle)}"></label></div>`
         : `<span>${escapeHtml(reportAssigneeLabel(todo))}</span>`;
       return `<article class="client-billing-row${state.reportMovedEventIds?.has(eventId) ? " is-reassigned" : ""}">
-        <div class="client-billing-selection-slot">${billSelection}</div>
+        <div class="client-billing-selection-slot">${billSelection}${confirmOne}</div>
         <div class="client-billing-when"><strong>${todo.date ? formatDate(todo.date) : "Brez datuma"}</strong><span>${escapeHtml(time)}</span></div>
         <div class="client-billing-main">
           <div class="client-billing-title-row">${fullEditor}<h3>${title}</h3></div>
@@ -766,11 +768,13 @@ async function saveBulkClientFromDialog() {
       } finally { setClientBillProcessing(false); }
     }
 
-async function confirmClientBillFromReport() {
+let clientBillConfirmationPending = false;
+async function confirmClientBillFromReport(onlyEventId = "") {
+      if (clientBillConfirmationPending) return;
       const selection = reportClientSelection();
       if (!selection.id && !selection.name) return;
       const pending = reportTodos().map(reportTodoLine).filter((line) => !line.clientBill);
-      const selected = syncClientBillSelection(pending, selection);
+      const selected = onlyEventId ? pending.filter(line => todoEventId(line.todo) === onlyEventId) : syncClientBillSelection(pending, selection);
       const eventIds = [...new Set(selected.map((line) => todoEventId(line.todo)).filter(Boolean))];
       if (!eventIds.length) {
         showNotice("Označi vsaj en vpis za obračun stranki.");
@@ -778,21 +782,27 @@ async function confirmClientBillFromReport() {
       }
       const range = reportRangeLabel();
       const label = `${eventIds.length} ${eventIds.length === 1 ? "izbran vpis" : "izbranih vpisov"}`;
-      if (!await showAppConfirm(`Potrdim obračun stranki ${selection.name} za ${label} (${range})?\n\nPotrjeni vnosi bodo odstranjeni s seznama »Za obračun«. Ostanejo dosegljivi prek izbire »Prikaži obračunano« in jih lahko tam tudi prekličeš.`)) return;
-      setClientBillProcessing(true);
+      clientBillConfirmationPending = true;
       try {
+        const title = onlyEventId ? `\n${selected[0].todo.title || "Brez naziva"}` : "";
+        if (!await showAppConfirm(`Potrdim obračun stranki ${selection.name} za ${label} (${range})?${title}\n\nPotrjeni vnosi bodo odstranjeni s seznama »Za obračun«. Ostanejo dosegljivi prek izbire »Prikaži obračunano« in jih lahko tam tudi prekličeš.`)) return;
+        setClientBillProcessing(true);
         await api("/api/client-bills", {
           method: "POST",
           body: JSON.stringify({ clientId: selection.id, clientName: selection.name, from: $("reportFrom").value, to: $("reportTo").value, eventIds })
         });
-        state.clientBillSelectionKey = "";
-        state.clientBillSelectedEventIds = new Set();
+        if (onlyEventId) state.clientBillSelectedEventIds.delete(onlyEventId);
+        else {
+          state.clientBillSelectionKey = "";
+          state.clientBillSelectedEventIds = new Set();
+        }
         state.reportAttachmentSelectionKey = "";
         state.reportIncludedAttachmentIds = new Set();
         await loadAll();
         setView("report");
         renderReport();
       } finally {
+        clientBillConfirmationPending = false;
         setClientBillProcessing(false);
       }
     }
@@ -1101,6 +1111,13 @@ function installClientReportBindings1() {
     $("previousReportTodo").addEventListener("click", () => navigateReportTodo(-1).catch((error) => showNotice(error.message)));
     $("nextReportTodo").addEventListener("click", () => navigateReportTodo(1).catch((error) => showNotice(error.message)));
     $("clientDetailList").addEventListener("click", (event) => {
+      const confirmOne = event.target.closest("[data-confirm-client-event-id]");
+      if (confirmOne) {
+        event.preventDefault();
+        event.stopPropagation();
+        confirmClientBillFromReport(confirmOne.dataset.confirmClientEventId).catch(error => showNotice(error.message));
+        return;
+      }
       const cancelBill = event.target.closest("[data-cancel-client-bill-id]");
       if (cancelBill) {
         event.preventDefault();

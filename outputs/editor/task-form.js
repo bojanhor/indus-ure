@@ -5,6 +5,7 @@ function createTaskForm({
   activeWorkerId,
   api,
   chooseTodoClientSuggestion,
+  contactLinks,
   dateKey,
   dayTimelineMinutes,
   dayTimelineTime,
@@ -20,6 +21,7 @@ function createTaskForm({
   normalizeText,
   normalizeTodoFormTimes,
   openTodoDialog,
+  openClientEditDialog,
   parseBillingNumber,
   refreshClientList,
   rememberTodoStartTime,
@@ -69,7 +71,7 @@ function closeOtherTodoFormFoldouts(opened) {
 
 function todoFormClientContacts(client) {
       const contacts = Array.isArray(client?.contacts) ? client.contacts : [];
-      return contacts.filter((contact) => String(contact?.id || "").trim() && String(contact?.phone || "").trim());
+      return contacts.filter((contact) => String(contact?.id || "").trim() && (String(contact?.phone || "").trim() || String(contact?.email || "").trim()));
     }
 
 function todoFormSelectedClient() {
@@ -79,7 +81,6 @@ function todoFormSelectedClient() {
 function renderTodoFormClientContacts() {
       const field = $("todoFormClientContactsField");
       const picker = $("todoFormClientContactPicker");
-      const selected = $("todoFormClientContactSelected");
       const client = todoFormSelectedClient();
       const clientId = String(client?.clientId || client?.id || "");
       const contacts = todoFormClientContacts(client);
@@ -88,32 +89,15 @@ function renderTodoFormClientContacts() {
         state.todoDialogClientContactIds = [];
         state.todoDialogClientContactPickerOpen = false;
       }
-      field.classList.toggle("hidden", !contacts.length);
-      if (!contacts.length) {
-        picker.classList.add("hidden");
-        picker.innerHTML = "";
-        selected.innerHTML = "";
-        return;
-      }
+      field.classList.toggle("hidden", !clientId);
       const selectedIds = new Set(state.todoDialogClientContactIds);
-      picker.classList.toggle("hidden", !state.todoDialogClientContactPickerOpen);
       picker.innerHTML = contacts.map((contact) => `
-        <label class="todo-client-contact-picker-row">
-          <input type="checkbox" data-todo-client-contact-id="${escapeHtml(contact.id)}" ${selectedIds.has(contact.id) ? "checked" : ""}>
-          <span><strong>${escapeHtml(contact.name || "Kontakt")}</strong></span>
-          <small>${escapeHtml(contact.phone)}</small>
-        </label>
-      `).join("");
-      const selectedContacts = contacts.filter((contact) => selectedIds.has(contact.id));
-      selected.innerHTML = selectedContacts.map((contact) => `
-        <div class="todo-client-contact-row">
-          <span><strong>${escapeHtml(contact.name || "Kontakt")}</strong> · <a class="inline-url" href="tel:${escapeHtml(String(contact.phone).replace(/[^0-9+]/g, ""))}">${escapeHtml(contact.phone)}</a></span>
-          <span class="todo-client-contact-actions">
-            <a class="secondary" href="tel:${escapeHtml(String(contact.phone).replace(/[^0-9+]/g, ""))}" title="Pokliči ${escapeHtml(contact.name || contact.phone)}" aria-label="Pokliči ${escapeHtml(contact.name || contact.phone)}">&#9742;</a>
-            <button class="secondary" type="button" data-remove-todo-client-contact-id="${escapeHtml(contact.id)}" title="Odstrani kontakt" aria-label="Odstrani kontakt">&times;</button>
-          </span>
+        <div class="todo-client-contact-picker-row">
+          <label><input type="checkbox" data-todo-client-contact-id="${escapeHtml(contact.id)}" ${selectedIds.has(contact.id) ? "checked" : ""}><strong>${escapeHtml(contact.name || "Kontakt")}</strong></label>
+          <span class="contact-values">${contactLinks.contactValues(contact)}</span>
+          <button class="secondary contact-share" type="button" data-share-todo-contact-id="${escapeHtml(contact.id)}" title="Deli kontakt" aria-label="Deli kontakt ${escapeHtml(contact.name || "")}">${contactLinks.shareIcon()}</button>
         </div>
-      `).join("");
+      `).join("") || '<p class="todo-meta">Stranka še nima kontaktnih oseb.</p>';
     }
 
 function syncTodoFormClientContacts({ preserve = false } = {}) {
@@ -832,10 +816,12 @@ function installTaskFormBindings1() {
       event.stopPropagation();
       chooseTodoClientSuggestion(Number(option.dataset.index));
     });
-    $("todoFormClientContactPickerToggle").addEventListener("click", () => {
-      if (!todoFormSelectedClient()) return;
-      state.todoDialogClientContactPickerOpen = !state.todoDialogClientContactPickerOpen;
-      renderTodoFormClientContacts();
+    $("todoFormClientContactPickerToggle").addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const client = todoFormSelectedClient();
+      if (!client) return;
+      openClientEditDialog(client.clientId || client.id, { addContact: true });
     });
     $("todoFormClientContactPicker").addEventListener("change", (event) => {
       const input = event.target.closest("[data-todo-client-contact-id]");
@@ -846,11 +832,11 @@ function installTaskFormBindings1() {
       state.todoDialogClientContactIds = [...selected];
       renderTodoFormClientContacts();
     });
-    $("todoFormClientContactSelected").addEventListener("click", (event) => {
-      const button = event.target.closest("[data-remove-todo-client-contact-id]");
+    $("todoFormClientContactPicker").addEventListener("click", (event) => {
+      const button = event.target.closest("[data-share-todo-contact-id]");
       if (!button) return;
-      state.todoDialogClientContactIds = state.todoDialogClientContactIds.filter((id) => id !== button.dataset.removeTodoClientContactId);
-      renderTodoFormClientContacts();
+      const contact = todoFormClientContacts(todoFormSelectedClient()).find(contact => contact.id === button.dataset.shareTodoContactId);
+      if (contact) contactLinks.shareContact(contact);
     });
 }
 

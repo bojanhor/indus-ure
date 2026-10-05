@@ -1047,6 +1047,7 @@
       "normalizeText",
       "normalizeTodoFormTimes",
       "openTodoDialog",
+      "openClientEditDialog",
       "parseBillingNumber",
       "refreshClientList",
       "rememberTodoStartTime",
@@ -1096,7 +1097,8 @@
     ],
     "direct": [
       "$",
-      "state"
+      "state",
+      "contactLinks"
     ],
     "globals": [
       "Array",
@@ -1931,11 +1933,11 @@
     "source": "html",
     "factory": "createContactLinks",
     "direct": [],
-    "callbacks": ["escapeHtml"],
-    "exports": ["matches", "render", "install"],
+    "callbacks": ["escapeHtml", "showNotice"],
+    "exports": ["matches", "render", "install", "contactValues", "shareIcon", "shareContact"],
     "originalFunctions": ["matches", "anchor", "render", "enhanceField", "enhance", "install"],
     "values": [],
-    "globals": ["String", "URL", "Map", "Set", "WeakMap", "document", "MutationObserver", "requestAnimationFrame"]
+    "globals": ["String", "URL", "Map", "Set", "WeakMap", "document", "MutationObserver", "requestAnimationFrame", "navigator", "encodeURIComponent"]
   },
   {
     "name": "editor/app-config",

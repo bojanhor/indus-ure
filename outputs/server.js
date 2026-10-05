@@ -259,9 +259,10 @@ function cleanTodoClientContactSnapshots(value) {
   return (Array.isArray(value) ? value : [])
     .map((contact) => ({
       name: String(contact?.name || contact?.contact || "").trim().replace(/\s+/g, " ").slice(0, 160),
-      phone: String(contact?.phone || contact?.number || "").trim().replace(/\s+/g, " ").slice(0, 80)
+      phone: String(contact?.phone || contact?.number || "").trim().replace(/\s+/g, " ").slice(0, 80),
+      ...(String(contact?.email || "").trim() ? { email: String(contact.email).trim().slice(0, 254) } : {})
     }))
-    .filter((contact) => contact.phone)
+    .filter((contact) => contact.phone || contact.email)
     .slice(0, 12);
 }
 
@@ -279,7 +280,7 @@ function todoClientContactSelection(client, contactIds, legacyContacts = []) {
   if (!resolvedIds.length && !selectedIds.length && legacyContacts.length) {
     for (const requested of cleanTodoClientContactSnapshots(legacyContacts)) {
       const phone = contactPhoneKey(requested.phone);
-      const match = available.find((contact) => contactPhoneKey(contact.phone) === phone
+      const match = available.find((contact) => (phone ? contactPhoneKey(contact.phone) === phone : normalizedText(contact.email) === normalizedText(requested.email))
         && (!requested.name || normalizedText(contact.name) === normalizedText(requested.name)));
       if (!match) {
         invalidLegacyContacts += 1;
@@ -290,7 +291,7 @@ function todoClientContactSelection(client, contactIds, legacyContacts = []) {
   }
   return {
     clientContactIds: resolvedIds,
-    clientContacts: resolvedIds.map((id) => byId.get(id)).filter(Boolean).map((contact) => ({ id: contact.id, name: contact.name, phone: contact.phone })),
+    clientContacts: resolvedIds.map((id) => byId.get(id)).filter(Boolean).map((contact) => ({ ...contact })),
     invalidContactIds,
     invalidLegacyContacts
   };
@@ -320,7 +321,7 @@ function applyTodoClientContactSelection(db, todo, { strict = false } = {}) {
 }
 
 function clientContactMatchKey(contact = {}) {
-  return `${normalizedText(contact.name || contact.contact || "")}\u0000${contactPhoneKey(contact.phone || contact.number || "")}`;
+  return `${normalizedText(contact.name || contact.contact || "")}\u0000${contactPhoneKey(contact.phone || contact.number || "")}\u0000${normalizedText(contact.email)}`;
 }
 
 function mergeMigratedClientContacts(sourceClient, targetClient) {
@@ -331,8 +332,11 @@ function mergeMigratedClientContacts(sourceClient, targetClient) {
     const sourcePhone = contactPhoneKey(sourceContact.phone);
     const matching = mergedContacts.find((contact) => contact.id === sourceContact.id)
       || mergedContacts.find((contact) => clientContactMatchKey(contact) === clientContactMatchKey(sourceContact))
-      || (sourcePhone ? mergedContacts.find((contact) => contactPhoneKey(contact.phone) === sourcePhone) : null);
+      || (sourcePhone ? mergedContacts.find((contact) => contactPhoneKey(contact.phone) === sourcePhone) : null)
+      || (sourceContact.email ? mergedContacts.find(contact => normalizedText(contact.email) === normalizedText(sourceContact.email)) : null);
     if (matching) {
+      if (!matching.phone && sourceContact.phone) matching.phone = sourceContact.phone;
+      if (!matching.email && sourceContact.email) matching.email = sourceContact.email;
       contactIdMap.set(sourceContact.id, matching.id);
       continue;
     }
@@ -343,7 +347,7 @@ function mergeMigratedClientContacts(sourceClient, targetClient) {
   const contacts = normalizeClientContacts(mergedContacts);
   const before = JSON.stringify({ contacts: targetClient.contacts || [], phone: targetClient.phone || "" });
   targetClient.contacts = contacts;
-  targetClient.phone = contacts[0]?.phone || "";
+  targetClient.phone = contacts.find(contact => contact.phone)?.phone || "";
   return { contactIdMap, changed: before !== JSON.stringify({ contacts: targetClient.contacts, phone: targetClient.phone }) };
 }
 
@@ -3811,7 +3815,8 @@ function reconcileClientContacts(inputContacts, existingContacts = []) {
     const samePerson = existing.find((item) => !usedExistingIds.has(item.id) && clientContactMatchKey(item) === clientContactMatchKey(contact));
     const phone = contactPhoneKey(contact.phone);
     const samePhone = phone ? existing.filter((item) => !usedExistingIds.has(item.id) && contactPhoneKey(item.phone) === phone) : [];
-    const match = sameId || samePerson || (samePhone.length === 1 ? samePhone[0] : null);
+    const sameEmail = contact.email ? existing.filter(item => !usedExistingIds.has(item.id) && normalizedText(item.email) === normalizedText(contact.email)) : [];
+    const match = sameId || samePerson || (samePhone.length === 1 ? samePhone[0] : null) || (sameEmail.length === 1 ? sameEmail[0] : null);
     if (match) {
       usedExistingIds.add(match.id);
       return { ...contact, id: match.id };
@@ -3835,9 +3840,11 @@ function cleanClient(input = {}, { existingClient = null } = {}) {
   } else if (hasLegacyPhone) {
     const primaryPhone = String(input.phone || "").trim();
     if (!primaryPhone) {
-      contacts = [];
+      contacts = existingContacts.filter(contact => contact.email).map(contact => ({ ...contact, phone: "" }));
     } else if (existingContacts.length) {
-      contacts = [{ ...existingContacts[0], phone: primaryPhone }, ...existingContacts.slice(1)];
+      const primaryIndex = existingContacts.findIndex(contact => contact.phone);
+      contacts = primaryIndex >= 0 ? existingContacts.map((contact, index) => index === primaryIndex ? { ...contact, phone: primaryPhone } : contact)
+        : [...existingContacts, ...normalizeClientContacts([{ name: "", phone: primaryPhone }])];
     } else {
       contacts = normalizeClientContacts([{ name: "", phone: primaryPhone }]);
     }
@@ -3850,7 +3857,7 @@ function cleanClient(input = {}, { existingClient = null } = {}) {
     name: String(input.name || "").trim(),
     search: String(input.search || input.name || "").trim(),
     email: String(input.email || "").trim(),
-    phone: contacts[0]?.phone || "",
+    phone: contacts.find(contact => contact.phone)?.phone || "",
     contacts,
     address: String(input.address || "").trim(),
     city: String(input.city || "").trim(),
@@ -3990,8 +3997,9 @@ function validateClient(client) {
   if (!client.name) return "Manjka naziv stranke.";
   if (client.taxId && !isUsableTaxId(client.taxId)) return "Dav\u010dna \u0161tevilka ni veljavna.";
   const contacts = normalizeClientContacts(client.contacts, client.phone);
+  if (contacts.some(contact => contact.email && !/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(contact.email))) return "E-poštni naslov kontaktne osebe ni veljaven.";
   if (contacts.length > 1 && contacts.some((contact) => !contact.name)) {
-    return "Ob ve\u010d telefonskih \u0161tevilkah vpi\u0161i ime kontakta pri vsaki.";
+    return "Ob več kontaktih vpiši ime kontakta pri vsakem.";
   }
   return "";
 }

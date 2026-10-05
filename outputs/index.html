@@ -1715,7 +1715,9 @@
     .report-client-transfer input { display: block; width: 100%; min-height: 42px; padding: 9px 11px; border: 1px solid var(--line); border-radius: 8px; font: inherit; }
     .report-export-settings { display: grid; gap: 16px; padding: 16px 20px; }
     #reportExportSettingsDialog .todo-meta { margin: 0 20px 18px; }
-    .client-billing-inline-fields.report-worker-labels { grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; background: transparent; padding: 0; }
+    .client-billing-inline-fields.report-worker-labels { display: flex; flex-wrap: wrap; gap: 10px; width: auto; max-width: 100%; background: transparent; padding: 0; }
+    .report-worker-labels > label { flex: 0 1 190px; min-width: 0; max-width: 100%; }
+    .report-worker-labels > label:last-child { flex-basis: 240px; }
     .report-export-settings label { display: flex; align-items: center; gap: 10px; }
     .report-export-settings input { width: 20px; height: 20px; }
     .client-autocomplete-row { display: flex; align-items: stretch; }
@@ -2702,7 +2704,20 @@
       display: grid;
       grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 38px;
       gap: 8px;
-      align-items: end;
+      align-items: start;
+    }
+    .client-edit-contact-values, .client-contact-edit-actions { display: grid; gap: 8px; min-width: 0; }
+    .client-contact-edit-actions { padding-top: 23px; }
+    .contact-share { width: 38px; min-width: 38px; min-height: 38px; padding: 8px; }
+    .contact-share svg, #todoFormClientContactPickerToggle svg { display: block; width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; }
+    .client-directory-contacts { display: grid; gap: 4px; margin-top: 8px; }
+    .client-directory-contact { display: grid; grid-template-columns: minmax(70px, 160px) minmax(0, 1fr) 38px; gap: 10px; align-items: center; }
+    .contact-values { overflow-wrap: anywhere; min-width: 0; }
+    @media (max-width: 520px) {
+      .client-edit-contact-row { grid-template-columns: minmax(0, 1fr) 38px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+      .client-edit-contact-row > label { grid-column: 1; }
+      .client-edit-contact-values { grid-column: 1; }
+      .client-contact-edit-actions { grid-column: 2; grid-row: 1 / 3; }
     }
 
     .client-edit-contact-remove {
@@ -3647,8 +3662,7 @@
 
     .todo-client-contact-field {
       grid-column: 1 / -1;
-      display: grid;
-      gap: 8px;
+      display: block;
       padding: 10px;
       border: 1px solid var(--line);
       border-radius: 9px;
@@ -3665,6 +3679,12 @@
     }
 
     .todo-client-contact-head { justify-content: space-between; }
+    .todo-client-contact-head { cursor: pointer; min-height: 28px; }
+    .todo-client-contact-head::after { content: "⌄"; }
+    .todo-client-contact-field[open] .todo-client-contact-head::after { content: "⌃"; }
+    .todo-client-contact-head strong { margin-right: auto; }
+    .todo-client-contact-field:not([open]) #todoFormClientContactPickerToggle { display: none; }
+    .todo-client-contact-field[open] .todo-client-contact-picker { margin-top: 10px; }
     .todo-client-contact-head strong { font-size: 0.92rem; }
     .todo-client-contact-picker {
       display: grid;
@@ -3674,7 +3694,8 @@
       border-radius: 7px;
       background: #fff;
     }
-    .todo-client-contact-picker-row { padding: 5px 4px; }
+    .todo-client-contact-picker-row { display: grid; grid-template-columns: minmax(80px, 1fr) minmax(0, 1fr) 38px; padding: 5px 0; }
+    .todo-client-contact-picker-row > label { display: flex; align-items: center; gap: 8px; min-width: 0; overflow-wrap: anywhere; }
     .todo-client-contact-picker-row input { width: 18px; height: 18px; min-height: 0; margin: 0; }
     .todo-client-contact-picker-row span { min-width: 0; overflow-wrap: anywhere; }
     .todo-client-contact-picker-row small { margin-left: auto; color: var(--muted); overflow-wrap: anywhere; }
@@ -4765,9 +4786,14 @@
 
     .client-billing-selection-slot {
       display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
       justify-content: center;
       padding-top: 1px;
     }
+    .client-billing-confirm-one { width: 34px; min-height: 38px; padding: 6px; color: var(--accent); }
+    .client-billing-confirm-one svg { display: block; width: 20px; height: 20px; }
 
     .client-billing-row:last-child { margin-bottom: 0; border-bottom: 0; }
     .client-billing-settled-divider {
@@ -6182,14 +6208,6 @@
               <div class="client-autocomplete-list hidden" id="todoFormClientSuggestions" role="listbox"></div>
             </div>
           </div>
-          <section class="todo-client-contact-field hidden" id="todoFormClientContactsField" aria-label="Kontaktne osebe stranke">
-            <div class="todo-client-contact-head">
-              <strong>Kontaktna oseba</strong>
-              <button class="secondary quick-client-button" id="todoFormClientContactPickerToggle" type="button" title="Izberi kontaktno osebo" aria-label="Izberi kontaktno osebo">&#128100;+</button>
-            </div>
-            <div class="todo-client-contact-picker hidden" id="todoFormClientContactPicker"></div>
-            <div class="todo-client-contact-selected" id="todoFormClientContactSelected"></div>
-          </section>
         </div>
         <details class="todo-status-direct-field" id="todoFormStatusField">
           <summary><span>Status</span><span class="todo-status-summary" id="todoFormStatusSummary">Čaka</span></summary>
@@ -6331,6 +6349,10 @@
               <div class="todo-time-picker-dial todo-time-picker-detail" id="todoFormQuickTimeDial" aria-live="polite"></div>
             </section>
           </div>
+        </details>
+        <details class="todo-client-contact-field hidden" id="todoFormClientContactsField">
+          <summary class="todo-client-contact-head"><strong>KONTAKTNE OSEBE</strong><button class="secondary quick-client-button" id="todoFormClientContactPickerToggle" type="button" title="Dodaj kontaktno osebo" aria-label="Dodaj kontaktno osebo"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="7" r="4"/><path d="M2 20v-2a7 7 0 0 1 14 0v2M19 7v8m-4-4h8"/></svg></button></summary>
+          <div class="todo-client-contact-picker" id="todoFormClientContactPicker"></div>
         </details>
         <p class="todo-form-late-entry-notice hidden" id="todoFormLateTimeEntryNotice" role="status"></p>
         <div class="todo-form-attachments" id="todoFormAttachments">
@@ -6480,8 +6502,8 @@
           <section class="client-edit-contacts" aria-labelledby="clientEditContactsTitle">
             <div class="client-edit-contacts-head">
               <div>
-                <strong id="clientEditContactsTitle">Kontaktne osebe in telefonske številke</strong>
-                <small>Pri več številkah je ime kontaktne osebe obvezno.</small>
+                <strong id="clientEditContactsTitle">Kontaktne osebe</strong>
+                <small>Vpiši telefon ali e-pošto. Pri več kontaktih je ime obvezno.</small>
               </div>
               <button class="secondary" id="addClientEditContact" type="button">+ Dodaj kontakt</button>
             </div>
@@ -7161,7 +7183,7 @@ const state = {
 
 const $ = (id) => document.getElementById(id);
 /* @indus-module:editor/contact-links */
-const contactLinks = createContactLinks({ escapeHtml });
+const contactLinks = createContactLinks({ escapeHtml, showNotice: (...args) => showNotice(...args) });
 contactLinks.install();
 
 /* @indus-module:editor/app-config */
@@ -7322,6 +7344,8 @@ const {
 } = createTaskForm({
     $,
     state,
+    contactLinks,
+    openClientEditDialog: (...args) => openClientEditDialog(...args),
     activeWorkerId: (...args) => activeWorkerId(...args),
     api: (...args) => api(...args),
     chooseTodoClientSuggestion: (...args) => chooseTodoClientSuggestion(...args),
@@ -10743,7 +10767,7 @@ function renderMonth() {
             const settlementIndicators = dayTodoSettlementIndicators(todo);
             const changeNotice = todoChangeNotice(todo);
             item.className = `day-todo todo-status-color ${todoStatusClass(todo.status)} ${todoAssigneeIds(todo).length > 1 ? 'multi-assignee' : ''} ${todo.done ? 'done' : ''} ${todo.urgent ? 'urgent' : ''} ${changeNotice ? 'has-change-notice' : ''} ${settlementIndicators ? 'has-settlements' : ''}`;
-            const time = todo.start && todo.end ? `<span class="day-todo-time-part">${escapeHtml(todo.start)}&ndash;</span><wbr><span class="day-todo-time-part">${escapeHtml(todo.end)}</span>` : 'Brez ure';
+            const time = todo.start && todo.end ? `<span class="day-todo-time-part">${escapeHtml(todo.start)}&ndash;</span><wbr><span class="day-todo-time-part">${escapeHtml(todo.end)}</span>` : '';
             const client = todoClientCalendarName(todo, 'Brez stranke');
             const title = todo.title || 'Brez naslova';
             if (changeNotice) item.title = todoChangeNoticeText(todo);
@@ -11974,7 +11998,7 @@ function clientHasEntries(client) {
     }
 
 function clientDirectoryRow(client, { showInternalId = false } = {}) {
-      const detail = [client.search, client.taxId, client.email, clientContactSummary(client), client.address, client.postal, client.city]
+      const detail = [client.search, client.taxId, client.email, client.address, client.postal, client.city]
         .filter(Boolean)
         .join(" | ");
       const identity = showInternalId
@@ -11990,6 +12014,7 @@ function clientDirectoryRow(client, { showInternalId = false } = {}) {
             ${client.hiddenFromNewTasks ? '<span class="todo-meta">Skrita pri novih opravilih</span>' : ""}
             ${detail ? `<span class="todo-meta">${linkifyText(detail)}</span>` : ""}
             ${identity ? `<span class="todo-meta">${escapeHtml(identity)}</span>` : ""}
+            <div class="client-directory-contacts">${clientContactRecords(client).map((contact, index) => `<div class="client-directory-contact"><strong>${escapeHtml(contact.name || "Kontakt")}</strong><span class="contact-values">${contactLinks.contactValues(contact)}</span><button class="secondary contact-share" type="button" data-share-client-id="${escapeHtml(client.clientId || client.id || "")}" data-share-contact-index="${index}" title="Deli kontakt" aria-label="Deli kontakt ${escapeHtml(contact.name || "")}">${contactLinks.shareIcon()}</button></div>`).join("")}</div>
             ${client.syncError ? `<span class="todo-meta error">${escapeHtml(client.syncError)}</span>` : ""}
           </div>
           <div class="client-row-actions">
@@ -12143,6 +12168,7 @@ async function saveQuickClientFromDialog() {
       });
       const client = data.client || {};
       $("todoFormClient").value = client.search || client.name || name;
+      syncTodoFormClientContacts();
       hideTodoClientSuggestions();
       $("quickClientDialog").close();
       $("todoFormClient").focus();
@@ -12191,7 +12217,8 @@ function normalizeClientContactDraft(contact = {}) {
       return {
         id: String(contact?.id || "").trim() || clientContactId(),
         name: String(contact?.name || contact?.contact || "").trim(),
-        phone: String(contact?.phone || contact?.number || "").trim()
+        phone: String(contact?.phone || contact?.number || "").trim(),
+        email: String(contact?.email || "").trim()
       };
     }
 
@@ -12199,9 +12226,10 @@ function clientEditContactDrafts({ includeBlank = false } = {}) {
       const rows = [...$("clientEditContacts").querySelectorAll(".client-edit-contact-row")].map((row) => ({
         id: String(row.dataset.contactId || "").trim() || clientContactId(),
         name: row.querySelector(".client-edit-contact-name")?.value.trim() || "",
-        phone: row.querySelector(".client-edit-contact-phone")?.value.trim() || ""
+        phone: row.querySelector(".client-edit-contact-phone")?.value.trim() || "",
+        email: row.querySelector(".client-edit-contact-email")?.value.trim() || ""
       }));
-      return includeBlank ? rows : rows.filter((contact) => contact.name || contact.phone);
+      return includeBlank ? rows : rows.filter((contact) => contact.name || contact.phone || contact.email);
     }
 
 function renderClientEditContacts(contacts = []) {
@@ -12219,7 +12247,7 @@ function renderClientEditContacts(contacts = []) {
         name.type = "text";
         name.className = "client-edit-contact-name";
         name.autocomplete = "name";
-        name.placeholder = index === 0 ? "Neobvezno pri eni številki" : "Ime in priimek";
+        name.placeholder = index === 0 ? "Neobvezno pri enem kontaktu" : "Ime in priimek";
         name.value = contact.name;
         nameLabel.appendChild(name);
 
@@ -12232,6 +12260,25 @@ function renderClientEditContacts(contacts = []) {
         phone.placeholder = "npr. 041 123 456";
         phone.value = contact.phone;
         phoneLabel.appendChild(phone);
+        const emailLabel = document.createElement("label");
+        emailLabel.textContent = "E-pošta";
+        const email = document.createElement("input");
+        email.type = "email";
+        email.className = "client-edit-contact-email";
+        email.autocomplete = "email";
+        email.placeholder = "ime@podjetje.si";
+        email.value = contact.email;
+        emailLabel.appendChild(email);
+        const values = document.createElement("div");
+        values.className = "client-edit-contact-values";
+        values.append(phoneLabel, emailLabel);
+        const share = document.createElement("button");
+        share.type = "button";
+        share.className = "secondary contact-share";
+        share.title = "Deli kontakt";
+        share.setAttribute("aria-label", "Deli kontakt");
+        share.innerHTML = contactLinks.shareIcon();
+        share.addEventListener("click", () => contactLinks.shareContact({ name: name.value.trim(), phone: phone.value.trim(), email: email.value.trim() }));
 
         const remove = document.createElement("button");
         remove.type = "button";
@@ -12244,7 +12291,10 @@ function renderClientEditContacts(contacts = []) {
           renderClientEditContacts(next);
         });
 
-        row.append(nameLabel, phoneLabel, remove);
+        const actions = document.createElement("div");
+        actions.className = "client-contact-edit-actions";
+        actions.append(share, remove);
+        row.append(nameLabel, values, actions);
         list.appendChild(row);
       });
     }
@@ -12258,11 +12308,13 @@ function contactsForClientEdit(client = {}) {
 function validateClientEditContacts() {
       const rows = [...$("clientEditContacts").querySelectorAll(".client-edit-contact-row")];
       const contacts = clientEditContactDrafts();
-      const incomplete = contacts.find((contact) => contact.name && !contact.phone);
-      if (incomplete) return showFormValidationError($("clientEditForm"), "Pri kontaktni osebi manjka telefonska številka.", rows.find((row) => String(row.dataset.contactId || "") === incomplete.id)?.querySelector(".client-edit-contact-phone"));
+      const incomplete = contacts.find((contact) => contact.name && !contact.phone && !contact.email);
+      if (incomplete) return showFormValidationError($("clientEditForm"), "Pri kontaktni osebi manjka telefon ali e-pošta.", rows.find((row) => String(row.dataset.contactId || "") === incomplete.id)?.querySelector(".client-edit-contact-phone"));
+      const invalidEmail = contacts.find(contact => contact.email && !/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(contact.email));
+      if (invalidEmail) return showFormValidationError($("clientEditForm"), "E-poštni naslov kontaktne osebe ni veljaven.", rows.find(row => row.dataset.contactId === invalidEmail.id)?.querySelector(".client-edit-contact-email"));
       if (contacts.length > 1 && contacts.some((contact) => !contact.name)) {
         const unnamed = contacts.find((contact) => !contact.name);
-        return showFormValidationError($("clientEditForm"), "Pri več telefonskih številkah vpiši ime vsake kontaktne osebe.", rows.find((row) => String(row.dataset.contactId || "") === unnamed?.id)?.querySelector(".client-edit-contact-name"));
+        return showFormValidationError($("clientEditForm"), "Pri več kontaktih vpiši ime vsake kontaktne osebe.", rows.find((row) => String(row.dataset.contactId || "") === unnamed?.id)?.querySelector(".client-edit-contact-name"));
       }
       return contacts;
     }
@@ -12271,7 +12323,7 @@ function canDeleteClient() {
       return state.user?.role === "boss";
     }
 
-function openClientEditDialog(clientId) {
+function openClientEditDialog(clientId, { addContact = false } = {}) {
       const client = allClientRecords().find((item) => item.clientId === clientId || item.id === clientId);
       if (!client) {
         showNotice("Stranke ni bilo mogoče najti.");
@@ -12297,7 +12349,7 @@ function openClientEditDialog(clientId) {
         ? "Brisanje je mogoče samo, kadar stranka nima aktivnih opravil ali vnosov. Namesto brisanja jo lahko skriješ pri novih opravilih."
         : "";
       $("clientEditDialog").showModal();
-      requestAnimationFrame(() => $("clientEditName").focus());
+      requestAnimationFrame(() => addContact ? $("addClientEditContact").click() : $("clientEditName").focus());
     }
 
 async function saveClientFromDialog() {
@@ -12320,7 +12372,7 @@ async function saveClientFromDialog() {
         search,
         taxId,
         email: $("clientEditEmail").value.trim(),
-        phone: contacts[0]?.phone || "",
+        phone: contacts.find(contact => contact.phone)?.phone || "",
         contacts,
         address: $("clientEditAddress").value.trim(),
         city: $("clientEditCity").value.trim(),
@@ -12999,12 +13051,13 @@ function clientContactRecords(client = {}) {
       const add = (contact = {}) => {
         const name = String(contact?.name || contact?.contact || "").trim();
         const phone = String(contact?.phone || contact?.number || "").trim();
-        if (!name && !phone) return;
+        const email = String(contact?.email || "").trim();
+        if (!name && !phone && !email) return;
         const id = String(contact?.id || "").trim();
-        const key = id ? `id:${id}` : `value:${normalizeText(name)}\u0000${normalizeText(phone)}`;
+        const key = id ? `id:${id}` : `value:${normalizeText(name)}\u0000${normalizeText(phone)}\u0000${normalizeText(email)}`;
         if (seen.has(key)) return;
         seen.add(key);
-        contacts.push({ id, name, phone });
+        contacts.push({ id, name, phone, ...(email ? { email } : {}) });
       };
       records.forEach(add);
       const legacyPhone = String(client?.phone || "").trim();
@@ -13016,7 +13069,7 @@ function clientContactRecords(client = {}) {
 
 function clientContactSummary(client = {}) {
       return clientContactRecords(client)
-        .map((contact) => contact.name && contact.phone ? `${contact.name} · ${contact.phone}` : (contact.phone || contact.name))
+        .map((contact) => [contact.name, contact.phone, contact.email].filter(Boolean).join(" · "))
         .filter(Boolean)
         .join(" | ");
     }
@@ -13032,7 +13085,7 @@ function clientSearchFields(client = {}) {
         client.email,
         client.phone,
         clientContactSummary(client),
-        ...clientContactRecords(client).flatMap((contact) => [contact.name, contact.phone])
+        ...clientContactRecords(client).flatMap((contact) => [contact.name, contact.phone, contact.email])
       ].filter(Boolean);
     }
 
@@ -14202,6 +14255,13 @@ $("todoItems").addEventListener("click", async (event) => {
 installClientReportBindings1();
 
 const handleClientListClick = (event) => {
+      const share = event.target.closest("[data-share-client-id]");
+      if (share) {
+        const client = allClientRecords().find(client => (client.clientId || client.id) === share.dataset.shareClientId);
+        const contact = client && clientContactRecords(client)[Number(share.dataset.shareContactIndex)];
+        if (contact) contactLinks.shareContact(contact);
+        return;
+      }
       const billingButton = event.target.closest(".open-client-billing");
       if (billingButton) {
         openClientReport(billingButton.dataset.clientName || "", billingButton.dataset.clientId || "");
@@ -14215,7 +14275,7 @@ const handleClientListClick = (event) => {
 $("closeClientEdit").addEventListener("click", () => $("clientEditDialog").close());
 $("cancelClientEdit").addEventListener("click", () => $("clientEditDialog").close());
 $("addClientEditContact").addEventListener("click", () => {
-      renderClientEditContacts([...clientEditContactDrafts({ includeBlank: true }), { id: clientContactId(), name: "", phone: "" }]);
+      renderClientEditContacts([...clientEditContactDrafts(), { id: clientContactId(), name: "", phone: "" }]);
       const rows = $("clientEditContacts").querySelectorAll(".client-edit-contact-row");
       rows[rows.length - 1]?.querySelector(".client-edit-contact-name")?.focus();
     });

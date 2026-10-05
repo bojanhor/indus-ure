@@ -43,7 +43,7 @@ test("calendar headers show profile then name on the left and time on the right,
   expect(await urgent.locator(".avatar img").evaluate(img => img.complete && img.naturalWidth > 0)).toBe(true);
   await expect(cards.filter({ hasText: "Skupno opravilo QA" }).locator(".day-todo-worker-name")).toHaveText(["Ibro", "Bojan"]);
   await expect(cards.filter({ hasText: "Brez časa QA" }).locator(".avatar")).toHaveText("I");
-  await expect(cards.filter({ hasText: "Brez časa QA" }).locator(".day-todo-time")).toHaveText("Brez ure");
+  await expect(cards.filter({ hasText: "Brez časa QA" }).locator(".day-todo-time")).toBeEmpty();
   await expect(cards.filter({ hasText: "Dolgo ime QA" }).locator(".day-todo-worker-name")).toHaveText('Dolgo ime <delavca> "QA"');
   await expect(cards.filter({ hasText: "Dolgo ime QA" }).locator(".day-todo-worker")).toHaveAttribute("title", 'Dolgo ime <delavca> "QA"');
   const span = page.locator('.day-multiday-event.is-span-start').filter({ hasText: "Večdnevni obisk QA" });

@@ -190,6 +190,7 @@ async function openTodoDialog(todo = {}, { reportNavigationIds = null } = {}) {
         ? todo.clientContactIds.map((id) => String(id || "")).filter(Boolean)
         : [];
       state.todoDialogClientContactPickerOpen = false;
+      $("todoFormClientContactsField").open = false;
       hideTodoClientSuggestions();
       $("todoFormTask").value = todo.title || "";
       renderTodoTaskSuggestions();

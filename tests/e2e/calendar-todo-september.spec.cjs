@@ -102,7 +102,9 @@ test("boss calendar filters external workers, grouped planning and recorded hour
   });
   await page.screenshot({ path: test.info().outputPath("daily-calendar-controls.png") });
   await page.locator("#closeDayTimeline").click();
-
+  // Closing traverses the modal's history entry asynchronously. Wait for
+  // that traversal before a document reload, which otherwise races popstate.
+  await page.waitForFunction(() => !modalHistoryTokens.has($('dayTimelineDialog')) && !modalHistoryIgnoreNextPopstate);
   await page.reload();
   await expect(page.locator("#app")).toBeVisible();
   await page.evaluate(() => { state.current = new Date(2032, 3, 1); setView("calendar"); renderMonth(); });

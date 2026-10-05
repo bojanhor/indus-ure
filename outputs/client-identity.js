@@ -53,7 +53,7 @@ function normalizedClientSource(value) {
 }
 
 // Phone numbers belong to people, not merely to a company. Keep the old
-// singular `phone` field as a compatibility mirror of the first entry while
+// singular `phone` field as a compatibility mirror of the first phone while
 // allowing the API to store a proper, ordered contact list.
 function normalizeClientContacts(value, legacyPhone = "") {
   const source = Array.isArray(value)
@@ -66,11 +66,12 @@ function normalizeClientContacts(value, legacyPhone = "") {
       // later corrected on the client record.
       id: isStableClientId(item?.id) ? String(item.id).trim() : createClientId(),
       name: String(item?.name || item?.contact || "").trim().replace(/\s+/g, " ").slice(0, 160),
-      phone: String(item?.phone || item?.number || "").trim().replace(/\s+/g, " ").slice(0, 80)
+      phone: String(item?.phone || item?.number || "").trim().replace(/\s+/g, " ").slice(0, 80),
+      ...(String(item?.email || "").trim() ? { email: String(item.email).trim().slice(0, 254) } : {})
     }))
-    .filter((item) => item.phone)
+    .filter((item) => item.phone || item.email)
     .filter((item) => {
-      const key = `${normalizedText(item.name)}\u0000${item.phone.replace(/\s+/g, "")}`;
+      const key = `${normalizedText(item.name)}\u0000${item.phone.replace(/\s+/g, "")}\u0000${normalizedText(item.email)}`;
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
@@ -93,8 +94,8 @@ function normalizeStoredClient(client = {}) {
     search: String(client.search || client.name || "").trim(),
     email: String(client.email || "").trim(),
     // `phone` remains for old browsers and exports. New callers should use
-    // `contacts`, whose first row is mirrored here.
-    phone: contacts[0]?.phone || "",
+    // `contacts`; email-only rows do not replace the phone mirror.
+    phone: contacts.find(contact => contact.phone)?.phone || "",
     contacts,
     address: String(client.address || "").trim(),
     city: String(client.city || "").trim(),

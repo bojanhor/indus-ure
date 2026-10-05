@@ -23,10 +23,31 @@ test("contact links recognize phones, emails and URLs without linking dates, amo
   assert.match(html, /href="https:\/\/www.example.si"/);
   assert.match(html, /q=1&amp;b=2/);
   assert.match(html, /rel="noopener noreferrer"/);
+  assert.doesNotMatch(links.render('servis@example.si'), /target=|window\.open|chrome|mail\.google/);
+  assert.match(links.contactValues({ name: 'Ana', phone: '041 123 456', email: 'ana@example.si' }), /href="tel:041123456"/);
+  assert.doesNotMatch(links.contactValues({ email: 'ana@example.si' }), /target=|<script/);
   for (const value of ['23. 9. 2026', '2026-09-23', '08:00-09:00', '12345678', '1500,00 EUR', '1,5 h', 'javascript:alert(1)', '<img src=x onerror="alert(1)">']) {
     assert.equal(links.matches(value).length, 0, value);
     assert.doesNotMatch(links.render(value), /<img|<script|href=/);
   }
+});
+
+test("contact sharing uses the native chooser, clipboard fallback and treats cancellation as harmless", async () => {
+  const shared = [], copied = [], notices = [];
+  const navigator = { share: async payload => shared.push(payload), clipboard: { writeText: async text => copied.push(text) } };
+  const context = vm.createContext({ URL, navigator });
+  vm.runInContext(fs.readFileSync(path.join(__dirname, "../outputs/editor/contact-links.js"), "utf8"), context);
+  const links = context.createContactLinks({ escapeHtml: String, showNotice: message => notices.push(message) });
+  const contact = { name: 'Ana', phone: '041 123 456', email: 'ana@example.si' };
+  await links.shareContact(contact);
+  assert.equal(shared[0].text, 'Ana\n041 123 456\nana@example.si');
+  navigator.share = async () => { const error = new Error('cancel'); error.name = 'AbortError'; throw error; };
+  await links.shareContact(contact);
+  assert.equal(notices.length, 0);
+  delete navigator.share;
+  await links.shareContact(contact);
+  assert.equal(copied[0], shared[0].text);
+  assert.match(notices[0], /kopiran/);
 });
 
 function storageFixture(t) {

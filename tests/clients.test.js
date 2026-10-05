@@ -90,6 +90,28 @@ test("telefon stranke se varno prevede v stabilne kontakte", () => {
   assert.equal(preserved.contacts[1].id, valid.contacts[1].id);
 });
 
+test("email contacts preserve identity, selections, phone compatibility and strict ownership", () => {
+  const client = cleanClient({ name: "Contact QA", contacts: [
+    { name: "Ana", email: "ana@example.si" }, { name: "Bine", phone: "041 123 456" }
+  ] });
+  assert.equal(validateClient(client), "");
+  assert.equal(client.phone, "041 123 456");
+  const ana = client.contacts[0];
+  const renamed = cleanClient({ ...client, contacts: [{ ...ana, name: "Ana Novak", email: "ana.novak@example.si" }, client.contacts[1]] }, { existingClient: client });
+  assert.equal(renamed.contacts[0].id, ana.id);
+  const selected = applyTodoClientContactSelection({ clients: [renamed] }, { clientId: client.clientId, clientContactIds: [ana.id] }, { strict: true });
+  assert.equal(selected.error, "");
+  assert.equal(selected.todo.clientContacts[0].email, "ana.novak@example.si");
+  const legacy = applyTodoClientContactSelection({ clients: [client] }, { clientId: client.clientId, clientContacts: [{ name: "Ana", email: ana.email }] }, { strict: true });
+  assert.deepEqual(legacy.todo.clientContactIds, [ana.id]);
+  assert.match(applyTodoClientContactSelection({ clients: [client] }, { clientId: client.clientId, clientContactIds: [createClientId()] }, { strict: true }).error, /ne pripada/);
+  const oldBrowser = cleanClient({ name: client.name, phone: "" }, { existingClient: client });
+  assert.equal(oldBrowser.contacts.length, 1);
+  assert.equal(oldBrowser.contacts[0].email, ana.email);
+  assert.match(validateClient(cleanClient({ name: "Bad email", contacts: [{ name: "Ana", email: "bad@" }] })), /ni veljaven/);
+  assert.deepEqual(normalizeStoredClient(client), client);
+});
+
 test("skrivanje stranke je izrecno, povrnljivo in ohranjeno pri starejših zahtevkih", () => {
   const client = normalizeStoredClient({ name: "Arhivska stranka", hiddenFromNewTasks: true });
   assert.equal(client.hiddenFromNewTasks, true);
