@@ -144,7 +144,7 @@ zadnje 3 označene kopije pred objavami. Prekrivanje šteje samo enkrat;
 ob začetku obratovanja se vedno ohranijo vsaj 3 razpoložljive popolne kopije.
 To ni trda omejitev velikosti arhivov. Nastavitvi v `/etc/indus-ure.env` sta
 `BACKUP_LOCAL_RETENTION_DAYS=7` in `BACKUP_LOCAL_DEPLOYMENT_COPIES=3` (privzeto,
-minimuma 7 in 3). Google Drive hramba ostaja nespremenjena: 90 dni.
+minimuma 7 in 3).
 
 `deploy-indus-ure` po uspešnem pre-deploy backupu in pred preklopom kodo
 kopije označi z `<archive>.deployment.json`. Ta vsebuje ime, SHA-256 in ciljno
@@ -171,6 +171,40 @@ Stare preverjene kopije pred objavami se ob uvedbi lahko označijo z
 `scripts/mark-backup-deployment.js --directory <BACKUP_DIR> --release <git-id>
 --archive <točno-ime-arhiva>`. Tudi ta korak preveri SHA-256 in ničesar ne briše.
 
+### Samodejno redčenje Google Drive kopij (7. 10. 2026)
+
+Isti nočni backup (02:15–02:30 Europe/Ljubljana) po uspešni izdelavi in
+preverjanju nove lokalne/oddaljene kopije ohrani **zadnjo kopijo vsakega od
+zadnjih 90 koledarskih dni + zadnje 3 kopije pred objavo**. Dnevno in
+pred-objavno pravilo se prekrivata, ne seštevata slepo. Ohrani vsaj tri
+popolne kopije; datumov v prihodnosti ne briše. Nastavitvi sta
+`BACKUP_OFFSITE_RETENTION_DAYS=90` (30–365) in
+`BACKUP_OFFSITE_DEPLOYMENT_COPIES=3` (3–100).
+
+Obravnava le lastne, aplikacijsko označene pare recovery arhiv + SHA-256
+v namenski mapi. Nepopolne pare, ročne kopije, navodila in neznane datoteke
+pusti nedotaknjene. Pred brisanjem preveri vse kontrolne datoteke in sveže
+Drive metapodatke celotnega načrta. Napaka, spremenjen objekt ali neveljavna
+zaščita ustavi čiščenje. Starega arhiva ne prenaša v celoti še enkrat:
+lokalni SHA-256 in oddaljena velikost/MD5 sta preverjena ob nalaganju nove
+kopije; pri starih preveri integriteto kontrolne datoteke in metapodatke.
+
+Lokalne pred-objavne oznake po preverjanju SHA-256 prepiše v zasebne Drive
+`appProperties` arhiva (`deploymentRelease`, `deploymentSha256`). Objavni
+postopek mora pred preklopom izdaje potrditi tudi to oddaljeno oznako.
+Zaščita zato preživi izgubo lokalnega strežnika. Obnova stare kode tega
+pravila nima nujno; po rollbacku preveri politiko kopij.
+
+Pregled brez sprememb (tudi brez zapisovanja Drive oznak):
+`sudo node --env-file=/etc/indus-ure.env /opt/indus-ure/current/scripts/backup-indus-ure.js --inspect-retention`.
+Samostojen nezaščiten ukaz za brisanje ne obstaja. Za dejansko čiščenje
+zaženi običajni `indus-ure-backup.service`; ta najprej ustvari novo kopijo.
+Drive čiščenje in označevanje uporabljata isti PostgreSQL advisory lock in
+lokalni `.retention-lock`. Rezultat in delni napredek ob napaki sta zapisana
+v `indus_backup_runs.data.driveRetention` (imena, sproščeni bajti, pravilo).
+Arhivi se trajno izbrišejo, ne prestavijo v plačljiv koš. Rollback kode jih
+ne obnovi; ohranjene dnevne in pred-objavne kopije ostanejo na voljo.
+
 ### Mediji aplikacije
 
 Brisanje metapodatkov je transakcijsko. `save()` po COMMIT ne briše fizične
@@ -180,3 +214,13 @@ Nepovezane fizične datoteke zato lahko ostanejo do ločenega vzdrževalnega
 čiščenja. Pri čiščenju je treba ustaviti vse zapisovalce in nalaganja, narediti
 kopijo ter dokazati, da ključ ni v metapodatkih, začasnih nalaganjih ali Undo.
 Samodejno fizično čiščenje ni vključeno v ta poseg.
+
+Pregled 7. 10. 2026: čiščenje koša/arhiva periodično odstrani metapodatke
+nepreklicno izbrisanih dogodkov. Stare aplikacijsko upravljane Drive priloge
+poskusi izbrisati pred izbrisom dogodka; ob napaki obdrži dogodek za ponovni
+poskus. Zunanjih povezav ne briše. Splošnega iskanja osirotelih Drive datotek
+ali fizičnih datotek `media/objects` in `media/thumbnails` ni. Zato take
+datoteke ostajajo tudi v naslednjih celovitih recovery kopijah. Pred
+uvedbo fizičnega čiščenja je potreben ločen, usklajen GC z zaščito vseh
+referenc, zgodovine/Undo in nalaganj v teku; zgolj brisanje po ID dogodka
+ni varno.

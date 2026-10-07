@@ -126,6 +126,21 @@ async function inspectRetention(directory, options = {}) {
   };
 }
 
+// Keep deployment marking and remote pruning mutually exclusive as well.
+// Export only validated markers, never trust arbitrary filenames as checkpoints.
+async function withDeploymentMarkers(directory, action) {
+  return withRetentionLock(directory, async root => {
+    const { records } = await inventory(root);
+    const marked = records.filter(row => row.deployment);
+    for (const row of marked) {
+      if (await sha256(path.join(root, row.name)) !== row.checksum) throw new Error(`Neveljavna kopija pred objavo: ${row.name}.`);
+      await unchanged(path.join(root, row.name), row.stat);
+      await unchanged(path.join(root, `${row.name}.deployment.json`), row.markerStat);
+    }
+    return action(marked.map(row => row.deployment));
+  });
+}
+
 async function retainLocal(directory, { verifiedBackup, now = Date.now(), policy = retentionPolicy({}) } = {}) {
   const proof = verifiedBackup;
   if (!proof || proof.status !== "success" || !proof.verified?.localArchive || !proof.verified?.driveSize
@@ -185,7 +200,7 @@ async function markDeploymentBackup(directory, { release, archive, notBefore = 0
   });
 }
 
-module.exports = { retentionPolicy, archiveTime, planRetention, inspectRetention, retainLocal, markDeploymentBackup };
+module.exports = { retentionPolicy, archiveTime, planRetention, inspectRetention, retainLocal, markDeploymentBackup, withDeploymentMarkers };
 if (require.main === module) {
   const args = process.argv.slice(2);
   const preview = args.length === 2 && args[0] === "--inspect"

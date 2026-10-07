@@ -19,6 +19,12 @@ async function main(args) {
   if (Boolean(options["--directory"]) === Boolean(options["--env-file"])) throw new Error("Določi mapo kopij ali okoljsko datoteko.");
   const directory = options["--directory"] || backupDirectoryFromEnvironmentFile(options["--env-file"]);
   const marker = await markDeploymentBackup(directory, { release: options["--release"], archive: options["--archive"], notBefore: Number(options["--since"] || 0) * 1000 });
+  // Publication must also persist checkpoint protection off-site. Load only
+  // the explicitly supplied, trusted systemd file; never log its contents.
+  if (options["--env-file"]) {
+    process.loadEnvFile(options["--env-file"]);
+    await require("./backup-indus-ure").inspectOrMarkDriveRetention({ markOnly: true });
+  }
   process.stdout.write(`Zaščitena kopija pred objavo ${marker.release}: ${marker.archive}\n`);
 }
 if (require.main === module) main(process.argv.slice(2)).catch(error => { process.stderr.write(error.message + "\n"); process.exitCode = 1; });

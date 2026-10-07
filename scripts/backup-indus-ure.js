@@ -13,6 +13,7 @@ const { Pool } = require("pg");
 const { google } = require("googleapis");
 const nodemailer = require("nodemailer");
 const { retentionPolicy, retainLocal } = require("./backup-retention");
+const { driveRetentionPolicy, manageDriveRetention } = require("./drive-backup-retention");
 
 const execFileAsync = promisify(execFile);
 const DATABASE_URL = process.env.DATABASE_URL || "";
@@ -24,7 +25,6 @@ const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || "";
 const GOOGLE_REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI || "";
 const OWNER_EMAIL = String(process.env.GOOGLE_DRIVE_OWNER_EMAIL || "bojan@indus.si").trim().toLowerCase();
 const PARENT_FOLDER_ID = String(process.env.GOOGLE_DRIVE_BACKUP_PARENT_FOLDER_ID || process.env.GOOGLE_DRIVE_TASKS_FOLDER_ID || "").trim();
-const OFFSITE_RETENTION_DAYS = Math.max(30, Number(process.env.BACKUP_OFFSITE_RETENTION_DAYS || 90));
 const ALERT_SMTP_URL = String(process.env.ALERT_SMTP_URL || "").trim();
 const ALERT_EMAIL_FROM = String(process.env.ALERT_EMAIL_FROM || "").trim();
 const ALERT_EMAIL_TO = String(process.env.ALERT_EMAIL_TO || "bojan@indus.si").trim();
@@ -146,8 +146,12 @@ async function dumpConsistentDatabase(pool, workDir, database, state, { dump = d
   } finally { client.release(); }
 }
 
-function restoreGuide() {
+function baseRestoreGuide() {
   return "INDUS URE - HITRA OBNOVA\n==========================\nPosodobljeno 11. 9. 2026. Velja za Ure, NE za Fakture.\nPodrobnosti: application/OPERATIONS.md in application/DEPLOY-UBUNTU.md.\n\nPaket vsebuje PostgreSQL bazo, priloge, kodo aplikacije in app-config.json. Datoteko app-config.json po pregledu obnovi v /var/lib/indus-ure/app-config.json (lastnik indus-ure, pravice 0600). V testnem okolju je v DATA_DIR. Namenoma NE vsebuje OAuth žetonov, prijavnih sej, hashov gesel, ICS povezav ali /etc/indus-ure.env.\ndatabase.dump in sanitized-state.sql sta zajeta v istem izvoženem PostgreSQL posnetku. Obnovi OBA iz ISTEGA paketa.\n\n1. Prenesi .tar.gz in istoimensko .sha256 datoteko. Preveri in razpakiraj v zasebno mapo:\n   sha256sum -c indus-ure-recovery-....tar.gz.sha256\n   mkdir restore && tar -xzf indus-ure-recovery-....tar.gz -C restore\n   chmod 0644 restore/database.dump restore/sanitized-state.sql\n   Uporabnik postgres potrebuje tudi prehod do te mape. Po obnovi odstrani njegov začasni dostop.\n\n2. Na ciljnem Ubuntu namesti Node 20+, PostgreSQL, nginx, git in tar ter obdelavo slik:\n   sudo apt-get install -y libvips-tools libheif-examples\n   Ustvari uporabnika indus-ure in mape po application/DEPLOY-UBUNTU.md.\n   NAJPREJ preveri obnovo v izolirani bazi in hash prilog. Za redno objavo je obvezen run-indus-ure-postgres-qa; obnovitev produkcije potrebuje posebej dovoljenje lastnika.\n\n3. Pred potrjeno produkcijsko obnovo naredi neodvisno kopijo trenutne baze, medijev in okolja. Ustavi aplikacijo IN vse skripte, timerje ali druge pisce baze. Preveri ciljni strežnik:\n   sudo systemctl stop indus-ure.service indus-ure-worker-digest.timer indus-ure-backup.timer\n   Preveri tudi morebitne že tekoče digest/backup storitve.\n\n4. BAZA - naslednji ukazi PREPIŠEJO indus_ure, nikoli indus_fakture:\n   sudo -u postgres dropdb --if-exists indus_ure\n   sudo -u postgres createdb --owner=indus_ure indus_ure\n   sudo -u postgres pg_restore --no-owner --no-acl --role=indus_ure -d indus_ure restore/database.dump\n   sudo -u postgres psql -v ON_ERROR_STOP=1 -d indus_ure -f restore/sanitized-state.sql\n   Ne izpusti indus_meta/storage_revision. Ne zaganjaj starega pisca brez CAS zaščite.\n\n5. PRILOGE IN KODA:\n   Ohranjen star MEDIA_DIR naj bo ločena pred-obnovitvena kopija; ne briši ga vnaprej.\n   Pripravi prazno /var/lib/indus-ure/media in vanjo kopiraj restore/media/.\n   Lastništvo indus-ure:indus-ure, zasebne mape 0700.\n   Kodo restore/application/ pripravi kot ločeno preverjeno izdajo, npm ci --omit=dev.\n   Ne prepisuj aktivne izdaje. Preklop izvedi šele po testih, z aplikacijo ustavljeno.\n   Nepovezane stare medijske datoteke se namenoma ohranijo; čiščenje ni del obnove.\n\n6. Ročno obnovi /etc/indus-ure.env iz LOČENEGA varnega zapisa:\n   DATABASE_URL, NODE_ENV=production, HOST=127.0.0.1, PORT=8123,\n   MEDIA_DIR=/var/lib/indus-ure/media, PUBLIC_BASE_URL=https://ure.indus.si,\n   Google OAuth, GOOGLE_DRIVE_BACKUP_PARENT_FOLDER_ID,\n   GOOGLE_DRIVE_TASKS_FOLDER_ID (Dokumenti/Preglednice), GOOGLE_DRIVE_OWNER_EMAIL,\n   BACKUP_DIR=/var/backups/indus-ure.\n   Lokalna javna prijava z geslom NI vključena. Google identitete uporabnikov ostanejo.\n   Izbirna servisna LAN prijava zahteva LAN_SUPPORT_LOGIN_ENABLED, LAN_SUPPORT_LOGIN_PASSWORD\n   (vsaj 24 znakov), izbiro obstoječega uporabnika ter preverjen LAN proxy;\n   natančna imena in omrežne pogoje preveri v OPERATIONS.md. Ne odpiraj je internetu.\n   Skrivnosti in sej ne kopiraj v chat ali Git.\n\n7. Namesti systemd/nginx datoteke iz application/deploy/, nato:\n   sudo systemctl daemon-reload\n   sudo systemctl start indus-ure.service\n   curl --fail http://127.0.0.1:8123/api/health\n   Preveri prijavo, opravilo, prilogo, obračun, števila vrstic in dnevnik napak.\n   Šele po uspešnem preverjanju ponovno vključi prej omogočene timerje.\n\n8. Kot Bojan v Nastavitvah ponovno poveži Google. ICS povezave in seje se ne obnovijo.\n   Ustvari nove read-only ICS povezave ter preveri uspešen nov recovery backup in Drive navodila.\n\nPred produkcijsko obnovo postopek preveri na ločenem testnem strežniku.\n";
+}
+function restoreGuide() {
+  return baseRestoreGuide().replace("Posodobljeno 11. 9. 2026.", "Posodobljeno 7. 10. 2026.")
+    + "\nHRAMBA KOPIJ\nGoogle Drive: zadnja kopija vsakega od zadnjih 90 koledarskih dni (Europe/Ljubljana) in zadnje 3 kopije pred objavo. Lokalno: 7 dnevnih in 3 pred-objavne. Najmanj 3 popolne kopije. Presežne kopije se trajno odstranijo šele po uspešno preverjeni novi kopiji.\nNastavitve: BACKUP_OFFSITE_RETENTION_DAYS=90, BACKUP_OFFSITE_DEPLOYMENT_COPIES=3, BACKUP_LOCAL_RETENTION_DAYS=7, BACKUP_LOCAL_DEPLOYMENT_COPIES=3.\nPred-objavne oznake so tudi na arhivih v zasebnih Drive appProperties. Podroben postopek in omejitve: application/OPERATIONS.md.\n";
 }
 async function verifyLocalArchive(file) {
   const output = await execFileAsync("tar", ["-tzf", file], { maxBuffer: 16 * 1024 * 1024 });
@@ -240,19 +244,19 @@ async function upsertInstructions(drive, folderId, file) {
     : await upload(drive, folderId, file, PURPOSE.instructions, "", "text/plain");
   return verifyDrive(drive, folderId, file, remote);
 }
-async function driveFiles(drive, q) {
-  const files = []; let pageToken = "";
-  do {
-    const result = await drive.files.list({ q, fields: "nextPageToken,files(id,createdTime,appProperties)", pageSize: 1000, pageToken: pageToken || undefined });
-    files.push(...(result.data.files || [])); pageToken = result.data.nextPageToken || "";
-  } while (pageToken);
-  return files;
-}
-async function retainDrive(drive, folderId) {
-  const files = await driveFiles(drive, [`'${folderId.replace(/'/g, "\\'")}' in parents`, "trashed = false", `appProperties has { key='indusApp' and value='${APP_ID}' }`].join(" and "));
-  const cutoff = Date.now() - OFFSITE_RETENTION_DAYS * 86400000;
-  const expiredIds = new Set(files.filter((file) => file.appProperties?.purpose === PURPOSE.archive && new Date(file.createdTime || 0).getTime() < cutoff).map((file) => file.appProperties?.backupId).filter(Boolean));
-  for (const file of files.filter((file) => expiredIds.has(file.appProperties?.backupId))) await drive.files.delete({ fileId: file.id });
+async function inspectOrMarkDriveRetention({ markOnly = false } = {}) {
+  requireConfig();
+  const pool = poolForDatabase(); let lock;
+  try {
+    lock = await pool.connect();
+    if (!(await lock.query("select pg_try_advisory_lock(hashtext('indus-ure-recovery-backup')) as locked")).rows[0].locked) throw new Error("Druga varnostna kopija že poteka.");
+    const folderId = (await meta(pool, "backup_drive_folder"))?.id;
+    if (!folderId) throw new Error("Obstoječa mapa Drive kopij ni nastavljena.");
+    return await manageDriveRetention(await driveForOwner(pool), folderId, { directory: BACKUP_DIR, policy: driveRetentionPolicy(), dryRun: !markOnly, markOnly });
+  } finally {
+    if (lock) { await lock.query("select pg_advisory_unlock(hashtext('indus-ure-recovery-backup'))").catch(() => {}); lock.release(); }
+    await pool.end();
+  }
 }
 async function main() {
   const id = `backup-${stamp()}-${crypto.randomBytes(4).toString("hex")}`;
@@ -260,6 +264,7 @@ async function main() {
   try {
     requireConfig();
     const localRetentionPolicy = retentionPolicy();
+    const offsiteRetentionPolicy = driveRetentionPolicy();
     backupLock = await pool.connect();
     if (!(await backupLock.query("select pg_try_advisory_lock(hashtext('indus-ure-recovery-backup')) as locked")).rows[0].locked) throw new Error("Druga varnostna kopija že poteka.");
     await ensureTables(pool);
@@ -287,12 +292,12 @@ async function main() {
       upload(drive, folderId, archive, PURPOSE.archive, id), upload(drive, folderId, checksumPath, PURPOSE.checksum, id, "text/plain"), upsertInstructions(drive, folderId, guide)
     ]);
     const [archiveCheck, checksumCheck] = await Promise.all([verifyDrive(drive, folderId, archive, remoteArchive), verifyDrive(drive, folderId, checksumPath, remoteChecksum)]);
-    const result = { id, status: "success", createdAt: manifest.createdAt, recoveryFile: path.basename(archive), checksumFile: path.basename(checksumPath), bytes: archiveCheck.bytes, sha256: checksum, driveFileId: archiveCheck.id, driveChecksumFileId: checksumCheck.id, driveFolderId: folderId, verified: { localArchive: true, driveSize: true, driveMd5: true, freshDriveRead: true, restoreInstructions: Boolean(instructions.id) } };
-    await retainDrive(drive, folderId);
+    const result = { id, status: "success", createdAt: manifest.createdAt, recoveryFile: path.basename(archive), checksumFile: path.basename(checksumPath), bytes: archiveCheck.bytes, md5: archiveCheck.md5, sha256: checksum, driveFileId: archiveCheck.id, driveChecksumFileId: checksumCheck.id, driveFolderId: folderId, verified: { localArchive: true, driveSize: true, driveMd5: true, freshDriveRead: true, restoreInstructions: Boolean(instructions.id) } };
+    result.driveRetention = await manageDriveRetention(drive, folderId, { directory: BACKUP_DIR, verifiedBackup: result, policy: offsiteRetentionPolicy });
     result.localRetention = await retainLocal(BACKUP_DIR, { verifiedBackup: result, policy: localRetentionPolicy });
     await recordRun(pool, id, "success", result); await clearBackupAlerts(pool); process.stdout.write(`${JSON.stringify(result)}\n`);
   } catch (error) {
-    const result = { id, status: "failed", finishedAt: new Date().toISOString(), error: error.message || String(error) };
+    const result = { id, status: "failed", finishedAt: new Date().toISOString(), error: error.message || String(error), ...(error.driveRetention ? { driveRetention: error.driveRetention } : {}) };
     try { await recordRun(pool, id, "failed", result); } catch {}
     try { await recordFailureAlert(pool, result); } catch (notifyError) { process.stderr.write(`Backup app notification failed: ${notifyError.message || notifyError}\n`); }
     try { await notifyFailure(result); } catch (notifyError) { process.stderr.write(`Backup email notification failed: ${notifyError.message || notifyError}\n`); }
@@ -306,5 +311,11 @@ async function main() {
     await pool.end().catch(() => {});
   }
 }
-if (require.main === module) main();
-module.exports = { dumpConsistentDatabase, dumpDatabase, writeSanitizedState, sanitize, restoreGuide };
+if (require.main === module) {
+  if (process.argv.length === 2) main();
+  else if (process.argv.length === 3 && process.argv[2] === "--inspect-retention") {
+    inspectOrMarkDriveRetention().then(result => process.stdout.write(JSON.stringify(result) + "\n"))
+      .catch(error => { process.stderr.write(error.message + "\n"); process.exitCode = 1; });
+  } else { process.stderr.write("Neveljavni argumenti. Za pregled uporabi --inspect-retention.\n"); process.exitCode = 1; }
+}
+module.exports = { dumpConsistentDatabase, dumpDatabase, writeSanitizedState, sanitize, restoreGuide, inspectOrMarkDriveRetention };
