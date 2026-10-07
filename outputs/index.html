@@ -3427,6 +3427,8 @@
     dialog::backdrop { background: rgba(17, 24, 28, 0.45); }
 
     #deletedTodosDialog { width: min(680px, calc(100vw - 26px)); max-height: min(760px, calc(100dvh - 26px)); overflow-y: auto; overscroll-behavior: contain; }
+    .deleted-todos-search { display: grid; gap: 6px; margin-bottom: 14px; }
+    #deletedTodosSearch { width: 100%; min-width: 0; }
     .deleted-todos-list { display: grid; gap: 10px; }
     .deleted-todo-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: #f8faf7; }
     .deleted-todo-card strong { display: block; overflow-wrap: anywhere; }
@@ -6138,9 +6140,14 @@
     </form>
   </dialog>
   <dialog id="deletedTodosDialog">
-    <form method="dialog">
-      <div class="modal-head"><div><h3>Izbrisano</h3><span class="todo-meta" id="deletedTodosMeta"></span></div><button class="icon-btn" id="closeDeletedTodos" type="button" title="Zapri" aria-label="Zapri">&times;</button></div>
-      <div class="modal-body"><div class="deleted-todos-list" id="deletedTodosList"></div></div>
+    <form method="dialog" id="deletedTodosForm">
+      <div class="modal-head"><div><h3>Izbrisano</h3><span class="todo-meta" id="deletedTodosMeta" role="status" aria-live="polite"></span></div><button class="icon-btn" id="closeDeletedTodos" type="button" title="Zapri" aria-label="Zapri">&times;</button></div>
+      <div class="modal-body">
+        <label class="deleted-todos-search" for="deletedTodosSearch">Išči v košu
+          <input id="deletedTodosSearch" type="search" placeholder="Naslov, stranka, datum …" autocomplete="off" aria-controls="deletedTodosList">
+        </label>
+        <div class="deleted-todos-list" id="deletedTodosList"></div>
+      </div>
     </form>
   </dialog>
 
@@ -13760,15 +13767,31 @@ function renderDeletedTodos() {
       const list = $("deletedTodosList");
       const meta = $("deletedTodosMeta");
       const todos = Array.isArray(state.deletedTodos) ? state.deletedTodos : [];
+      const query = normalizeText($("deletedTodosSearch").value).trim();
+      const words = query.split(/\s+/).filter(Boolean);
+      // Filter only the already loaded trash; never change its contents or
+      // request another server search while typing.
+      const visible = words.length ? todos.filter((todo) => {
+        const text = normalizeText([todo.title || "Brez naslova", todo.client, todoStatus(todo.status).label,
+          todo.date ? todoDateTimeLabel(todo) : "", todo.trashedAt ? formatDateTime(todo.trashedAt) : "",
+          todo.trashedByName].join(" "));
+        return words.every(word => text.includes(word));
+      }) : todos;
       const retentionDays = Number(state.deletedTodoRetentionDays || 30);
-      meta.textContent = todos.length
+      meta.textContent = query && todos.length
+        ? `Prikazano ${visible.length} od ${todos.length} · obnova je možna ${retentionDays} dni po brisanju`
+        : todos.length
         ? `${todos.length} ${todos.length === 1 ? "opravilo" : "opravil"} · obnova je možna ${retentionDays} dni po brisanju`
         : `Obnova je možna ${retentionDays} dni po brisanju.`;
       if (!todos.length) {
         list.innerHTML = '<p class="deleted-todo-empty">Koš je prazen.</p>';
         return;
       }
-      list.innerHTML = todos.map((todo) => {
+      if (!visible.length) {
+        list.innerHTML = '<p class="deleted-todo-empty">Ni zadetkov za vpisani filter.</p>';
+        return;
+      }
+      list.innerHTML = visible.map((todo) => {
         const deletedAt = todo.trashedAt ? formatDateTime(todo.trashedAt) : "neznano";
         const restoreUntil = todo.restoreUntil ? ` · do ${escapeHtml(formatDateTime(todo.restoreUntil))}` : "";
         const client = todo.client ? ` · ${escapeHtml(todo.client)}` : "";
@@ -13782,6 +13805,7 @@ async function openDeletedTodos() {
       const data = await api("/api/todos/trash");
       state.deletedTodos = data.todos || [];
       state.deletedTodoRetentionDays = Number(data.retentionDays || 30);
+      $("deletedTodosSearch").value = "";
       renderDeletedTodos();
       $("deletedTodosDialog").showModal();
     }
@@ -13976,6 +14000,8 @@ $("logoutBtn").addEventListener("click", async () => {
 
 $("trashMenuBtn").addEventListener("click", () => openDeletedTodos().catch((error) => showNotice(error.message)));
 $("closeDeletedTodos").addEventListener("click", () => $("deletedTodosDialog").close());
+$("deletedTodosSearch").addEventListener("input", renderDeletedTodos);
+$("deletedTodosForm").addEventListener("submit", (event) => event.preventDefault());
 $("deletedTodosList").addEventListener("click", (event) => {
       const button = event.target.closest(".restore-deleted-todo");
       const card = event.target.closest("[data-deleted-todo-id]");
