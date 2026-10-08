@@ -156,8 +156,8 @@ odstrani skupaj z arhivom, razen če ga ohranja dnevno pravilo.
 Dotakne se samo popolnih prepoznanih arhivov neposredno v `BACKUP_DIR`
 ter njihovih kontrolnih datotek/oznak; ročne kopije, podmape, nepopolne
 kopije in neznane datoteke ostanejo. Napačna kontrolna vsota, neveljavna
-oznaka ali konflikt zaklepa ustavijo čiščenje in sprožijo obstoječe opozorilo
-backupa. Dnevnik `indus_backup_runs.data.localRetention` vsebuje seznam
+oznaka ali konflikt zaklepa ustavijo čiščenje in sprožijo ločeno opozorilo
+čiščenja, ne razveljavijo že preverjene nove kopije. Dnevnik `indus_backup_runs.data.localRetention` vsebuje seznam
 ohranjenih/odstranjenih kopij ter sproščene bajte.
 
 Backup ima PostgreSQL advisory lock proti sočasnim zagonom, označevanje in
@@ -188,6 +188,21 @@ Drive metapodatke celotnega načrta. Napaka, spremenjen objekt ali neveljavna
 zaščita ustavi čiščenje. Starega arhiva ne prenaša v celoti še enkrat:
 lokalni SHA-256 in oddaljena velikost/MD5 sta preverjena ob nalaganju nove
 kopije; pri starih preveri integriteto kontrolne datoteke in metapodatke.
+
+Od 8. 10. 2026 primerjava namerno ignorira interno Drive polje `version`,
+ki se lahko spremeni brez spremembe vsebine. Še vedno primerja ID, ime,
+velikost, MD5, lastništvo, mapo, koš in aplikacijske/zaščitne oznake; pri
+neujemanjih dnevnik navede spremenjena polja. Datum in velikost sama nista
+dokaz integritete. Pred brisanjem se kandidati ponovno preverijo.
+
+Izdelava kopije in čiščenje imata ločen rezultat: po uspešnem preverjanju
+kopija ostane `status=success`, čiščenje pa ima `cleanupStatus=success`
+ali `warning`, s podrobnostmi v `driveRetention` in `localRetention`.
+Opozorilo `backup-cleanup-failed` (»Kopija je uspela; čiščenje kopij ni
+uspelo«) aplikacijski nadzor prikaže in pošlje po že nastavljeni poti.
+Neuspešno Drive čiščenje preskoči lokalno brisanje. Dejanska napaka izdelave,
+nalaganja ali preverjanja nove kopije ostaja kritična `backup-failed` in
+neuspešen izhod storitve. Prejšnjih neprebranih napak uspešen zagon ne briše.
 
 Lokalne pred-objavne oznake po preverjanju SHA-256 prepiše v zasebne Drive
 `appProperties` arhiva (`deploymentRelease`, `deploymentSha256`). Objavni

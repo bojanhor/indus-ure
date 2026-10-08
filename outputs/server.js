@@ -11,6 +11,7 @@ const { promisify } = require("util");
 const PDFDocument = require("pdfkit");
 const archiver = require("archiver");
 const { renderAppShell } = require("./app-shell");
+const { backupCleanupIssue } = require("./backup-status");
 const planningCalendar = require("./planning-calendar");
 const { createCalendarSyncStore } = require("./calendar-sync-store");
 const { createGooglePlanningCalendar } = require("./google-planning-calendar");
@@ -5039,6 +5040,8 @@ async function runOperationalMonitor() {
     try {
       const latestRun = await getPgPool().query("select status, data, created_at, finished_at from indus_backup_runs order by created_at desc limit 1");
       const recent = latestRun.rows[0];
+      const cleanupIssue = backupCleanupIssue({ ...recent?.data, status: recent?.status });
+      if (cleanupIssue) issues.push(cleanupIssue);
       if (recent?.status === "failed") {
         const detail = String(recent.data?.error || "Neznana napaka pri nocnem backupu.").slice(0, 600);
         issues.push({ code: "backup-failed", severity: "critical", title: "Varnostna kopija ni uspela", message: `Zadnji samodejni recovery backup ni uspel: ${detail}` });

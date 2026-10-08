@@ -14,6 +14,7 @@ const { google } = require("googleapis");
 const nodemailer = require("nodemailer");
 const { retentionPolicy, retainLocal } = require("./backup-retention");
 const { driveRetentionPolicy, manageDriveRetention } = require("./drive-backup-retention");
+const { runBackupRetention, backupCleanupIssue } = require("../outputs/backup-status");
 
 const execFileAsync = promisify(execFile);
 const DATABASE_URL = process.env.DATABASE_URL || "";
@@ -293,9 +294,16 @@ async function main() {
     ]);
     const [archiveCheck, checksumCheck] = await Promise.all([verifyDrive(drive, folderId, archive, remoteArchive), verifyDrive(drive, folderId, checksumPath, remoteChecksum)]);
     const result = { id, status: "success", createdAt: manifest.createdAt, recoveryFile: path.basename(archive), checksumFile: path.basename(checksumPath), bytes: archiveCheck.bytes, md5: archiveCheck.md5, sha256: checksum, driveFileId: archiveCheck.id, driveChecksumFileId: checksumCheck.id, driveFolderId: folderId, verified: { localArchive: true, driveSize: true, driveMd5: true, freshDriveRead: true, restoreInstructions: Boolean(instructions.id) } };
-    result.driveRetention = await manageDriveRetention(drive, folderId, { directory: BACKUP_DIR, verifiedBackup: result, policy: offsiteRetentionPolicy });
-    result.localRetention = await retainLocal(BACKUP_DIR, { verifiedBackup: result, policy: localRetentionPolicy });
-    await recordRun(pool, id, "success", result); await clearBackupAlerts(pool); process.stdout.write(`${JSON.stringify(result)}\n`);
+    await runBackupRetention(result, {
+      drive: () => manageDriveRetention(drive, folderId, { directory: BACKUP_DIR, verifiedBackup: result, policy: offsiteRetentionPolicy }),
+      local: () => retainLocal(BACKUP_DIR, { verifiedBackup: result, policy: localRetentionPolicy })
+    });
+    await recordRun(pool, id, "success", result);
+    // The app monitor reports cleanup warnings separately from backup failure.
+    const cleanupIssue = backupCleanupIssue(result);
+    if (cleanupIssue) process.stderr.write(`INDUS URE backup cleanup warning: ${cleanupIssue.message}\n`);
+    try { await clearBackupAlerts(pool); } catch (error) { process.stderr.write(`Backup alert cleanup failed: ${error.message}\n`); }
+    process.stdout.write(`${JSON.stringify(result)}\n`);
   } catch (error) {
     const result = { id, status: "failed", finishedAt: new Date().toISOString(), error: error.message || String(error), ...(error.driveRetention ? { driveRetention: error.driveRetention } : {}) };
     try { await recordRun(pool, id, "failed", result); } catch {}

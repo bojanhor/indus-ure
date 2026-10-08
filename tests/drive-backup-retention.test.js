@@ -121,8 +121,79 @@ test("corrupt sidecars, checkpoint hashes, or a changed retained archive block t
   await assert.rejects(f.run(), /oznaka/); assert.deepEqual(f.deleted, []);
   delete props.deploymentRelease; delete props.deploymentSha256;
   const get = f.drive.files.get;
-  f.drive.files.get = async args => { const r = await get(args); if (args.fileId === f.fresh.driveFileId && !args.alt) r.data.version = "99"; return r; };
-  await assert.rejects(f.run(), /spremenila/); assert.deepEqual(f.deleted, []);
+  f.drive.files.get = async args => { const r = await get(args); if (args.fileId === f.fresh.driveFileId && !args.alt) r.data.md5Checksum = "0".repeat(32); return r; };
+  await assert.rejects(f.run(), /spremenila.*md5Checksum/); assert.deepEqual(f.deleted, []);
+});
+
+test("Drive-only version changes, including a fresh SHA sidecar, do not invalidate intact backups", async t => {
+  const f = await fixture(t), get = f.drive.files.get;
+  f.drive.files.get = async args => {
+    const response = await get(args);
+    if (!args.alt) {
+      const file = f.files.get(args.fileId);
+      file.version = String(Number(file.version) + 1);
+      response.data.version = file.version;
+      response.data.appProperties = Object.fromEntries(Object.entries(file.appProperties).reverse());
+    }
+    return response;
+  };
+  const result = await f.run();
+  assert.deepEqual(result.removed, [f.old.recoveryFile]);
+  assert.ok(f.files.has(f.fresh.driveFileId));
+  assert.ok(f.files.has(f.fresh.driveChecksumFileId));
+});
+
+test("content, identity, ownership, location and checkpoint changes still stop deletion", async t => {
+  const mutations = {
+    md5Checksum: file => { file.md5Checksum = "0".repeat(32); }, // same size!
+    size: file => { file.size = String(Number(file.size) + 1); },
+    id: file => { file.id = "other-file"; },
+    name: file => { file.name += ".changed"; },
+    ownedByMe: file => { file.ownedByMe = false; },
+    parents: file => { file.parents = ["other-folder"]; },
+    trashed: file => { file.trashed = true; },
+    appProperties: file => { file.appProperties.deploymentRelease = "123abcd"; }
+  };
+  for (const [key, mutate] of Object.entries(mutations)) await t.test(key, async t => {
+    const f = await fixture(t), get = f.drive.files.get;
+    f.drive.files.get = async args => {
+      const response = await get(args);
+      if (args.fileId === f.old.driveFileId && !args.alt) mutate(response.data);
+      return response;
+    };
+    await assert.rejects(f.run(), new RegExp(`spremenila.*${key}`));
+    assert.deepEqual(f.deleted, []);
+  });
+});
+
+test("a same-sized sidecar content change is rejected even when its Drive version also changes", async t => {
+  const f = await fixture(t), get = f.drive.files.get;
+  f.drive.files.get = async args => {
+    const response = await get(args);
+    if (args.fileId === f.fresh.driveChecksumFileId && !args.alt) {
+      response.data.version = "4";
+      response.data.md5Checksum = "0".repeat(32);
+    }
+    return response;
+  };
+  await assert.rejects(f.run(), /spremenila.*sha256.*md5Checksum/);
+  assert.deepEqual(f.deleted, []);
+});
+
+test("deletion candidates are rechecked after preflight, not just once", async t => {
+  const f = await fixture(t), get = f.drive.files.get;
+  let reads = 0;
+  f.drive.files.get = async args => {
+    const response = await get(args);
+    if (args.fileId === f.old.driveFileId && !args.alt && ++reads === 2) response.data.md5Checksum = "0".repeat(32);
+    return response;
+  };
+  await assert.rejects(f.run(), error => {
+    assert.match(error.message, /md5Checksum/);
+    assert.deepEqual(error.driveRetention.removed, []);
+    return true;
+  });
+  assert.deepEqual(f.deleted, []);
 });
 
 test("lost local checkpoints and conflicting locks fail closed", async t => {

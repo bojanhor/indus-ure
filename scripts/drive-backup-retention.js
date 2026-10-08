@@ -23,13 +23,20 @@ function owned(file, folderId) {
   return file?.id && !file.trashed && file.ownedByMe === true && file.parents?.includes(folderId)
     && file.appProperties?.indusApp === APP;
 }
-function signature(file) {
-  return JSON.stringify([file.id, file.name, file.size, file.md5Checksum, file.version, file.ownedByMe,
-    Boolean(file.trashed), [...(file.parents || [])].sort(), Object.entries(file.appProperties || {}).sort()]);
+function safetyMetadata(file) {
+  // Drive's version also changes for internal, non-content updates (e.g. a
+  // freshly uploaded text sidecar). Compare content and deletion authority,
+  // not that opaque counter. Date + size alone cannot prove equal content.
+  return { id: file.id, name: file.name, size: file.size, md5Checksum: file.md5Checksum,
+    ownedByMe: file.ownedByMe, trashed: Boolean(file.trashed),
+    parents: [...(file.parents || [])].sort(), appProperties: Object.entries(file.appProperties || {}).sort() };
 }
+function signature(file) { return JSON.stringify(safetyMetadata(file)); }
 async function freshFile(drive, folderId, file) {
   const fresh = (await drive.files.get({ fileId: file.id, fields: FIELDS })).data;
-  if (!owned(fresh, folderId) || signature(fresh) !== signature(file)) throw new Error(`Drive kopija se je med preverjanjem spremenila: ${file.name}.`);
+  const before = safetyMetadata(file), after = safetyMetadata(fresh);
+  const changed = Object.keys(before).filter(key => JSON.stringify(before[key]) !== JSON.stringify(after[key]));
+  if (!owned(fresh, folderId) || changed.length) throw new Error(`Drive kopija se je med preverjanjem spremenila: ${file.name} (polja: ${changed.join(", ") || "lastništvo/mesto"}).`);
   return fresh;
 }
 async function inventory(drive, folderId) {
@@ -108,8 +115,9 @@ async function syncMarkers(drive, folderId, records, localMarkers, dryRun, deplo
       const appProperties = { ...row.archive.appProperties, deploymentRelease: marker.release, deploymentSha256: marker.sha256 };
       await drive.files.update({ fileId: row.archive.id, requestBody: { appProperties }, fields: "id" });
       const updated = (await drive.files.get({ fileId: row.archive.id, fields: FIELDS })).data;
-      // Only the app properties and Drive version may change.
-      if (!owned(updated, folderId) || signature({ ...updated, appProperties: row.archive.appProperties, version: row.archive.version }) !== signature(row.archive)
+      // Only the explicitly written app properties may change; the opaque
+      // Drive version is deliberately excluded from all safety comparisons.
+      if (!owned(updated, folderId) || signature({ ...updated, appProperties: row.archive.appProperties }) !== signature(row.archive)
           || updated.appProperties.deploymentRelease !== marker.release || updated.appProperties.deploymentSha256 !== marker.sha256) throw new Error("Drive ni potrdil zaščite kopije pred objavo.");
       row.archive = updated;
     }

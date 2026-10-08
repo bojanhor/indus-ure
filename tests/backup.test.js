@@ -6,6 +6,69 @@ const path = require("path");
 const test = require("node:test");
 const { dumpConsistentDatabase } = require("../scripts/backup-indus-ure");
 const { installRestoredMedia } = require("../outputs/server");
+const { runBackupRetention, backupCleanupIssue } = require("../outputs/backup-status");
+
+function verifiedBackup() {
+  return { status: "success", recoveryFile: "verified.tar.gz", bytes: 123, sha256: "original-sha",
+    verified: { localArchive: true, driveSize: true, driveMd5: true, freshDriveRead: true, restoreInstructions: true } };
+}
+
+test("successful cleanup records both outcomes without a warning", async () => {
+  const result = verifiedBackup(), steps = [];
+  await runBackupRetention(result, {
+    drive: async () => { steps.push("drive"); return { removed: ["old"], freedBytes: 12 }; },
+    local: async () => { steps.push("local"); return { removed: [], freedBytes: 0 }; }
+  });
+  assert.deepEqual(steps, ["drive", "local"]);
+  assert.equal(result.status, "success");
+  assert.equal(result.cleanupStatus, "success");
+  assert.equal(result.driveRetention.status, "success");
+  assert.equal(result.localRetention.status, "success");
+  assert.equal(backupCleanupIssue(result), null);
+});
+
+test("Drive cleanup failure preserves backup proof and partial progress, skips local deletion and warns separately", async () => {
+  const result = verifiedBackup(), proof = structuredClone(result);
+  const error = Object.assign(new Error("Drive unavailable"), { driveRetention: { removed: ["old"], freedBytes: 12 } });
+  await runBackupRetention(result, {
+    drive: async () => { throw error; },
+    local: async () => assert.fail("Local deletion must not run")
+  });
+  for (const key of Object.keys(proof)) assert.deepEqual(result[key], proof[key]);
+  assert.equal(result.cleanupStatus, "warning");
+  assert.equal(result.driveRetention.status, "failed");
+  assert.deepEqual(result.driveRetention.removed, ["old"]);
+  assert.equal(result.driveRetention.freedBytes, 12);
+  assert.equal(result.localRetention.status, "skipped");
+  const issue = backupCleanupIssue(result);
+  assert.equal(issue.code, "backup-cleanup-failed");
+  assert.equal(issue.severity, "warning");
+  assert.match(issue.title, /Kopija je uspela/);
+  assert.match(issue.message, /Drive unavailable/);
+});
+
+test("local cleanup failure preserves the successful off-site copy and cleanup result", async () => {
+  const result = verifiedBackup();
+  await runBackupRetention(result, {
+    drive: async () => ({ removed: ["old"], freedBytes: 12 }),
+    local: async () => { throw new Error("local lock"); }
+  });
+  assert.equal(result.status, "success");
+  assert.equal(result.driveRetention.status, "success");
+  assert.equal(result.localRetention.status, "failed");
+  assert.match(backupCleanupIssue(result).message, /Lokalno: local lock/);
+});
+
+test("unverified or failed backups never run cleanup or masquerade as cleanup warnings", async () => {
+  for (const result of [{ status: "failed" }, { ...verifiedBackup(), verified: { driveSize: true } }]) {
+    await assert.rejects(runBackupRetention(result, {
+      drive: async () => assert.fail("No cleanup before verification"),
+      local: async () => assert.fail("No cleanup before verification")
+    }), /uspešno preverjeno/);
+  }
+  assert.equal(backupCleanupIssue({ status: "failed", cleanupStatus: "warning" }), null);
+  assert.equal(backupCleanupIssue({ status: "success" }), null); // legacy records
+});
 
 test("browser restore retains live media and rejects conflicting immutable content", async () => {
   const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "indus-restore-test-"));
