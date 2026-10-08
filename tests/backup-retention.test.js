@@ -159,6 +159,9 @@ test("deployment helper reads only the backup directory setting and deployment g
   assert.ok(deploy.indexOf('== success ]]') < deploy.indexOf('scripts/mark-backup-deployment.js'));
   assert.match(deploy, /checkpoint_tool="\$current\/scripts\/mark-backup-deployment\.js"/);
   const backup = await fs.readFile(path.join(__dirname, "../scripts/backup-indus-ure.js"), "utf8");
-  assert.ok(backup.indexOf('verifyDrive(drive, folderId, archive') < backup.indexOf('await retainLocal(BACKUP_DIR'));
+  const verification = backup.indexOf('verifyDrive(drive, folderId, archive');
+  const cleanup = backup.indexOf('await runBackupRetention(result');
+  assert.ok(verification >= 0 && cleanup > verification);
+  assert.match(backup, /local: \(\) => retainLocal\(BACKUP_DIR, \{ verifiedBackup: result/);
   assert.match(backup, /pg_try_advisory_lock/);
 });

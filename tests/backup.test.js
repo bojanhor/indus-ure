@@ -45,6 +45,10 @@ test("Drive cleanup failure preserves backup proof and partial progress, skips l
   assert.equal(issue.severity, "warning");
   assert.match(issue.title, /Kopija je uspela/);
   assert.match(issue.message, /Drive unavailable/);
+  await runBackupRetention(result, { drive: async () => ({ removed: [] }), local: async () => ({ removed: [] }) });
+  assert.equal(result.cleanupStatus, "success");
+  assert.equal(result.localRetention.status, "success");
+  assert.equal(backupCleanupIssue(result), null);
 });
 
 test("local cleanup failure preserves the successful off-site copy and cleanup result", async () => {
