@@ -163,6 +163,8 @@ test("reorder orientation survives expansion and drag start but clears on search
   await expect(page.locator(".todo-reorder-origin")).toHaveCount(0);
   await page.locator("#clientSearch").press("Escape");
   await page.getByRole("button", { name: "Koledar", exact: true }).click();
+  // First opening now intentionally shows today; select the fixture month.
+  await page.evaluate(() => { state.current = new Date(2026, 8, 1); renderMonth(); });
   const shared = page.locator('.day-todo.multi-assignee:not(.urgent)').filter({ hasText: "Shared plan" });
   await expect(shared).toHaveCount(1);
   expect(await shared.evaluate(el => getComputedStyle(el).borderLeftWidth)).toBe("7px");

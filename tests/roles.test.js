@@ -3,6 +3,7 @@ const test = require("node:test");
 
 const {
   ENTRY_EDIT_LOCK_TTL_MS,
+  buildCalendarIcs,
   SESSION_TTL_MS,
   TODO_STATUS_DEFINITIONS,
   TODO_EDIT_LOCK_TTL_MS,
@@ -118,7 +119,9 @@ test("per-user task change markers survive shared assignments and clear only for
   };
   const changed = todoChangeNoticeFields({ title: "Projekt" }, { title: "Popravljen projekt" });
   assert.deepEqual(changed, ["title"]);
-  const recipients = recordTodoChangeNotices(noticeDb, noticeDb.todos, users.ibro, changed, "updated", "2026-08-30T10:00:00.000Z");
+  assert.deepEqual(recordTodoChangeNotices(noticeDb, noticeDb.todos, users.ibro, changed, "updated"), []);
+  assert.deepEqual(recordTodoChangeNotices(noticeDb, noticeDb.todos, users.ibro, ["created"], "created"), []);
+  const recipients = recordTodoChangeNotices(noticeDb, noticeDb.todos, users.ibro, changed, "manual", "2026-08-30T10:00:00.000Z");
   assert.deepEqual(recipients.sort(), ["bojan", "tina"]);
   assert.equal(todoChangeNoticeForUser(noticeDb.todos[0], users.ibro), null);
   assert.equal(todoChangeNoticeForUser(noticeDb.todos[0], users.bojan)?.fields[0], "title");
@@ -127,6 +130,9 @@ test("per-user task change markers survive shared assignments and clear only for
   assert.equal(todoChangeNoticeForUser(noticeDb.todos[0], users.tina), null);
   assert.equal(todoChangeNoticeForUser(noticeDb.todos[0], users.bojan)?.fields[0], "title");
   assert.deepEqual(cleanTodoChangeNotices({ invalid: { fields: ["title"] } }, users), {});
+  const legacy = { at: "2026-08-30T10:00:00.000Z", by: "ibro", fields: ["title"], kind: "updated" };
+  assert.deepEqual(cleanTodoChangeNotices({ bojan: legacy }, users), {});
+  assert.equal(todoChangeNoticeForUser({ changeNotices: { bojan: legacy } }, users.bojan), null);
 });
 
 test("šef vidi vse, delavec pa samo svoje podatke", () => {
@@ -134,6 +140,15 @@ test("šef vidi vse, delavec pa samo svoje podatke", () => {
   assert.deepEqual(visibleEntriesForUser(db, worker).map((item) => item.id), ["e1"]);
   assert.deepEqual(visibleTodosForUser(db, worker).map((item) => item.id), ["t1"]);
   assert.deepEqual(visibleDebtsForUser(db, worker).map((item) => item.id), ["d1"]);
+});
+
+test("ICS izpusti naročila, nujnost označi z dvema klicajema", () => {
+  const source = { users: { bojan: boss }, todos: ["open", "order", "order_car", "order_warehouse"].map(status => ({
+    id: status, title: `Naloga ${status}`, status, syncUser: "bojan", date: "2026-10-12", urgent: true
+  })) };
+  const ics = buildCalendarIcs(source, { combined: true });
+  assert.match(ics, /SUMMARY:!! TODO: Naloga open/);
+  assert.doesNotMatch(ics, /Naloga order|NUJNO/);
 });
 
 test("malica se delavcu plača največ do nastavljene meje", () => {

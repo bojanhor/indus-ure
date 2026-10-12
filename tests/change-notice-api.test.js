@@ -96,8 +96,7 @@ test("sprememba opravila ostane zasebna do potrditve prejemnika, sprememba z obv
 
     const ibroList = await request(port, "/api/todos", { headers: ibro });
     const createdForIbro = JSON.parse(ibroList.body).todos.find((todo) => todo.id === id);
-    assert.equal(createdForIbro.changeNotice?.kind, "created");
-    assert.equal(createdForIbro.changeNotice?.by, "bojan");
+    assert.equal(createdForIbro.changeNotice, null, "Ustvarjanje ne označuje samodejno.");
     assert.equal(createdForIbro.changeNoticesByUser, undefined, "Delavec ne sme dobiti oznak drugih prejemnikov.");
 
     const acknowledge = await request(port, `/api/todos/${encodeURIComponent(id)}/change-notice/seen`, {
@@ -163,7 +162,7 @@ test("sprememba opravila ostane zasebna do potrditve prejemnika, sprememba z obv
     assert.equal(JSON.parse(ibroAfterSave.body).todos.find((todo) => todo.id === id).changeNotice, null, "Samo uspešno shranjevanje prejemnika porabi njegovo oznako.");
     const bossList = await request(port, "/api/todos", { headers: bojan });
     const changedForBoss = JSON.parse(bossList.body).todos.find((todo) => todo.id === id);
-    assert.equal(changedForBoss.changeNotice?.kind, "updated");
+    assert.equal(changedForBoss.changeNotice?.kind, "manual");
     assert.deepEqual(changedForBoss.changeNotice?.fields, ["title"]);
     assert.equal(changedForBoss.changeNotice?.by, "ibro");
 

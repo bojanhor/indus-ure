@@ -145,7 +145,8 @@ test("oznaka spremembe je zasebna po prejemniku, vidna v vseh pogledih in nastan
   assert.match(server, /requestedRecipientId !== user\.id && user\.role !== "boss"/);
   assert.match(server, /const notifyOthers = body\.notifyOthers === true;/);
   assert.match(server, /const notificationFields = todoChangeNoticeFields\(previousTodo, updatedOpenedTodo \|\| todo, \{ assignmentsChanged \}\);/);
-  assert.match(server, /notifyOthers[\s\S]{0,250}\? recordTodoChangeNotices\([\s\S]*?notificationFields\.length \? notificationFields : \["manual"\][\s\S]*?notificationFields\.length \? "updated" : "manual"/);
+  assert.match(server, /notifyOthers[\s\S]{0,250}\? recordTodoChangeNotices\([\s\S]*?notificationFields\.length \? notificationFields : \["manual"\],\s*"manual"/);
+  assert.match(server, /if \(kind !== "manual"\) return \[\];/);
   assert.match(html, /Opozori druge o spremembi/);
   assert.match(html, /id="todoFormNotifyOthers" type="checkbox"/);
   assert.match(html, /notifyOthers: Boolean\(existing && !isHoursEntry && \$\("todoFormNotifyOthers"\)\.checked\)/);

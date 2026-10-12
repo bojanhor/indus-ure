@@ -152,9 +152,9 @@ const TODO_STATUS_DEFINITIONS = Object.freeze({
   open: { label: "Čaka", googleColorId: "8" },
   in_progress: { label: "V teku", googleColorId: "9" },
   execution: { label: "Zaklju\u010deno", googleColorId: "10" },
-  order: { label: "Naro\u010di-projekt", googleColorId: "11" },
-  order_car: { label: "Naroči Avto", googleColorId: "11" },
-  order_warehouse: { label: "Naroči Sklad.", googleColorId: "11" },
+  order: { label: "Naro\u010di-projekt", googleColorId: "6" },
+  order_car: { label: "Naroči Avto", googleColorId: "6" },
+  order_warehouse: { label: "Naroči Sklad.", googleColorId: "6" },
   add_to_car: { label: "Dodaj v avto", googleColorId: "4" },
   // Keep the legacy ID intact: existing tasks become the distinct "Vrne naj"
   // state without a data migration.
@@ -2304,6 +2304,8 @@ function publicUser(user) {
     name: user.name,
     role: user.role,
     avatar: user.avatar || "",
+    avatarInitial: user.avatarInitial || "",
+    avatarColor: user.avatarColor || "",
     employmentType: user.employmentType || "contractor",
     timeEntryForIds: [...new Set([user.id, ...(Array.isArray(user.timeEntryForIds) ? user.timeEntryForIds : [])].map(cleanUserId).filter(Boolean))]
   };
@@ -2313,6 +2315,8 @@ function publicDirectoryUser(user) {
     id: user.id,
     name: user.name,
     role: user.role,
+    avatarInitial: user.avatarInitial || "",
+    avatarColor: user.avatarColor || "",
     employmentType: user.employmentType || "contractor",
     exportTitle: String(user.billing?.exportTitle || "")
   };
@@ -2371,7 +2375,8 @@ function cleanTodoChangeNotices(input, users = {}) {
     const id = cleanUserId(userId);
     if (!id || !users?.[id] || users[id].active === false) continue;
     const notice = cleanTodoChangeNotice(raw, users);
-    if (notice) notices[id] = notice;
+    // Old automatic markers are no longer inbox items. Audit history remains.
+    if (notice?.kind === "manual") notices[id] = notice;
   }
   return notices;
 }
@@ -2381,7 +2386,8 @@ function todoChangeNoticeForUser(todo, user) {
   // participants. Its late-entry report and audit history stay available,
   // but it must never receive the green task-change marker.
   if (!todo || !user || TIME_ENTRY_TODO_STATUSES.has(String(todo.status || ""))) return null;
-  return cleanTodoChangeNotice(todo.changeNotices?.[user.id], { [user.id]: user, [todo.changeNotices?.[user.id]?.by]: { name: todo.changeNotices?.[user.id]?.byName || "" } });
+  const notice = cleanTodoChangeNotice(todo.changeNotices?.[user.id], { [user.id]: user, [todo.changeNotices?.[user.id]?.by]: { name: todo.changeNotices?.[user.id]?.byName || "" } });
+  return notice?.kind === "manual" ? notice : null;
 }
 
 function todoChangeNoticeFields(previous = {}, next = {}, { created = false, manual = false, assignmentsChanged = false } = {}) {
@@ -2417,6 +2423,7 @@ function todoChangeNoticeRecipientIds(db, todos, actor) {
 }
 
 function recordTodoChangeNotices(db, todos, actor, fields, kind = "updated", at = new Date().toISOString()) {
+  if (kind !== "manual") return [];
   const taskTodos = (todos || []).filter((todo) => !TIME_ENTRY_TODO_STATUSES.has(String(todo?.status || "")));
   // Time entries have their own audit and late-entry paths; never add a task
   // marker that could remain permanently visible for a worker.
@@ -3180,6 +3187,8 @@ function publicWorkerManagementUser(db, user) {
     email: user.email || "",
     role: user.role || "worker",
     active: user.active !== false,
+    avatarInitial: user.avatarInitial || "",
+    avatarColor: user.avatarColor || "",
     employmentType: user.employmentType || "contractor",
     timeEntryForIds: timeEntryTargetIds(db, user),
     dailyReport: workerDailyReportSettings(db, user)
@@ -4153,7 +4162,8 @@ function foldIcsLine(line) {
 
 function buildCalendarIcs(db, { userId = "", combined = false } = {}) {
   const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
-  const todos = planningCalendar.select(db.todos, { userId, combined });
+  const todos = planningCalendar.select(db.todos, { userId, combined })
+    .filter(todo => !["order", "order_car", "order_warehouse"].includes(todo.status));
   const calendarName = combined ? "INDUS URE - Planiranje - Vsi delavci"
     : `INDUS URE - Planiranje - ${db.users?.[userId]?.name || "Delovni koledar"}`;
   const lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//INDUS URE//Planiranje//SL",
@@ -4175,7 +4185,7 @@ function buildCalendarIcs(db, { userId = "", combined = false } = {}) {
     } else {
       lines.push(`DTSTART;VALUE=DATE:${icsDate(todo.date)}`, `DTEND;VALUE=DATE:${icsDate(planningCalendar.nextDay(endDate))}`);
     }
-    lines.push(`SUMMARY:${icsEscape(`${todo.urgent ? "NUJNO: " : ""}TODO: ${todo.title}`)}`, `DESCRIPTION:${icsEscape(description)}`);
+    lines.push(`SUMMARY:${icsEscape(`${todo.urgent ? "!! " : ""}TODO: ${todo.title}`)}`, `DESCRIPTION:${icsEscape(description)}`);
     if (link) lines.push(`URL:${link}`);
     lines.push("END:VEVENT");
   }
@@ -5689,6 +5699,13 @@ async function handleApi(req, res) {
         return;
       }
       const active = worker.role === "boss" ? true : body.active !== false;
+      const avatarInitial = String(body.avatarInitial ?? worker.avatarInitial ?? "");
+      const avatarColor = String(body.avatarColor ?? worker.avatarColor ?? "");
+      if ((avatarInitial && !/^[ABCČDEFGHIJKLMNOPRSŠTUVZŽabcčdefghijklmnoprsštuvzž]$/.test(avatarInitial))
+          || (avatarColor && !/^#[0-9a-f]{6}$/i.test(avatarColor))) {
+        sendJson(res, 400, { error: "Izberi eno črko slovenske abecede in veljavno barvo." });
+        return;
+      }
       const requestedTargets = Array.isArray(body.timeEntryForIds) ? body.timeEntryForIds : [];
       const timeEntryForIds = [...new Set([id, ...requestedTargets]
         .map(cleanUserId)
@@ -5709,6 +5726,8 @@ async function handleApi(req, res) {
       worker.name = name;
       worker.email = email;
       worker.active = active;
+      worker.avatarInitial = avatarInitial;
+      worker.avatarColor = avatarColor;
       worker.employmentType = "contractor";
       worker.timeEntryForIds = active ? timeEntryForIds : [];
       worker.dailyReport = {
@@ -5718,7 +5737,7 @@ async function handleApi(req, res) {
       };
       for (const candidate of Object.values(db.users || {})) {
         if (!candidate || candidate.id === id) continue;
-        if (Array.isArray(candidate.timeEntryForIds)) candidate.timeEntryForIds = candidate.timeEntryForIds.filter((targetId) => targetId !== id);
+        if (!active && Array.isArray(candidate.timeEntryForIds)) candidate.timeEntryForIds = candidate.timeEntryForIds.filter((targetId) => targetId !== id);
       }
       normalizeWorkerProfile(id, worker, db.users);
       recordAuditLog(db, {
@@ -7596,7 +7615,7 @@ releaseTodoAssignmentEditLock(db, previousTodo, user, editLockToken);
           updatedGroup,
           user,
           notificationFields.length ? notificationFields : ["manual"],
-          notificationFields.length ? "updated" : "manual",
+          "manual",
           now
         )
         : [];

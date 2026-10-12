@@ -136,6 +136,8 @@ async function main() {
   db.attachments[attachmentId] = { id: attachmentId, data: `data:image/png;base64,${bytes.toString("base64")}`, name: "qa.png", mimeType: "image/png" };
   db.todos[0].photos = [{ attachmentId, name: "qa.png" }];
   normalizeDb(db);
+  db.users.ibro.avatarInitial = "ž";
+  db.users.ibro.avatarColor = "#ffd000";
   const bossToken = createSession(db, "bojan");
   const workerToken = createSession(db, "ibro");
   const headers = token => ({ Cookie: `indus-ure-session=${token}`, "X-CSRF-Token": db.sessions[sessionTokenHash(token)].csrfToken, "Content-Type": "application/json" });
@@ -146,6 +148,13 @@ async function main() {
   check("relational.roundtrip_hidden_client");
   assert.equal(db.todos.find(item => item.id === ids[0]).billingWorkerKm, 19);
   check("relational.roundtrip_worker_km");
+  const directoryWorker = (await store.publicUserDirectory()).find(item => item.id === "ibro");
+  const sessionWorker = (await store.sessionWithRevision(sessionTokenHash(workerToken))).user;
+  for (const profile of [db.users.ibro, directoryWorker, sessionWorker]) {
+    assert.equal(profile.avatarInitial, "ž");
+    assert.equal(profile.avatarColor, "#ffd000");
+  }
+  check("workers.avatar_persists_in_snapshot_directory_and_lightweight_session");
 
   const before = await fingerprints();
   db.todos.find(item => item.id === ids[0]).title = "Targeted change";

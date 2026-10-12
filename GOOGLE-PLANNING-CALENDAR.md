@@ -2,7 +2,11 @@
 
 ## Obseg
 
-Google in ICS uporabljata isti izbor kot spletni mesečni pogled planiranja.
+Google in ICS izhajata iz izbora spletnega mesečnega pogleda planiranja.
+Od 12. 10. 2026 ICS dodatno izključi naročila (`order`, `order_car`,
+`order_warehouse`) in nujnost v naslovu označi z `!!` namesto `NUJNO:`.
+Naročila v aplikaciji ostanejo vidna. Neposredni Google prenos za zdaj ohrani
+izbor; morebitna enaka izključitev iz Googla čaka na uporabnikovo potrditev.
 Vključeni so datirani, neizbrisani, nearhivirani in neuvoženi dogodki.
 Izključeni so `execution`, `meal`, `drive`, `purchase`, `material` in stari
 `entries`: noben vpis opravljenih ur, malica, vožnja, nabava ali material.

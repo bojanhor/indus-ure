@@ -1467,8 +1467,8 @@
     .todo-item.completed-view-item { opacity: 1; }
 
     .todo-item.ordered-confirmed {
-      border-color: #d6e0db;
-      background: #f8fbf9;
+      border-color: #e6bd97;
+      background: #fff8f1;
     }
 
     .todo-item.ordered-confirmed .todo-summary {
@@ -1478,10 +1478,6 @@
     .todo-item.ordered-confirmed .todo-title,
     .todo-item.ordered-confirmed .todo-client-name {
       text-decoration: line-through;
-    }
-
-    .todo-item.ordered-confirmed .todo-status-chip {
-      filter: grayscale(0.45);
     }
 
     .todo-item.dragging {
@@ -1787,7 +1783,7 @@
     .todo-status-billing { --todo-bg: #7ae7bf; --todo-fg: #202124; --todo-border: #2e9d78; }
     .todo-status-order,
     .todo-status-order_car,
-    .todo-status-order_warehouse { --todo-bg: #dc2127; --todo-fg: #fff; }
+    .todo-status-order_warehouse { --todo-bg: #ffb878; --todo-fg: #202124; --todo-border: #d8883f; }
     .todo-status-add_to_car { --todo-bg: #ff887c; --todo-fg: #202124; --todo-border: #d95f54; }
     /* "Vrne naj" is the lighter logistics marker; settlement is darker. */
     .todo-status-return_and_bill { --todo-bg: #ffb878; --todo-fg: #202124; --todo-border: #d8883f; }
@@ -1805,6 +1801,14 @@
       background: var(--todo-bg);
       color: var(--todo-fg);
       border-left-color: var(--todo-border, var(--todo-bg));
+    }
+    .day-todo.todo-status-order,
+    .day-todo.todo-status-order_car,
+    .day-todo.todo-status-order_warehouse,
+    .day-multiday-event.todo-status-order,
+    .day-multiday-event.todo-status-order_car,
+    .day-multiday-event.todo-status-order_warehouse {
+      background: #f7f9f8 !important; color: #202124 !important; border-left-color: #d8883f !important;
     }
 
     .todo-chip.todo-status-color {
@@ -1903,9 +1907,9 @@
 
     .todo-imported-chip { background: #dbe8f0; color: #174f67; border: 1px solid #7eaec3; }
     .todo-ordering-chip {
-      border: 1px solid #bfd1c7;
-      background: #e7f0ec;
-      color: #315647;
+      border: 1px solid #d8883f;
+      background: #ffead6;
+      color: #7b3b0f;
       font-weight: 800;
       white-space: nowrap;
     }
@@ -1951,17 +1955,17 @@
       padding: 0;
       border: 1px solid #9aa0a6;
       border-radius: 7px;
-      background: #f4f6f5;
-      color: #77817c;
+      background: #fff8f1;
+      color: #94501e;
       font-size: 17px;
       font-weight: 900;
       line-height: 1;
     }
 
     .todo-ordered-toggle[aria-pressed="true"] {
-      border-color: #217a3f;
-      background: #dff4e5;
-      color: #176b36;
+      border-color: #d8883f;
+      background: #ffdab8;
+      color: #7b3b0f;
     }
 
     .todo-ordered-toggle[aria-pressed="false"] > span { opacity: .28; }
@@ -4050,7 +4054,8 @@
        Scrolling a tall top-layer dialog with a sticky header is fragile on
        iOS/WebKit. A normal inner scroller also keeps fields below the actions
        when Safari scrolls a focused input into view. */
-    #todoDialog { width: min(820px, calc(100vw - 26px)); max-height: calc(100dvh - 20px); overflow: hidden; }
+    #todoDialog { width: min(820px, calc(100vw - 26px)); max-height: calc(var(--editor-viewport-height, 100dvh) - 20px); overflow: hidden; }
+    #todoDialog[open].visual-viewport-positioned { position: fixed; top: var(--editor-viewport-top, 0px); bottom: auto; margin-top: 10px; margin-bottom: 0; }
     #todoForm { display: flex; flex-direction: column; min-height: 0; max-height: inherit; }
     #todoForm > .modal-head,
     #todoForm > .modal-global-notice { position: relative; flex: 0 0 auto; }
@@ -6747,6 +6752,7 @@
           </div>
           <div class="actions"><button class="primary" id="createWorker" type="submit">Dodaj delavca</button></div>
         </section>
+        <label class="worker-active-field"><input id="showInactiveWorkers" type="checkbox">Prikaži tudi odstranjene / neaktivne delavce</label>
         <div class="worker-management-list" id="workerManagementList" aria-live="polite"></div>
         <div class="actions"><button class="secondary" id="cancelWorkers" type="button">Zapri</button></div>
       </div>
@@ -6985,7 +6991,7 @@ function todoChangeNotice(todo) {
       const notice = recipientId === String(state?.user?.id || "")
         ? todo?.changeNotice
         : todo?.changeNoticesByUser?.[recipientId];
-      return notice && typeof notice === "object" && Array.isArray(notice.fields) && notice.fields.length ? notice : null;
+      return notice?.kind === "manual" && Array.isArray(notice.fields) && notice.fields.length ? notice : null;
     }
 
 function todoChangeNoticeText(todo) {
@@ -7154,6 +7160,7 @@ const state = {
       localTestMode: false,
       users: [],
       workerManagement: [],
+      showInactiveWorkers: false,
       workerBilling: [],
       workContext: "",
       todoSortMode: "manual",
@@ -8837,7 +8844,7 @@ async function refreshSessionSecurityContext() {
       state.token = "cookie";
       state.csrfToken = me.csrfToken || "";
       state.sessionExpiresAt = Number(me.sessionExpiresAt || 0);
-      state.syncRevision = Number(me.syncRevision || state.syncRevision || 0);
+      // Renewing authentication does not mean the displayed data was refreshed.
       state.lastServerSyncAt = new Date().toISOString();
       state.backgroundSessionLoginRequired = false;
       state.backgroundSessionNoticeShown = false;
@@ -8981,7 +8988,6 @@ function applyBootstrapSnapshot(data, { preserveTodoMutations = false, todoRevis
       state.token = "cookie";
       state.csrfToken = data.csrfToken || "";
       state.sessionExpiresAt = Number(data.sessionExpiresAt || 0);
-      state.syncRevision = Number(data.syncRevision || 0);
       state.lastServerSyncAt = new Date().toISOString();
       state.offlineMode = false;
       state.user = data.user;
@@ -8989,6 +8995,7 @@ function applyBootstrapSnapshot(data, { preserveTodoMutations = false, todoRevis
       if (!preserveTodoMutations || canApplyTodoSnapshot(todoRevision, todoSnapshotWasStable)) {
         state.todos = data.todos || [];
         state.todoSnapshotLoaded = true;
+        state.syncRevision = Number(data.syncRevision || 0);
       }
       if (Array.isArray(data.entries)) state.entries = data.entries;
       if (Array.isArray(data.debts)) state.debts = data.debts;
@@ -9133,7 +9140,6 @@ async function reconnectAfterOffline() {
         state.token = "cookie";
         state.csrfToken = me.csrfToken || "";
         state.sessionExpiresAt = Number(me.sessionExpiresAt || 0);
-        state.syncRevision = Number(me.syncRevision || 0);
         state.lastServerSyncAt = new Date().toISOString();
         state.user = me.user;
         state.offlineMode = false;
@@ -9238,7 +9244,20 @@ function syncModalPageScrollLock() {
         document.body.style.top = "";
         window.scrollTo(0, modalScrollLockY);
       }
+      syncEditorViewport();
     }
+
+function syncEditorViewport() {
+      const dialog = $("todoDialog");
+      const viewport = window.visualViewport;
+      if (!dialog || !viewport) return;
+      const compact = matchMedia("(pointer: coarse)").matches || viewport.height < window.innerHeight - 80;
+      dialog.classList.toggle("visual-viewport-positioned", compact);
+      dialog.style.setProperty("--editor-viewport-height", `${viewport.height}px`);
+      dialog.style.setProperty("--editor-viewport-top", `${viewport.offsetTop}px`);
+    }
+window.visualViewport?.addEventListener("resize", syncEditorViewport);
+window.visualViewport?.addEventListener("scroll", syncEditorViewport);
 
 function modalHistoryState(dialogId, token) {
       const current = history.state && typeof history.state === "object" ? history.state : {};
@@ -9652,6 +9671,8 @@ function renderWorkContextOptions(contexts) {
         icon.textContent = context.value === "admin"
           ? "\u265B"
           : String(context.label || "").replace(/^Delavski pogled - /, "").trim().slice(0, 1).toUpperCase();
+        const contextWorker = state.users.find(user => `worker:${user.id}` === context.value);
+        if (contextWorker) paintWorkerAvatar(icon, contextWorker);
         const label = document.createElement("span");
         label.textContent = context.value === "admin" ? "\u0160efovski pogled" : context.label;
         button.append(icon, label);
@@ -9703,8 +9724,8 @@ function calendarTodoWorkers(todo) {
         const avatar = document.createElement("span");
         avatar.className = "avatar";
         avatar.setAttribute("aria-hidden", "true");
-        avatar.textContent = (name || "?").slice(0, 1).toUpperCase();
-        if (user?.avatar) {
+        paintWorkerAvatar(avatar, user || { name });
+        if (user?.avatar && !user.avatarInitial) {
           const image = document.createElement("img");
           image.alt = "";
           image.draggable = false;
@@ -9825,10 +9846,13 @@ function applyWorkContextUi() {
       contextControl.title = "Aktivni pogled: " + contextName + ". Odpri izbiro pogleda.";
       contextControl.setAttribute("aria-label", contextControl.title);
       contextControl.dataset.context = admin ? "admin" : "worker";
-      $("activeWorkContextIcon").textContent = admin ? "Š" : String(contextName).trim().slice(0, 1).toUpperCase();
       $("activeWorkContextLabel").textContent = contextName;
       const activeContextIcon = $("activeWorkContextIcon");
-      activeContextIcon.textContent = admin ? "\u265B" : String(contextName).trim().slice(0, 1).toUpperCase();
+      if (admin) {
+        activeContextIcon.textContent = "\u265B";
+        activeContextIcon.style.backgroundColor = "";
+        activeContextIcon.style.color = "";
+      } else paintWorkerAvatar(activeContextIcon, worker || { name: contextName });
       document.querySelectorAll(".work-context-option").forEach((button) => {
         const active = button.dataset.workContext === state.workContext;
         button.classList.toggle("active", active);
@@ -9879,14 +9903,21 @@ function updateAvatar(id, user) {
       const avatar = $(id);
       if (!avatar || !user) return;
       avatar.replaceChildren();
-      if (user.avatar) {
+      paintWorkerAvatar(avatar, user);
+      if (user.avatar && !user.avatarInitial) {
         const image = document.createElement("img");
         image.src = user.avatar;
         image.alt = "";
         avatar.appendChild(image);
-      } else {
-        avatar.textContent = (user.name || user.id || "?").slice(0, 1).toUpperCase();
       }
+    }
+
+function paintWorkerAvatar(element, user) {
+      element.textContent = user.avatarInitial || (user.name || user.id || "?").slice(0, 1).toUpperCase();
+      const color = /^#[0-9a-f]{6}$/i.test(user.avatarColor || "") ? user.avatarColor : "";
+      element.style.backgroundColor = color;
+      const rgb = color ? [1, 3, 5].map(index => parseInt(color.slice(index, index + 2), 16)) : [];
+      element.style.color = color && (rgb[0] * .299 + rgb[1] * .587 + rgb[2] * .114) > 155 ? "#17252a" : "#fff";
     }
 
 async function loadEntries() {
@@ -9955,7 +9986,11 @@ async function loadAll() {
 
 function uiIsBeingEdited() {
       const active = document.activeElement;
-      return Boolean(document.querySelector("dialog[open]") || active?.matches('input, textarea, select, [contenteditable="true"]'));
+      const blockingDialog = [...document.querySelectorAll("dialog[open]")].some(dialog => dialog.id !== "dayTimelineDialog");
+      return Boolean(blockingDialog || state.todoMutationPending || state.dayTimelineSaving
+        || state.dayTimelineInteraction || state.dayTimelineGesture || state.dayTimelineDrafts.size
+        || (active?.matches('input, textarea, [contenteditable="true"]')
+          && !active.matches('input[type="search"], #clientSearch, #reportClient, #clientsSearch')));
     }
 
 async function checkServerChanges() {
@@ -9979,9 +10014,20 @@ async function checkServerChanges() {
       const data = await response.json();
       if (data.userId !== state.user?.id) return;
       const changed = Number(data.revision || 0) !== Number(state.syncRevision || 0);
-      state.syncRevision = Number(data.revision || 0);
       state.lastServerSyncAt = data.serverTime || new Date().toISOString();
-      if (changed) await loadAll();
+      if (changed) {
+        const todoRevision = state.todoRevision;
+        const stable = state.todoMutationPending === 0;
+        const snapshot = await api("/api/bootstrap", { recoverSession: false });
+        // Adopt one coherent snapshot only after success. Neither a failed
+        // fetch nor a concurrent edit is allowed to consume the new revision.
+        if (!canApplyTodoSnapshot(todoRevision, stable) || uiIsBeingEdited()) return;
+        applyBootstrapSnapshot(snapshot);
+        initializeWorkContext();
+        applyWorkContextUi();
+        render();
+        saveOfflineSnapshotSoon();
+      }
     }
 
 async function autoRefreshSharedData() {
@@ -13833,7 +13879,7 @@ function renderWorkerManagement() {
         return;
       }
       const activeTargets = workers.filter((worker) => worker.active);
-      list.innerHTML = workers.map((worker) => {
+      list.innerHTML = workers.filter(worker => worker.active || state.showInactiveWorkers).map((worker) => {
         const locked = worker.role === "boss";
         const disabled = worker.active ? "" : "disabled";
         const dailyReport = worker.dailyReport || {};
@@ -13848,6 +13894,8 @@ function renderWorkerManagement() {
             <label>Ime in priimek<input data-worker-name type="text" maxlength="120" value="${escapeHtml(worker.name || "")}" ${disabled}></label>
             <label>Google e-pošta <span class="todo-meta">(neobvezno)</span><input data-worker-email type="email" maxlength="240" value="${escapeHtml(worker.email || "")}" placeholder="Brez prijave z Googlom" ${disabled}></label>
             <label>Način obračunavanja<select data-worker-employment-type ${disabled}><option value="contractor" selected>Kooperant</option></select></label>
+            <label>Črka ikone<select data-worker-avatar-initial ${disabled}><option value="">Samodejno</option>${[..."ABCČDEFGHIJKLMNOPRSŠTUVZŽabcčdefghijklmnoprsštuvzž"].map(letter => `<option value="${letter}" ${worker.avatarInitial === letter ? "selected" : ""}>${letter}</option>`).join("")}</select></label>
+            <label>Barva ikone<input data-worker-avatar-color type="color" value="${escapeHtml(worker.avatarColor || '#1f6f8b')}" ${disabled}></label>
           </div>
           <div class="worker-management-details">
             <fieldset class="worker-permissions" ${disabled}><legend>Lahko vpisuje ure za</legend><div class="worker-permissions-list">${targets || '<span class="todo-meta">Ni aktivnih delavcev.</span>'}</div></fieldset>
@@ -13883,6 +13931,7 @@ async function openWorkersDialog() {
       if (state.user?.role !== "boss") throw new Error("Delavce lahko upravlja samo šef.");
       const data = await api("/api/workers");
       state.workerManagement = data.workers || [];
+      $("showInactiveWorkers").checked = state.showInactiveWorkers;
       renderWorkerManagement();
       $("workersDialog").showModal();
     }
@@ -13912,6 +13961,8 @@ async function saveManagedWorker(card, { activate = false } = {}) {
           name: card.querySelector("[data-worker-name]")?.value || "",
           email: card.querySelector("[data-worker-email]")?.value || "",
           employmentType: "contractor",
+          avatarInitial: card.querySelector("[data-worker-avatar-initial]")?.value || "",
+          avatarColor: card.querySelector("[data-worker-avatar-color]")?.value || "",
           active: activate || Boolean(card.querySelector("[data-worker-active]")?.checked),
           timeEntryForIds: targets,
           dailyReport: {
@@ -14156,7 +14207,17 @@ installTaskCreationBindings1();
 
 installWorkerDebtBindings1();
 
-$("calendarViewBtn").addEventListener("click", () => setView("calendar"));
+$("calendarViewBtn").addEventListener("click", () => {
+      const firstOpen = !state.calendarOpened;
+      state.calendarOpened = true;
+      if (firstOpen) state.current = new Date();
+      setView("calendar");
+      if (firstOpen) requestAnimationFrame(() => $("calendar").querySelector(".day.today")?.scrollIntoView({ block: "center", inline: "nearest" }));
+    });
+$("showInactiveWorkers").addEventListener("change", event => {
+      state.showInactiveWorkers = event.target.checked;
+      renderWorkerManagement();
+    });
 $("todosViewBtn").addEventListener("click", () => setView("todos"));
 installWorkerBillingBindings1();
 
@@ -14331,6 +14392,7 @@ $("nextMonth").addEventListener("click", () => {
 $("todayBtn").addEventListener("click", () => {
       state.current = new Date();
       render();
+      requestAnimationFrame(() => $("calendar").querySelector(".day.today")?.scrollIntoView({ block: "center", inline: "nearest" }));
     });
 $("dayTimelineZoomOut").addEventListener("click", () => setDayTimelineZoom(state.dayTimelineMinuteHeight / 1.25));
 $("dayTimelineZoomIn").addEventListener("click", () => setDayTimelineZoom(state.dayTimelineMinuteHeight * 1.25));

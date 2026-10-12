@@ -408,6 +408,8 @@ class PostgresStore {
                 'name', coalesce(u.data ->> 'name', ''),
                 'role', coalesce(u.data ->> 'role', ''),
                 'avatar', coalesce(u.data ->> 'avatar', ''),
+                'avatarInitial', coalesce(u.data ->> 'avatarInitial', ''),
+                'avatarColor', coalesce(u.data ->> 'avatarColor', ''),
                 'active', coalesce(u.data -> 'active', 'true'::jsonb),
                 'employmentType', coalesce(u.data ->> 'employmentType', 'contractor'),
                 'timeEntryForIds', coalesce(u.data -> 'timeEntryForIds', '[]'::jsonb)
@@ -438,6 +440,8 @@ class PostgresStore {
       `select id,
               coalesce(data ->> 'name', '') as name,
               data ->> 'role' as role,
+              coalesce(data ->> 'avatarInitial', '') as avatar_initial,
+              coalesce(data ->> 'avatarColor', '') as avatar_color,
               coalesce(data #>> '{billing,exportTitle}', '') as export_title
        from indus_users
        where coalesce(data ->> 'active', 'true') <> 'false'
@@ -447,6 +451,8 @@ class PostgresStore {
       const user = {
         id: String(row.id || ''),
         name: String(row.name || ''),
+        avatarInitial: String(row.avatar_initial || ''),
+        avatarColor: String(row.avatar_color || ''),
         exportTitle: String(row.export_title || '')
       };
       if (row.role) user.role = String(row.role);
