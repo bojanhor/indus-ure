@@ -51,6 +51,7 @@ function createTaskForm({
   todoStatusUsesInternalCompanyClient,
   updateTodoStatusControl,
   workerDefaultHourlyRate,
+  allowedTimeEntryUsers,
   moduleValues
 }) {
 function applyTodoFormInternalCompanyClient() {
@@ -204,10 +205,7 @@ function todoOrderForCurrentUser(todo) {
     }
 
 function timeEntryTargetUsers() {
-      const permitted = state.user?.role === "boss"
-        ? new Set(state.users.map((user) => user.id))
-        : new Set(state.user?.timeEntryForIds || [state.user?.id]);
-      return state.users.filter((user) => permitted.has(user.id)).sort((left, right) => String(left.name || left.id).localeCompare(String(right.name || right.id), "sl"));
+      return allowedTimeEntryUsers().sort((left, right) => String(left.name || left.id).localeCompare(String(right.name || right.id), "sl"));
     }
 
 function renderTodoFormAssignees(selectedIds = [], onlyIds = null, { disabled = false, single = false } = {}) {
@@ -453,7 +451,7 @@ function applyMealDefaults() {
       state.todoDialogDriveFiles = [];
       renderTodoFormPhotos();
       renderTodoFormDriveFiles();
-      renderTodoFormAssignees([activeWorkerId()], [activeWorkerId()]);
+      renderTodoFormAssignees([activeWorkerId()], timeEntryTargetUsers().map(user => user.id), { single: true });
       renderTodoFormQuickTimePicker();
     }
 
@@ -526,7 +524,7 @@ function updateTodoFormStatus() {
             ? ($("todoFormId").value ? "Uredi vpis ur" : "Novo zaključeno opravilo")
             : $("todoFormId").value ? "Uredi opravilo" : "Novo opravilo";
       $("todoFormClientField").classList.toggle("hidden", meal);
-      $("todoFormAssigneeField").classList.toggle("hidden", meal || materialEntry || noteEntry);
+      $("todoFormAssigneeField").classList.toggle("hidden", materialEntry || noteEntry);
       $("todoFormAttachments").classList.toggle("hidden", meal);
       if (meal) $("todoFormClientContactsField").classList.add("hidden");
       else syncTodoFormClientContacts({ preserve: true });

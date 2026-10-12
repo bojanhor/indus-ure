@@ -23,6 +23,12 @@ Strukturirane finančne vrednosti, priponke, zgodovina in plačila se ne prenaš
 Prosto besedilo opisa se prenese tako, kot je zapisano; ne gre za anonimizacijo.
 Časovno območje je Europe/Ljubljana; celodnevni datum do je ekskluziven.
 
+Odsotnosti so ločena neobračunska evidenca. V Google in ICS gre samo nevtralni
+naslov »Odsotnost«, odsotni izvajalec, termin in povezava; nikoli razlog
+bolezen/dopust ali seznam gledalcev. Osebni koledar dobi odsotnost samo,
+če jo oseba sme videti v aplikaciji. Skupni koledar ostaja samo za šefe.
+Datum »Do« je v obrazcu vključen, izvoz ga pretvori v naslednji dan.
+
 ## Povezava in uporaba
 
 Nastavitve in orodja → **Google Koledar — planiranje** (tudi Račun in profil).

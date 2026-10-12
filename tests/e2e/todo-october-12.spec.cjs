@@ -67,7 +67,7 @@ test('worker icon and permissions persist; removal hides worker without deleting
     const { workers } = await api('/api/workers');
     return { icon: workers.find(w => w.id === id), ibro: workers.find(w => w.id === 'ibro') };
   }, id);
-  expect(saved.ibro.timeEntryForIds).toContain(id);
+  expect(saved.ibro.timeEntryForIds).not.toContain(id);
   expect(saved.icon.avatarColor).toBe('#ffd000');
   const invalid = await page.evaluate(async worker => {
     try { await api(`/api/workers/${worker.id}`, { method: 'PUT', body: JSON.stringify({ ...worker, avatarInitial: '<', avatarColor: 'red' }) }); }

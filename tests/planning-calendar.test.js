@@ -5,6 +5,51 @@ const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 const planning = require("../outputs/planning-calendar");
+const absences = require("../outputs/absence-model");
+
+test("absence visibility, ownership and inclusive dates are independent from payroll", () => {
+  const users = { boss: { id: "boss", role: "boss" }, ibro: { id: "ibro", role: "worker" }, other: { id: "other", role: "worker" } };
+  const fields = absences.clean({ workerId: "ibro", date: "2026-10-12", endDate: "2026-10-14", reason: "illness", viewerIds: [] }, users, users.boss);
+  const item = { id: "absence1", ...fields };
+  assert.deepEqual(item.viewerIds, ["ibro", "boss"]);
+  assert.equal(absences.canView(item, users.other), false);
+  assert.equal(absences.canEdit(item, users.ibro), true);
+  item.viewerIds.push("other");
+  assert.equal(absences.canView(item, users.other), true);
+  assert.equal(absences.canEdit(item, users.other), false);
+  assert.equal(absences.calendarItem(item).endDate, "2026-10-14");
+  assert.throws(() => absences.clean({ ...fields, date: "2026-02-30" }, users, users.boss), /datuma/);
+  assert.throws(() => absences.clean({ ...fields, endDate: "2026-10-01" }, users, users.boss), /datuma/);
+  assert.throws(() => absences.clean({ ...fields, reason: "medical details" }, users, users.boss), /razlog/);
+  assert.deepEqual(absences.visible({ absences: [{ ...item, deletedAt: "now" }] }, users.boss), []);
+});
+
+test("absence exports whitelist neutral fields and respect each calendar viewer", () => {
+  const db = { todos: [], users: {
+    boss: { id: "boss", role: "boss", email: "boss@example.test" },
+    ibro: { id: "ibro", role: "worker", email: "ibro@example.test" },
+    other: { id: "other", role: "worker", email: "other@example.test" }
+  }, absences: [{ id: "absence1", workerId: "ibro", date: "2026-10-12", endDate: "2026-10-14", reason: "illness", notes: "private medical text", viewerIds: ["ibro", "boss"] }] };
+  assert.equal(absences.exported(db, { userId: "other" }).length, 0);
+  const exported = absences.exported(db, { userId: "ibro" });
+  assert.equal(exported[0].title, "Odsotnost");
+  assert.doesNotMatch(JSON.stringify(exported), /illness|medical|viewerIds|reason/);
+  const plans = calendarPlans(db, "https://ure.example.test", {});
+  assert.equal(plans.find(p => p.key === "worker:other").todos.length, 0);
+  const body = Object.values(plans.find(p => p.key === "worker:ibro").events)[0];
+  assert.equal(body.end.date, "2026-10-15");
+  assert.doesNotMatch(JSON.stringify(body), /illness|medical|Bolezen/);
+  const { buildCalendarIcs, browserBackupState, restoredBrowserState, workerHasBusinessData } = require("../outputs/server");
+  const ics = buildCalendarIcs(db, { userId: "ibro" });
+  assert.match(ics, /Odsotnost/);
+  assert.match(ics, /DTEND;VALUE=DATE:20261015/);
+  assert.doesNotMatch(ics, /illness|medical|Bolezen/);
+  assert.doesNotMatch(buildCalendarIcs(db, { userId: "other" }), /BEGIN:VEVENT/);
+  assert.equal(workerHasBusinessData(db, "ibro"), true);
+  const backup = browserBackupState(db);
+  assert.deepEqual(backup.snapshot.absences, db.absences);
+  assert.deepEqual(restoredBrowserState(db, backup).absences, db.absences);
+});
 const { APP, SCOPES, calendarPlans, controlledEvent, createGooglePlanningCalendar } = require("../outputs/google-planning-calendar");
 const { createCalendarSyncStore } = require("../outputs/calendar-sync-store");
 const { createCalendarHttp } = require("../outputs/calendar-http");

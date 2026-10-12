@@ -2,6 +2,7 @@
 
 const crypto = require("node:crypto");
 const planning = require("./planning-calendar");
+const absences = require("./absence-model");
 const APP = "indus-planning-v1";
 const SCOPES = [
   "https://www.googleapis.com/auth/calendar.app.created",
@@ -14,8 +15,8 @@ const missing = error => [404, 410].includes(statusCode(error));
 
 function eventBody(todo, db, baseUrl, definitions) {
   const link = new URL("/", baseUrl);
-  link.searchParams.set("todo", todo.id);
-  const status = definitions[todo.status] || { label: todo.status, googleColorId: "8" };
+  link.searchParams.set(todo._absence ? "absence" : "todo", todo.id);
+  const status = todo._absence ? { label: "Odsotnost", googleColorId: "8" } : definitions[todo.status] || { label: todo.status, googleColorId: "8" };
   const people = (todo.assigneeIds || []).map(id => db.users?.[id]?.name || id).join(", ");
   const endDate = todo.endDate && todo.endDate >= todo.date ? todo.endDate : todo.date;
   const timed = /^\d{2}:\d{2}$/.test(todo.start || "") && /^\d{2}:\d{2}$/.test(todo.end || "");
@@ -38,11 +39,11 @@ function calendarPlans(db, baseUrl, definitions) {
   const active = Object.values(db.users || {}).filter(user => user.active !== false);
   const bosses = active.filter(user => user.role === "boss" && user.email).map(user => user.email.toLowerCase());
   const plans = [{ key: "combined", title: "INDUS — Planiranje — Vsi delavci", readers: bosses,
-    todos: planning.select(db.todos, { combined: true }) }];
+    todos: [...planning.select(db.todos, { combined: true }), ...absences.exported(db, { combined: true })] }];
   for (const user of active) {
     if (!user.email) continue;
     plans.push({ key: `worker:${user.id}`, title: `INDUS — Planiranje — ${user.name || user.id}`,
-      readers: [user.email.toLowerCase()], todos: planning.select(db.todos, { userId: user.id }) });
+      readers: [user.email.toLowerCase()], todos: [...planning.select(db.todos, { userId: user.id }), ...absences.exported(db, { userId: user.id })] });
   }
   return plans.map(plan => ({ ...plan, events: Object.fromEntries(plan.todos.map(todo => {
     const body = eventBody(todo, db, baseUrl, definitions);

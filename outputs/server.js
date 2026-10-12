@@ -13,6 +13,9 @@ const archiver = require("archiver");
 const { renderAppShell } = require("./app-shell");
 const { backupCleanupIssue } = require("./backup-status");
 const planningCalendar = require("./planning-calendar");
+const workerAccess = require("./worker-access");
+const absences = require("./absence-model");
+const { createAbsenceHttp } = require("./absence-http");
 const { createCalendarSyncStore } = require("./calendar-sync-store");
 const { createGooglePlanningCalendar } = require("./google-planning-calendar");
 const { createCalendarHttp } = require("./calendar-http");
@@ -109,7 +112,7 @@ const UNDO_MAX_PATCH_BYTES = 512 * 1024;
 let TODO_REVISION_HISTORY_LIMIT = config().history.eventVersions;
 const TODO_REVISION_TEXT_LIMIT = 12_000;
 const UNDO_ARRAY_SNAPSHOT_KEYS = [
-  "todos", "entries", "debts", "advances", "personalPurchases",
+  "todos", "absences", "entries", "debts", "advances", "personalPurchases",
   "clients", "billingLocks", "payrolls", "clientBills", "settlementCorrections"
 ];
 const UNDO_VALUE_SNAPSHOT_KEYS = ["settings", "calendarToken"];
@@ -2307,7 +2310,8 @@ function publicUser(user) {
     avatarInitial: user.avatarInitial || "",
     avatarColor: user.avatarColor || "",
     employmentType: user.employmentType || "contractor",
-    timeEntryForIds: [...new Set([user.id, ...(Array.isArray(user.timeEntryForIds) ? user.timeEntryForIds : [])].map(cleanUserId).filter(Boolean))]
+    workerKind: workerAccess.kind(user),
+    timeEntryForIds: [user.id]
   };
 }
 function publicDirectoryUser(user) {
@@ -2315,6 +2319,7 @@ function publicDirectoryUser(user) {
     id: user.id,
     name: user.name,
     role: user.role,
+    workerKind: workerAccess.kind(user),
     avatarInitial: user.avatarInitial || "",
     avatarColor: user.avatarColor || "",
     employmentType: user.employmentType || "contractor",
@@ -3043,9 +3048,7 @@ const EMPLOYMENT_TYPES = new Set(["contractor", "employee"]);
 function timeEntryTargetIds(db, user) {
   if (!user || typeof user !== "object") return [];
   const users = db?.users && typeof db.users === "object" ? db.users : {};
-  const requested = Array.isArray(user.timeEntryForIds) ? user.timeEntryForIds : [];
-  const ids = [...new Set([user.id, ...requested].map(cleanUserId).filter(Boolean))];
-  return ids.filter((id) => !Object.keys(users).length || (users[id] && users[id].active !== false));
+  return workerAccess.targets(Object.values(users), user).map(worker => worker.id);
 }
 
 function canRecordHoursFor(db, user, workerId) {
@@ -3058,6 +3061,8 @@ function canRecordHoursFor(db, user, workerId) {
 function normalizeWorkerProfile(id, user, users = {}) {
   if (!user || typeof user !== "object") return false;
   let changed = false;
+  const workerKind = workerAccess.kind(user);
+  if (user.workerKind !== workerKind) { user.workerKind = workerKind; changed = true; }
   const active = user.role === "boss" ? true : user.active !== false;
   if (user.active !== active) {
     user.active = active;
@@ -3070,9 +3075,11 @@ function normalizeWorkerProfile(id, user, users = {}) {
     user.employmentType = employmentType;
     changed = true;
   }
+  // Keep the old field for a code rollback, but never authorize from it.
+  // Effective choices come exclusively from the actor and external profile.
   const ids = [...new Set([id, ...(Array.isArray(user.timeEntryForIds) ? user.timeEntryForIds : [])]
     .map(cleanUserId)
-    .filter((targetId) => Boolean(users[targetId]) && users[targetId].active !== false))];
+    .filter(targetId => Boolean(users[targetId]) && users[targetId].active !== false))];
   if (JSON.stringify(user.timeEntryForIds || []) !== JSON.stringify(ids)) {
     user.timeEntryForIds = ids;
     changed = true;
@@ -3176,7 +3183,7 @@ function workerHasBusinessData(db, userId) {
     }
     return false;
   };
-  return [db.entries, db.todos, db.debts, db.advances, db.personalPurchases, db.payrolls, db.clientBills, db.billingLocks, db.auditLog]
+  return [db.entries, db.todos, db.absences, db.debts, db.advances, db.personalPurchases, db.payrolls, db.clientBills, db.billingLocks, db.auditLog]
     .some((collection) => Array.isArray(collection) && collection.some(refersToUser));
 }
 
@@ -3186,6 +3193,7 @@ function publicWorkerManagementUser(db, user) {
     name: user.name || user.id,
     email: user.email || "",
     role: user.role || "worker",
+    workerKind: workerAccess.kind(user),
     active: user.active !== false,
     avatarInitial: user.avatarInitial || "",
     avatarColor: user.avatarColor || "",
@@ -4162,18 +4170,18 @@ function foldIcsLine(line) {
 
 function buildCalendarIcs(db, { userId = "", combined = false } = {}) {
   const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
-  const todos = planningCalendar.select(db.todos, { userId, combined })
-    .filter(todo => !["order", "order_car", "order_warehouse"].includes(todo.status));
+  const todos = [...planningCalendar.select(db.todos, { userId, combined })
+    .filter(todo => !["order", "order_car", "order_warehouse"].includes(todo.status)), ...absences.exported(db, { userId, combined })];
   const calendarName = combined ? "INDUS URE - Planiranje - Vsi delavci"
     : `INDUS URE - Planiranje - ${db.users?.[userId]?.name || "Delovni koledar"}`;
   const lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//INDUS URE//Planiranje//SL",
     "CALSCALE:GREGORIAN", "METHOD:PUBLISH", `X-WR-CALNAME:${icsEscape(calendarName)}`, "X-WR-TIMEZONE:Europe/Ljubljana"];
   for (const todo of todos) {
-    const link = PUBLIC_BASE_URL ? `${PUBLIC_BASE_URL}/?todo=${encodeURIComponent(todo.id)}` : "";
+    const link = PUBLIC_BASE_URL ? `${PUBLIC_BASE_URL}/?${todo._absence ? "absence" : "todo"}=${encodeURIComponent(todo.id)}` : "";
     const description = [
       todo.client ? `Stranka: ${todo.client}` : "",
       `Za: ${todo.assigneeIds.map(id => db.users?.[id]?.name || id).join(", ")}`,
-      `Status: ${todoStatusDefinition(todo.status).label}`,
+      `Status: ${todo._absence ? "Odsotnost" : todoStatusDefinition(todo.status).label}`,
       todo.notes || "", link ? `Odpri v INDUS Ure: ${link}` : ""
     ].filter(Boolean).join("\n");
     lines.push("BEGIN:VEVENT", `UID:planning-${todo.assignmentGroupId}@indus-ure`, `DTSTAMP:${stamp}`);
@@ -4659,7 +4667,8 @@ function browserBackupUser(user = {}) {
     email: String(user.email || ""),
     name: String(user.name || ""),
     role: user.role === "boss" ? "boss" : "worker",
-    avatar: String(user.avatar || "")
+    avatar: String(user.avatar || ""),
+    workerKind: workerAccess.kind(user)
   };
 }
 
@@ -4679,6 +4688,7 @@ function browserBackupState(db) {
       users: Object.fromEntries(Object.entries(db.users || {}).map(([id, user]) => [id, browserBackupUser(user)])),
       entries: db.entries || [],
       todos: db.todos || [],
+      absences: db.absences || [],
       attachments,
       debts: db.debts || [],
       clients: db.clients || [],
@@ -4767,7 +4777,7 @@ async function extractBrowserRestoreZip(zipFile, directory) {
 
 function restoredBrowserState(current, metadata) {
   const snapshot = metadata.snapshot || {};
-  const arrays = ["entries", "todos", "debts", "clients", "billingLocks", "payrolls", "clientBills"];
+  const arrays = ["entries", "todos", "absences", "debts", "clients", "billingLocks", "payrolls", "clientBills"];
   for (const key of arrays) if (snapshot[key] !== undefined && !Array.isArray(snapshot[key])) throw new Error(`Neveljavni podatki: ${key}.`);
   if (snapshot.attachments !== undefined && (typeof snapshot.attachments !== "object" || Array.isArray(snapshot.attachments))) throw new Error("Neveljavni podatki prilog.");
   const importedUsers = snapshot.users && typeof snapshot.users === "object" ? snapshot.users : {};
@@ -4787,6 +4797,7 @@ function restoredBrowserState(current, metadata) {
     todoCreateReceipts: {},
     entries: snapshot.entries || [],
     todos: snapshot.todos || [],
+    absences: snapshot.absences || [],
     attachments: snapshot.attachments || {},
     debts: snapshot.debts || [],
     clients: snapshot.clients || [],
@@ -5273,6 +5284,7 @@ async function handleApi(req, res) {
     }
 
     if (await handleUndoJournal(req, res, url)) return;
+    if (await handleAbsences(req, res, url)) return;
     const notificationReadMatch = url.pathname.match(/^\/api\/notifications\/([^/]+)\/read$/);
     if (notificationReadMatch && req.method === "POST") {
       const user = await requireUser(req, res);
@@ -5533,6 +5545,7 @@ async function handleApi(req, res) {
         syncRevision: Number(db.syncRevision || 0),
         users: activeUsers.map(publicDirectoryUser),
         todos: visibleTodosForUser(db, user),
+        absences: absences.visible(db, user),
         clients: db.clients || [],
         settings: db.settings || {},
         workers
@@ -5706,10 +5719,7 @@ async function handleApi(req, res) {
         sendJson(res, 400, { error: "Izberi eno črko slovenske abecede in veljavno barvo." });
         return;
       }
-      const requestedTargets = Array.isArray(body.timeEntryForIds) ? body.timeEntryForIds : [];
-      const timeEntryForIds = [...new Set([id, ...requestedTargets]
-        .map(cleanUserId)
-        .filter((targetId) => Boolean(db.users?.[targetId]) && db.users[targetId].active !== false))];
+      const timeEntryForIds = Array.isArray(worker.timeEntryForIds) ? worker.timeEntryForIds : [id];
       const currentDailyReport = workerDailyReportSettings(db, worker);
       const requestedDailyReport = body.dailyReport && typeof body.dailyReport === "object" ? body.dailyReport : currentDailyReport;
       const reportEmailEnabled = requestedDailyReport.emailEnabled !== false;
@@ -6515,7 +6525,7 @@ async function handleApi(req, res) {
           .filter((assigneeId) => Boolean(db.users?.[assigneeId]) && db.users[assigneeId].active !== false))]
         : [];
       if (user.role !== "boss" && TIME_ENTRY_TODO_STATUSES.has(todo.status) && requestedAssigneeIds.some((assigneeId) => !canRecordHoursFor(db, user, assigneeId))) {
-        sendJson(res, 403, { error: "Delavec lahko ure vpiše samo sebi ali za delavce, ki jih je določil šef." });
+        sendJson(res, 403, { error: "Delavec lahko vpiše ure samo sebi ali zunanjim izvajalcem, posamično." });
         return;
       }
       if (hasExplicitAssignees && !requestedAssigneeIds.length && !["meal", "material", "note"].includes(todo.status)) {
@@ -6525,7 +6535,10 @@ async function handleApi(req, res) {
       let assigneeIds = requestedAssigneeIds.length
         ? requestedAssigneeIds
         : todoAssigneesForRequest(user, todo.syncUser, db.users);
-      if (["meal", "material", "note"].includes(todo.status)) assigneeIds = [syncUserForRequest(user, todo.syncUser || assigneeIds[0] || user.id, "", db.users)];
+      if (TIME_ENTRY_TODO_STATUSES.has(todo.status) && assigneeIds.some(id => !canRecordHoursFor(db, user, id))) {
+        sendJson(res, 403, { error: "Delavec lahko vpiše ure samo sebi ali zunanjim izvajalcem, posamično." }); return;
+      }
+      if (["material", "note"].includes(todo.status)) assigneeIds = [syncUserForRequest(user, todo.syncUser || assigneeIds[0] || user.id, "", db.users)];
       if (TIME_ENTRY_TODO_STATUSES.has(todo.status) && assigneeIds.length !== 1) {
         sendJson(res, 400, { error: "Vnos ur se vpisuje posebej za enega delavca." });
         return;
@@ -7508,10 +7521,10 @@ async function handleApi(req, res) {
       }
 
       if (TIME_ENTRY_TODO_STATUSES.has(todo.status) && assigneeIds.some((assigneeId) => !canRecordHoursFor(db, user, assigneeId))) {
-        sendJson(res, 403, { error: "Delavec lahko ure vpiše samo sebi ali za delavce, ki jih je določil šef." });
+        sendJson(res, 403, { error: "Delavec lahko vpiše ure samo sebi ali zunanjim izvajalcem, posamično." });
         return;
       }
-      if (["meal", "material", "note"].includes(todo.status)) assigneeIds = [syncUserForRequest(user, todo.syncUser || assigneeIds[0] || previousTodo.syncUser || user.id, previousTodo.syncUser, db.users)];
+      if (["material", "note"].includes(todo.status)) assigneeIds = [syncUserForRequest(user, todo.syncUser || assigneeIds[0] || previousTodo.syncUser || user.id, previousTodo.syncUser, db.users)];
       if (TIME_ENTRY_TODO_STATUSES.has(todo.status) && assigneeIds.length !== 1) {
         sendJson(res, 400, { error: "Vnos ur se vpisuje posebej za enega delavca." });
         return;
@@ -8178,6 +8191,7 @@ const googlePlanningCalendar = createGooglePlanningCalendar({
     return google.calendar({ version: "v3", auth: googleClient(null, tokens), timeout: 10000, retry: false });
   }
 });
+const handleAbsences = createAbsenceHttp({ requireUser, readRequestDb, readBody, writeDbAsync, sendJson, recordAuditLog });
 const calendarHttp = createCalendarHttp({
   service: googlePlanningCalendar, requireUser, sendJson, sendText, readBody, googleClient, googleReady,
   ownerEmail: GOOGLE_DRIVE_OWNER_EMAIL, baseUrl: PUBLIC_BASE_URL,
@@ -8235,6 +8249,8 @@ module.exports = {
   releaseTodoAssignmentEditLock,
   entryEditLockConflict,
   buildCalendarIcs,
+  browserBackupState,
+  restoredBrowserState,
   buildPayrollSnapshot,
   upsertSettlementCorrections,
   correctionPayrollLine,

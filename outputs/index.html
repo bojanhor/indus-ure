@@ -1621,6 +1621,22 @@
     }
 
     .todo-status-open { --todo-bg: #e1e1e1; --todo-fg: #202124; --todo-border: #9aa0a6; }
+    .todo-status-absence { --todo-bg: #f0eaf7; --todo-fg: #503865; --todo-border: #9878b3; }
+    #absenceDialog { width: min(560px, calc(100vw - 24px)); max-height: calc(var(--editor-viewport-height, 100dvh) - 24px); overflow: hidden; }
+    #absenceDialog[open].visual-viewport-positioned { position: fixed; top: var(--editor-viewport-top, 0px); bottom: auto; margin-top: 10px; margin-bottom: 0; }
+    #absenceForm { display: flex; flex-direction: column; max-height: calc(var(--editor-viewport-height, 100dvh) - 48px); }
+    .absence-fields { overflow: auto; display: grid; gap: 16px; padding: 18px 20px; }
+    .absence-fields > label, .absence-fields .form-grid > label { display: grid; gap: 6px; font-size: 14px; color: #52646a; }
+    .absence-fields select, .absence-fields input[type="date"] { box-sizing: border-box; width: 100%; min-width: 0; min-height: 44px; padding: 8px 10px; border: 1px solid #cddad6; border-radius: 8px; font: inherit; background: #fff; color: #25373b; }
+    .absence-fields .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .absence-fields fieldset { min-width: 0; padding: 12px; border: 1px solid #cddad6; border-radius: 10px; }
+    .absence-fields legend { padding: 0 5px; font-weight: 700; }
+    #absenceError:empty { display: none; }
+    #absenceTitle { white-space: normal; font-size: 20px; }
+    #absenceViewers { display: grid; gap: 9px; }
+    #absenceViewers label { display: flex; align-items: center; gap: 8px; }
+    #absenceViewers input { width: auto; }
+    #absenceError { color: #a02020; }
     .todo-status-mobile-options {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
@@ -5843,6 +5859,7 @@
         <div class="month-title calendar-view">
           <button class="icon-btn" id="prevMonth" type="button" title="Prej&#353;nji mesec">&lsaquo;</button>
           <h2 id="monthTitle"></h2>
+          <button class="secondary" id="calendarAbsenceButton" type="button">Odsotnost</button>
           <button class="icon-btn" id="nextMonth" type="button" title="Naslednji mesec">&rsaquo;</button>
           <button class="today-calendar-btn" id="todayBtn" type="button" title="Danes" aria-label="Danes">
             <span class="today-calendar-icon" aria-hidden="true"><span class="today-calendar-day" id="todayDayNumber"></span></span>
@@ -5986,6 +6003,7 @@
             <button class="primary" id="newTodoButton" type="button">Dodaj opravilo</button>
             <button class="secondary" id="writeHoursButton" type="button">Vpis ur</button>
             <button class="secondary" id="materialEntryButton" type="button">Vpis materiala</button>
+            <button class="secondary" id="absenceEntryButton" type="button">Odsotnost</button>
           </div>
           <div class="todo-head">
             <strong id="todoPanelTitle">Vsa opravila</strong>
@@ -6110,6 +6128,29 @@
     </form>
   </dialog>
 
+  <dialog id="absenceDialog">
+    <form id="absenceForm">
+      <div class="modal-head">
+        <h3 id="absenceTitle">Nova odsotnost</h3>
+        <div class="modal-head-actions">
+          <button class="icon-btn danger" id="deleteAbsence" type="button" aria-label="Izbriši odsotnost" title="Izbriši odsotnost">🗑</button>
+          <button class="primary" id="saveAbsence" type="button" aria-label="Shrani odsotnost">✓</button>
+          <button class="icon-btn" id="closeAbsence" type="button" aria-label="Zapri odsotnost">×</button>
+        </div>
+      </div>
+      <div class="absence-fields">
+        <p id="absenceError" role="alert"></p>
+        <label>Odsotni delavec<select id="absenceWorker"></select></label>
+        <label>Razlog<select id="absenceReason"><option value="vacation">Dopust</option><option value="illness">Bolezen</option></select></label>
+        <div class="form-grid">
+          <label>Od<input id="absenceDate" type="date" required></label>
+          <label>Do (vključno)<input id="absenceEndDate" type="date" required></label>
+        </div>
+        <fieldset><legend>Kdo vidi odsotnost</legend><div id="absenceViewers"></div></fieldset>
+        <p class="todo-meta">Celodnevni zapis za planiranje. Ne vpliva na ure, plačilo ali obračune. V Google/ICS koledarju je prikazana samo odsotnost, brez razloga.</p>
+      </div>
+    </form>
+  </dialog>
   <dialog id="dayTimelineDialog">
     <form method="dialog">
       <div class="modal-head">
@@ -6124,6 +6165,7 @@
         </div>
       </div>
       <div class="day-timeline-toolbar">
+        <button class="secondary" id="dayAbsenceButton" type="button">Odsotnost</button>
         <div class="gesture-zoom-controls" aria-label="Pove&#269;ava dnevne &#269;asovnice">
           <button class="secondary zoom-step day-timeline-control" id="dayTimelineZoomOut" type="button" title="Pomanj&#353;aj &#269;asovnico" aria-label="Pomanj&#353;aj &#269;asovnico"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10" cy="10" r="7"/><path d="m15 15 6 6M7 10h6"/></svg></button>
           <button class="secondary zoom-step day-timeline-control" id="dayTimelineZoomIn" type="button" title="Pove&#269;aj &#269;asovnico" aria-label="Pove&#269;aj &#269;asovnico"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10" cy="10" r="7"/><path d="m15 15 6 6M7 10h6M10 7v6"/></svg></button>
@@ -6952,6 +6994,7 @@ function todoUsesOrderConfirmation(todo) {
       return Boolean(todo && todoOrderStatusIds.has(todo.status));
     }
 function todoStatusClass(status) {
+      if (status === "absence") return "todo-status-absence";
       return `todo-status-${todoStatus(status).id}`;
     }
 
@@ -7070,6 +7113,8 @@ const state = {
       view: "todos",
       entries: [],
       todos: [],
+      absences: [],
+      absencesLoaded: false,
       todoSnapshotLoaded: false,
       startupHydrating: false,
       deletedTodos: [],
@@ -7358,6 +7403,7 @@ const {
 } = createTaskForm({
     $,
     state,
+    allowedTimeEntryUsers: () => WorkerAccess.targets(state.users, state.user),
     contactLinks,
     openClientEditDialog: (...args) => openClientEditDialog(...args),
     activeWorkerId: (...args) => activeWorkerId(...args),
@@ -8994,6 +9040,8 @@ function applyBootstrapSnapshot(data, { preserveTodoMutations = false, todoRevis
       state.users = [...new Map([...(data.users || []), state.user].map((user) => [user.id, user])).values()];
       if (!preserveTodoMutations || canApplyTodoSnapshot(todoRevision, todoSnapshotWasStable)) {
         state.todos = data.todos || [];
+        state.absences = data.absences || [];
+        state.absencesLoaded = true;
         state.todoSnapshotLoaded = true;
         state.syncRevision = Number(data.syncRevision || 0);
       }
@@ -9248,13 +9296,14 @@ function syncModalPageScrollLock() {
     }
 
 function syncEditorViewport() {
-      const dialog = $("todoDialog");
       const viewport = window.visualViewport;
-      if (!dialog || !viewport) return;
+      if (!viewport) return;
       const compact = matchMedia("(pointer: coarse)").matches || viewport.height < window.innerHeight - 80;
-      dialog.classList.toggle("visual-viewport-positioned", compact);
-      dialog.style.setProperty("--editor-viewport-height", `${viewport.height}px`);
-      dialog.style.setProperty("--editor-viewport-top", `${viewport.offsetTop}px`);
+      for (const dialog of [$("todoDialog"), $("absenceDialog")].filter(Boolean)) {
+        dialog.classList.toggle("visual-viewport-positioned", compact);
+        dialog.style.setProperty("--editor-viewport-height", `${viewport.height}px`);
+        dialog.style.setProperty("--editor-viewport-top", `${viewport.offsetTop}px`);
+      }
     }
 window.visualViewport?.addEventListener("resize", syncEditorViewport);
 window.visualViewport?.addEventListener("scroll", syncEditorViewport);
@@ -9591,6 +9640,7 @@ function applyOnlineCachedSnapshot(snapshot) {
       return true;
     }
 function showLoginScreen() {
+      state.absences = []; state.absencesLoaded = false;
       setStartupHydrating(false);
       document.body.classList.remove("booting");
       document.body.classList.add("login-ready");
@@ -9830,7 +9880,20 @@ function isImportedTodo(todo) {
     }
 
 function calendarTodos({ includeArchived = false } = {}) {
-      return uniqueTodosByEventId(contextTodos()).filter((todo) => !isImportedTodo(todo) && (includeArchived || !todo.archivedAt) && calendarWorkerMatches(todo));
+      return [...uniqueTodosByEventId(contextTodos()).filter((todo) => !isImportedTodo(todo) && (includeArchived || !todo.archivedAt) && calendarWorkerMatches(todo)), ...calendarAbsences()];
+    }
+
+/* @indus-module:worker-access */
+/* @indus-module:absence-model */
+/* @indus-module:editor/absences */
+const absenceUi = createAbsenceUi({ $, state, api, render, escapeHtml, showNotice, showAppConfirm, dateKey, activeWorkerId });
+function calendarAbsences() {
+      return (state.absences || []).filter(item => isAdminView() || Absences.canView(item, { id: activeWorkerId(), role: "worker" }))
+        .map(item => Absences.calendarItem(item)).filter(calendarWorkerMatches);
+    }
+function openCalendarTodo(todo) {
+      if (todo._absence) absenceUi.open(state.absences.find(item => item.id === todo.id));
+      else openTodoDialog(todo);
     }
 
 /* @indus-module:planning-calendar */
@@ -9865,7 +9928,7 @@ function applyWorkContextUi() {
       document.querySelectorAll(".worker-only").forEach((element) => element.classList.toggle("hidden", admin));
       $("newTodoButton").classList.remove("hidden");
       $("newTodoButton").textContent = "Dodaj opravilo";
-      $("writeHoursButton").classList.toggle("hidden", admin);
+      $("writeHoursButton").classList.remove("hidden");
       $("materialEntryButton").classList.remove("hidden");
       document.querySelectorAll(".admin-entry-field").forEach((element) => element.classList.toggle("hidden", !admin));
       $("googleDrive").classList.toggle("hidden", String(state.user?.email || "").toLowerCase() !== "bojan@indus.si");
@@ -9949,7 +10012,7 @@ async function loadAll() {
         ? api("/api/client-bills")
         : Promise.resolve({ clientBills: [] });
       const serverStatusRequest = state.user?.role === 'boss' ? api('/api/server-status', { recoverSession: false }).catch(() => null) : Promise.resolve(null);
-      const [entries, todos, debts, advances, personalPurchases, clients, settings, workerBilling, payrolls, clientBills, serverStatus] = await Promise.all([
+      const [entries, todos, debts, advances, personalPurchases, clients, settings, workerBilling, payrolls, clientBills, serverStatus, absenceData] = await Promise.all([
         api("/api/entries"),
         api("/api/todos"),
         api("/api/debts"),
@@ -9960,11 +10023,13 @@ async function loadAll() {
         workerBillingRequest,
         api("/api/payrolls"),
         clientBillsRequest,
-        serverStatusRequest
+        serverStatusRequest,
+        api("/api/absences")
       ]);
       state.entries = entries.entries || [];
       if (canApplyTodoSnapshot(todoRevision, todoSnapshotWasStable)) {
         state.todos = todos.todos || [];
+        state.absences = absenceData.absences || []; state.absencesLoaded = true;
         state.todoSnapshotLoaded = true;
       }
       state.debts = debts.debts || [];
@@ -10448,6 +10513,7 @@ function todoDateTimeLabel(todo) {
 
 function render() {
       if ($("app").classList.contains("hidden")) return;
+      absenceUi.resume();
       renderSearch();
       if (state.view === "calendar") renderMonth();
       if (state.view === "todos") renderTodos();
@@ -10548,7 +10614,7 @@ function appendMonthMultiDayLanes(day, key, weekIndex, layout) {
               event.stopPropagation();
               return;
             }
-            openTodoDialog(todo);
+            openCalendarTodo(todo);
           });
           slot.appendChild(item);
         }
@@ -10650,6 +10716,7 @@ function activateMonthTodoPointerDrag() {
     }
 
 function beginMonthTodoPointerDrag(event, item, todo, originDate = todo.date) {
+      if (todo._absence) return;
       if (!event.isPrimary || (event.pointerType === "mouse" && event.button !== 0)) return;
       clearMonthTodoPointerDrag();
       const rect = item.getBoundingClientRect();
@@ -10748,7 +10815,7 @@ function renderMonth() {
       calendar.innerHTML = '';
       const entries = contextEntries().filter(calendarWorkerMatches);
       const todos = state.showCompletedCalendarTodos ? calendarTodos()
-        : PlanningCalendar.select(state.todos, { combined: isAdminView(), userId: activeWorkerId() }).filter(calendarWorkerMatches);
+        : [...PlanningCalendar.select(state.todos, { combined: isAdminView(), userId: activeWorkerId() }).filter(calendarWorkerMatches), ...calendarAbsences()];
       const todayDate = new Date();
       $('todayDayNumber').textContent = todayDate.getDate();
       $('todayBtn').setAttribute('aria-label', `Danes, ${todayDate.toLocaleDateString('sl-SI')}`);
@@ -10821,7 +10888,7 @@ function renderMonth() {
             const changeNotice = todoChangeNotice(todo);
             item.className = `day-todo todo-status-color ${todoStatusClass(todo.status)} ${todoAssigneeIds(todo).length > 1 ? 'multi-assignee' : ''} ${todo.done ? 'done' : ''} ${todo.urgent ? 'urgent' : ''} ${changeNotice ? 'has-change-notice' : ''} ${settlementIndicators ? 'has-settlements' : ''}`;
             const time = todo.start && todo.end ? `<span class="day-todo-time-part">${escapeHtml(todo.start)}&ndash;</span><wbr><span class="day-todo-time-part">${escapeHtml(todo.end)}</span>` : '';
-            const client = todoClientCalendarName(todo, 'Brez stranke');
+            const client = todo._absence ? '' : todoClientCalendarName(todo, 'Brez stranke');
             const title = todo.title || 'Brez naslova';
             if (changeNotice) item.title = todoChangeNoticeText(todo);
             const flags = `${settlementIndicators}${changeNotice ? `<span class="day-todo-change-mark" aria-label="${escapeHtml(todoChangeNoticeLabel(todo))}">&#9679;</span>` : ''}`;
@@ -10836,7 +10903,7 @@ function renderMonth() {
                 event.stopPropagation();
                 return;
               }
-              openTodoDialog(todo);
+              openCalendarTodo(todo);
             });
             day.appendChild(item);
           });
@@ -11049,6 +11116,7 @@ async function saveDayTimelineDrafts({ announce = true, closeAfterSave = false }
 
 async function openTodoFromDayTimeline(todo) {
       if (!todo) return;
+      if (todo._absence) { openCalendarTodo(todo); return; }
       if (state.dayTimelineSaving) {
         showNotice("Dnevni pogled se \u0161e shranjuje.");
         return;
@@ -11310,7 +11378,7 @@ function renderDayTimeline() {
         title.textContent = todo.title + (client ? " - " + client : "");
         heading.append(calendarTodoWorkers(todo), title);
         button.appendChild(heading);
-        const movableToTimeline = !todoIsMultiDayCalendarSpan(todo);
+        const movableToTimeline = !todo._absence && !todoIsMultiDayCalendarSpan(todo);
         if (movableToTimeline) {
           button.title = "Povleci v časovnico za enourni termin";
           const pointerOptions = { passive: false };
@@ -13883,11 +13951,7 @@ function renderWorkerManagement() {
         const locked = worker.role === "boss";
         const disabled = worker.active ? "" : "disabled";
         const dailyReport = worker.dailyReport || {};
-        const targets = activeTargets.map((target) => {
-          const own = target.id === worker.id;
-          const checked = own || (worker.timeEntryForIds || []).includes(target.id);
-          return `<label><input type="checkbox" data-worker-target value="${escapeHtml(target.id)}" ${checked ? "checked" : ""} ${own || !worker.active ? "disabled" : ""}>${escapeHtml(target.name || target.id)}${own ? " (sam)" : ""}</label>`;
-        }).join("");
+        const targets = WorkerAccess.targets(activeTargets, worker).map(target => escapeHtml(target.name || target.id)).join(", ");
         return `<article class="worker-management-card ${worker.active ? "" : "inactive"}" data-worker-id="${escapeHtml(worker.id)}">
           <div class="worker-management-head"><div><h4>${escapeHtml(worker.name || worker.id)}</h4><span class="worker-management-status">${escapeHtml(workerManagementLabel(worker))}</span></div><label class="worker-active-field"><input type="checkbox" data-worker-active ${worker.active ? "checked" : ""} ${locked ? "disabled" : ""}>Aktiven</label></div>
           <div class="worker-management-grid">
@@ -13898,7 +13962,7 @@ function renderWorkerManagement() {
             <label>Barva ikone<input data-worker-avatar-color type="color" value="${escapeHtml(worker.avatarColor || '#1f6f8b')}" ${disabled}></label>
           </div>
           <div class="worker-management-details">
-            <fieldset class="worker-permissions" ${disabled}><legend>Lahko vpisuje ure za</legend><div class="worker-permissions-list">${targets || '<span class="todo-meta">Ni aktivnih delavcev.</span>'}</div></fieldset>
+            <fieldset class="worker-permissions"><legend>Lahko vpisuje ure za</legend><p>${worker.role === "boss" ? "Vse delavce, vsakega posebej." : "Samo zase ali za zunanje izvajalce, posamično."}</p><div class="worker-permissions-list">${targets}</div></fieldset>
             <fieldset class="worker-report-delivery" ${disabled}>
               <legend>Dnevna poročila po e-pošti</legend>
               <div class="worker-report-delivery-grid">
@@ -13954,7 +14018,6 @@ async function createWorkerFromForm() {
 async function saveManagedWorker(card, { activate = false } = {}) {
       const id = card?.dataset.workerId || "";
       if (!id) return;
-      const targets = [...card.querySelectorAll("[data-worker-target]:checked")].map((input) => input.value);
       const data = await api(`/api/workers/${encodeURIComponent(id)}`, {
         method: "PUT",
         body: JSON.stringify({
@@ -13964,7 +14027,6 @@ async function saveManagedWorker(card, { activate = false } = {}) {
           avatarInitial: card.querySelector("[data-worker-avatar-initial]")?.value || "",
           avatarColor: card.querySelector("[data-worker-avatar-color]")?.value || "",
           active: activate || Boolean(card.querySelector("[data-worker-active]")?.checked),
-          timeEntryForIds: targets,
           dailyReport: {
             emailEnabled: Boolean(card.querySelector("[data-worker-report-email-enabled]")?.checked),
             recipientEmail: card.querySelector("[data-worker-report-recipient]")?.value || "",

@@ -225,7 +225,7 @@ async function openTodoDialog(todo = {}, { reportNavigationIds = null } = {}) {
       const selectedAssignees = editing ? todoAssigneeIds(todo) : draftAssignees;
       const isTimeEntryForm = Boolean(state.todoHoursSourceId || state.todoStandaloneHours || moduleValues.timeEntryStatusIds.has(requestedStatus));
       const permittedAssigneeIds = isTimeEntryForm ? timeEntryTargetUsers().map((worker) => worker.id) : null;
-      renderTodoFormAssignees(selectedAssignees, permittedAssigneeIds, { disabled: state.todoMealEntry || state.todoMaterialEntry || state.todoNoteEntry, single: isTimeEntryForm });
+      renderTodoFormAssignees(selectedAssignees, permittedAssigneeIds, { disabled: state.todoMaterialEntry || state.todoNoteEntry, single: isTimeEntryForm });
       state.todoDialogPhotos = (todo.photos || []).map((photo) => ({ ...photo }));
       state.todoDialogDriveFiles = (todo.driveFiles || []).map((file) => ({ ...file }));
       // Render the attachment list immediately but defer image previews.  On

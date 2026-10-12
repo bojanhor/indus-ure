@@ -249,6 +249,10 @@ function undoActionLabel({ req, actor, beforeState, afterState }) {
   const clientBill = undoChangedItem(beforeState.clientBills, afterState.clientBills);
   const payroll = undoChangedItem(beforeState.payrolls, afterState.payrolls);
   const debt = undoChangedItem(beforeState.debts, afterState.debts);
+  if (pathname.startsWith("/api/absences")) {
+    const item = undoChangedItem(beforeState.absences, afterState.absences);
+    return prefix + (method === "DELETE" ? " izbrisal" : method === "POST" ? " dodal" : " spremenil") + " odsotnost: " + (item?.date || "") + " – " + (item?.endDate || "");
+  }
   if (pathname.startsWith("/api/todos")) {
     const title = cleanAuditLogText(todo?.title || "brez naslova", 100);
     if (method === "POST" && pathname === "/api/todos") return prefix + " ustvaril dogodek \u00bb" + title + "\u00ab";
@@ -282,7 +286,7 @@ function undoEligibleRequest(req) {
   const pathname = new URL(req.url, "http://undo.local").pathname;
   if (/^\/api\/todos\/(?:video|image|pdf|drive-files|[^/]+\/(?:lock|completion-request|share-pdf-ticket))/.test(pathname)) return false;
   if (/^\/api\/(?:attachments|notifications|auth|google|login|logout|password|profile|billing-locks|undo-journal|backup)\b/.test(pathname)) return false;
-  return /^\/api\/(?:todos(?:\/|$)|entries(?:\/|$)|clients(?:\/|$)|client-bills(?:\/|$)|payrolls(?:\/|$)|advances(?:\/|$)|personal-purchases(?:\/|$)|debts(?:\/|$)|settings\/billing$)/.test(pathname);
+  return /^\/api\/(?:absences(?:\/|$)|todos(?:\/|$)|entries(?:\/|$)|clients(?:\/|$)|client-bills(?:\/|$)|payrolls(?:\/|$)|advances(?:\/|$)|personal-purchases(?:\/|$)|debts(?:\/|$)|settings\/billing$)/.test(pathname);
 }
 
 function appendUndoJournalForMutation(db) {
@@ -367,7 +371,9 @@ function restoreUndoPatch(db, patch) {
 
 function visibleUndoJournal(db, user) {
   const current = currentUndoRecord(db);
-  return normalizeUndoJournal(db.undoJournal).map((record) => ({
+  return normalizeUndoJournal(db.undoJournal)
+    .filter(record => !record.patch?.arrays?.absences || user?.role === "boss" || record.actorId === user?.id)
+    .map((record) => ({
     id: record.id,
     createdAt: record.createdAt,
     actorId: record.actorId,

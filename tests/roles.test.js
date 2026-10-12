@@ -1400,18 +1400,23 @@ test("visible todos expose attachment metadata without eager media payloads", ()
     mimeType: "image/jpeg"
   });
 });
-test("delavec lahko vpisuje ure zase in za delavce, ki jih določi šef", () => {
+test("delavec lahko vpisuje ure samo zase ali zunanjim izvajalcem, ne glede na stara pooblastila", () => {
   const workerDb = {
     users: {
       bojan: { id: "bojan", role: "boss", active: true, timeEntryForIds: ["bojan"] },
       ibro: { id: "ibro", role: "worker", active: true, timeEntryForIds: ["ibro", "maja"] },
       maja: { id: "maja", role: "worker", active: true, timeEntryForIds: ["maja"] },
+      external: { id: "external", name: "Zunanji izvajalci", role: "worker", active: true },
       marko: { id: "marko", role: "worker", active: false, timeEntryForIds: [] }
     }
   };
-  assert.deepEqual(timeEntryTargetIds(workerDb, workerDb.users.ibro), ["ibro", "maja"]);
+  assert.deepEqual(timeEntryTargetIds(workerDb, workerDb.users.ibro), ["ibro", "external"]);
   assert.equal(canRecordHoursFor(workerDb, workerDb.users.ibro, "ibro"), true);
-  assert.equal(canRecordHoursFor(workerDb, workerDb.users.ibro, "maja"), true);
+  assert.equal(canRecordHoursFor(workerDb, workerDb.users.ibro, "maja"), false);
+  assert.equal(canRecordHoursFor(workerDb, workerDb.users.ibro, "external"), true);
+  normalizeWorkerProfile("external", workerDb.users.external, workerDb.users);
+  workerDb.users.external.name = "Zunanji sodelavci";
+  assert.equal(canRecordHoursFor(workerDb, workerDb.users.ibro, "external"), true);
   assert.equal(canRecordHoursFor(workerDb, workerDb.users.ibro, "bojan"), false);
   assert.equal(canRecordHoursFor(workerDb, workerDb.users.ibro, "marko"), false);
   assert.equal(canRecordHoursFor(workerDb, workerDb.users.bojan, "maja"), true);

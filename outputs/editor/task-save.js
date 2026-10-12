@@ -258,10 +258,10 @@ async function saveTodoFromDialog({ closeAfterSave = true, handover = false } = 
       const materialEntry = $("todoFormStatus").value === "material";
       const noteEntry = $("todoFormStatus").value === "note";
       const assigneeIds = selectedTodoFormAssignees();
-      if (!meal && !materialEntry && !noteEntry && !assigneeIds.length) {
+      if (!materialEntry && !noteEntry && !assigneeIds.length) {
         return invalidTodoForm("Izberi vsaj enega izvajalca.", $("todoFormAssignees").querySelector("input") || $("todoFormAssigneeLabel"));
       }
-      if (meal || materialEntry || noteEntry) assigneeIds.splice(0, assigneeIds.length, existing?.syncUser || activeWorkerId());
+      if (materialEntry || noteEntry) assigneeIds.splice(0, assigneeIds.length, existing?.syncUser || activeWorkerId());
       const hourlyRate = parseBillingNumber($("todoFormHourlyRate").value, 10_000);
       const billingKm = parseBillingNumber($("todoFormBillingKm").value, 1_000_000);
       const clientKm = parseBillingNumber($("todoFormClientKm").value, 1_000_000);

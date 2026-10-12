@@ -88,6 +88,10 @@ async function main() {
     const afterNoop = await fingerprints();
     for (const table of tables.filter(table => !["indus_meta", "indus_sessions"].includes(table))) assert.deepEqual(afterNoop[table], beforeNoop[table], `Normalization is not idempotent for ${table}`);
     check("upgrade.production_clone_preserves_business_counts_and_is_idempotent");
+    const absenceProbe = { id: "qa-rollback-absence", workerId: "ibro", date: "2026-10-12", endDate: "2026-10-13", reason: "vacation", viewerIds: ["ibro", "bojan"] };
+    const probeDb = await store.load();
+    probeDb.absences = [...(probeDb.absences || []), absenceProbe];
+    await store.save(probeDb);
     // This mode already requires a private QA database. Exercise the deployed
     // version against the upgraded clone, never against production itself.
     const previousServer = await fs.realpath("/opt/indus-ure/current/outputs/server.js");
@@ -110,6 +114,7 @@ async function main() {
     const previousView = JSON.parse(JSON.stringify(forward));
     previous.normalizeDb(previousView);
     normalizeDb(forward);
+    assert.deepEqual(forward.absences.find(item => item.id === absenceProbe.id), absenceProbe, "Code rollback lost absence data");
     const forwardView = JSON.parse(JSON.stringify(forward));
     const differentKeys = [...new Set([...Object.keys(previousView), ...Object.keys(forwardView)])]
       .filter(key => !isDeepStrictEqual(previousView[key], forwardView[key]));
@@ -155,6 +160,16 @@ async function main() {
     assert.equal(profile.avatarColor, "#ffd000");
   }
   check("workers.avatar_persists_in_snapshot_directory_and_lightweight_session");
+
+  db.absences = [{ id: crypto.randomUUID(), workerId: "bojan", reason: "illness", date: "2026-10-12", endDate: "2026-10-14", viewerIds: ["bojan"], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }];
+  await store.save(db);
+  db = await store.load();
+  assert.equal(db.absences[0].reason, "illness");
+  const privateSeed = await store.initialBootstrapSeed(db.users.ibro);
+  const { visible: visibleAbsences } = require("../outputs/absence-model");
+  assert.deepEqual(visibleAbsences(privateSeed, db.users.ibro), []);
+  assert.equal(visibleAbsences(await store.initialBootstrapSeed(db.users.bojan), db.users.bojan).length, 1);
+  check("absences.postgres_roundtrip_and_initial_bootstrap_privacy");
 
   const before = await fingerprints();
   db.todos.find(item => item.id === ids[0]).title = "Targeted change";
@@ -261,6 +276,14 @@ async function main() {
     await bootstrap.arrayBuffer();
     assert.deepEqual(await digest(), beforeGet);
     check("http.GET_bootstrap_does_not_write_normalization");
+    for (const route of ["/api/bootstrap", "/api/bootstrap?initial=1", "/api/absences"]) {
+      const privateRead = await request(route, { headers: worker });
+      assert.equal(privateRead.status, 200);
+      assert.deepEqual((await privateRead.json()).absences, []);
+    }
+    const privateId = (await store.load()).absences[0].id;
+    assert.equal((await request(`/api/absences/${privateId}`, { headers: worker })).status, 404);
+    check("http.absence_privacy_in_full_initial_and_detail_routes");
     const loadCount = fullLoads();
     let response = await request(`/api/attachments/${attachmentId}`);
     assert.equal(response.status, 200);
