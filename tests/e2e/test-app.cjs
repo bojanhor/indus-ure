@@ -44,7 +44,7 @@ async function stopChild(child) {
   if (child.exitCode === null) child.kill("SIGKILL");
 }
 
-async function startIsolatedTestApp() {
+async function startIsolatedTestApp({ authMode = "test" } = {}) {
   const port = await reserveLoopbackPort();
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), "indus-ure-playwright-"));
   const mediaDir = path.join(dataDir, "media");
@@ -60,16 +60,19 @@ async function startIsolatedTestApp() {
       PORT: String(port),
       HOST: "127.0.0.1",
       NODE_ENV: "test",
-      INDUS_URE_TEST_MODE: "true",
+      INDUS_URE_TEST_MODE: authMode === "test" ? "true" : "false",
+      INDUS_URE_LAN_SUPPORT_TEST_MODE: authMode === "lan" ? "true" : "false",
+      LAN_SUPPORT_LOGIN_ENABLED: authMode === "lan" ? "true" : "false",
+      LAN_SUPPORT_LOGIN_PASSWORD: authMode === "lan" ? TEST_PASSWORD : "",
       TEST_LOCAL_LOGIN_PASSWORD: TEST_PASSWORD,
       DATA_DIR: dataDir,
       MEDIA_DIR: mediaDir,
       // Never inherit a database URL or third-party credentials into E2E.
       DATABASE_URL: "",
       PUBLIC_BASE_URL: "",
-      GOOGLE_CLIENT_ID: "",
-      GOOGLE_CLIENT_SECRET: "",
-      GOOGLE_REDIRECT_URI: "",
+      GOOGLE_CLIENT_ID: authMode === "test" ? "" : "isolated-qa.apps.googleusercontent.com",
+      GOOGLE_CLIENT_SECRET: authMode === "test" ? "" : "isolated-fake-secret",
+      GOOGLE_REDIRECT_URI: authMode === "test" ? "" : `${baseUrl}/api/google/callback`,
       GOOGLE_DRIVE_TASKS_FOLDER_ID: "",
       GOOGLE_DRIVE_ATTACHMENTS_FOLDER_ID: "",
       ALERT_SMTP_URL: "",

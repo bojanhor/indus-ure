@@ -376,6 +376,12 @@
       box-shadow: 0 18px 38px rgba(0, 0, 0, 0.18);
     }
     .local-test-login strong { color: #fff; font-size: 13px; letter-spacing: 0.04em; }
+    .local-test-login + .google-button { margin-top: 16px; }
+    .login-card .local-test-login label { display: grid; gap: 6px; color: #fff; }
+    .local-test-login input, .local-test-login select { min-height: 44px; font-size: 16px; }
+    .local-test-login p { color: #dae7e6; margin: 0; font-size: 13px; line-height: 1.4; }
+    .login-message { color: #fff; max-width: 360px; line-height: 1.5; }
+    .worker-lan-password { display: grid; gap: 10px; }
     .secondary { background: #e4eee9; color: #203035; }
     .ghost {
       border: 1px solid rgba(255, 255, 255, 0.18);
@@ -5760,6 +5766,7 @@
       <div class="login-logo">IU</div>
       <h1>INDUS URE</h1>
       <div class="offline hidden" id="serverWarning">Odpri stran prek lokalnega stre&#382;nika, ne direktno kot datoteko.</div>
+      <p class="login-message hidden" id="loginMessage" role="status"></p>
       <div class="local-test-login hidden" id="localTestLoginPanel">
         <strong id="localTestLoginTitle">LOKALNO TESTNO OKOLJE</strong>
         <label id="localTestUserLabel">Testni uporabnik
@@ -5768,12 +5775,16 @@
             <option value="ibro">Ibro (delavec)</option>
           </select>
         </label>
+        <label id="lanLoginEmailLabel" class="hidden">Google e-poštni naslov
+          <input id="lanLoginEmail" type="email" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="254" required disabled>
+        </label>
         <label id="localTestPasswordLabel">Testno geslo
           <input id="localTestPassword" type="password" autocomplete="current-password" required disabled>
         </label>
         <button class="primary" id="localTestLoginBtn" type="submit" disabled>Vstopi v testno okolje</button>
+        <p id="lanLoginHint" class="hidden">Uporabi svoje geslo za INDUS URE, ne gesla za Gmail. Nastavi ga šef v nastavitvah delavca.</p>
       </div>
-      <button class="google-button" id="googleLoginBtn" type="submit">
+      <button class="google-button" id="googleLoginBtn" type="button">
         <span class="google-mark">G</span>
         <span>Prijavi se z Googlom</span>
       </button>
@@ -8044,40 +8055,77 @@ async function loadLocalTestMode() {
       const password = $("localTestPassword");
       const button = $("localTestLoginBtn");
       try {
-        const response = await fetch("/api/test-mode", { credentials: "same-origin", headers: { Accept: "application/json" } });
-        const data = response.ok ? await response.json() : {};
-        state.localTestMode = data?.enabled === true;
-        state.localSupportLogin = data?.supportLogin === true;
+        const support = new URLSearchParams(location.search).get("lan_support") === "1";
+        const response = await fetch("/api/auth/options" + (support ? "?support=1" : ""), { credentials: "same-origin", cache: "no-store", headers: { Accept: "application/json" } });
+        if (!response.ok) throw new Error("Možnosti prijave niso dosegljive.");
+        const data = await response.json();
+        state.loginOptionsLoaded = true;
+        state.googleLoginAvailable = data.google === true;
+        state.localTestMode = data.test === true || data.support === true;
+        state.localSupportLogin = data.support === true;
+        state.localPasswordLogin = data.password === true && !state.localTestMode;
       } catch {
+        state.loginOptionsLoaded = false;
         state.localTestMode = false;
         state.localSupportLogin = false;
+        state.localPasswordLogin = false;
+        state.googleLoginAvailable = true;
       }
-      panel.classList.toggle("hidden", !state.localTestMode);
-      $("googleLoginBtn").classList.toggle("hidden", state.localTestMode);
+      const local = state.localTestMode || state.localPasswordLogin;
+      panel.classList.toggle("hidden", !local);
+      $("googleLoginBtn").classList.toggle("hidden", !state.googleLoginAvailable);
+      $("localTestUserLabel").classList.toggle("hidden", !state.localTestMode);
+      $("lanLoginEmailLabel").classList.toggle("hidden", !state.localPasswordLogin);
+      $("lanLoginHint").classList.toggle("hidden", !state.localPasswordLogin);
+      $("lanLoginEmail").disabled = !state.localPasswordLogin;
       user.disabled = !state.localTestMode;
-      password.disabled = !state.localTestMode;
-      button.disabled = !state.localTestMode;
-      $("localTestLoginTitle").textContent = state.localSupportLogin ? "LOKALNI PODPORNI DOSTOP" : "LOKALNO TESTNO OKOLJE";
+      password.disabled = !local;
+      button.disabled = !local;
+      $("localTestLoginTitle").textContent = state.localPasswordLogin ? "PRIJAVA V LOKALNEM OMREŽJU" : state.localSupportLogin ? "LOKALNI PODPORNI DOSTOP" : "LOKALNO TESTNO OKOLJE";
       $("localTestUserLabel").childNodes[0].textContent = state.localSupportLogin ? "Uporabnik" : "Testni uporabnik";
-      $("localTestPasswordLabel").childNodes[0].textContent = state.localSupportLogin ? "Geslo" : "Testno geslo";
-      button.textContent = state.localSupportLogin ? "Vstopi prek lokalnega omrežja" : "Vstopi v testno okolje";
-      if (state.localTestMode) password.value = "";
+      $("localTestPasswordLabel").childNodes[0].textContent = state.localPasswordLogin ? "Geslo INDUS" : state.localSupportLogin ? "Geslo" : "Testno geslo";
+      button.textContent = state.localPasswordLogin ? "Prijavi se z geslom" : state.localSupportLogin ? "Vstopi prek lokalnega omrežja" : "Vstopi v testno okolje";
+      password.value = "";
     }
 
 async function requestLocalTestLogin() {
-      const response = await fetch("/api/test-login", {
+      const response = await fetch(state.localPasswordLogin ? "/api/auth/lan-login" : "/api/test-login", {
         method: "POST",
         credentials: "same-origin",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
         body: JSON.stringify({
-          userId: $("localTestUser").value,
+          ...(state.localPasswordLogin ? { email: $("lanLoginEmail").value } : { userId: $("localTestUser").value }),
           password: $("localTestPassword").value
         })
       });
       const text = await response.text();
       const data = text ? JSON.parse(text) : {};
-      if (!response.ok) throw new Error(data?.error || "Testna prijava ni uspela.");
+      if (!response.ok) throw new Error(data?.error || "Prijava ni uspela.");
       return data;
+    }
+
+async function startPublicGoogleLogin() {
+      if (!state.loginOptionsLoaded || !state.googleLoginAvailable || state.localTestMode || state.localPasswordLogin) return false;
+      let lastAttempt = 0, signedOut = false;
+      try {
+        lastAttempt = Number(sessionStorage.getItem(automaticLoginAttemptKey) || 0);
+        signedOut = sessionStorage.getItem("indus-ure-explicit-logout") === "1";
+      } catch { return false; } // Without a loop guard keep the manual button.
+      if (signedOut) { setLoginMessage("Odjavljen si. Za ponovno prijavo izberi Google."); return false; }
+      if (new URLSearchParams(location.search).get("login") === "expired" || (lastAttempt && Date.now() - lastAttempt < automaticLoginRetryDelayMs)) {
+        setLoginMessage("Samodejna prijava ni bila zaključena. Poskusi znova z Googlom."); return false;
+      }
+      try {
+        sessionStorage.setItem(automaticLoginAttemptKey, String(Date.now()));
+        const data = await requestGoogleLoginUrl(true);
+        location.replace(data.url);
+        return true;
+      } catch (error) { setLoginMessage(error.message); return false; }
+    }
+
+function setLoginMessage(message) {
+      $("loginMessage").textContent = message || "";
+      $("loginMessage").classList.toggle("hidden", !message);
     }
 async function requestGoogleLoginUrl(automatic = false) {
       const params = new URLSearchParams();
@@ -9105,12 +9153,6 @@ async function boot() {
         $("serverWarning").classList.remove("hidden");
         return;
       }
-      // The LAN support route is opt-in so public production launches do not
-      // make an otherwise unused request or reveal an alternate login form.
-      const lanSupportRequested = new URLSearchParams(location.search).get("lan_support") === "1";
-      const localTestModePromise = (["localhost", "127.0.0.1"].includes(location.hostname) || lanSupportRequested)
-        ? loadLocalTestMode()
-        : Promise.resolve();
       try {
         const quickMode = quickCreateModeFromLink();
         if (quickMode) {
@@ -9173,7 +9215,10 @@ async function boot() {
         state.token = "";
         state.csrfToken = "";
         state.offlineMode = false;
-        await localTestModePromise;
+        // Only signed-out launches need this request. The server, not the URL
+        // or browser hostname, decides whether password login is allowed.
+        await loadLocalTestMode();
+        if (error?.status === 401 && await startPublicGoogleLogin()) return;
         showLoginScreen();
       }
     }
@@ -9649,6 +9694,7 @@ function showLoginScreen() {
     }
 
 function showApp({ minimal = false } = {}) {
+      try { sessionStorage.removeItem(automaticLoginAttemptKey); sessionStorage.removeItem("indus-ure-explicit-logout"); } catch {}
       protectLoggedInHistory();
       document.body.classList.remove("booting", "login-ready");
       $("loginScreen").classList.add("hidden");
@@ -13962,6 +14008,12 @@ function renderWorkerManagement() {
             <label>Barva ikone<input data-worker-avatar-color type="color" value="${escapeHtml(worker.avatarColor || '#1f6f8b')}" ${disabled}></label>
           </div>
           <div class="worker-management-details">
+            <fieldset class="worker-lan-password" ${disabled}><legend>Geslo za prijavo v LAN</legend>
+              <p class="todo-meta">${worker.lanPasswordConfigured ? "Geslo je nastavljeno." : "Geslo še ni nastavljeno."} Uporabniško ime je shranjeni Google e-poštni naslov. To ni geslo za Gmail.</p>
+              <label>Novo geslo INDUS<input type="password" data-worker-lan-password autocomplete="new-password" minlength="12" maxlength="128" placeholder="Najmanj 12 znakov"></label>
+              <label>Ponovi novo geslo<input type="password" data-worker-lan-password-repeat autocomplete="new-password" maxlength="128"></label>
+              <div class="worker-management-actions"><button class="secondary" type="button" data-set-lan-password>Nastavi geslo</button>${worker.lanPasswordConfigured ? '<button class="secondary" type="button" data-disable-lan-password>Izklopi prijavo z geslom</button>' : ''}</div>
+            </fieldset>
             <fieldset class="worker-permissions"><legend>Lahko vpisuje ure za</legend><p>${worker.role === "boss" ? "Vse delavce, vsakega posebej." : "Samo zase ali za zunanje izvajalce, posamično."}</p><div class="worker-permissions-list">${targets}</div></fieldset>
             <fieldset class="worker-report-delivery" ${disabled}>
               <legend>Dnevna poročila po e-pošti</legend>
@@ -14038,6 +14090,24 @@ async function saveManagedWorker(card, { activate = false } = {}) {
       showNotice(activate ? "Delavec je ponovno aktiven." : "Podatki delavca so shranjeni.");
     }
 
+async function setManagedLanPassword(card, disable = false) {
+      if (!card?.dataset.workerId) return;
+      const input = card.querySelector("[data-worker-lan-password]");
+      const repeat = card.querySelector("[data-worker-lan-password-repeat]");
+      if (!disable && (input.value.length < 12 || input.value.length > 128)) throw new Error("Geslo INDUS mora imeti od 12 do 128 znakov.");
+      if (!disable && input.value !== repeat.value) throw new Error("Gesli se ne ujemata.");
+      if (disable && !await showAppConfirm("Izklopim LAN-prijavo z geslom za tega uporabnika? Njegove seje z geslom se bodo zaključile. Google prijava ostane na voljo.")) return;
+      const buttons = card.querySelectorAll("[data-set-lan-password], [data-disable-lan-password]");
+      buttons.forEach(button => { button.disabled = true; });
+      try {
+        const result = await api(`/api/workers/${encodeURIComponent(card.dataset.workerId)}/lan-password`, { method: "PUT", body: JSON.stringify(disable ? { disable: true } : { password: input.value }) });
+        input.value = ""; repeat.value = "";
+        state.workerManagement = state.workerManagement.map(worker => worker.id === result.worker.id ? result.worker : worker);
+        renderWorkerManagement();
+        showNotice(disable ? "LAN-prijava z geslom je izklopljena." : "Geslo INDUS je nastavljeno. Prejšnje seje z geslom so preklicane.");
+      } finally { buttons.forEach(button => { button.disabled = false; }); }
+    }
+
 async function removeManagedWorker(card) {
       const id = card?.dataset.workerId || "";
       const name = card?.querySelector("[data-worker-name]")?.value || "tega delavca";
@@ -14068,10 +14138,11 @@ async function copyCalendarFeed(combined = false) {
 
 $("loginForm").addEventListener("submit", async (event) => {
       event.preventDefault();
-      if (state.localTestMode) {
+      if (state.localTestMode || state.localPasswordLogin) {
         try {
           $("localTestLoginBtn").disabled = true;
           await requestLocalTestLogin();
+          $("localTestPassword").value = "";
           location.reload();
         } catch (error) {
           $("localTestLoginBtn").disabled = false;
@@ -14079,9 +14150,12 @@ $("loginForm").addEventListener("submit", async (event) => {
         }
         return;
       }
+    });
+$("googleLoginBtn").addEventListener("click", async () => {
       try {
         $("googleLoginBtn").disabled = true;
         sessionStorage.removeItem(automaticLoginAttemptKey);
+        sessionStorage.removeItem("indus-ure-explicit-logout");
         const data = await requestGoogleLoginUrl(false);
         location.replace(data.url);
       } catch (error) {
@@ -14108,6 +14182,7 @@ $("logoutBtn").addEventListener("click", async () => {
       state.token = "";
       state.csrfToken = "";
       state.user = null;
+      try { sessionStorage.setItem("indus-ure-explicit-logout", "1"); } catch {}
       location.reload();
     });
 
@@ -14124,6 +14199,15 @@ $("deletedTodosList").addEventListener("click", (event) => {
 $("workersMenuBtn").addEventListener("click", () => openWorkersDialog().catch((error) => showNotice(error.message)));
 $("closeWorkers").addEventListener("click", () => $("workersDialog").close());
 $("cancelWorkers").addEventListener("click", () => $("workersDialog").close());
+$("workersDialog").addEventListener("close", () => {
+      $("workerManagementList").querySelectorAll('input[type="password"]').forEach(input => { input.value = ""; });
+    });
+$("workerManagementList").addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && event.target.matches('input[type="password"]')) {
+        event.preventDefault();
+        setManagedLanPassword(event.target.closest("[data-worker-id]")).catch(error => showNotice(error.message));
+      }
+    });
 $("workersForm").addEventListener("submit", (event) => { event.preventDefault(); createWorkerFromForm().catch((error) => showNotice(error.message)); });
 $("workerManagementList").addEventListener("click", (event) => {
       const card = event.target.closest("[data-worker-id]");
@@ -14131,6 +14215,8 @@ $("workerManagementList").addEventListener("click", (event) => {
       if (event.target.closest("[data-save-worker]")) saveManagedWorker(card).catch((error) => showNotice(error.message));
       if (event.target.closest("[data-reactivate-worker]")) saveManagedWorker(card, { activate: true }).catch((error) => showNotice(error.message));
       if (event.target.closest("[data-remove-worker]")) removeManagedWorker(card).catch((error) => showNotice(error.message));
+      if (event.target.closest("[data-set-lan-password]")) setManagedLanPassword(card).catch((error) => showNotice(error.message));
+      if (event.target.closest("[data-disable-lan-password]")) setManagedLanPassword(card, true).catch((error) => showNotice(error.message));
     });
 $("notificationsBtn").addEventListener("click", () => openNotifications().catch((error) => showNotice(error.message)));
 $("closeNotifications").addEventListener("click", () => $("notificationsDialog").close());

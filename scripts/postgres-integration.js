@@ -143,6 +143,8 @@ async function main() {
   normalizeDb(db);
   db.users.ibro.avatarInitial = "ž";
   db.users.ibro.avatarColor = "#ffd000";
+  const lanCredential = await require("../outputs/lan-auth").hash("postgres-qa-personal-password");
+  db.users.ibro.lanPasswordHash = lanCredential;
   const bossToken = createSession(db, "bojan");
   const workerToken = createSession(db, "ibro");
   const headers = token => ({ Cookie: `indus-ure-session=${token}`, "X-CSRF-Token": db.sessions[sessionTokenHash(token)].csrfToken, "Content-Type": "application/json" });
@@ -160,6 +162,11 @@ async function main() {
     assert.equal(profile.avatarColor, "#ffd000");
   }
   check("workers.avatar_persists_in_snapshot_directory_and_lightweight_session");
+  assert.equal(db.users.ibro.lanPasswordHash, lanCredential);
+  assert.equal(directoryWorker.lanPasswordHash, undefined);
+  assert.equal(sessionWorker.lanPasswordHash, undefined);
+  assert.ok(!JSON.stringify(sanitize(db)).includes(lanCredential));
+  check("auth.personal_lan_credential_persists_privately_and_is_excluded_from_recovery");
 
   db.absences = [{ id: crypto.randomUUID(), workerId: "bojan", reason: "illness", date: "2026-10-12", endDate: "2026-10-14", viewerIds: ["bojan"], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }];
   await store.save(db);

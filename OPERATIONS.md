@@ -27,6 +27,22 @@ testne dokaze in pravila; ta navodila jih ne nadomeščajo.
 
 - Običajna prijava je Google OAuth. Delavec brez povezane Google prijave
   lahko obstaja v evidenci; to mu samo po sebi ne omogoči spletnega dostopa.
+- Od 14. 10. 2026 se neprijavljen zunanji obisk samodejno preusmeri na Google.
+  Po izrecni odjavi ali neuspešni/prekinjeni prijavi ostane ročni gumb, da ni
+  zanke preusmeritev. Že prijavljen obisk ne zahteva dodatne poizvedbe o prijavi.
+- Na dovoljenem LAN se brez posebnega URL parametra pokažeta Google in osebna
+  prijava z e-pošto. `/api/auth/options` določi možnosti na strežniku;
+  `/api/auth/lan-login` zahteva isti zaupanja vreden LAN proxy, JSON in isto
+  spletno izhodišče. V produkciji je osebna prijava na voljo le prek HTTPS.
+- Osebna gesla INDUS niso gesla za Gmail. Šef jih nastavi ali izklopi v
+  **Nastavitve → Delavci → Geslo za prijavo v LAN**, po shranitvi e-pošte.
+  Vsako geslo ima 12–128 znakov in lasten naključni salt/scrypt hash.
+  Obstoječi uporabniki nimajo samodejno nastavljenih osebnih LAN-gesel.
+  Stari zgodovinski hashi in podporno geslo se za osebno prijavo ne sprejmejo.
+  Ponastavitev/izklop prekliče prejšnje osebne LAN-seje tega uporabnika;
+  Google seje ohrani. Osebni hash se ne izvaža v uporabniški/recovery backup,
+  poslovni Undo ali javne profile. Po obnovi sanitiziranega recovery paketa je
+  treba osebna gesla nastaviti znova; uporabniška obnova obstoječa gesla ohrani.
 - Ločena podporna prijava z izbiro uporabnika in geslom obstaja tudi v
   produkciji, če je `LAN_SUPPORT_LOGIN_ENABLED=true` in je podporno geslo
   dolgo najmanj 24 znakov. Skrivnost ostane samo v okoljski datoteki.
@@ -42,6 +58,18 @@ testne dokaze in pravila; ta navodila jih ne nadomeščajo.
   HttpOnly/Secure/SameSite cookie in CSRF. Ob izključitvi podpore preveri
   tudi preklic že ustvarjenih podpornih sej; sprememba zastavice sama ne
   pomeni preklica obstoječega piškotka.
+
+Osebna prijava uporablja isti strežniški opt-in `LAN_SUPPORT_LOGIN_ENABLED`,
+vendar ni odvisna od vrednosti skupnega podpornega gesla. Omejitev poskusov
+upošteva dejanski LAN IP in račun, ne skupnega loopback naslova Nginxa.
+Za omejitev velja 6 neuspelih poskusov v 10 minutah. Podporni URL ostaja ločen
+in ga običajna prijavna stran ne ponuja. `X-Real-IP` mora Nginx vedno prepisati;
+prihajajoči `X-Forwarded-For`, poljubno ime domene ali `?lan_support=1` niso dokaz LAN.
+
+Povrnitev te spremembe: prejšnja izdaja `27ab379`; brez spremembe SQL sheme.
+Novi `users.*.lanPasswordHash` in `sessions.*.authMethod` sta aditivna. Stara
+izdaja osebne prijave ne izvaja, sicer pa podatke ohrani. Povrnitev kode sama
+ne prekliče že izdanih sej; po potrebi jih je treba preklicati ločeno.
 
 ## Tehnična konfiguracija
 

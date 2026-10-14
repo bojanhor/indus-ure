@@ -5,6 +5,96 @@ const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
+const lanAuth = require("../outputs/lan-auth");
+
+test("LAN authentication trusts only exact proxy IPv4 subnet and rejects cross-site login", async () => {
+  const req = (peer, ip) => ({ socket: { remoteAddress: peer }, headers: { "x-real-ip": ip } });
+  assert.equal(lanAuth.lanAddress(req("::ffff:127.0.0.1", "::ffff:192.168.50.24")), "192.168.50.24");
+  for (const ip of ["198.51.100.1", "192.168.51.1", "192.168.50.evil", "192.168.50.999", "192.168.50.1, 8.8.8.8", ""]) {
+    assert.equal(lanAuth.lanAddress(req("127.0.0.1", ip)), "");
+  }
+  assert.equal(lanAuth.lanAddress(req("192.168.50.4", "192.168.50.2")), "");
+  assert.equal(lanAuth.lanAddress(req("127.0.0.1", "192.168.50.2"), "192.168."), "");
+  const login = { socket: {}, headers: { host: "ure.indus.si", origin: "https://ure.indus.si", "x-forwarded-proto": "https", "content-type": "application/json" } };
+  assert.equal(lanAuth.sameOriginLogin(login), true);
+  assert.equal(lanAuth.sameOriginLogin({ ...login, headers: { ...login.headers, origin: "https://evil.test" } }), false);
+  assert.equal(lanAuth.sameOriginLogin({ ...login, headers: { ...login.headers, "sec-fetch-site": "cross-site" } }), false);
+  assert.equal(lanAuth.sameOriginLogin({ ...login, headers: { ...login.headers, "content-type": "application/x-www-form-urlencoded" } }), false);
+  const password = "QA-ločeno-geslo-2026";
+  const hash = await lanAuth.hash(password);
+  assert.equal(await lanAuth.verify(password, hash), true);
+  assert.equal(await lanAuth.verify("napačno", hash), false);
+  assert.equal(await lanAuth.verify(password, ""), false);
+  assert.equal(await lanAuth.verify(password, "legacy-unhashed"), false);
+  assert.notEqual(await lanAuth.hash(password), hash);
+  await assert.rejects(lanAuth.hash("short"));
+  await assert.rejects(lanAuth.hash("x".repeat(129)));
+});
+
+test("LAN password attempts are limited by real client and account without blocking every LAN user", () => {
+  const limiter = lanAuth.createLimiter();
+  for (let n = 0; n < 6; n++) limiter.fail("192.168.50.2", "qa@example.test", 1000);
+  assert.equal(limiter.allowed("192.168.50.2", "other@example.test", 1001), false);
+  assert.equal(limiter.allowed("192.168.50.3", "qa@example.test", 1001), false);
+  assert.equal(limiter.allowed("192.168.50.3", "other@example.test", 1001), true);
+  assert.equal(limiter.allowed("192.168.50.2", "qa@example.test", 601001), true);
+});
+
+test("personal LAN passwords: role checks, sessions, disabled users, rotation, sanitization and public denial", { timeout: 45000 }, async () => {
+  const { startIsolatedTestApp, TEST_PASSWORD } = require("./e2e/test-app.cjs");
+  const app = await startIsolatedTestApp({ authMode: "lan" });
+  const port = Number(new URL(app.baseUrl).port);
+  const lan = { "X-Real-IP": "192.168.50.30", "Content-Type": "application/json" };
+  const call = (route, body, headers = lan, method = "POST") => request(port, route, { method, headers, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) });
+  try {
+    const boss = await call("/api/test-login", { userId: "bojan", password: TEST_PASSWORD });
+    const bossHeaders = { ...lan, Cookie: boss.headers["set-cookie"][0], "X-CSRF-Token": JSON.parse(boss.body).csrfToken };
+    const password = "QA-osebno-geslo-2026";
+    const worker = JSON.parse((await call("/api/workers", { name: "LAN QA", email: "lan-qa@example.test" }, bossHeaders)).body).worker;
+    const route = `/api/workers/${worker.id}/lan-password`;
+    assert.equal((await call(route, { password }, { ...lan, Cookie: bossHeaders.Cookie }, "PUT")).status, 403);
+    assert.equal((await call(route, { password: "short" }, bossHeaders, "PUT")).status, 400);
+    const configured = await call(route, { password }, bossHeaders, "PUT");
+    assert.equal(configured.status, 200, configured.body);
+    assert.equal(JSON.parse(configured.body).worker.lanPasswordConfigured, true);
+    assert.ok(!configured.body.includes("scrypt-v1$"));
+    const credential = { email: " LAN-QA@EXAMPLE.TEST ", password };
+    assert.equal((await call("/api/auth/lan-login", credential, { ...lan, "X-Real-IP": "198.51.100.3" })).status, 404);
+    assert.equal((await call("/api/auth/lan-login", credential, { ...lan, Origin: "https://evil.test" })).status, 403);
+    for (const data of [{ ...credential, password: TEST_PASSWORD }, { ...credential, email: "unknown@example.test" }, { ...credential, password: "wrong" }]) {
+      assert.equal((await call("/api/auth/lan-login", data)).status, 401);
+    }
+    const login = await call("/api/auth/lan-login", credential);
+    assert.equal(login.status, 200, login.body);
+    const workerHeaders = { ...lan, Cookie: login.headers["set-cookie"][0], "X-CSRF-Token": JSON.parse(login.body).csrfToken };
+    assert.equal((await call(route, { password }, workerHeaders, "PUT")).status, 403);
+    assert.equal((await call("/api/me", undefined, workerHeaders, "GET")).status, 200);
+    const changed = "Drugo-QA-osebno-geslo";
+    assert.equal((await call(route, { password: changed }, bossHeaders, "PUT")).status, 200);
+    assert.equal((await call("/api/me", undefined, workerHeaders, "GET")).status, 401);
+    assert.equal((await call("/api/auth/lan-login", credential)).status, 401);
+    const newLogin = await call("/api/auth/lan-login", { ...credential, password: changed });
+    assert.equal(newLogin.status, 200);
+    assert.equal((await call(route, { disable: true }, bossHeaders, "PUT")).status, 200);
+    assert.equal((await call("/api/auth/lan-login", { ...credential, password: changed })).status, 401);
+    assert.equal((await call("/api/me", undefined, { ...lan, Cookie: newLogin.headers["set-cookie"][0] }, "GET")).status, 401);
+    assert.equal((await call(route, { password }, bossHeaders, "PUT")).status, 200);
+    const removed = await call(`/api/workers/${worker.id}`, { ...worker, active: false, dailyReport: { emailEnabled: false } }, bossHeaders, "PUT");
+    assert.equal(removed.status, 200, removed.body);
+    assert.equal((await call("/api/auth/lan-login", credential)).status, 401);
+    const opts = await call("/api/auth/options", undefined, { "X-Real-IP": "198.51.100.4" }, "GET");
+    assert.deepEqual(JSON.parse(opts.body), { google: true, password: false, test: false, support: false });
+    const { browserBackupState, restoredBrowserState } = require("../outputs/server");
+    const { sanitize } = require("../scripts/backup-indus-ure");
+    const secret = "qa-private-lan-credential-sentinel";
+    const db = { users: { bojan: { id: "bojan", role: "boss", lanPasswordHash: secret, email: "qa@example.test" } } };
+    assert.ok(!JSON.stringify(browserBackupState(db)).includes(secret));
+    assert.ok(!JSON.stringify(sanitize(db)).includes(secret));
+    assert.equal(restoredBrowserState(db, { snapshot: { users: { bojan: { lanPasswordHash: "attacker" } } } }).users.bojan.lanPasswordHash, secret);
+    for (let n = 0; n < 6; n++) assert.equal((await call("/api/auth/lan-login", { email: "limit@example.test", password: "invalid" }, { ...lan, "X-Real-IP": "192.168.50.40" })).status, 401);
+    assert.equal((await call("/api/auth/lan-login", { email: "limit@example.test", password: "invalid" }, { ...lan, "X-Real-IP": "192.168.50.40" })).status, 429);
+  } finally { await app.stop(); }
+});
 const { renderAppShell } = require("../outputs/app-shell");
 const { readServerSource } = require("./module-source.cjs");
 
@@ -1158,7 +1248,7 @@ test("prijavljen uporabnik dobi neblokirajoč zagonski okvir in PostgreSQL indek
   assert.match(html, /function applyOnlineCachedSnapshot\(snapshot\)/);
   assert.match(html, /const bootstrapPromise = api\("\/api\/bootstrap\?initial=1", \{ recoverSession: false \}\);/);
   assert.match(html, /get\("lan_support"\) === "1"/);
-  assert.match(html, /lanSupportRequested\)\s*\? loadLocalTestMode\(\)/);
+  assert.match(html, /await loadLocalTestMode\(\);\s*if \(error\?\.status === 401 && await startPublicGoogleLogin\(\)\)/);
   assert.match(html, /const cachedSnapshotPromise = usableOfflineSnapshot\(\)\.catch\(\(\) => null\);/);
   assert.match(html, /body\.app-hydrating #app \.main \{ pointer-events: none; \}/);
   assert.match(html, /setStartupHydrating\(false\);/);

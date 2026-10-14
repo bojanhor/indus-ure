@@ -14,6 +14,8 @@ const { renderAppShell } = require("./app-shell");
 const { backupCleanupIssue } = require("./backup-status");
 const planningCalendar = require("./planning-calendar");
 const workerAccess = require("./worker-access");
+const lanAuth = require("./lan-auth");
+const lanPasswordAttempts = lanAuth.createLimiter();
 const absences = require("./absence-model");
 const { createAbsenceHttp } = require("./absence-http");
 const { createCalendarSyncStore } = require("./calendar-sync-store");
@@ -553,20 +555,13 @@ function localTestRequestAllowed(req) {
   return remoteAddress === "127.0.0.1" || remoteAddress === "::1" || (TEST_LOCAL_NETWORK === "192.168.50." && remoteAddress.startsWith(TEST_LOCAL_NETWORK));
 }
 
-function requestComesFromLoopbackProxy(req) {
-  const remoteAddress = String(req.socket?.remoteAddress || "").replace(/^::ffff:/, "");
-  return remoteAddress === "127.0.0.1" || remoteAddress === "::1";
-}
-
-function forwardedLanAddress(req) {
-  return String(req.headers["x-real-ip"] || "").split(",")[0].trim().replace(/^::ffff:/, "");
-}
-
 function lanSupportRequestAllowed(req) {
-  const address = forwardedLanAddress(req);
-  return requestComesFromLoopbackProxy(req)
-    && TEST_LOCAL_NETWORK === "192.168.50."
-    && address.startsWith(TEST_LOCAL_NETWORK);
+  return Boolean(lanAuth.lanAddress(req, TEST_LOCAL_NETWORK));
+}
+
+function lanPasswordLoginEnabled(req) {
+  return LAN_SUPPORT_LOGIN_ENABLED && lanSupportRequestAllowed(req)
+    && (NODE_ENV !== "production" || req.socket.encrypted || req.headers["x-forwarded-proto"] === "https");
 }
 
 function lanSupportLoginEnabled(req) {
@@ -581,7 +576,7 @@ function localTestLoginEnabled(req) {
 }
 
 function localTestLoginKey(req) {
-  return String(req.socket?.remoteAddress || "unknown").replace(/^::ffff:/, "");
+  return lanAuth.lanAddress(req, TEST_LOCAL_NETWORK) || String(req.socket?.remoteAddress || "unknown").replace(/^::ffff:/, "");
 }
 
 function localTestLoginRateAllowed(req, now = Date.now()) {
@@ -3195,6 +3190,7 @@ function publicWorkerManagementUser(db, user) {
     role: user.role || "worker",
     workerKind: workerAccess.kind(user),
     active: user.active !== false,
+    lanPasswordConfigured: Boolean(user.lanPasswordHash),
     avatarInitial: user.avatarInitial || "",
     avatarColor: user.avatarColor || "",
     employmentType: user.employmentType || "contractor",
@@ -5124,6 +5120,39 @@ async function handleApi(req, res) {
       });
       return;
     }
+    if (url.pathname === "/api/auth/options" && req.method === "GET") {
+      sendJson(res, 200, {
+        google: googleReady(),
+        password: lanPasswordLoginEnabled(req),
+        test: LOCAL_TEST_MODE && localTestLoginEnabled(req),
+        support: lanSupportLoginEnabled(req) && url.searchParams.get("support") === "1"
+      });
+      return;
+    }
+    if (url.pathname === "/api/auth/lan-login" && req.method === "POST") {
+      if (!lanPasswordLoginEnabled(req)) { sendJson(res, 404, { error: "Ni na voljo." }); return; }
+      if (!lanAuth.sameOriginLogin(req)) { sendJson(res, 403, { error: "Prijava mora potekati na strani INDUS URE." }); return; }
+      const body = await readBody(req);
+      const email = String(body.email || "").trim().toLowerCase().slice(0, 254);
+      const address = lanAuth.lanAddress(req, TEST_LOCAL_NETWORK);
+      if (!lanPasswordAttempts.allowed(address, email)) {
+        sendJson(res, 429, { error: "Preveč neuspelih poskusov. Počakaj deset minut." }); return;
+      }
+      const db = await readRequestDb(req);
+      const user = userByEmail(db, email);
+      if (!await lanAuth.verify(body.password, user?.lanPasswordHash)) {
+        lanPasswordAttempts.fail(address, email);
+        sendJson(res, 401, { error: "E-poštni naslov ali geslo INDUS ni pravilno." }); return;
+      }
+      lanPasswordAttempts.clear(address, email);
+      const token = createSession(db, user.id);
+      db.sessions[sessionTokenHash(token)].authMethod = "lan-password";
+      recordAuditLog(db, { actor: user, action: "auth.lan.login", targetType: "session", context: { provider: "lan-password" } });
+      await writeDbAsync(db);
+      setSessionCookie(req, res, token);
+      sendJson(res, 200, { ok: true, user: publicUser(user), csrfToken: db.sessions[sessionTokenHash(token)].csrfToken });
+      return;
+    }
     if (url.pathname === "/api/test-mode" && req.method === "GET") {
       const supportLogin = lanSupportLoginEnabled(req);
       sendJson(res, 200, {
@@ -5135,8 +5164,7 @@ async function handleApi(req, res) {
     }
 
     if (url.pathname === "/api/test-login" && req.method === "POST") {
-      // This endpoint is intentionally unavailable in production and from any
-      // network except the current local subnet/loopback.
+      // Separate test/support credentials; never used by the ordinary LAN form.
       if (!localTestLoginEnabled(req)) {
         sendJson(res, 404, { error: "Ni na voljo." });
         return;
@@ -5154,7 +5182,7 @@ async function handleApi(req, res) {
       }
       const db = await readRequestDb(req);
       const user = db.users?.[userId];
-      if (!user) {
+      if (!user || user.active === false) {
         sendJson(res, 403, { error: "Testni uporabnik ni na voljo." });
         return;
       }
@@ -5681,6 +5709,29 @@ async function handleApi(req, res) {
       return;
     }
 
+    const lanPasswordMatch = /^\/api\/workers\/([^/]+)\/lan-password$/.exec(url.pathname);
+    if (lanPasswordMatch && req.method === "PUT") {
+      const actor = await requireUser(req, res);
+      if (!actor) return;
+      if (actor.role !== "boss") { sendJson(res, 403, { error: "LAN-gesla lahko nastavlja samo šef." }); return; }
+      const body = await readBody(req);
+      const db = await readRequestDb(req);
+      const worker = db.users?.[decodeURIComponent(lanPasswordMatch[1])];
+      if (!worker) { sendJson(res, 404, { error: "Delavec ne obstaja." }); return; }
+      if (body.disable !== true && (!validEmailAddress(worker.email) || worker.active === false)) {
+        sendJson(res, 400, { error: "Najprej shrani veljaven Google e-poštni naslov in aktiviraj delavca." }); return;
+      }
+      const error = body.disable === true ? "" : lanAuth.passwordError(body.password);
+      if (error) { sendJson(res, 400, { error }); return; }
+      worker.lanPasswordHash = body.disable === true ? "" : await lanAuth.hash(body.password);
+      for (const [id, session] of Object.entries(db.sessions || {})) {
+        if (session.userId === worker.id && session.authMethod === "lan-password") delete db.sessions[id];
+      }
+      recordAuditLog(db, { actor, action: body.disable === true ? "auth.lan.disabled" : "auth.lan.reset", targetType: "worker", targetId: worker.id });
+      await writeDbAsync(db);
+      sendJson(res, 200, { ok: true, worker: publicWorkerManagementUser(db, worker) });
+      return;
+    }
     const workerMatch = url.pathname === "/api/workers/billing" ? null : /^\/api\/workers\/([^/]+)$/.exec(url.pathname);
     if (workerMatch && req.method === "PUT") {
       const user = await requireUser(req, res);
