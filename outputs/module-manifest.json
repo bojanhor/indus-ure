@@ -1154,6 +1154,7 @@
     "factory": "createTaskDialog",
     "source": "html",
     "exports": [
+      "confirmProjectHoursBeforeSave",
       "suggestedNoteTimeRange",
       "openTodoDialog",
       "navigateReportTodo",
@@ -1173,6 +1174,9 @@
       "installTaskCloseBindings1"
     ],
     "callbacks": [
+      "api",
+      "closeModalBeforeTransition",
+      "isNetworkError",
       "acquireTodoEditLockForDialog",
       "activeWorkerId",
       "applyMealDefaults",
@@ -1260,9 +1264,11 @@
       "console",
       "Date",
       "document",
+      "encodeURIComponent",
       "Error",
       "history",
       "HTMLElement",
+      "JSON",
       "location",
       "Math",
       "Number",
@@ -1308,6 +1314,7 @@
       "installCompletionBindings1"
     ],
     "callbacks": [
+      "confirmProjectHoursBeforeSave",
       "acquireTodoEditLockForDialog",
       "activeWorkerId",
       "announceQueuedLateTimeEntryReport",

@@ -2,6 +2,63 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 const { TEST_PASSWORD, startIsolatedTestApp } = require("./e2e/test-app.cjs");
 
+test("existing project hours lookup is read-only, matches source group/day/worker and excludes trash", { timeout: 30_000 }, async () => {
+  const app = await startIsolatedTestApp();
+  try {
+    const loginAs = async userId => {
+      const response = await fetch(`${app.baseUrl}/api/test-login`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ userId, password: TEST_PASSWORD }) });
+      const session = await response.json();
+      const headers = { "Content-Type": "application/json", Cookie: response.headers.get("set-cookie").split(";", 1)[0], "X-CSRF-Token": session.csrfToken };
+      return async (path, method = "GET", body) => {
+        const response = await fetch(app.baseUrl + path, { method, headers, ...(body ? { body: JSON.stringify(body) } : {}) });
+        return { status: response.status, data: await response.json() };
+      };
+    };
+    const api = await loginAs("bojan");
+    const base = { title: "Lookup source", client: "Lookup client", status: "open", date: "2032-10-14", syncUser: "ibro", assigneeIds: ["ibro", "bojan"] };
+    const planned = await api("/api/todos", "POST", base);
+    assert.equal(planned.status, 200, JSON.stringify(planned.data));
+    const sources = planned.data.todos.filter(item => item.title === base.title);
+    assert.equal(sources.length, 2);
+    const source = sources.find(item => item.syncUser === "ibro");
+    const alias = sources.find(item => item.syncUser === "bojan");
+    const create = async (title, overrides = {}) => {
+      const response = await api("/api/todos", "POST", { ...base, title, status: "execution", assigneeIds: ["ibro"], clientId: source.clientId, sourceProjectTodoId: source.id, start: "08:00", end: "09:00", ...overrides });
+      assert.equal(response.status, 200, JSON.stringify(response.data));
+      return response.data.todos.find(item => item.title === title);
+    };
+    const first = await create("First hours");
+    const second = await create("Second hours via other assignment", { sourceProjectTodoId: alias.id, start: "09:00", end: "10:00" });
+    await create("Different day", { date: "2032-10-15" });
+    await create("Different worker", { syncUser: "bojan", assigneeIds: ["bojan"] });
+    const unrelated = await api("/api/todos", "POST", { ...base, assigneeIds: ["ibro"] });
+    const otherSource = unrelated.data.todos.find(item => item.title === base.title && !sources.some(s => s.id === item.id));
+    await create("Same title, different source", { sourceProjectTodoId: otherSource.id, start: "10:00", end: "11:00" });
+    const path = `/api/todos/${source.id}/project-hours?date=${base.date}&workerId=ibro`;
+    const before = await api("/api/todos");
+    const lookup = await api(path);
+    assert.equal(lookup.status, 200);
+    assert.equal(lookup.data.workerName, "Ibro");
+    assert.deepEqual(lookup.data.entries, [first, second].map(({ id, start, end }) => ({ id, start, end })));
+    assert.deepEqual((await api("/api/todos")).data, before.data, "GET cannot alter entries");
+    assert.deepEqual((await api(path.replace(base.date, "2032-10-16"))).data.entries, []);
+    assert.equal((await api(path.replace(base.date, "not-a-date"))).status, 400);
+    const workerApi = await loginAs("ibro");
+    assert.equal((await workerApi(path)).status, 200);
+    assert.equal((await workerApi(path.replace("workerId=ibro", "workerId=bojan"))).status, 403);
+    const privatePlan = await api("/api/todos", "POST", { ...base, title: "Private plan", syncUser: "bojan", assigneeIds: ["bojan"] });
+    const privateId = privatePlan.data.todos.find(item => item.title === "Private plan").id;
+    assert.equal((await workerApi(path.replace(source.id, privateId))).status, 404);
+    assert.equal((await fetch(app.baseUrl + path)).status, 401);
+    // Settled entries still warrant a warning and retain their existing edit lock.
+    const settled = await api("/api/client-bills", "POST", { clientId: first.clientId, eventIds: [first.assignmentGroupId || first.id] });
+    assert.equal(settled.status, 201, JSON.stringify(settled.data));
+    assert.equal((await api(path)).data.entries.length, 2);
+    assert.equal((await api(`/api/todos/${second.id}`, "DELETE")).status, 200);
+    assert.deepEqual((await api(path)).data.entries.map(item => item.id), [first.id]);
+  } finally { await app.stop(); }
+});
+
 test("customer PDF always uses billable hours; event sharing retains actual time and business values stay unchanged", { timeout: 40_000 }, async () => {
   const app = await startIsolatedTestApp();
   try {

@@ -5963,6 +5963,39 @@ async function handleApi(req, res) {
       return;
     }
 
+    const projectHoursMatch = url.pathname.match(/^\/api\/todos\/([^/]+)\/project-hours$/);
+    if (projectHoursMatch && req.method === "GET") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      const db = await readRequestDb(req);
+      const source = db.todos.find(item => item.id === projectHoursMatch[1] && !isTrashedTodo(item));
+      if (!source || !canManageTodo(user, source)) {
+        sendJson(res, 404, { error: "Izvorno opravilo ni na voljo." });
+        return;
+      }
+      const date = url.searchParams.get("date") || "";
+      const workerId = cleanUserId(url.searchParams.get("workerId"));
+      if (!isDateKey(date) || !workerId) {
+        sendJson(res, 400, { error: "Izberi datum in delavca." });
+        return;
+      }
+      if (!canRecordHoursFor(db, user, workerId)) {
+        sendJson(res, 403, { error: "Za tega delavca ne moreš vpisovati ur." });
+        return;
+      }
+      // The source link names an assignment, but all assignments of the same
+      // planning event represent one source. Include settled/archived hours;
+      // only entries in the trash cease to count as existing work.
+      const sourceIds = new Set(todoAssignmentItems(db, source).map(item => item.id));
+      const entries = db.todos.filter(item => item.status === "execution"
+        && !isTrashedTodo(item) && item.date === date && item.syncUser === workerId
+        && sourceIds.has(item.sourceProjectTodoId))
+        .map(item => ({ id: item.id, start: item.start || "", end: item.end || "" }))
+        .sort((a, b) => a.start.localeCompare(b.start) || a.id.localeCompare(b.id));
+      sendJson(res, 200, { entries, workerName: db.users[workerId].name || workerId });
+      return;
+    }
+
     if (url.pathname === "/api/todos/trash" && req.method === "GET") {
       const user = await requireUser(req, res);
       if (!user) return;

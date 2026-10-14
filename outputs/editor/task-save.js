@@ -12,6 +12,7 @@ function createTaskSave({
   clearTodoCreationDraft,
   clearTodoEditLockState,
   closeToolsMenu,
+  confirmProjectHoursBeforeSave,
   createLocalUuid,
   deleteTodoFromDialog,
   duplicateTodoFromCurrent,
@@ -322,6 +323,9 @@ async function saveTodoFromDialog({ closeAfterSave = true, handover = false } = 
       // Check before confirmations, optimistic closing and the automatic
       // missing-time slot path, which intentionally skips full validation.
       if (!validateTodoHoursClient(todo)) return;
+      if (!id && selectedStatus === "execution" && sourceProjectTodoId && todo.date) {
+        if (handover || !await confirmProjectHoursBeforeSave(todo)) return;
+      }
       const previousClientBillableMinutes = manualClientBillableMinutes(existing?.clientBillableMinutes);
       const workerHoursChanged = Boolean(existing)
         && Math.round(duration(existing) * 60) !== Math.round(duration(todo) * 60);

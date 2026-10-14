@@ -4,6 +4,9 @@ function createTaskDialog({
   state,
   acquireTodoEditLockForDialog,
   activeWorkerId,
+  api,
+  closeModalBeforeTransition,
+  isNetworkError,
   applyMealDefaults,
   applyTodoChangeNoticeToForm,
   autosizeTodoNarrativeFields,
@@ -58,6 +61,111 @@ function createTaskDialog({
   workerDefaultHourlyRate,
   moduleValues
 }) {
+let projectHoursApproval = "";
+let projectHoursOpening = false;
+let taskDialogGeneration = 0;
+
+async function chooseExistingProjectHours(todo, generation) {
+      const sourceId = String(todo.sourceProjectTodoId || "");
+      const workerId = String(todo.syncUser || "");
+      const date = String(todo.date || dateKey(new Date()));
+      let data;
+      let offline = false;
+      try {
+        data = await api(`/api/todos/${encodeURIComponent(sourceId)}/project-hours?date=${encodeURIComponent(date)}&workerId=${encodeURIComponent(workerId)}`);
+      } catch (error) {
+        if (!isNetworkError(error)) throw error;
+        offline = true;
+        const source = state.todos.find(item => item.id === sourceId);
+        const sourceIds = new Set(state.todos.filter(item => item.id === sourceId
+          || (source?.assignmentGroupId && item.assignmentGroupId === source.assignmentGroupId)).map(item => item.id));
+        data = {
+          entries: state.todos.filter(item => item.status === "execution" && !item.trashedAt
+            && item.date === date && item.syncUser === workerId && sourceIds.has(item.sourceProjectTodoId)),
+          workerName: timeEntryTargetUsers().find(item => item.id === workerId)?.name || workerId
+        };
+      }
+      if (!$("todoDialog").open || generation !== taskDialogGeneration) return { action: "cancel" };
+      const entries = data.entries.slice().sort((a, b) => String(a.start).localeCompare(String(b.start)) || a.id.localeCompare(b.id));
+      const approval = JSON.stringify([sourceId, workerId, date, offline, entries.map(item => [item.id, item.start, item.end])]);
+      if ((!entries.length && !offline) || projectHoursApproval === approval) return { action: "new", approval };
+      const dialog = $("projectHoursExistsDialog");
+      $("projectHoursExistsTitle").textContent = entries.length ? "Ure so že vpisane" : "Preverjanje brez povezave";
+      const dateLabel = date.split("-").reverse().join(". ");
+      $("projectHoursExistsMessage").textContent = `${data.workerName} · ${dateLabel}\nZa to opravilo ${entries.length ? "že obstajajo spodnji vpisi ur. Izberi vpis za urejanje ali izrecno ustvari novega." : "ni shranjenih vpisov v tej napravi."}${offline ? "\nBrez povezave: novih vpisov z drugih naprav ni mogoče preveriti." : ""}`;
+      if (entries.length && !$("todoFormId").value) $("projectHoursExistsMessage").textContent += "\nČe izbereš urejanje obstoječega, se trenutni novi vpis zavrže.";
+      const list = $("projectHoursExistsList");
+      list.replaceChildren();
+      entries.forEach((entry, index) => {
+        const label = document.createElement("label");
+        const radio = document.createElement("input");
+        radio.type = "radio";
+        radio.name = "existingProjectHours";
+        radio.value = entry.id;
+        radio.checked = index === 0;
+        const text = document.createElement("span");
+        text.textContent = `${entry.start || "—"}–${entry.end || "—"}`;
+        label.append(radio, text);
+        list.append(label);
+      });
+      $("projectHoursExistsEdit").hidden = !entries.length;
+      return new Promise(resolve => {
+        let settled = false;
+        const finish = async choice => {
+          if (settled) return;
+          settled = true;
+          dialog.removeEventListener("close", cancelled);
+          await closeModalBeforeTransition(dialog);
+          resolve(choice);
+        };
+        const cancelled = () => finish({ action: "cancel" });
+        dialog.addEventListener("close", cancelled, { once: true });
+        $("projectHoursExistsClose").onclick = cancelled;
+        $("projectHoursExistsCreate").onclick = () => finish({ action: "new", approval });
+        $("projectHoursExistsEdit").onclick = () => finish({ action: "edit", id: list.querySelector("input:checked")?.value });
+        dialog.showModal();
+        (entries.length ? $("projectHoursExistsEdit") : $("projectHoursExistsClose")).focus({ preventScroll: true });
+      });
+    }
+
+async function openExistingProjectHours(id, generation) {
+      // Fetch the current entry before dismissing any unsaved new form. Normal
+      // editor locks/settlement restrictions still apply to the existing entry.
+      let todo;
+      try {
+        todo = (await api(`/api/todos/${encodeURIComponent(id)}`)).todo;
+      } catch (error) {
+        if (!isNetworkError(error)) throw error;
+        todo = state.todos.find(item => item.id === id);
+        if (!todo) throw error;
+      }
+      if (!$("todoDialog").open || generation !== taskDialogGeneration) return;
+      const day = state.todoDialogReturnDayDate;
+      const view = state.todoDialogReturnDayView;
+      state.todoDialogReturnDayDate = "";
+      state.todoDialogReturnDayView = null;
+      if (!$("todoFormId").value) {
+        state.todoCreationDraftCommitted = true;
+        await clearTodoCreationDraft();
+      }
+      state.todoHoursSourceId = "";
+      await releaseTodoEditLockForDialog();
+      await closeModalBeforeTransition($("todoDialog"));
+      await openTodoDialog(todo);
+      state.todoDialogReturnDayDate = day;
+      state.todoDialogReturnDayView = view;
+    }
+
+async function confirmProjectHoursBeforeSave(todo) {
+      const generation = taskDialogGeneration;
+      const choice = await chooseExistingProjectHours(todo, generation);
+      if (!$("todoDialog").open || generation !== taskDialogGeneration) return false;
+      if (choice.action === "edit") await openExistingProjectHours(choice.id, generation);
+      if (choice.action !== "new") return false;
+      projectHoursApproval = choice.approval;
+      return true;
+    }
+
 function syncTodoFormFooterActions() {
       const pairs = [
         ["deleteTodoFromDialog", "todoFooterDelete"],
@@ -117,6 +225,8 @@ function syncReportTodoDialogNavigation(todoId, navigationIds = null) {
     }
 
 async function openTodoDialog(todo = {}, { reportNavigationIds = null } = {}) {
+      taskDialogGeneration++;
+      projectHoursApproval = "";
       clearFormValidationError($("todoForm"));
       setTodoDialogSaving(false);
       const requestedCreationMode = todoCreationDraftMode(todo);
@@ -377,45 +487,56 @@ function setTodoDialogSaving(saving) {
     }
 
 async function openHoursTodoFromCurrent() {
+      if (projectHoursOpening) return;
       const sourceId = $("todoFormId").value;
       const source = state.todos.find((todo) => todo.id === sourceId);
       if (!source) return;
       if (!moduleValues.projectHoursSourceStatuses.has(source.status)) throw new Error("Ta vrsta zapisa ni opravilo, na katero lahko vpišeš nove ure.");
-      state.todoHoursSourceOriginal = {
-        status: source.status,
-        done: Boolean(source.done)
-      };
-      await releaseTodoEditLockForDialog();
-      const dialog = $("todoDialog");
-      if (dialog.open) {
-        // close fires asynchronously. A zero-delay timer can reopen the form
-        // before its old close handlers run and clear the new source ID/photos.
-        await new Promise((resolve) => {
-          dialog.addEventListener("close", resolve, { once: true });
-          dialog.close();
+      projectHoursOpening = true;
+      try {
+        const generation = taskDialogGeneration;
+        const workerId = activeWorkerId() || source.syncUser || state.user?.id || "";
+        const choice = await chooseExistingProjectHours({ sourceProjectTodoId: sourceId, syncUser: workerId, date: source.date }, generation);
+        if (!$("todoDialog").open || generation !== taskDialogGeneration) return;
+        if (choice.action === "edit") return await openExistingProjectHours(choice.id, generation);
+        if (choice.action !== "new") return;
+        state.todoHoursSourceOriginal = {
+          status: source.status,
+          done: Boolean(source.done)
+        };
+        await releaseTodoEditLockForDialog();
+        const returnDay = state.todoDialogReturnDayDate;
+        const returnView = state.todoDialogReturnDayView;
+        state.todoDialogReturnDayDate = "";
+        state.todoDialogReturnDayView = null;
+        await closeModalBeforeTransition($("todoDialog"));
+        await openTodoDialog({
+          _hoursSourceId: source.id,
+          client: source.client,
+          clientId: source.clientId,
+          title: source.title,
+          date: source.date,
+          start: "",
+          end: "",
+          status: "execution",
+          urgent: false,
+          warranty: Boolean(source.warranty),
+          syncUser: workerId,
+          _hoursAssigneeIds: [workerId],
+          sourceProjectTitle: source.title || "",
+          photos: (source.photos || []).map((photo) => ({ ...photo })),
+          driveFiles: (source.driveFiles || []).map((file) => ({ ...file })),
+          billingHourlyRate: source.billingHourlyRate ?? null,
+          billingKm: 0,
+          clientKm: 0,
+          clientVehicle: "personal"
         });
+        state.todoDialogReturnDayDate = returnDay;
+        state.todoDialogReturnDayView = returnView;
+        projectHoursApproval = choice.approval;
+      } finally {
+        projectHoursOpening = false;
       }
-      await openTodoDialog({
-        _hoursSourceId: source.id,
-        client: source.client,
-        clientId: source.clientId,
-        title: source.title,
-        date: source.date,
-        start: "",
-        end: "",
-        status: "execution",
-        urgent: false,
-        warranty: Boolean(source.warranty),
-        syncUser: activeWorkerId() || source.syncUser || state.user?.id || "",
-        _hoursAssigneeIds: [activeWorkerId() || source.syncUser || state.user?.id || ""],
-        sourceProjectTitle: source.title || "",
-        photos: (source.photos || []).map((photo) => ({ ...photo })),
-        driveFiles: (source.driveFiles || []).map((file) => ({ ...file })),
-        billingHourlyRate: source.billingHourlyRate ?? null,
-        billingKm: 0,
-        clientKm: 0,
-        clientVehicle: "personal"
-      });
     }
 
 async function openStandaloneHoursDialog(date = dateKey(new Date()), { adminCreate = false, draft = {} } = {}) {
@@ -760,6 +881,7 @@ function installTaskCloseBindings1() {
 }
 
   return {
+    confirmProjectHoursBeforeSave,
     suggestedNoteTimeRange,
     openTodoDialog,
     navigateReportTodo,

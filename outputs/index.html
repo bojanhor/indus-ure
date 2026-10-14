@@ -3980,7 +3980,11 @@
     .modal-global-notice { position: sticky; top: 0; z-index: 40; display: flex; align-items: flex-start; gap: 9px; margin: 0; padding: 10px 14px; border-bottom: 1px solid #b9d1c8; background: #173e4a; color: #fff; box-shadow: 0 5px 14px rgba(14, 30, 36, 0.18); font-weight: 800; line-height: 1.35; }
     .modal-global-notice[hidden] { display: none; }
     .modal-global-notice button { min-width: 32px; min-height: 32px; padding: 0; color: #173e4a; background: #f4fbf7; }
-    #appConfirmDialog, #appPromptDialog, #quickClientDialog { width: min(460px, calc(100vw - 26px)); }
+    #appConfirmDialog, #appPromptDialog, #quickClientDialog, #projectHoursExistsDialog { width: min(460px, calc(100vw - 26px)); }
+    #projectHoursExistsList { display: grid; gap: 8px; margin: 14px 0; }
+    #projectHoursExistsList label { display: flex; align-items: center; gap: 12px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; }
+    #projectHoursExistsList input { width: auto; margin: 0; }
+    #projectHoursExistsDialog .actions { flex-wrap: wrap; }
     .app-dialog-message { margin: 0; color: var(--ink); line-height: 1.5; white-space: pre-line; }    .client-autocomplete {
       position: relative;
       min-width: 0;
@@ -6872,6 +6876,14 @@
       <div class="modal-body"><p class="app-dialog-message" id="appConfirmMessage"></p><div class="actions"><button class="secondary" id="appConfirmCancel" type="button">Prekliči</button><button class="primary" id="appConfirmAccept" type="button">Potrdi</button></div></div>
     </form>
   </dialog>
+  <dialog id="projectHoursExistsDialog" aria-labelledby="projectHoursExistsTitle">
+    <div class="modal-head"><h3 id="projectHoursExistsTitle">Ure so že vpisane</h3><button class="icon-btn" id="projectHoursExistsClose" type="button" aria-label="Zapri">&times;</button></div>
+    <div class="modal-body">
+      <p class="app-dialog-message" id="projectHoursExistsMessage"></p>
+      <div id="projectHoursExistsList" role="group" aria-label="Obstoječi vpisi ur"></div>
+      <div class="actions"><button class="primary" id="projectHoursExistsEdit" type="button">Uredi obstoječi vpis</button><button class="secondary" id="projectHoursExistsCreate" type="button">Ustvari nov vpis</button></div>
+    </div>
+  </dialog>
   <dialog id="appPromptDialog">
     <form method="dialog">
       <div class="modal-head"><h3 id="appPromptTitle">Vnos</h3><button class="icon-btn" id="appPromptClose" type="button" title="Zapri">&times;</button></div>
@@ -7475,6 +7487,7 @@ const {
 
 /* @indus-module:editor/task-dialog */
 const {
+  confirmProjectHoursBeforeSave,
   suggestedNoteTimeRange,
   openTodoDialog,
   navigateReportTodo,
@@ -7497,6 +7510,9 @@ const {
     state,
     acquireTodoEditLockForDialog: (...args) => acquireTodoEditLockForDialog(...args),
     activeWorkerId: (...args) => activeWorkerId(...args),
+    api: (...args) => api(...args),
+    closeModalBeforeTransition: (...args) => closeModalBeforeTransition(...args),
+    isNetworkError: (...args) => isNetworkError(...args),
     applyMealDefaults: (...args) => applyMealDefaults(...args),
     applyTodoChangeNoticeToForm: (...args) => applyTodoChangeNoticeToForm(...args),
     autosizeTodoNarrativeFields: (...args) => autosizeTodoNarrativeFields(...args),
@@ -7579,6 +7595,7 @@ const {
     clearTodoCreationDraft: (...args) => clearTodoCreationDraft(...args),
     clearTodoEditLockState: (...args) => clearTodoEditLockState(...args),
     closeToolsMenu: (...args) => closeToolsMenu(...args),
+    confirmProjectHoursBeforeSave: (...args) => confirmProjectHoursBeforeSave(...args),
     createLocalUuid: (...args) => createLocalUuid(...args),
     deleteTodoFromDialog: (...args) => deleteTodoFromDialog(...args),
     duplicateTodoFromCurrent: (...args) => duplicateTodoFromCurrent(...args),
