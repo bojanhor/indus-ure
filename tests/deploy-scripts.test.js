@@ -18,6 +18,7 @@ test("deployment requires content-bound PostgreSQL QA and a successful backup be
   assert.match(qa, /--upgrade/);
   assert.match(qa, /trap cleanup EXIT/);
   assert.match(windows, /Invoke-Native npm.cmd run test:e2e/);
+  assert.match(windows, /Invoke-Native npm.cmd run test:e2e:firefox/);
   assert.match(windows, /run-indus-ure-postgres-qa \$release && sudo \/usr\/local\/sbin\/deploy-indus-ure/);
 });
 

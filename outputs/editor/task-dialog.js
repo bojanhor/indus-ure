@@ -599,12 +599,14 @@ async function deleteTodoFromDialog() {
       const id = $("todoFormId").value;
       if (!id || !await showAppConfirm("Premaknem opravilo v Izbrisano? Obnovitev je možna 30 dni.")) return;
       const returnDayDate = state.todoDialogReturnDayDate;
+      const returnDayView = state.todoDialogReturnDayView;
       state.todoDialogReturnDayDate = "";
+      state.todoDialogReturnDayView = null;
       await deleteTodoFromServer(id);
       $("todoDialog").close();
       if (returnDayDate) {
         await new Promise((resolve) => setTimeout(resolve, 0));
-        openDayTimeline(returnDayDate);
+        openDayTimeline(returnDayDate, { viewSnapshot: returnDayView });
       }
     }
 
@@ -715,12 +717,14 @@ function installTaskCloseBindings1() {
     $("todoDialog").addEventListener("close", () => { if ($("completionRequestDialog").open) $("completionRequestDialog").close(); });
     $("todoDialog").addEventListener("close", () => {
       const returnDayDate = state.todoDialogReturnDayDate;
+      const returnDayView = state.todoDialogReturnDayView;
       state.todoDialogReturnDayDate = "";
+      state.todoDialogReturnDayView = null;
       // A normal edit/cancel from daily view returns to the same day. Hour-entry
       // flows have their own completion path immediately below.
       if (!returnDayDate || state.todoHoursSourceId || state.todoHoursFixingTime) return;
       setTimeout(() => {
-        if (!$("todoDialog").open && !$("dayTimelineDialog").open) openDayTimeline(returnDayDate);
+        if (!$("todoDialog").open && !$("dayTimelineDialog").open) openDayTimeline(returnDayDate, { viewSnapshot: returnDayView });
       }, 0);
     });
     $("todoDialog").addEventListener("close", () => {

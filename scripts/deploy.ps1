@@ -49,6 +49,7 @@ try {
   $fullCommit = (& git rev-parse HEAD).Trim()
   Write-Host "Obvezni izolirani brskalniski testi"
   Invoke-Native npm.cmd run test:e2e
+  Invoke-Native npm.cmd run test:e2e:firefox
   if ($LASTEXITCODE -ne 0 -or $fullCommit -notmatch '^[0-9a-f]{40}$') {
     throw "Ni mogoče dolociti trenutnega commita."
   }

@@ -47,7 +47,12 @@ lokalno JSON datoteko; produkcija brez PostgreSQL namenoma ne zažene.
 ```bash
 npm test
 npm run test:e2e
+npm run test:e2e:firefox
 ```
+
+Pred prvim brskalniškim testom namesti pogona z `npx playwright install chromium firefox`.
+Objava zahteva tudi Firefoxov regresijski preizkus odpiranja dnevnega koledarja
+(dotik, miška, Nazaj in ohranitev položaja); testni podatki so izolirani od produkcije.
 
 Testi preverijo sintakso, dostopne vloge, lokalno identiteto strank, odstranitev
 Sheets/Calendar poti, varne seje, PWA in backup poti.

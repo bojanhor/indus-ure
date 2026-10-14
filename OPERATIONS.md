@@ -115,7 +115,7 @@ Revizijska zaščita ne more zaščititi pred administratorjem, ki jo obide.
 ## Obvezni postopek objave Ure
 
 1. Čisto commitano stanje, pregled diff-a in brez sprememb tujih projektov.
-2. `npm test` in izolirani `npm run test:e2e`.
+2. `npm test`, izolirani `npm run test:e2e` in `npm run test:e2e:firefox`.
 3. `scripts/deploy.ps1 -IdentityFile <zasebni-kljuc>`: objava commita v Git,
    prenos arhiva in preverjanje SHA-256, priprava točno te izdaje.
 4. `run-indus-ure-postgres-qa <revizija>` je obvezen tudi pri ročni objavi:
