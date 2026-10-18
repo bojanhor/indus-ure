@@ -44,6 +44,21 @@ async function stop(child) {
   if (child.exitCode === null) child.kill("SIGKILL");
 }
 
+async function readPersistedJson(file) {
+  // The legacy JSON backend writes synchronously in the server process, but
+  // this separate process can read during a subsequent background write.
+  // Retry only an incomplete JSON read, never a business-value assertion.
+  // Persistent corruption still fails; PostgreSQL has separate transaction tests.
+  for (let attempt = 0; ; attempt += 1) {
+    const contents = await fs.readFile(file, "utf8");
+    try { return JSON.parse(contents); }
+    catch (error) {
+      if (!(error instanceof SyntaxError) || attempt >= 9) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+  }
+}
+
 test("časovna serija shrani premik datuma in zaokrožene ure atomarno", { timeout: 15_000 }, async () => {
   const port = 19600 + Math.floor(Math.random() * 900);
   const dataDir = path.join(os.tmpdir(), `indus-ure-day-timeline-${process.pid}-${Date.now()}`);
@@ -144,7 +159,7 @@ test("časovna serija shrani premik datuma in zaokrožene ure atomarno", { timeo
       { date: "2026-07-22", endDate: "2026-07-22", start: "10:15", end: "11:45" }
     );
 
-    const persisted = JSON.parse(await fs.readFile(path.join(dataDir, "db.json"), "utf8"));
+    const persisted = await readPersistedJson(path.join(dataDir, "db.json"));
     const persistedTodo = persisted.todos.find((todo) => todo.id === created.id);
     assert.deepEqual(
       { date: persistedTodo?.date, endDate: persistedTodo?.endDate, start: persistedTodo?.start, end: persistedTodo?.end },
@@ -204,7 +219,7 @@ test("časovna serija shrani premik datuma in zaokrožene ure atomarno", { timeo
       })
     });
     assert.equal(atomicReject.status, 409, atomicReject.body);
-    const afterRejectedBatch = JSON.parse(await fs.readFile(path.join(dataDir, "db.json"), "utf8"));
+    const afterRejectedBatch = await readPersistedJson(path.join(dataDir, "db.json"));
     const unchanged = afterRejectedBatch.todos.find((todo) => todo.id === created.id);
     assert.deepEqual({ start: unchanged?.start, end: unchanged?.end }, { start: "11:00", end: "12:00" }, "Neuspešna serija ne sme delno zapisati prve spremembe.");
   } finally {
