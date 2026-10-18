@@ -58,7 +58,7 @@ function latestCorrection(db, predicate) {
 function workerCorrectionSnapshot(db, todo, fallback = {}) {
   const raw = payrollLineForTodo(db, todo, todo?.syncUser || todo?.createdBy || "");
   const hourlyRate = nonnegativeNumber(todo?.billingHourlyRate, nonnegativeNumber(fallback.hourlyRate, 0, 10_000), 10_000);
-  const kmRate = nonnegativeNumber(fallback.kmRate, nonnegativeNumber(db.settings?.billing?.workerOwnVehicleKmRate, 0, 1_000), 1_000);
+  const kmRate = nonnegativeNumber(fallback.kmRate, nonnegativeNumber(raw?.kmRate, 0, 1_000), 1_000);
   const minutes = Number(raw?.minutes || 0);
   const workerKm = nonnegativeNumber(todo?.billingKm, 0, 1_000_000);
   const commuteKm = nonnegativeNumber(fallback.commuteKm, 0, 1_000_000);

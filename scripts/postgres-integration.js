@@ -91,6 +91,7 @@ async function main() {
     const absenceProbe = { id: "qa-rollback-absence", workerId: "ibro", date: "2026-10-12", endDate: "2026-10-13", reason: "vacation", viewerIds: ["ibro", "bojan"] };
     const probeDb = await store.load();
     probeDb.absences = [...(probeDb.absences || []), absenceProbe];
+    probeDb.users.ibro.billing.workerOwnVehicleKmRate = 0.49;
     await store.save(probeDb);
     // This mode already requires a private QA database. Exercise the deployed
     // version against the upgraded clone, never against production itself.
@@ -115,6 +116,7 @@ async function main() {
     previous.normalizeDb(previousView);
     normalizeDb(forward);
     assert.deepEqual(forward.absences.find(item => item.id === absenceProbe.id), absenceProbe, "Code rollback lost absence data");
+    assert.equal(forward.users.ibro.billing.workerOwnVehicleKmRate, 0.49, "Code rollback lost personal mileage rate");
     const forwardView = JSON.parse(JSON.stringify(forward));
     const differentKeys = [...new Set([...Object.keys(previousView), ...Object.keys(forwardView)])]
       .filter(key => !isDeepStrictEqual(previousView[key], forwardView[key]));
@@ -143,6 +145,7 @@ async function main() {
   normalizeDb(db);
   db.users.ibro.avatarInitial = "ž";
   db.users.ibro.avatarColor = "#ffd000";
+  db.users.ibro.billing.workerOwnVehicleKmRate = 0.49;
   const lanCredential = await require("../outputs/lan-auth").hash("postgres-qa-personal-password");
   db.users.ibro.lanPasswordHash = lanCredential;
   const bossToken = createSession(db, "bojan");
@@ -162,6 +165,10 @@ async function main() {
     assert.equal(profile.avatarColor, "#ffd000");
   }
   check("workers.avatar_persists_in_snapshot_directory_and_lightweight_session");
+  assert.equal(db.users.ibro.billing.workerOwnVehicleKmRate, 0.49);
+  const quickWorker = (await store.quickCreateSeed(db.users.bojan)).workers.find(item => item.id === "ibro");
+  assert.equal(quickWorker.workerOwnVehicleKmRate, 0.49);
+  check("workers.personal_mileage_persists_and_is_in_quick_create_seed");
   assert.equal(db.users.ibro.lanPasswordHash, lanCredential);
   assert.equal(directoryWorker.lanPasswordHash, undefined);
   assert.equal(sessionWorker.lanPasswordHash, undefined);

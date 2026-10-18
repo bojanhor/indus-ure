@@ -121,6 +121,26 @@ test("payroll module retains meal cap, independent rate and one commute per day"
   assert.equal(rules.payrollTotals(lines).totalAmount, 33.45);
 });
 
+test("personal worker mileage keeps legacy defaults and zero; confirmed snapshots keep old rates", () => {
+  const { workerKmRateForUser } = require("../outputs/worker-billing-settings");
+  const db = { settings: { billing: { workerOwnVehicleKmRate: 0.25 } }, users: {
+    ibro: { billing: { workerOwnVehicleKmRate: 0.49, commuteKmOneWay: 7 } },
+    bojan: { billing: { workerOwnVehicleKmRate: 0 } }, legacy: {}
+  } };
+  assert.equal(workerKmRateForUser(db, "legacy"), 0.25);
+  assert.equal(workerKmRateForUser(db, "ibro"), 0.49);
+  assert.equal(workerKmRateForUser(db, "bojan"), 0);
+  const rules = payrollRules();
+  const todo = { id: "personal-km", syncUser: "ibro", date: "2026-09-01", start: "08:00", end: "09:00", status: "execution", billingHourlyRate: 25, billingKm: 3, commuteEligible: true };
+  const lines = rules.withDailyCommuteInPayroll(db, "ibro", [rules.payrollLineForTodo(db, todo)]);
+  assert.equal(lines[0].km, 17);
+  assert.equal(lines[0].totalAmount, 33.33);
+  const confirmed = rules.normalizePayroll({ id: "confirmed", workerId: "ibro", from: todo.date, to: todo.date, status: "confirmed", lines }, db);
+  db.users.ibro.billing.workerOwnVehicleKmRate = 0;
+  assert.equal(rules.normalizePayroll(confirmed, db).lines[0].kmRate, 0.49);
+  assert.equal(rules.payrollLineForTodo(db, todo).kmRate, 0);
+});
+
 function attachments() {
   return createAttachmentModel({ MAX_TODO_IMAGE_DATA_LENGTH: 1024, MAX_TODO_PDF_DATA_LENGTH: 1024, MAX_TODO_ATTACHMENTS_DATA_LENGTH: 2048, MAX_TODO_THUMBNAIL_DATA_LENGTH: 1024, MAX_TODO_ATTACHMENTS: 40 });
 }

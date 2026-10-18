@@ -14,6 +14,7 @@ const { renderAppShell } = require("./app-shell");
 const { backupCleanupIssue } = require("./backup-status");
 const planningCalendar = require("./planning-calendar");
 const workerAccess = require("./worker-access");
+const { workerKmRateForUser } = require("./worker-billing-settings");
 const lanAuth = require("./lan-auth");
 const lanPasswordAttempts = lanAuth.createLimiter();
 const absences = require("./absence-model");
@@ -3195,7 +3196,13 @@ function publicWorkerManagementUser(db, user) {
     avatarColor: user.avatarColor || "",
     employmentType: user.employmentType || "contractor",
     timeEntryForIds: timeEntryTargetIds(db, user),
-    dailyReport: workerDailyReportSettings(db, user)
+    dailyReport: workerDailyReportSettings(db, user),
+    billing: {
+      hourlyRate: defaultHourlyRateForUser(db, user.id),
+      commuteKmOneWay: commuteKmOneWayForUser(db, user.id),
+      exportTitle: String(user.billing?.exportTitle || ""),
+      workerOwnVehicleKmRate: workerKmRateForUser(db, user.id)
+    }
   };
 }
 function nonnegativeNumber(value, fallback = null, maximum = Number.MAX_SAFE_INTEGER) {
@@ -3251,6 +3258,21 @@ function defaultHourlyRateForUser(db, userId) {
   );
 }
 
+function normalizeWorkerBillingInput(db, id, input) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return null;
+  const billing = { ...(db.users?.[id]?.billing || {}) };
+  const fields = { hourlyRate: 10_000, commuteKmOneWay: 1_000_000, workerOwnVehicleKmRate: 1_000 };
+  for (const [key, maximum] of Object.entries(fields)) {
+    if (!Object.hasOwn(input, key)) continue;
+    if (!["number", "string"].includes(typeof input[key]) || String(input[key]).trim() === "") return null;
+    const value = nonnegativeNumber(input[key], null, maximum);
+    if (value === null) return null;
+    billing[key] = value;
+  }
+  if (Object.hasOwn(input, "exportTitle")) billing.exportTitle = String(input.exportTitle || "").trim().slice(0, 120);
+  return billing;
+}
+
 function quickCreateBootstrapFromDb(db, user) {
   const activeUsers = Object.values(db.users || {}).filter((worker) => worker.active !== false);
   return {
@@ -3264,7 +3286,8 @@ function quickCreateBootstrapFromDb(db, user) {
         role: worker.role,
         hourlyRate: defaultHourlyRateForUser(db, worker.id),
         exportTitle: String(worker.billing?.exportTitle || ""),
-        commuteKmOneWay: commuteKmOneWayForUser(db, worker.id)
+        commuteKmOneWay: commuteKmOneWayForUser(db, worker.id),
+        workerOwnVehicleKmRate: workerKmRateForUser(db, worker.id)
       })),
     settings: db.settings || {}
   };
@@ -5564,7 +5587,8 @@ async function handleApi(req, res) {
           role: worker.role,
           hourlyRate: defaultHourlyRateForUser(db, worker.id),
           exportTitle: String(worker.billing?.exportTitle || ""),
-          commuteKmOneWay: commuteKmOneWayForUser(db, worker.id)
+          commuteKmOneWay: commuteKmOneWayForUser(db, worker.id),
+          workerOwnVehicleKmRate: workerKmRateForUser(db, worker.id)
         }));
       const snapshot = {
         user: publicUser(user),
@@ -5771,6 +5795,11 @@ async function handleApi(req, res) {
         return;
       }
       const timeEntryForIds = Array.isArray(worker.timeEntryForIds) ? worker.timeEntryForIds : [id];
+      const billing = body.billing === undefined ? null : normalizeWorkerBillingInput(db, id, body.billing);
+      if (body.billing !== undefined && !billing) {
+        sendJson(res, 400, { error: "Vnesi veljavno urno postavko, kilometrino in pot v službo." });
+        return;
+      }
       const currentDailyReport = workerDailyReportSettings(db, worker);
       const requestedDailyReport = body.dailyReport && typeof body.dailyReport === "object" ? body.dailyReport : currentDailyReport;
       const reportEmailEnabled = requestedDailyReport.emailEnabled !== false;
@@ -5790,6 +5819,7 @@ async function handleApi(req, res) {
       worker.avatarInitial = avatarInitial;
       worker.avatarColor = avatarColor;
       worker.employmentType = "contractor";
+      if (billing) worker.billing = billing;
       worker.timeEntryForIds = active ? timeEntryForIds : [];
       worker.dailyReport = {
         emailEnabled: reportEmailEnabled,
@@ -5882,7 +5912,8 @@ async function handleApi(req, res) {
         role: worker.role,
         hourlyRate: defaultHourlyRateForUser(db, worker.id),
         exportTitle: String(worker.billing?.exportTitle || ""),
-        commuteKmOneWay: commuteKmOneWayForUser(db, worker.id)
+        commuteKmOneWay: commuteKmOneWayForUser(db, worker.id),
+        workerOwnVehicleKmRate: workerKmRateForUser(db, worker.id)
       }));
       sendJson(res, 200, { workers });
       return;
@@ -5898,14 +5929,12 @@ async function handleApi(req, res) {
       const body = await readBody(req);
       const db = await readRequestDb(req);
       const workerId = cleanUserId(body.userId);
-      const hourlyRate = nonnegativeNumber(body.hourlyRate, null, 10_000);
-      const exportTitle = String(body.exportTitle || "").trim().slice(0, 120);
-      const commuteKmOneWay = nonnegativeNumber(body.commuteKmOneWay, nonnegativeNumber(db.users?.[workerId]?.billing?.commuteKmOneWay, 0, 1_000_000), 1_000_000);
-      if (!db.users?.[workerId] || hourlyRate === null) {
+      const billing = normalizeWorkerBillingInput(db, workerId, body);
+      if (!db.users?.[workerId] || !billing) {
         sendJson(res, 400, { error: "Delavec ali urna postavka ni pravilna." });
         return;
       }
-      db.users[workerId].billing = { ...(db.users[workerId].billing || {}), hourlyRate, exportTitle, commuteKmOneWay };
+      db.users[workerId].billing = billing;
       await writeDbAsync(db);
       const workers = Object.values(db.users).map((worker) => ({
         id: worker.id,
@@ -5913,7 +5942,8 @@ async function handleApi(req, res) {
         role: worker.role,
         hourlyRate: defaultHourlyRateForUser(db, worker.id),
         exportTitle: String(worker.billing?.exportTitle || ""),
-        commuteKmOneWay: commuteKmOneWayForUser(db, worker.id)
+        commuteKmOneWay: commuteKmOneWayForUser(db, worker.id),
+        workerOwnVehicleKmRate: workerKmRateForUser(db, worker.id)
       }));
       sendJson(res, 200, { workers });
       return;

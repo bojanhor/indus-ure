@@ -2,6 +2,8 @@
 const crypto = require("node:crypto");
 
 // Payroll domain rules; settlement orchestration/HTTP are in settlement-service.js.
+const { workerKmRateForUser } = require("./worker-billing-settings");
+
 function createPayrollRules({ isDateKey, nonnegativeNumber, defaultHourlyRateForUser, cleanUserId, signedNumber, isTrashedTodo, correctionPayrollLine, PAYROLL_STATUSES, PAYROLL_PAID_TODO_STATUSES }) {
 // BEGIN preserved payroll rules
 function payrollRange(input = {}) {
@@ -100,11 +102,7 @@ function payrollLineForTodo(db, todo, workerId = "") {
   const workerKm = nonnegativeNumber(todo.billingKm, 0, 1_000_000);
   // Kilometrina delavca je povračilo za njegovo lastno vozilo.
   // Ne sme se mešati s tarifo, ki se zaračuna stranki za kombi ali osebni avto.
-  const kmRate = nonnegativeNumber(
-    db.settings?.billing?.workerOwnVehicleKmRate,
-    nonnegativeNumber(db.settings?.billing?.kmRate, 0, 1_000),
-    1_000
-  );
+  const kmRate = workerKmRateForUser(db, workerId || todo.syncUser || todo.createdBy);
   const hours = minutes / 60;
   const workAmount = Number((hours * hourlyRate).toFixed(2));
   const kmAmount = Number((workerKm * kmRate).toFixed(2));

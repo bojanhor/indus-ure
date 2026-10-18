@@ -119,50 +119,6 @@ function parseBillingNumber(value, maximum) {
       return Number.isFinite(number) && number >= 0 && number <= maximum ? number : null;
     }
 
-function renderWorkerBillingTable() {
-      const body = $("workerBillingRows");
-      if (!body) return;
-      body.replaceChildren();
-      state.workerBilling
-        .slice()
-        .sort((a, b) => String(a.name || a.id).localeCompare(String(b.name || b.id), "sl"))
-        .forEach((worker) => {
-          const row = document.createElement("tr");
-          row.dataset.userId = worker.id;
-          row.innerHTML = `
-            <td><strong>${escapeHtml(worker.name || worker.id)}</strong></td>
-            <td>${worker.role === "boss" ? "Šef in delavec" : "Delavec"}</td>
-            <td><input class="worker-rate-input" type="number" min="0" max="10000" step="0.01" value="${Number(worker.hourlyRate || 0)}" aria-label="Urna postavka za ${escapeHtml(worker.name || worker.id)}"> EUR/h</td>
-            <td><input class="worker-commute-input" type="number" min="0" max="1000000" step="0.1" value="${Number(worker.commuteKmOneWay || 0)}" aria-label="Pot v službo v eno smer za ${escapeHtml(worker.name || worker.id)}"> km</td>
-            <td><input class="worker-export-title-input" type="text" maxlength="120" value="${escapeHtml(worker.exportTitle || "")}" placeholder="Npr. monter" aria-label="Naziv izvajalca v izvozu za ${escapeHtml(worker.name || worker.id)}"></td>
-            <td><button class="secondary save-worker-rate" type="button">Shrani</button></td>
-          `;
-          row.querySelector(".save-worker-rate").addEventListener("click", async (event) => {
-            const input = row.querySelector(".worker-rate-input");
-            const hourlyRate = parseBillingNumber(input.value, 10_000);
-            const commuteKmOneWay = parseBillingNumber(row.querySelector(".worker-commute-input").value, 1_000_000);
-            const exportTitle = row.querySelector(".worker-export-title-input").value.trim();
-            if (hourlyRate === null || commuteKmOneWay === null) {
-              showNotice("Vnesi pravilno urno postavko in pot v sluzbo.");
-              return;
-            }
-            event.currentTarget.disabled = true;
-            try {
-              const data = await api("/api/workers/billing", {
-                method: "PUT",
-                body: JSON.stringify({ userId: worker.id, hourlyRate, commuteKmOneWay, exportTitle })
-              });
-              state.workerBilling = data.workers || state.workerBilling;
-              render();
-            } catch (error) {
-              event.currentTarget.disabled = false;
-              showNotice(error.message);
-            }
-          });
-          body.appendChild(row);
-        });
-    }
-
 async function saveDebtToServer(debt) {
       const method = debt.id ? "PUT" : "POST";
       const path = debt.id ? `/api/debts/${debt.id}` : "/api/debts";
@@ -697,7 +653,8 @@ function lockedBillingFinancialIds(workerId, field) {
     }
 
 function billingLiveLines(workerId, range) {
-      const kmRate = Number(state.settings.billing?.workerOwnVehicleKmRate ?? state.settings.billing?.kmRate ?? 0);
+      const worker = state.workerBilling.find(item => item.id === workerId);
+      const kmRate = Number(worker?.workerOwnVehicleKmRate ?? state.settings.billing?.workerOwnVehicleKmRate ?? state.settings.billing?.kmRate ?? 0);
       const lockedTodoIds = lockedBillingTodoIds(workerId);
       const lines = state.todos
         .filter((todo) => !isImportedTodo(todo) && (todo.syncUser || todo.createdBy) === workerId && moduleValues.payrollPaidTodoStatuses.has(todo.status) && String(todo.date || "") >= range.from && String(todo.date || "") <= range.to)
@@ -1263,7 +1220,6 @@ function installWorkerBillingBindings1() {
     workerDefaultHourlyRate,
     todoHourlyRate,
     parseBillingNumber,
-    renderWorkerBillingTable,
     renderAdvanceProjects,
     manualClientBillableMinutes,
     todoClientBillableHours,

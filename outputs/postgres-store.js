@@ -10,6 +10,7 @@ const fs = require("fs");
 const fsp = fs.promises;
 const path = require("path");
 const { isDeepStrictEqual } = require("node:util");
+const { workerKmRateForUser } = require("./worker-billing-settings");
 
 class StaleSnapshotError extends Error {
   constructor(message = "Podatki so bili medtem spremenjeni. Osveži pogled in ponovi shranjevanje; tvoja sprememba ni bila zapisana.") {
@@ -494,7 +495,8 @@ class PostgresStore {
         role: String(row.data?.role || ""),
         hourlyRate: Number.isFinite(Number(row.data?.billing?.hourlyRate)) ? Number(row.data.billing.hourlyRate) : fallbackRate,
         exportTitle: String(row.data?.billing?.exportTitle || ""),
-        commuteKmOneWay: Number(row.data?.billing?.commuteKmOneWay || 0)
+        commuteKmOneWay: Number(row.data?.billing?.commuteKmOneWay || 0),
+        workerOwnVehicleKmRate: workerKmRateForUser({ users: { [row.id]: row.data }, settings }, row.id)
       }));
     return {
       clients: clients.rows.map((row) => row.data),

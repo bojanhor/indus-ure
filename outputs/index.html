@@ -2970,6 +2970,17 @@
     }
 
     .calendar-filters { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 24px; padding: 10px 12px 6px; }
+    .month-grid-viewport { min-width: 0; }
+    #monthGrid { display: grid; grid-template-rows: auto 1fr; }
+    .calendar-shell.month-fit { display: block; min-height: calc(100dvh - 12px); overflow: hidden; }
+    .calendar-shell.month-fit > .month-title { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 8px 12px; }
+    .calendar-shell.month-fit > .month-title h2 { font-size: 18px; margin: 0; }
+    .calendar-shell.month-fit > .month-title .today-calendar-btn { margin-left: auto; }
+    body:has(.calendar-shell.month-fit:not(.view-hidden)) .topbar { display: none; }
+    .month-fit .month-grid-viewport { position: relative; overflow: hidden; }
+    .month-fit #monthGrid { position: absolute; top: 0; transform-origin: top left; }
+    #monthFitToggle { margin-left: auto; white-space: nowrap; }
+    #monthFitToggle[aria-pressed="true"] { color: #fff; background: var(--accent); }
     .calendar-worker-filter { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; font-size: 13px; }
     .calendar-worker-picker { position: relative; min-width: 170px; max-width: min(280px, calc(100vw - 110px)); }
     .calendar-worker-picker summary { padding: 9px 12px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--ink); cursor: pointer; overflow-wrap: anywhere; }
@@ -4923,7 +4934,8 @@
       cursor: pointer;
     }
 
-    .client-billing-select.is-selected { border-color: #197e68; color: #075a4b; background: #dcf1e9; }
+    .client-billing-select.is-selected { border-color: #075a4b; color: #fff; background: #075a4b; box-shadow: 0 0 0 1px #075a4b; }
+    .client-billing-select:not(.is-selected):not(.is-billed) .client-billing-select-icon { visibility: hidden; }
     .client-billing-select.is-billed { border-color: #0d5b4b; color: #063f34; background: #d7f0e7; }
     .client-billing-select.is-billed:hover, .client-billing-select.is-billed:focus-visible { border-color: #9a2f35; color: #7c1620; background: #fff1f1; }
     .client-billing-select input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
@@ -5677,6 +5689,11 @@
     .worker-management-head h4 { margin: 0; }
     .worker-management-status { display: inline-flex; margin-top: 3px; color: var(--muted); font-size: 12px; font-weight: 800; }
     .worker-management-grid { display: grid; grid-template-columns: minmax(170px, 1fr) minmax(220px, 1.2fr) minmax(150px, .75fr); gap: 10px; }
+    .worker-billing-settings { margin: 12px 0 0; padding: 12px; border: 1px solid var(--line); border-radius: 9px; background: #f1f7f5; }
+    .worker-billing-settings legend { padding: 0 5px; font-weight: 800; }
+    .worker-billing-settings-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); gap: 12px; }
+    .worker-billing-settings-grid label { min-width: 0; }
+    .worker-billing-settings-grid input { width: 100%; min-width: 0; }
     .worker-management-details { display: grid; grid-template-columns: minmax(230px, .9fr) minmax(300px, 1.25fr); gap: 10px; margin-top: 12px; }
     .worker-permissions { margin: 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 9px; }
     .worker-permissions legend { padding: 0 4px; font-weight: 800; }
@@ -5862,7 +5879,7 @@
               <button class="menu-action admin-only" id="serverStatusBtn" type="button">Stanje stre&#382;nika</button>
               <button class="menu-action" id="undoHistoryBtn" type="button">Zgodovina sprememb</button>
               <button class="menu-action admin-only" id="auditLogBtn" type="button">Dnevnik dejavnosti</button>
-              <button class="menu-action admin-only" id="appSettingsBtn" type="button">Nastavitve obračuna in arhiva</button>
+              <button class="menu-action admin-only" id="appSettingsBtn" type="button">Malica, arhiv in tehnične nastavitve</button>
               <button class="menu-action admin-only" id="exportCsv" type="button">Izvoz CSV</button>
               <button class="menu-action admin-only" id="downloadBackup" type="button">Prenesi varnostno kopijo (ZIP)</button>
               <button class="menu-action admin-only" id="restoreBackup" type="button">Obnovi iz ZIP kopije</button>
@@ -6113,7 +6130,9 @@
           <div class="calendar-worker-filter hidden" id="calendarWorkerFilterField">Izvajalci
             <details id="calendarWorkerFilter" class="calendar-worker-picker"><summary aria-label="Izvajalci v koledarju">Vsi izvajalci</summary><div class="calendar-worker-choices"></div></details>
           </div>
+          <button class="secondary" type="button" id="monthFitToggle" aria-pressed="false" title="Pomanjšaj celoten mesec na en zaslon">Cel mesec</button>
         </div>
+        <div class="month-grid-viewport" id="monthGridViewport"><div id="monthGrid">
         <div class="weekdays">
           <div>Pon</div>
           <div>Tor</div>
@@ -6124,6 +6143,7 @@
           <div>Ned</div>
         </div>
         <div class="calendar" id="calendar"></div>
+        </div></div>
       </section>
     </main>
   </div>
@@ -6730,11 +6750,10 @@
 
   <dialog id="appSettingsDialog">
     <form method="dialog">
-      <div class="modal-head"><h3>Nastavitve obračuna in arhiva</h3><button class="icon-btn" id="closeAppSettings" type="button" title="Zapri">&times;</button></div>
+      <div class="modal-head"><h3>Malica, arhiv in tehnične nastavitve</h3><button class="icon-btn" id="closeAppSettings" type="button" title="Zapri">&times;</button></div>
       <div class="modal-body app-settings-sections">
         <section class="app-settings-section"><h4>Malica</h4><label>Plačani čas malice za delavca (minute)<input id="settingsMealPaidMinutes" type="number" min="0" max="240" step="1"></label><p class="todo-meta">Malica se stranki ne obračuna. Delavcu se plača največ izbrano število minut.</p></section>
-        <section class="app-settings-section"><h4>Kilometrina delavca</h4><label>Povračilo za lastno vozilo (EUR/km)<input id="settingsWorkerOwnVehicleKmRate" type="number" min="0" max="1000" step="0.01"></label><p class="todo-meta">Uporabi se samo za kilometrino delavca; stroški prevoza za stranko ostanejo ločeni po vozilu.</p></section>
-        <section class="app-settings-section"><h4>Čiščenje arhiva</h4><label>Čas hrambe arhiviranega dogodka (meseci)<input id="settingsArchiveRetentionMonths" type="number" min="1" max="120" step="1"></label><p class="todo-meta">Po tem obdobju se izbriše samo dogodek, ki je že arhiviran po potrjenem obračunu delavca in stranke: lokalne priloge, aplikacijsko ustvarjene Drive priloge ter neuporabljena začasna stranka. Obračunski zapisi ostanejo.</p></section>        <section class="app-settings-section worker-billing"><h4>Privzete urne postavke</h4><div class="worker-billing-scroll"><table><thead><tr><th>Delavec</th><th>Vloga</th><th>Privzeta urna postavka</th><th>Pot v službo (ena smer)</th><th>Naziv v izvozu</th><th></th></tr></thead><tbody id="workerBillingRows"></tbody></table></div></section>
+        <section class="app-settings-section"><h4>Čiščenje arhiva</h4><label>Čas hrambe arhiviranega dogodka (meseci)<input id="settingsArchiveRetentionMonths" type="number" min="1" max="120" step="1"></label><p class="todo-meta">Po tem obdobju se izbriše samo dogodek, ki je že arhiviran po potrjenem obračunu delavca in stranke: lokalne priloge, aplikacijsko ustvarjene Drive priloge ter neuporabljena začasna stranka. Obračunski zapisi ostanejo.</p></section>
         <section class="app-settings-section"><h4>Tehnične nastavitve</h4><p>Omejitve prilog, časovne nastavitve, zgodovina in nadzor strežnika.</p><button type="button" class="secondary" id="openTechnicalConfig">Odpri tehnične nastavitve</button></section>
         <div class="actions"><button class="secondary" id="cancelAppSettings" type="button">Prekliči</button><button class="primary" id="saveAppSettings" type="button">Shrani nastavitve</button></div>
       </div>
@@ -7708,7 +7727,6 @@ const {
   workerDefaultHourlyRate,
   todoHourlyRate,
   parseBillingNumber,
-  renderWorkerBillingTable,
   renderAdvanceProjects,
   manualClientBillableMinutes,
   todoClientBillableHours,
@@ -10601,7 +10619,6 @@ function render() {
       if (state.view === "clients") renderClients();
       if (state.view === "report") renderReport();
       if (state.view === "billing") renderBillingView();
-      if ($("appSettingsDialog").open) renderWorkerBillingTable();
       if ($("serverStatusDialog").open) renderServerStatus();
       if ($("dayTimelineDialog").open) renderDayTimeline();
     }
@@ -10890,6 +10907,55 @@ function cancelMonthTodoPointerDrag(event) {
       if (!monthTodoPointerDrag || monthTodoPointerDrag.pointerId !== event.pointerId) return;
       clearMonthTodoPointerDrag();
     }
+let monthFitFrame = 0;
+let monthFitReposition = false;
+const monthTitleHome = document.createComment("month title home");
+document.querySelector(".month-title").before(monthTitleHome);
+function updateMonthFit() {
+      monthFitFrame = 0;
+      const viewport = $("monthGridViewport"), grid = $("monthGrid");
+      const shell = viewport.closest(".calendar-shell");
+      shell.classList.toggle("month-fit", Boolean(state.monthFit));
+      $("monthFitToggle").setAttribute("aria-pressed", String(Boolean(state.monthFit)));
+      $("monthFitToggle").textContent = state.monthFit ? "Običajna velikost" : "Cel mesec";
+      const title = document.querySelector(".month-title");
+      if (!state.monthFit) {
+        if (title.parentElement === shell) monthTitleHome.after(title);
+        grid.style.width = grid.style.transform = grid.style.left = "";
+        viewport.style.height = "";
+        monthFitReposition = false;
+        return;
+      }
+      if (title.parentElement !== shell) shell.prepend(title);
+      if (!viewport.clientWidth || state.view !== "calendar") return;
+      shell.scrollLeft = 0;
+      if (monthFitReposition) shell.scrollIntoView({ block: "start" });
+      monthFitReposition = false;
+      const width = viewport.clientWidth;
+      // Keep normal readable card layout before scaling; do not crop days or
+      // collapse their contents just to meet a fixed row height.
+      const naturalWidth = Math.max(width, matchMedia("(max-width: 760px)").matches ? 728 : 840);
+      grid.style.width = naturalWidth + "px";
+      grid.style.transform = "none";
+      const naturalHeight = grid.scrollHeight;
+      const bottom = (window.visualViewport?.offsetTop || 0) + (window.visualViewport?.height || innerHeight);
+      const availableHeight = Math.max(1, bottom - viewport.getBoundingClientRect().top - 12);
+      const scale = Math.min(1, width / naturalWidth, availableHeight / Math.max(1, naturalHeight));
+      grid.style.transform = `scale(${scale})`;
+      grid.style.left = Math.max(0, (width - naturalWidth * scale) / 2) + "px";
+      viewport.style.height = Math.ceil(naturalHeight * scale) + "px";
+    }
+function queueMonthFit(reposition = false) {
+      monthFitReposition = monthFitReposition || reposition;
+      if (!monthFitFrame) monthFitFrame = requestAnimationFrame(updateMonthFit);
+    }
+$("monthFitToggle").addEventListener("click", () => {
+      state.monthFit = !state.monthFit;
+      queueMonthFit(true);
+    });
+window.addEventListener("resize", () => queueMonthFit(true));
+window.visualViewport?.addEventListener("resize", () => queueMonthFit(true));
+
 function renderMonth() {
       renderCalendarWorkerFilter();
       const calendar = $('calendar');
@@ -10991,6 +11057,7 @@ function renderMonth() {
 
         calendar.appendChild(day);
       }
+      queueMonthFit();
     }
     /* @indus-module:time-entry-editor */
 const {
@@ -14078,6 +14145,7 @@ function renderWorkerManagement() {
         const locked = worker.role === "boss";
         const disabled = worker.active ? "" : "disabled";
         const dailyReport = worker.dailyReport || {};
+        const billing = worker.billing || {};
         const targets = WorkerAccess.targets(activeTargets, worker).map(target => escapeHtml(target.name || target.id)).join(", ");
         return `<article class="worker-management-card ${worker.active ? "" : "inactive"}" data-worker-id="${escapeHtml(worker.id)}">
           <div class="worker-management-head"><div><h4>${escapeHtml(worker.name || worker.id)}</h4><span class="worker-management-status">${escapeHtml(workerManagementLabel(worker))}</span></div><label class="worker-active-field"><input type="checkbox" data-worker-active ${worker.active ? "checked" : ""} ${locked ? "disabled" : ""}>Aktiven</label></div>
@@ -14088,6 +14156,15 @@ function renderWorkerManagement() {
             <label>Črka ikone<select data-worker-avatar-initial ${disabled}><option value="">Samodejno</option>${[..."ABCČDEFGHIJKLMNOPRSŠTUVZŽabcčdefghijklmnoprsštuvzž"].map(letter => `<option value="${letter}" ${worker.avatarInitial === letter ? "selected" : ""}>${letter}</option>`).join("")}</select></label>
             <label>Barva ikone<input data-worker-avatar-color type="color" value="${escapeHtml(worker.avatarColor || '#1f6f8b')}" ${disabled}></label>
           </div>
+          <fieldset class="worker-billing-settings" ${disabled}><legend>Obračun delavca</legend>
+            <div class="worker-billing-settings-grid">
+              <label>Privzeta urna postavka (EUR/h)<input data-worker-hourly-rate type="number" min="0" max="10000" step="0.01" value="${Number(billing.hourlyRate ?? 0)}" required></label>
+              <label>Pot v službo — ena smer (km)<input data-worker-commute-km type="number" min="0" max="1000000" step="0.1" value="${Number(billing.commuteKmOneWay ?? 0)}" required></label>
+              <label>Povračilo za lastno vozilo (EUR/km)<input data-worker-km-rate type="number" min="0" max="1000" step="0.01" value="${Number(billing.workerOwnVehicleKmRate ?? 0)}" required></label>
+              <label>Naziv v izvozu<input data-worker-export-title type="text" maxlength="120" value="${escapeHtml(billing.exportTitle || "")}" placeholder="Npr. monter"></label>
+            </div>
+            <p class="todo-meta">Kilometrina velja samo za tega delavca, tudi za pot v službo. Stroški prevoza za stranko so ločeni. Potrjeni obračuni se ne spreminjajo.</p>
+          </fieldset>
           <div class="worker-management-details">
             <fieldset class="worker-lan-password" ${disabled}><legend>Geslo za prijavo v LAN</legend>
               <p class="todo-meta">${worker.lanPasswordConfigured ? "Geslo je nastavljeno." : "Geslo še ni nastavljeno."} Uporabniško ime je shranjeni Google e-poštni naslov. To ni geslo za Gmail.</p>
@@ -14151,12 +14228,25 @@ async function createWorkerFromForm() {
 async function saveManagedWorker(card, { activate = false } = {}) {
       const id = card?.dataset.workerId || "";
       if (!id) return;
+      const billing = {};
+      for (const [key, selector, max] of [
+        ["hourlyRate", "[data-worker-hourly-rate]", 10_000],
+        ["commuteKmOneWay", "[data-worker-commute-km]", 1_000_000],
+        ["workerOwnVehicleKmRate", "[data-worker-km-rate]", 1_000]
+      ]) {
+        const input = card.querySelector(selector);
+        const value = input.value.trim() ? parseBillingNumber(input.value, max) : null;
+        if (value === null) { input.focus(); throw new Error("Vnesi veljavno urno postavko, kilometrino in pot v službo."); }
+        billing[key] = value;
+      }
+      billing.exportTitle = card.querySelector("[data-worker-export-title]").value.trim();
       const data = await api(`/api/workers/${encodeURIComponent(id)}`, {
         method: "PUT",
         body: JSON.stringify({
           name: card.querySelector("[data-worker-name]")?.value || "",
           email: card.querySelector("[data-worker-email]")?.value || "",
           employmentType: "contractor",
+          billing,
           avatarInitial: card.querySelector("[data-worker-avatar-initial]")?.value || "",
           avatarColor: card.querySelector("[data-worker-avatar-color]")?.value || "",
           active: activate || Boolean(card.querySelector("[data-worker-active]")?.checked),
@@ -14287,6 +14377,9 @@ $("workerManagementList").addEventListener("keydown", (event) => {
       if (event.key === "Enter" && event.target.matches('input[type="password"]')) {
         event.preventDefault();
         setManagedLanPassword(event.target.closest("[data-worker-id]")).catch(error => showNotice(error.message));
+      } else if (event.key === "Enter" && event.target.matches("input:not([type=checkbox]), select")) {
+        event.preventDefault();
+        saveManagedWorker(event.target.closest("[data-worker-id]")).catch(error => showNotice(error.message));
       }
     });
 $("workersForm").addEventListener("submit", (event) => { event.preventDefault(); createWorkerFromForm().catch((error) => showNotice(error.message)); });
@@ -14336,28 +14429,23 @@ $("workContextControl").addEventListener("toggle", () => {
     });
 window.addEventListener("resize", keepToolsMenuInViewport);
 function openAppSettings() {
-      const billing = state.settings.billing || {};
       const archive = state.settings.archive || {};
       $("settingsMealPaidMinutes").value = mealPaidMinutes();
-      $("settingsWorkerOwnVehicleKmRate").value = Number(billing.workerOwnVehicleKmRate ?? billing.kmRate ?? 0);
       $("settingsArchiveRetentionMonths").value = Number(archive.retentionMonths ?? 12);
-      renderWorkerBillingTable();
       $("appSettingsDialog").showModal();
     }
 async function saveAppSettings() {
       const mealPaid = parseBillingNumber($("settingsMealPaidMinutes").value, 240);
-      const workerOwnVehicleKmRate = parseBillingNumber($("settingsWorkerOwnVehicleKmRate").value, 1_000);
       const archiveRetentionMonths = parseBillingNumber($("settingsArchiveRetentionMonths").value, 120);
-      if (mealPaid === null || !Number.isInteger(mealPaid) || workerOwnVehicleKmRate === null || archiveRetentionMonths === null || !Number.isInteger(archiveRetentionMonths) || archiveRetentionMonths < 1 || archiveRetentionMonths > 120) {
+      if (mealPaid === null || !Number.isInteger(mealPaid) || archiveRetentionMonths === null || !Number.isInteger(archiveRetentionMonths) || archiveRetentionMonths < 1 || archiveRetentionMonths > 120) {
         const invalid = mealPaid === null || !Number.isInteger(mealPaid)
           ? $("settingsMealPaidMinutes")
-          : (workerOwnVehicleKmRate === null ? $("settingsWorkerOwnVehicleKmRate") : $("settingsArchiveRetentionMonths"));
-        return showFormValidationError($("appSettingsDialog").querySelector("form"), "Vnesi veljavne nastavitve malice, kilometrine in časa hrambe arhiva.", invalid);
+          : $("settingsArchiveRetentionMonths");
+        return showFormValidationError($("appSettingsDialog").querySelector("form"), "Vnesi veljavne nastavitve malice in časa hrambe arhiva.", invalid);
       }
       await saveBillingSettings({
         ...(state.settings.billing || {}),
         mealPaidMinutes: mealPaid,
-        workerOwnVehicleKmRate,
         archiveRetentionMonths
       });
       $("appSettingsDialog").close();
