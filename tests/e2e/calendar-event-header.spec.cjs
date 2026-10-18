@@ -92,8 +92,9 @@ test("calendar headers show profile then name on the left and time on the right,
   await expect(page.locator("#todoDialog")).toBeHidden();
   await page.evaluate(() => setWorkContext("worker:ibro"));
   await expect(cards.filter({ hasText: "Brez časa QA" }).locator(".day-todo-worker-name")).toHaveText("Ibro");
-  // Worker calendars retain their existing per-worker assignment projection.
-  await expect(cards.filter({ hasText: "Skupno opravilo QA" }).locator(".day-todo-worker-name")).toHaveText("Ibro");
+  // Personal calendars filter events, not the coworkers on a shared event.
+  await expect(cards.filter({ hasText: "Skupno opravilo QA" }).locator(".day-todo-worker-name")).toHaveText(["Ibro", "Bojan"]);
+  await expect(cards.filter({ hasText: "Nujni obisk QA" })).toHaveCount(0);
 });
 
 test("daily events put worker profiles before the title without duplicating names in the time row", async ({ page }) => {
@@ -177,7 +178,7 @@ test("daily events put worker profiles before the title without duplicating name
   await page.locator("#closeTodoDialog").click();
   await page.evaluate(() => { setWorkContext("worker:ibro"); openDayTimeline("2032-05-10"); });
   await expect(events.filter({ hasText: "Daily samostojno" })).toHaveCount(0);
-  // Daily view preserves the existing shared-event assignees, unlike the
-  // planning-only monthly projection; only Ibro's assigned events are listed.
+  // Both calendar views preserve shared-event assignees; only Ibro's
+  // assigned events are listed.
   await expect(shared.locator(".day-todo-worker-name")).toHaveText(["Ibro", "Bojan"]);
 });
