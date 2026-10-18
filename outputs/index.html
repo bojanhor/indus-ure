@@ -9992,7 +9992,8 @@ function calendarAbsences() {
     }
 function openCalendarTodo(todo) {
       if (todo._absence) absenceUi.open(state.absences.find(item => item.id === todo.id));
-      else openTodoDialog(todo);
+      // Calendar projections are presentation data, not an editable assignment set.
+      else openTodoDialog(state.todos.find(item => item.id === todo.id) || todo);
     }
 
 /* @indus-module:planning-calendar */
@@ -10891,7 +10892,7 @@ function finishMonthTodoPointerDrag(event) {
       const wasActive = drag.active;
       const wasPanning = drag.panning;
       const targetDate = drag.targetDate;
-      const todo = drag.todo;
+      const todo = state.todos.find(item => item.id === drag.todo.id) || drag.todo;
       const originDate = drag.originDate || todo.date;
       if (wasPanning) lastMonthTodoDragAt = Date.now();
       if (wasActive || wasPanning) event.preventDefault();
@@ -10900,7 +10901,10 @@ function finishMonthTodoPointerDrag(event) {
       lastMonthTodoDragAt = Date.now();
       if (!targetDate || targetDate === originDate) return;
       const dayShift = Math.round((parseDate(targetDate) - parseDate(originDate)) / 86400000);
-      saveTodoToServer({ ...todo, date: targetDate, endDate: shiftDateKey(todoEndDate(todo), dayShift) || targetDate }).catch((error) => showNotice(error.message));
+      // Moving a card changes its schedule, never its participants. Omission
+      // also preserves the server's complete assignment set after offline sync.
+      const { assigneeIds, ...scheduleTodo } = todo;
+      saveTodoToServer({ ...scheduleTodo, date: targetDate, endDate: shiftDateKey(todoEndDate(todo), dayShift) || targetDate }).catch((error) => showNotice(error.message));
     }
 
 function cancelMonthTodoPointerDrag(event) {
@@ -10961,8 +10965,9 @@ function renderMonth() {
       const calendar = $('calendar');
       calendar.innerHTML = '';
       const entries = contextEntries().filter(calendarWorkerMatches);
-      const todos = state.showCompletedCalendarTodos ? calendarTodos()
-        : [...PlanningCalendar.select(state.todos, { combined: isAdminView(), userId: activeWorkerId() }).filter(calendarWorkerMatches), ...calendarAbsences()];
+      // Google/ICS select() deliberately projects only the selected worker.
+      // The interactive calendar must retain the API's complete assigneeIds.
+      const todos = calendarTodos().filter(todo => state.showCompletedCalendarTodos || todo._absence || PlanningCalendar.eligible(todo));
       const todayDate = new Date();
       $('todayDayNumber').textContent = todayDate.getDate();
       $('todayBtn').setAttribute('aria-label', `Danes, ${todayDate.toLocaleDateString('sl-SI')}`);

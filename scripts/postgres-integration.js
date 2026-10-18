@@ -138,6 +138,8 @@ async function main() {
   db.clients.push({ clientId, id: clientId, name: "Izolirana QA stranka", alias: "QA", source: "ad-hoc", hiddenFromNewTasks: true });
   const ids = Array.from({ length: 500 }, () => crypto.randomUUID());
   for (const [index, id] of ids.entries()) db.todos.push({ id, assignmentGroupId: id, title: `QA ${index}`, status: "open", clientId, client: "Izolirana QA stranka", syncUser: index === 1 ? "ibro" : "bojan", createdBy: "bojan", billingWorkerKm: 19, photos: [] });
+  const sharedBojanId = crypto.randomUUID();
+  db.todos.push({ ...db.todos[1], id: sharedBojanId, syncUser: "bojan" });
   const bytes = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aX1sAAAAASUVORK5CYII=", "base64");
   const attachmentId = crypto.createHash("sha256").update(bytes).digest("hex");
   db.attachments[attachmentId] = { id: attachmentId, data: `data:image/png;base64,${bytes.toString("base64")}`, name: "qa.png", mimeType: "image/png" };
@@ -180,6 +182,9 @@ async function main() {
   db = await store.load();
   assert.equal(db.absences[0].reason, "illness");
   const privateSeed = await store.initialBootstrapSeed(db.users.ibro);
+  assert.deepEqual(privateSeed.todos.map(todo => todo.syncUser).sort(), ["bojan", "ibro"]);
+  assert.ok(privateSeed.todos.every(todo => todo.assignmentGroupId === ids[1]));
+  check("bootstrap.internal_seed_has_whole_visible_group_but_no_unrelated_tasks");
   const { visible: visibleAbsences } = require("../outputs/absence-model");
   assert.deepEqual(visibleAbsences(privateSeed, db.users.ibro), []);
   assert.equal(visibleAbsences(await store.initialBootstrapSeed(db.users.bojan), db.users.bojan).length, 1);
@@ -293,8 +298,15 @@ async function main() {
     for (const route of ["/api/bootstrap", "/api/bootstrap?initial=1", "/api/absences"]) {
       const privateRead = await request(route, { headers: worker });
       assert.equal(privateRead.status, 200);
-      assert.deepEqual((await privateRead.json()).absences, []);
+      const body = await privateRead.json();
+      assert.deepEqual(body.absences, []);
+      if (route.startsWith("/api/bootstrap")) {
+        assert.equal(body.todos.length, 1, "Other workers' assignment rows must remain private");
+        assert.equal(body.todos[0].id, ids[1]);
+        assert.deepEqual(body.todos[0].assigneeIds.sort(), ["bojan", "ibro"]);
+      }
     }
+    check("http.full_and_initial_bootstrap_keep_complete_assignees_without_private_rows");
     const privateId = (await store.load()).absences[0].id;
     assert.equal((await request(`/api/absences/${privateId}`, { headers: worker })).status, 404);
     check("http.absence_privacy_in_full_initial_and_detail_routes");

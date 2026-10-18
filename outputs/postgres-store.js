@@ -528,12 +528,17 @@ class PostgresStore {
            from indus_task_assignments a
            join indus_tasks t on t.id = a.task_id
           where t.archived_at is null
-            and ($1::boolean or a.worker_id = $2 or coalesce(t.data ->> 'createdBy', '') = $2)
+            and ($1::boolean or coalesce(t.data ->> 'createdBy', '') = $2
+                 or exists (select 1 from indus_task_assignments visible
+                             where visible.task_id = t.id and visible.worker_id = $2))
           order by t.scheduled_date desc nulls last, t.updated_at desc, a.id`,
         [boss, userId]
       )
     ]);
 
+    // Keep whole visible groups internally so the HTTP visibility projection
+    // can report every participant, even before the full bootstrap arrives.
+    // It still returns only assignments owned/created by the requesting worker.
     const todos = assignmentRows.rows.map((row) => joinTodo(row.task_data || {}, {
       ...(row.assignment_data || {}),
       id: row.assignment_id,

@@ -105,7 +105,7 @@ async function saveTodoToServer(todo) {
           resumeTodoLockHeartbeat(requestTodo.id, editLockToken);
           throw error;
         }
-        const localTodo = creating ? { ...requestTodo, id: requestTodo.id || "offline-" + createLocalUuid(), offlinePending: true } : { ...requestTodo, offlinePending: true };
+        const localTodo = creating ? { ...requestTodo, id: requestTodo.id || "offline-" + createLocalUuid(), offlinePending: true } : { ...state.todos.find(item => item.id === requestTodo.id), ...requestTodo, offlinePending: true };
         await queueOfflineTodo({ kind: creating ? "create" : "update", todoId: localTodo.id, todo: { ...requestTodo }, baseUpdatedAt: requestTodo.updatedAt || "" });
         if (isCurrentTodoRevision(todoRevision)) {
           const index = state.todos.findIndex((item) => item.id === requestTodo.id);
