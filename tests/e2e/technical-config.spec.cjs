@@ -12,7 +12,7 @@ async function login(page,user="bojan"){
 }
 async function settings(page){
  await page.locator("#toolsMenu > summary").click();
- await page.getByRole("button",{name:"Nastavitve obračuna in arhiva",exact:true}).click();
+ await page.getByRole("button",{name:"Malica, arhiv in tehnične nastavitve",exact:true}).click();
  await page.getByRole("button",{name:"Odpri tehnične nastavitve",exact:true}).click();
  await expect(page.locator("#technicalConfigDialog")).toBeVisible();
 }
