@@ -3155,10 +3155,10 @@
       border-left: 4px solid var(--todo-border, var(--todo-bg));
       text-align: left;
       font-weight: 750;
-      cursor: grab;
+      cursor: default;
       touch-action: manipulation;
     }
-    .day-all-day-item.is-drag-ready { outline: 2px dashed var(--accent); outline-offset: 2px; cursor: grabbing; }
+    .day-all-day-item.is-drag-ready { outline: 2px dashed var(--accent); outline-offset: 2px; cursor: move; }
 
     .day-timeline-scroll {
       position: relative;
@@ -3169,10 +3169,10 @@
       overscroll-behavior: contain;
       touch-action: none;
       background: #fff;
-      cursor: grab;
+      cursor: default;
     }
 
-    .day-timeline-scroll.is-panning { cursor: grabbing; }
+    .day-timeline-scroll.is-panning { cursor: default; }
     .day-timeline {
       position: relative;
       min-width: min(310px, 100%);
@@ -3245,13 +3245,13 @@
       background: var(--todo-bg);
       color: var(--todo-fg);
       box-shadow: 0 2px 5px rgba(22, 38, 31, 0.18);
-      cursor: grab;
+      cursor: default;
       touch-action: none;
       user-select: none;
       z-index: 3;
     }
 
-    .day-timeline-event.is-moving { opacity: 0.88; cursor: grabbing; z-index: 8; }
+    .day-timeline-event.is-moving { opacity: 0.88; cursor: move; z-index: 8; }
     .day-timeline-event.is-drop-preview {
       pointer-events: none;
       z-index: 9;
@@ -3263,7 +3263,7 @@
     }
     .day-timeline-event.is-day-moving { outline: 3px solid rgba(23, 114, 145, 0.9); outline-offset: 2px; box-shadow: 0 8px 18px rgba(23, 114, 145, 0.28); }
     .day-timeline-event.is-day-moving::after { content: attr(data-day-target); position: absolute; right: 6px; top: 5px; max-width: calc(100% - 12px); overflow: hidden; padding: 2px 5px; border-radius: 999px; color: #fff; background: rgba(17, 38, 46, 0.78); font-size: 10px; font-weight: 900; text-overflow: ellipsis; white-space: nowrap; }
-    .day-timeline-event.is-drag-ready { outline: 2px dashed var(--accent); outline-offset: 2px; }
+    .day-timeline-event.is-drag-ready { outline: 2px dashed var(--accent); outline-offset: 2px; cursor: move; }
     .day-timeline-event.has-change-notice { box-shadow: inset 4px 0 0 #176e37, 0 0 0 2px rgba(47, 154, 87, 0.45); }
     .day-hours-warning { display: inline-grid; place-items: center; width: 18px; height: 18px; margin-left: 5px; border-radius: 50%; background: #c93131; color: #fff; font-weight: 900; line-height: 1; }
     .day-timeline-event-title { display: block; font-size: 13px; line-height: 1.2; overflow-wrap: anywhere; }
@@ -11417,7 +11417,7 @@ function beginDayAllDayPointerDrag(event, todo) {
       if (state.dayTimelineSaving || todoIsMultiDayCalendarSpan(todo)) return;
       if (event.pointerType === "mouse" && event.button !== 0) return;
       const element = event.currentTarget;
-      const touchHoldRequired = event.pointerType === "touch";
+      const touchHoldRequired = true;
       const interaction = {
         pointerId: event.pointerId,
         pointerType: event.pointerType,
@@ -11437,13 +11437,7 @@ function beginDayAllDayPointerDrag(event, todo) {
         autoScrollAt: performance.now()
       };
       state.dayTimelineAllDayInteraction = interaction;
-      if (!touchHoldRequired) {
-        event.preventDefault();
-        event.stopPropagation();
-        try { element.setPointerCapture?.(event.pointerId); } catch { /* Firefox may reject capture. */ }
-        element.classList.add("is-drag-ready");
-        return;
-      }
+      try { element.setPointerCapture?.(event.pointerId); } catch { /* Capture can be unavailable. */ }
       interaction.holdTimer = setTimeout(() => {
         if (state.dayTimelineAllDayInteraction !== interaction) return;
         interaction.touchReady = true;
@@ -11462,10 +11456,11 @@ function updateDayAllDayPointerDrag(event) {
         if (Math.hypot(event.clientX - interaction.startX, event.clientY - interaction.startY) > 9) {
           clearTimeout(interaction.holdTimer);
           state.dayTimelineAllDayInteraction = null;
+          consumeDayTimelineActivationClick(event);
         }
         return;
       }
-      if (!interaction.moved && Math.max(Math.abs(event.clientX - interaction.startX), Math.abs(event.clientY - interaction.startY)) < 4) return;
+      if (!interaction.moved && Math.max(Math.abs(event.clientX - interaction.startX), Math.abs(event.clientY - interaction.startY)) < 9) return;
       event.preventDefault();
       event.stopPropagation();
       if (!interaction.moved) {
@@ -11486,6 +11481,7 @@ function finishDayAllDayPointerDrag(event, cancelled = false) {
       const target = interaction.target;
       clearDayAllDayDropPreview(interaction);
       if (interaction.moved) {
+        consumeDayTimelineActivationClick(event);
         state.dayTimelineSuppressClick = true;
         setTimeout(() => { state.dayTimelineSuppressClick = false; }, 250);
       }
@@ -11563,13 +11559,16 @@ function renderDayTimeline() {
         button.appendChild(heading);
         const movableToTimeline = !todo._absence && !todoIsMultiDayCalendarSpan(todo);
         if (movableToTimeline) {
-          button.title = "Povleci v časovnico za enourni termin";
+          button.title = "Klikni za urejanje; pridrži in povleci v časovnico za enourni termin";
           const pointerOptions = { passive: false };
           button.addEventListener("pointerdown", (event) => beginDayAllDayPointerDrag(event, todo), pointerOptions);
           button.addEventListener("pointermove", updateDayAllDayPointerDrag, pointerOptions);
           button.addEventListener("pointerup", (event) => finishDayAllDayPointerDrag(event), pointerOptions);
           button.addEventListener("pointercancel", (event) => finishDayAllDayPointerDrag(event, true), pointerOptions);
-          button.addEventListener("lostpointercapture", (event) => finishDayAllDayPointerDrag(event, true));
+          button.addEventListener("lostpointercapture", (event) => {
+            if (event.target === button && !button.hasPointerCapture?.(event.pointerId)) finishDayAllDayPointerDrag(event, true);
+          });
+          button.addEventListener("contextmenu", (event) => event.preventDefault());
         }
         button.addEventListener("click", (event) => {
           if (state.dayTimelineSuppressClick) {
@@ -11662,7 +11661,16 @@ function renderDayTimeline() {
           finishDayTimelineEventPointer(pointerEvent, true).catch(() => {});
         }, dayEventPointerOptions);
         event.addEventListener("lostpointercapture", (pointerEvent) => {
+          // Touch initially captures the nested title/avatar. Moving capture
+          // to the card after the hold must not cancel our own interaction.
+          if (pointerEvent.target !== event || event.hasPointerCapture?.(pointerEvent.pointerId)) return;
           finishDayTimelineEventPointer(pointerEvent, true).catch(() => {});
+        });
+        event.addEventListener("contextmenu", (contextEvent) => contextEvent.preventDefault());
+        event.addEventListener("click", () => {
+          // Pointer activations are consumed once at pointerup; this also
+          // supports assistive/keyboard-generated click-only activation.
+          openTodoFromDayTimeline(todo).catch((error) => showNotice(error.message));
         });
         event.addEventListener("keydown", (keyEvent) => {
           if (keyEvent.key !== "Enter" && keyEvent.key !== " ") return;
@@ -11799,30 +11807,25 @@ function navigateDayTimeline(dayOffset) {
 
 function dayTimelineResizeModeAtPointer(event, eventElement) {
       const bounds = eventElement.getBoundingClientRect();
-      // The starting point decides the entire gesture. Crossing into the
-      // right half later must not turn a scroll into a time/date edit.
-      if (event.clientX < bounds.left + bounds.width / 2) return "pan";
-      const relativeY = Math.max(0, Math.min(bounds.height, event.clientY - bounds.top));
-      // Forgiving edge zones apply only to the right half of the event.
-      const preferredZone = event.pointerType === "touch" ? 42 : 28;
-      const edgeZone = Math.min(preferredZone, bounds.height / 2);
-      if (relativeY <= edgeZone) return "resize-start";
-      if (relativeY >= bounds.height - edgeZone) return "resize-end";
-      return event.target?.closest?.(".day-resize-handle")?.dataset.mode || "move";
+      // Only the visible controls resize. Holding anywhere else moves the
+      // whole event, including its left half, without changing duration.
+      const handle = event.target?.closest?.(".day-resize-handle");
+      return handle && eventElement.contains(handle) && event.clientX >= bounds.left + bounds.width / 2
+        ? handle.dataset.mode : "move";
     }
 
 function beginDayTimelineEventPointer(event, todo) {
       if (state.dayTimelineSaving || todoIsMultiDayCalendarSpan(todo)) return;
       if (event.pointerType === "mouse" && event.button !== 0) return;
+      if (state.dayTimelinePointers.size || state.dayTimelineInteraction) return;
       const eventElement = event.currentTarget;
       const mode = dayTimelineResizeModeAtPointer(event, eventElement);
-      if (mode === "pan") return;
       const startMinute = dayTimelineMinutes(todo.start);
       const endMinute = dayTimelineMinutes(todo.end);
       if (startMinute === null || endMinute === null) return;
-      // Touch must be held before *any* event drag or resize starts. A normal
-      // swipe therefore remains a timeline scroll instead of a surprise edit.
-      const touchHoldRequired = event.pointerType === "touch";
+      // Moving the body always requires a hold (mouse, pen and touch). Keep
+      // mouse resizing immediate; touch resizing retains its existing hold.
+      const touchHoldRequired = event.pointerType === "touch" || mode === "move";
       if (!touchHoldRequired) {
         event.preventDefault();
         event.stopPropagation();
@@ -11832,6 +11835,7 @@ function beginDayTimelineEventPointer(event, todo) {
         pointerId: event.pointerId,
         pointerType: event.pointerType,
         todoId: todo.id,
+        todo,
         mode,
         startX: event.clientX,
         startY: event.clientY,
@@ -11984,7 +11988,8 @@ function updateDayTimelineEventPointer(event) {
       }
       const deltaX = event.clientX - interaction.startX;
       const deltaY = event.clientY - interaction.startY;
-      if (!interaction.moved && Math.max(Math.abs(deltaX), Math.abs(deltaY)) < 4) return;
+      const dragThreshold = interaction.mode === "move" || interaction.pointerType === "touch" ? 9 : 4;
+      if (!interaction.moved && Math.max(Math.abs(deltaX), Math.abs(deltaY)) < dragThreshold) return;
       event.preventDefault();
       event.stopPropagation();
       if (!interaction.moved) {
@@ -12000,19 +12005,22 @@ async function finishDayTimelineEventPointer(event, cancelled = false) {
       if (!interaction || interaction.pointerId !== event.pointerId) return;
       event.stopPropagation();
       state.dayTimelineInteraction = null;
+      state.dayTimelinePointers.delete(event.pointerId);
+      if (state.dayTimelineGesture?.pointerId === event.pointerId) state.dayTimelineGesture = null;
+      if (!state.dayTimelinePointers.size) $("dayTimelineScroll").classList.remove("is-panning");
       if (interaction.autoScrollFrame) cancelAnimationFrame(interaction.autoScrollFrame);
       interaction.element.classList.remove("is-moving", "is-drag-ready", "is-day-moving");
       interaction.element.style.transform = "";
       delete interaction.element.dataset.dayTarget;
       clearTimeout(interaction.holdTimer);
-      if (cancelled) { renderDayTimeline(); return; }
-      const todo = state.todos.find((item) => item.id === interaction.todoId);
+      if (cancelled) { if (interaction.moved) renderDayTimeline(); return; }
+      const todo = state.todos.find((item) => item.id === interaction.todoId) || interaction.todo;
+      consumeDayTimelineActivationClick(event);
       if (!interaction.moved) {
         // A tap is an edit action even when it lands on a resize grip. On
         // narrow cards the large, touch-friendly grips otherwise cover the
         // complete card and make the event appear impossible to open.
-        if (todo && (!interaction.touchHoldRequired || !interaction.touchReady)) {
-          consumeDayTimelineActivationClick(event);
+        if (todo) {
           await openTodoFromDayTimeline(todo);
         }
         return;
@@ -12044,13 +12052,17 @@ function dayTimelinePointerMetrics() {
 
 function startDayTimelineViewportPointer(event) {
       const eventCard = event.target.closest(".day-timeline-event");
-      const touchCandidate = state.dayTimelineInteraction;
-      const safeEventPan = eventCard && dayTimelineResizeModeAtPointer(event, eventCard) === "pan";
-      if (eventCard && !safeEventPan && !(touchCandidate && touchCandidate.pointerId === event.pointerId && touchCandidate.pointerType === "touch" && !touchCandidate.touchReady)) return;
+      const candidate = state.dayTimelineInteraction;
+      const pendingEventHold = eventCard && candidate?.pointerId === event.pointerId && !candidate.touchReady;
+      if (eventCard && !pendingEventHold && !state.dayTimelinePointers.size) return;
       if (event.pointerType === "mouse" && event.button !== 0) return;
+      if (state.dayTimelinePointers.size && candidate && !candidate.touchReady) {
+        clearTimeout(candidate.holdTimer);
+        state.dayTimelineInteraction = null;
+      }
       event.preventDefault();
       const scroll = $("dayTimelineScroll");
-      if (!eventCard || safeEventPan) scroll.setPointerCapture?.(event.pointerId);
+      try { scroll.setPointerCapture?.(event.pointerId); } catch { /* Capture can be unavailable. */ }
       state.dayTimelinePointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
       scroll.classList.add("is-panning");
       const metrics = dayTimelinePointerMetrics();
@@ -12063,7 +12075,7 @@ function startDayTimelineViewportPointer(event) {
           startY: event.clientY,
           lastX: event.clientX,
           lastY: event.clientY,
-          tapTodoId: safeEventPan ? eventCard.dataset.todoId : "",
+          tapTodoId: eventCard?.dataset.todoId || "",
           moved: false
         };
     }
@@ -12087,7 +12099,8 @@ function updateDayTimelineViewportPointer(event) {
       }
       const gesture = state.dayTimelineGesture;
       if (gesture?.type !== "pan" || gesture.pointerId !== event.pointerId) return;
-      if (Math.hypot(event.clientX - gesture.startX, event.clientY - gesture.startY) > 7) gesture.moved = true;
+      if (Math.hypot(event.clientX - gesture.startX, event.clientY - gesture.startY) > 9) gesture.moved = true;
+      if (!gesture.moved) return;
       scroll.scrollLeft -= event.clientX - gesture.lastX;
       scroll.scrollTop -= event.clientY - gesture.lastY;
       gesture.lastX = event.clientX;
@@ -12095,6 +12108,14 @@ function updateDayTimelineViewportPointer(event) {
     }
 
 function finishDayTimelineViewportPointer(event) {
+      const interaction = state.dayTimelineInteraction;
+      if (interaction?.pointerId === event.pointerId) {
+        // Arming a hold transfers capture from this viewport to the card.
+        // That transfer is not a cancellation or a second tap.
+        if (event.type === "lostpointercapture" && interaction.element.hasPointerCapture?.(event.pointerId)) return;
+        finishDayTimelineEventPointer(event, event.type !== "pointerup").catch((error) => showNotice(error.message));
+        return;
+      }
       const gesture = state.dayTimelineGesture;
       const horizontalSwipe = gesture?.type === "pan"
         && gesture.pointerId === event.pointerId
@@ -12125,6 +12146,7 @@ function finishDayTimelineViewportPointer(event) {
         $("dayTimelineScroll").classList.remove("is-panning");
       }
       if (event.type === "pointercancel" || event.type === "lostpointercapture") return;
+      if (gesture?.moved) consumeDayTimelineActivationClick(event);
       if (tappedTodoId && !remaining) {
         const todo = state.todos.find((item) => item.id === tappedTodoId);
         if (todo) {
@@ -14754,6 +14776,11 @@ $("dayTimelineDialog").addEventListener("close", () => {
       state.dayTimelinePointers.clear();
       if (interaction?.holdTimer) clearTimeout(interaction.holdTimer);
       if (interaction?.autoScrollFrame) cancelAnimationFrame(interaction.autoScrollFrame);
+      const allDayInteraction = state.dayTimelineAllDayInteraction;
+      state.dayTimelineAllDayInteraction = null;
+      clearTimeout(allDayInteraction?.holdTimer);
+      if (allDayInteraction?.autoScrollFrame) cancelAnimationFrame(allDayInteraction.autoScrollFrame);
+      clearDayAllDayDropPreview(allDayInteraction);
       state.dayTimelineGesture = null;
       $("dayTimelineScroll").classList.remove("is-panning");
       // X discards unsent drafts, but cannot cancel an already submitted write.

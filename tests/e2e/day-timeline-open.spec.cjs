@@ -120,3 +120,28 @@ test("empty daily tap creates one form; keyboard opening and browser Back keep t
     expect(await view(page)).toEqual(before);
   } finally { await context.close(); }
 });
+
+test("a deliberate held click without a drag still opens the event instead of being swallowed", async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 980, height: 860 }, serviceWorkers: "block" });
+  const page = await context.newPage();
+  try {
+    const id = await setup(page);
+    const card = page.locator(`.day-timeline-event[data-todo-id="${id}"]`);
+    await card.scrollIntoViewIfNeeded();
+    const box = await card.boundingBox();
+    await page.mouse.move(box.x + box.width * .7, box.y + box.height / 2);
+    await page.mouse.down();
+    expect(await page.evaluate(() => state.dayTimelineInteraction?.touchReady)).toBe(false);
+    await expect(card).toHaveClass(/is-drag-ready/);
+    await page.mouse.up();
+    await expect(page.locator("#todoDialog")).toBeVisible();
+    await expect(page.locator("#todoFormId")).toHaveValue(id);
+    expect(await page.evaluate(() => state.dayTimelineDrafts.size)).toBe(0);
+    await page.locator("#closeTodoDialog").click();
+    await expect(page.locator("#dayTimelineDialog")).toBeVisible();
+    await frames(page);
+    await card.evaluate(el => el.click()); // Accessible click with no pointer sequence.
+    await expect(page.locator("#todoDialog")).toBeVisible();
+    await expect(page.locator("#todoFormId")).toHaveValue(id);
+  } finally { await context.close(); }
+});

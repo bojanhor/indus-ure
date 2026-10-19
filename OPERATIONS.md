@@ -73,6 +73,16 @@ ne prekliče že izdanih sej; po potrebi jih je treba preklicati ločeno.
 
 ## Tehnična konfiguracija
 
+Dnevni pogled (19. 10. 2026): kratek klik/dotik na dogodek odpre urejevalnik.
+Premik časovnega ali celodnevnega dogodka se omogoči po 400 ms pridržanja
+z miško, pisalom ali dotikom; črtkan okvir označi pripravljenost. Spust brez
+premika še vedno odpre dogodek. Poteg pred pridržanjem samo pomika pogled.
+Trajanje se spreminja samo prek desnih kontrol zgoraj/spodaj, ne prek
+nevidnih robnih območij. Pri miški se ti kontroli odzoveta takoj, pri dotiku
+po obstoječem pridržanju. Navaden kazalec ne kaže več rokice za vlečenje.
+Regresijski prehod vključuje klike, počasne dotike, tresljaj, premik, resize,
+prenos pointer capture, pinch in vrnitev iz urejevalnika v Chromiumu/Firefoxu.
+
 Od 17. 9. 2026: `/var/lib/indus-ure/app-config.json`, šefovski obrazec v nastavitvah,
 atomaren zapis in prejšnja različica. Podrobnosti, privzete omejitve, validacija ter
 omejitve povrnitve: [TECHNICAL-CONFIG-2026-09-17.md](TECHNICAL-CONFIG-2026-09-17.md).

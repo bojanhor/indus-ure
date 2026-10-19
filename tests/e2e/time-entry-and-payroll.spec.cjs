@@ -1043,6 +1043,7 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
       const targetY = scrollBox.y + Math.min(scrollBox.height - 44, 150);
       await page.mouse.move(sourceBox.x + sourceBox.width / 2, sourceBox.y + sourceBox.height / 2);
       await page.mouse.down();
+      await expect(source).toHaveClass(/is-drag-ready/);
       await page.mouse.move(targetX, targetY, { steps: 8 });
       await expect(page.locator(".day-timeline-event.is-drop-preview")).toBeVisible();
       await page.mouse.up();
@@ -1126,6 +1127,7 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
       const targetY = scrollBox.y + Math.min(scrollBox.height - 40, Math.max(44, 150));
       await page.mouse.move(sourceBox.x + sourceBox.width / 2, sourceBox.y + sourceBox.height / 2);
       await page.mouse.down();
+      await expect(source).toHaveClass(/is-drag-ready/);
       await page.mouse.move(targetX, targetY, { steps: 8 });
       await expect(page.locator(".day-timeline-event.is-drop-preview")).toBeVisible();
       await page.mouse.up();
@@ -1188,6 +1190,7 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
       expect(box).toBeTruthy();
       await page.mouse.move(box.x + box.width * 0.7, box.y + box.height / 2);
       await page.mouse.down();
+      await expect(event).toHaveClass(/is-drag-ready/);
       await page.mouse.move(box.x + box.width * 0.7 + 128, box.y + box.height / 2, { steps: 8 });
       await page.mouse.up();
       expect(await page.evaluate(() => state.dayTimelineDate)).toBe(dates.next);

@@ -517,7 +517,10 @@ test("mese\u010dni in dnevni pogled ohranita berljivost nujnih in zaklju\u010den
   assert.match(html, /\.day-multiday-event\.urgent\.is-span-start/);
   assert.match(html, /todo\.urgent \? 'urgent' : ''/);
   assert.match(html, /function dayTimelineResizeModeAtPointer\(/);
-  assert.match(html, /const preferredZone = event\.pointerType === "touch" \? 42 : 28/);
+  assert.match(html, /const handle = event\.target\?\.closest\?\.\("\.day-resize-handle"\)/);
+  assert.match(html, /handle && eventElement\.contains\(handle\) && event\.clientX >= bounds\.left \+ bounds\.width \/ 2/);
+  assert.match(html, /const touchHoldRequired = event\.pointerType === "touch" \|\| mode === "move"/);
+  assert.doesNotMatch(html, /\.day-timeline-event[^{}]*\{[^{}]*cursor: grab/);
   assert.doesNotMatch(html, /Zgoraj\/dol spremeni uro/);
   assert.match(html, /\.todo-status-material \{ --todo-bg: #4eb54b;/);
   assert.match(html, /function syncClientBillSelection\(lines, selection\) \{[\s\S]*?const pending = lines\.filter\(\(line\) => !line\.clientBill\);[\s\S]*?state\.clientBillSelectedEventIds = new Set\(availableEventIds\);/);
