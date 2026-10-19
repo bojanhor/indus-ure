@@ -110,6 +110,18 @@ test("foreign, malformed, incomplete and unknown files are left untouched", asyn
   const result = await f.run(); assert.deepEqual(result.removed, [f.old.recoveryFile]); assert.equal(result.ignored.length, 7);
 });
 
+test("latest readable CSV files are never candidates for backup retention", async t => {
+  const f = await fixture(t);
+  for (const name of ["dogodki.csv", "vpisi-ur.csv"]) {
+    f.files.set(name, { id: name, name, parents: ["backup-folder"], ownedByMe: true, trashed: false,
+      appProperties: { indusApp: "indus-ure-v2", purpose: `recovery-latest-${name}`, backupId: "old-backup" } });
+  }
+  const result = await f.run();
+  for (const name of ["dogodki.csv", "vpisi-ur.csv"]) {
+    assert.ok(result.ignored.includes(name)); assert.ok(f.files.has(name)); assert.ok(!f.deleted.includes(name));
+  }
+});
+
 test("corrupt sidecars, checkpoint hashes, or a changed retained archive block the entire plan", async t => {
   const f = await fixture(t);
   const original = f.bodies.get(f.old.driveChecksumFileId);

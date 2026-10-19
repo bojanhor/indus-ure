@@ -11,6 +11,7 @@ const { PostgresStore } = require("../outputs/postgres-store");
 const { createCalendarSyncStore, KEY: CALENDAR_STATE_KEY } = require("../outputs/calendar-sync-store");
 const { normalizeDb, createSession, sessionTokenHash, attachmentVisibleToUser } = require("../outputs/server");
 const { dumpConsistentDatabase, dumpDatabase, sanitize } = require("./backup-indus-ure");
+const { renderReadableCsv, readReadableSnapshot } = require("./backup-readable-csv");
 
 const expected = process.env.PG_QA_DATABASE || "";
 const url = new URL(process.env.DATABASE_URL || "postgresql://invalid/invalid");
@@ -69,6 +70,13 @@ async function main() {
     assert.ok(file);
     assert.equal(crypto.createHash("sha256").update(await fs.readFile(file.filePath)).digest("hex"), original.attachmentId);
     check(mode === "--verify-recovery" ? "restore.real_sanitized_recovery_format_and_media_hash" : "restore.database_rows_and_media_hash");
+    if (mode === "--verify-recovery") {
+      const restoredCsv = renderReadableCsv(await readReadableSnapshot(pool), original.csvMetadata);
+      for (const file of restoredCsv) {
+        assert.equal(file.content, await fs.readFile(path.join(path.dirname(reportPath), file.name), "utf8"));
+      }
+      check("restore.readable_csv_exactly_matches_restored_database");
+    }
     return;
   }
   if (mode === "--upgrade") {
@@ -88,6 +96,12 @@ async function main() {
     const afterNoop = await fingerprints();
     for (const table of tables.filter(table => !["indus_meta", "indus_sessions"].includes(table))) assert.deepEqual(afterNoop[table], beforeNoop[table], `Normalization is not idempotent for ${table}`);
     check("upgrade.production_clone_preserves_business_counts_and_is_idempotent");
+    const productionView = await readReadableSnapshot(pool);
+    const productionCsv = renderReadableCsv(productionView, { backupId: "qa-production-clone", createdAt: new Date().toISOString() });
+    assert.equal(productionCsv[0].rows, productionView.tasks.length + productionView.entries.length);
+    const hourTaskIds = new Set(productionView.tasks.filter(t => ["execution", "meal", "drive", "purchase"].includes(t.status)).map(t => t.id));
+    assert.equal(productionCsv[1].rows, productionView.assignments.filter(a => hourTaskIds.has(a.taskId)).length);
+    check("upgrade.readable_csv_covers_all_production_clone_events_and_hour_assignments", { rows: productionCsv.map(f => ({ name: f.name, rows: f.rows })) });
     const absenceProbe = { id: "qa-rollback-absence", workerId: "ibro", date: "2026-10-12", endDate: "2026-10-13", reason: "vacation", viewerIds: ["ibro", "bojan"] };
     const probeDb = await store.load();
     probeDb.absences = [...(probeDb.absences || []), absenceProbe];
@@ -402,7 +416,10 @@ async function main() {
   } finally { await stop(child); }
   const recoveryDigest = await digest(true);
   const workDir = path.dirname(reportPath);
+  const csvMetadata = { backupId: "pg-qa-backup", createdAt: new Date().toISOString() };
+  const expectedCsv = renderReadableCsv(await readReadableSnapshot(pool), csvMetadata);
   await dumpConsistentDatabase(pool, workDir, path.join(workDir, "recovery.dump"), path.join(workDir, "recovery.sql"), {
+    metadata: csvMetadata,
     dump: async (...args) => {
       await dumpDatabase(...args);
       // A real concurrent commit between pg_dump and sanitized-state.sql must
@@ -410,11 +427,14 @@ async function main() {
       const during = await other.load();
       during.users.ibro.name = "Written during backup";
       during.settings.afterBackupSnapshot = true;
+      during.todos[0].notes = "Written during backup; must not leak into CSV";
       await other.save(during);
     }
   });
+  for (const file of expectedCsv) assert.equal(await fs.readFile(path.join(workDir, file.name), "utf8"), file.content);
+  check("backup.readable_csv_shares_snapshot_despite_concurrent_user_and_event_edit");
   check("backup.exported_snapshot_spans_real_concurrent_commit");
-  await fs.writeFile(reportPath, JSON.stringify({ checks, passed: true, attachmentId, recoveryDigest, restoreDigest: await digest() }, null, 2));
+  await fs.writeFile(reportPath, JSON.stringify({ checks, passed: true, attachmentId, recoveryDigest, csvMetadata, restoreDigest: await digest() }, null, 2));
 }
 main().then(() => { console.log(JSON.stringify({ passed: true, checks: checks.length })); }).catch(error => {
   console.error(error.stack || error.message); process.exitCode = 1;

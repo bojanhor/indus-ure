@@ -140,13 +140,38 @@ ali pošiljanje prave e-pošte zahtevata posebej določen varen testni primer.
 
 ## Obnova in povrnitev
 
+### Berljivi izvozi v samodejni kopiji (19. 10. 2026)
+
+Vsak zagon obstoječega `indus-ure-backup.service` (nočni in pred objavo)
+v isti PostgreSQL transakciji kot dump izdela `dogodki.csv` in `vpisi-ur.csv`.
+Oba sta v arhivu; manifest vsebuje število vrstic, velikost in SHA-256.
+Po preverjenem nalaganju arhiva se posodobita tudi dve samostojni datoteki
+v isti zasebni mapi Drive. ID in pravice ostanejo; dnevni CSV-ji se ne kopičijo.
+Njuni namenski `appProperties.purpose` nista predmet redčenja recovery arhivov.
+Vsak prenos se preveri s svežim branjem velikosti in MD5. Napaka CSV ustavi
+backup pred čiščenjem in sproži obstoječe opozorilo; pri napaki generiranja
+se prejšnja samostojna izvoza ne spreminjata. Prenosa dveh Drive datotek nista
+atomarna: po prekinitvi primerjaj ID kopije in uporabi par iz istega arhiva.
+
+CSV uporablja UTF-8 BOM, podpičje, dvojne narekovaje, decimalno vejico in
+ohranjene večvrstične opise. Formuli podobno besedilo dobi varnostni apostrof.
+Dogodki vsebujejo vse ohranjene skupne dogodke in stare koledarske vnose;
+vpisi ur so ločeni po izvajalcu. Vključena sta arhiv in koš z oznako stanja.
+Prazna številčna polja niso ničle. Vpisane ure so čas od–do, ne ponovni obračun
+plače; ure za stranko so navedene enkrat na skupni dogodek. Priloge, celotna
+zgodovina in potrjeni obračuni ostajajo v polnem recovery arhivu, ne v CSV.
+Ročnih opomb ne vpisuj v avtomatski datoteki, ker ju naslednji backup zamenja.
+Povrnitev kode na predhodno izdajo ustavi osveževanje CSV, že ustvarjeni
+datoteki/arhivi ostanejo uporabni. Ni spremembe SQL sheme ali poslovnih podatkov.
+
 Google koledar planiranja: pravila, nova dovoljenja, operativna vrsta,
 začasna ustavitev in omejitve povrnitve so v `GOOGLE-PLANNING-CALENDAR.md`.
 Stanje `indus_meta/planning_calendar_sync_v1` je ločeno od poslovnega CAS in
 ni del sanitiziranega recovery izvoza; po obnovi se povezava ponovno potrdi.
 
 - Recovery arhiv vsebuje `database.dump`, `sanitized-state.sql`, `media/`,
-  `application/`, `app-config.json` (od 17. 9. 2026), `manifest.json` in generirani `RESTORE-INDUS-URE.txt`.
+  `application/`, `app-config.json` (od 17. 9. 2026), `dogodki.csv` in
+  `vpisi-ur.csv` (od 19. 10. 2026), `manifest.json` in generirani `RESTORE-INDUS-URE.txt`.
   Dump in očiščeni uporabniki/nastavitve uporabljajo isti izvoženi PG posnetek.
 - Ohranita se poslovna baza in mediji; OAuth žetoni, gesla, seje, ICS žetoni
   in `/etc/indus-ure.env` so izključeni. Skrivnosti potrebujejo ločeno varno kopijo.

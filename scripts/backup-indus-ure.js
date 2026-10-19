@@ -15,6 +15,7 @@ const nodemailer = require("nodemailer");
 const { retentionPolicy, retainLocal } = require("./backup-retention");
 const { driveRetentionPolicy, manageDriveRetention } = require("./drive-backup-retention");
 const { runBackupRetention, backupCleanupIssue } = require("../outputs/backup-status");
+const { writeReadableCsv } = require("./backup-readable-csv");
 
 const execFileAsync = promisify(execFile);
 const DATABASE_URL = process.env.DATABASE_URL || "";
@@ -133,14 +134,19 @@ async function writeSanitizedState(pool, destination) {
   await fsp.writeFile(destination, sql.join("\n"), { mode: 0o600 });
 }
 
-async function dumpConsistentDatabase(pool, workDir, database, state, { dump = dumpDatabase, writeState = writeSanitizedState } = {}) {
+async function dumpConsistentDatabase(pool, workDir, database, state, {
+  dump = dumpDatabase, writeState = writeSanitizedState, writeCsv = writeReadableCsv,
+  metadata = { backupId: "snapshot", createdAt: new Date().toISOString() }
+} = {}) {
   const client = await pool.connect();
   try {
     await client.query("begin isolation level repeatable read read only");
     const snapshot = (await client.query("select pg_export_snapshot() as snapshot")).rows[0].snapshot;
     await dump(workDir, database, snapshot);
     await writeState(client, state);
+    const readable = await writeCsv(client, workDir, metadata);
     await client.query("commit");
+    return readable;
   } catch (error) {
     await client.query("rollback");
     throw error;
@@ -151,13 +157,14 @@ function baseRestoreGuide() {
   return "INDUS URE - HITRA OBNOVA\n==========================\nPosodobljeno 11. 9. 2026. Velja za Ure, NE za Fakture.\nPodrobnosti: application/OPERATIONS.md in application/DEPLOY-UBUNTU.md.\n\nPaket vsebuje PostgreSQL bazo, priloge, kodo aplikacije in app-config.json. Datoteko app-config.json po pregledu obnovi v /var/lib/indus-ure/app-config.json (lastnik indus-ure, pravice 0600). V testnem okolju je v DATA_DIR. Namenoma NE vsebuje OAuth žetonov, prijavnih sej, hashov gesel, ICS povezav ali /etc/indus-ure.env.\ndatabase.dump in sanitized-state.sql sta zajeta v istem izvoženem PostgreSQL posnetku. Obnovi OBA iz ISTEGA paketa.\n\n1. Prenesi .tar.gz in istoimensko .sha256 datoteko. Preveri in razpakiraj v zasebno mapo:\n   sha256sum -c indus-ure-recovery-....tar.gz.sha256\n   mkdir restore && tar -xzf indus-ure-recovery-....tar.gz -C restore\n   chmod 0644 restore/database.dump restore/sanitized-state.sql\n   Uporabnik postgres potrebuje tudi prehod do te mape. Po obnovi odstrani njegov začasni dostop.\n\n2. Na ciljnem Ubuntu namesti Node 20+, PostgreSQL, nginx, git in tar ter obdelavo slik:\n   sudo apt-get install -y libvips-tools libheif-examples\n   Ustvari uporabnika indus-ure in mape po application/DEPLOY-UBUNTU.md.\n   NAJPREJ preveri obnovo v izolirani bazi in hash prilog. Za redno objavo je obvezen run-indus-ure-postgres-qa; obnovitev produkcije potrebuje posebej dovoljenje lastnika.\n\n3. Pred potrjeno produkcijsko obnovo naredi neodvisno kopijo trenutne baze, medijev in okolja. Ustavi aplikacijo IN vse skripte, timerje ali druge pisce baze. Preveri ciljni strežnik:\n   sudo systemctl stop indus-ure.service indus-ure-worker-digest.timer indus-ure-backup.timer\n   Preveri tudi morebitne že tekoče digest/backup storitve.\n\n4. BAZA - naslednji ukazi PREPIŠEJO indus_ure, nikoli indus_fakture:\n   sudo -u postgres dropdb --if-exists indus_ure\n   sudo -u postgres createdb --owner=indus_ure indus_ure\n   sudo -u postgres pg_restore --no-owner --no-acl --role=indus_ure -d indus_ure restore/database.dump\n   sudo -u postgres psql -v ON_ERROR_STOP=1 -d indus_ure -f restore/sanitized-state.sql\n   Ne izpusti indus_meta/storage_revision. Ne zaganjaj starega pisca brez CAS zaščite.\n\n5. PRILOGE IN KODA:\n   Ohranjen star MEDIA_DIR naj bo ločena pred-obnovitvena kopija; ne briši ga vnaprej.\n   Pripravi prazno /var/lib/indus-ure/media in vanjo kopiraj restore/media/.\n   Lastništvo indus-ure:indus-ure, zasebne mape 0700.\n   Kodo restore/application/ pripravi kot ločeno preverjeno izdajo, npm ci --omit=dev.\n   Ne prepisuj aktivne izdaje. Preklop izvedi šele po testih, z aplikacijo ustavljeno.\n   Nepovezane stare medijske datoteke se namenoma ohranijo; čiščenje ni del obnove.\n\n6. Ročno obnovi /etc/indus-ure.env iz LOČENEGA varnega zapisa:\n   DATABASE_URL, NODE_ENV=production, HOST=127.0.0.1, PORT=8123,\n   MEDIA_DIR=/var/lib/indus-ure/media, PUBLIC_BASE_URL=https://ure.indus.si,\n   Google OAuth, GOOGLE_DRIVE_BACKUP_PARENT_FOLDER_ID,\n   GOOGLE_DRIVE_TASKS_FOLDER_ID (Dokumenti/Preglednice), GOOGLE_DRIVE_OWNER_EMAIL,\n   BACKUP_DIR=/var/backups/indus-ure.\n   Lokalna javna prijava z geslom NI vključena. Google identitete uporabnikov ostanejo.\n   Izbirna servisna LAN prijava zahteva LAN_SUPPORT_LOGIN_ENABLED, LAN_SUPPORT_LOGIN_PASSWORD\n   (vsaj 24 znakov), izbiro obstoječega uporabnika ter preverjen LAN proxy;\n   natančna imena in omrežne pogoje preveri v OPERATIONS.md. Ne odpiraj je internetu.\n   Skrivnosti in sej ne kopiraj v chat ali Git.\n\n7. Namesti systemd/nginx datoteke iz application/deploy/, nato:\n   sudo systemctl daemon-reload\n   sudo systemctl start indus-ure.service\n   curl --fail http://127.0.0.1:8123/api/health\n   Preveri prijavo, opravilo, prilogo, obračun, števila vrstic in dnevnik napak.\n   Šele po uspešnem preverjanju ponovno vključi prej omogočene timerje.\n\n8. Kot Bojan v Nastavitvah ponovno poveži Google. ICS povezave in seje se ne obnovijo.\n   Ustvari nove read-only ICS povezave ter preveri uspešen nov recovery backup in Drive navodila.\n\nPred produkcijsko obnovo postopek preveri na ločenem testnem strežniku.\n";
 }
 function restoreGuide() {
-  return baseRestoreGuide().replace("Posodobljeno 11. 9. 2026.", "Posodobljeno 7. 10. 2026.")
+  return baseRestoreGuide().replace("Posodobljeno 11. 9. 2026.", "Posodobljeno 19. 10. 2026.")
+    + "\nBERLJIV PREGLED BREZ APLIKACIJE\nV arhivu sta dogodki.csv in vpisi-ur.csv, zajeta v ISTEM PostgreSQL posnetku kot baza. Zadnja izvoza sta tudi samostojni datoteki v isti mapi Google Drive; vedno preveri stolpca Izvoz (UTC) in ID varnostne kopije.\nOdpri ju z Excelom ali LibreOffice: UTF-8, locilo podpicje, narekovaj dvojni, decimalna vejica. Datumi so YYYY-MM-DD, ure lokalne Europe/Ljubljana; casovni zigi izvoza so UTC. Opisi ohranijo prelome vrstic. Besedilo, ki bi ga preglednica izvedla kot formulo, ima varnostni apostrof.\ndogodki.csv vsebuje vse ohranjene dogodke (eno vrstico na skupno opravilo), vpise ur, material, zapiske in stare koledarske vnose. Izvajalci so navedeni skupaj. vpisi-ur.csv vsebuje posamezne vpise dela, malice, voznje in nabave po delavcih.\nVkljucena sta arhiv in kos: filtriraj Stanje zapisa. Trajno izbrisanih dogodkov v novi kopiji ni; poisci starejsi arhiv. Priloge so v media/, niso vgrajene v CSV. CSV ni popolna obnova baze, zgodovine ali obracunov.\nVpisane ure so razlika od-do, ne koncni obracun place (malica, prevoz na delo, popravki in urne postavke se ne preracunavajo). Prazna numericna polja pomenijo, da vrednost ni vpisana; niso nicla. Minute/ure za stranko so predogled dogodka, pri garanciji 0, in niso ponovno sestevane pri vec izvajalcih. Stari koledarski vnosi so samo v dogodki.csv, da ne podvojijo ur. ID obracunov pomagajo prepoznati ze obracunane vpise.\nDatoteki sta zaupni poslovni evidenci. Ne spreminjaj njunih pravic deljenja. Samostojni datoteki se ob vsakem backupu posodobita; rocne opombe shrani v svojo kopijo. Ob napaki izvoza ostaneta prejsnji datoteki. Ce se ustavi nalaganje med datotekama, lahko kazeta razlicna ID kopije; uporabi par iz istega preverjenega arhiva.\n"
     + "\nHRAMBA KOPIJ\nGoogle Drive: zadnja kopija vsakega od zadnjih 90 koledarskih dni (Europe/Ljubljana) in zadnje 3 kopije pred objavo. Lokalno: 7 dnevnih in 3 pred-objavne. Najmanj 3 popolne kopije. Presežne kopije se trajno odstranijo šele po uspešno preverjeni novi kopiji.\nNastavitve: BACKUP_OFFSITE_RETENTION_DAYS=90, BACKUP_OFFSITE_DEPLOYMENT_COPIES=3, BACKUP_LOCAL_RETENTION_DAYS=7, BACKUP_LOCAL_DEPLOYMENT_COPIES=3.\nPred-objavne oznake so tudi na arhivih v zasebnih Drive appProperties. Podroben postopek in omejitve: application/OPERATIONS.md.\n";
 }
 async function verifyLocalArchive(file) {
   const output = await execFileAsync("tar", ["-tzf", file], { maxBuffer: 16 * 1024 * 1024 });
   const names = String(output.stdout || "").split(/\r?\n/).filter(Boolean);
-  for (const required of ["database.dump", "sanitized-state.sql", "media", "application/package.json", "RESTORE-INDUS-URE.txt", "manifest.json"]) {
+  for (const required of ["database.dump", "sanitized-state.sql", "dogodki.csv", "vpisi-ur.csv", "media", "application/package.json", "RESTORE-INDUS-URE.txt", "manifest.json"]) {
     if (!names.some((name) => name === required || name.startsWith(`${required}/`))) throw new Error(`Lokalni recovery paket nima: ${required}.`);
   }
 }
@@ -245,6 +252,34 @@ async function upsertInstructions(drive, folderId, file) {
     : await upload(drive, folderId, file, PURPOSE.instructions, "", "text/plain");
   return verifyDrive(drive, folderId, file, remote);
 }
+async function upsertReadableCsv(drive, folderId, file, metadata) {
+  const name = path.basename(file);
+  if (!["dogodki.csv", "vpisi-ur.csv"].includes(name) || !/^[\w-]+$/.test(folderId)) throw new Error("Neveljaven CSV cilj.");
+  const purpose = `recovery-latest-${name}`;
+  const fields = "id,name,mimeType,size,md5Checksum,parents,trashed,ownedByMe,appProperties";
+  const found = await drive.files.list({
+    q: `'${folderId}' in parents and trashed = false and appProperties has { key='indusApp' and value='${APP_ID}' } and appProperties has { key='purpose' and value='${purpose}' }`,
+    fields: `nextPageToken,files(${fields})`, pageSize: 100
+  });
+  if (found.data.nextPageToken || (found.data.files || []).length > 1) throw new Error(`Podvojeni avtomatski CSV na Drive: ${name}.`);
+  const existing = found.data.files?.[0];
+  if (existing) {
+    const fresh = (await drive.files.get({ fileId: existing.id, fields })).data;
+    if (!fresh || fresh.trashed || fresh.ownedByMe !== true || !fresh.parents?.includes(folderId)
+        || fresh.mimeType !== "text/csv" || fresh.appProperties?.indusApp !== APP_ID || fresh.appProperties?.purpose !== purpose) {
+      throw new Error(`Drive CSV ni več v upravljani mapi ali nima pravega lastništva: ${name}.`);
+    }
+  }
+  const requestBody = { name, mimeType: "text/csv",
+    description: `INDUS URE – samodejni berljivi izvoz. Posnetek: ${metadata.createdAt}. ${metadata.rows} vrstic. Ob vsakem backupu se nadomesti; ročne opombe shrani v svojo kopijo.`,
+    appProperties: { indusApp: APP_ID, purpose, backupId: metadata.backupId, snapshotAt: metadata.createdAt } };
+  const media = { mimeType: "text/csv", body: fs.createReadStream(file) };
+  const remote = existing
+    ? (await drive.files.update({ fileId: existing.id, requestBody, media, fields })).data
+    : (await drive.files.create({ requestBody: { ...requestBody, parents: [folderId] }, media, fields })).data;
+  if (!remote?.id) throw new Error(`Drive ni sprejel CSV: ${name}.`);
+  return { name, rows: metadata.rows, backupId: metadata.backupId, ...await verifyDrive(drive, folderId, file, remote) };
+}
 async function inspectOrMarkDriveRetention({ markOnly = false } = {}) {
   requireConfig();
   const pool = poolForDatabase(); let lock;
@@ -274,7 +309,8 @@ async function main() {
     const database = path.join(work, "database.dump"), state = path.join(work, "sanitized-state.sql"), media = path.join(work, "media"), application = path.join(work, "application"), guide = path.join(work, "RESTORE-INDUS-URE.txt"), manifestPath = path.join(work, "manifest.json");
     const archive = path.join(BACKUP_DIR, `indus-ure-recovery-${stamp()}.tar.gz`), checksumPath = `${archive}.sha256`;
     await fsp.mkdir(media, { recursive: true, mode: 0o700 });
-    await dumpConsistentDatabase(pool, work, database, state);
+    const createdAt = new Date().toISOString();
+    const readableCsv = await dumpConsistentDatabase(pool, work, database, state, { metadata: { backupId: id, createdAt } });
     await copyMedia(media);
     await copyApplication(application);
     const configuration = require("../outputs/app-config").createAppConfig({
@@ -282,9 +318,9 @@ async function main() {
     }).get();
     await fsp.writeFile(path.join(work, "app-config.json"), JSON.stringify(configuration, null, 2), { mode: 0o600 });
     await fsp.writeFile(guide, restoreGuide(), { mode: 0o600 });
-    const manifest = { format: "indus-ure-recovery-v2", id, createdAt: new Date().toISOString(), application: "INDUS URE", database: "database.dump", sanitizedState: "sanitized-state.sql", media: "media", applicationSource: "application", configuration: "app-config.json", applicationSecretsIncluded: false, excluded: ["OAuth tokens", "password hashes", "active sessions", "ICS feed tokens", "server environment secrets"], mediaFiles: await mediaManifest(media), verification: ["local tar listing", "SHA-256 sidecar", "Google Drive size", "Google Drive MD5", "fresh Drive metadata read"], restore: "Follow RESTORE-INDUS-URE.txt." };
+    const manifest = { format: "indus-ure-recovery-v2", id, createdAt, readableCsv, application: "INDUS URE", database: "database.dump", sanitizedState: "sanitized-state.sql", media: "media", applicationSource: "application", configuration: "app-config.json", applicationSecretsIncluded: false, excluded: ["OAuth tokens", "password hashes", "active sessions", "ICS feed tokens", "server environment secrets"], mediaFiles: await mediaManifest(media), verification: ["local tar listing", "SHA-256 sidecar", "Google Drive size", "Google Drive MD5", "fresh Drive metadata read"], restore: "Follow RESTORE-INDUS-URE.txt." };
     await fsp.writeFile(manifestPath, JSON.stringify(manifest, null, 2), { mode: 0o600 });
-    await execFileAsync("tar", ["-C", work, "-czf", archive, "database.dump", "sanitized-state.sql", "media", "application", "app-config.json", "RESTORE-INDUS-URE.txt", "manifest.json"], { maxBuffer: 2 * 1024 * 1024 });
+    await execFileAsync("tar", ["-C", work, "-czf", archive, "database.dump", "sanitized-state.sql", "dogodki.csv", "vpisi-ur.csv", "media", "application", "app-config.json", "RESTORE-INDUS-URE.txt", "manifest.json"], { maxBuffer: 2 * 1024 * 1024 });
     await verifyLocalArchive(archive);
     const checksum = await sha256(archive);
     await fsp.writeFile(checksumPath, `${checksum}  ${path.basename(archive)}\n`, { mode: 0o600 });
@@ -293,7 +329,11 @@ async function main() {
       upload(drive, folderId, archive, PURPOSE.archive, id), upload(drive, folderId, checksumPath, PURPOSE.checksum, id, "text/plain"), upsertInstructions(drive, folderId, guide)
     ]);
     const [archiveCheck, checksumCheck] = await Promise.all([verifyDrive(drive, folderId, archive, remoteArchive), verifyDrive(drive, folderId, checksumPath, remoteChecksum)]);
-    const result = { id, status: "success", createdAt: manifest.createdAt, recoveryFile: path.basename(archive), checksumFile: path.basename(checksumPath), bytes: archiveCheck.bytes, md5: archiveCheck.md5, sha256: checksum, driveFileId: archiveCheck.id, driveChecksumFileId: checksumCheck.id, driveFolderId: folderId, verified: { localArchive: true, driveSize: true, driveMd5: true, freshDriveRead: true, restoreInstructions: Boolean(instructions.id) } };
+    const readableFiles = [];
+    // Publish only fully generated files AFTER the recovery archive is verified.
+    // Updates retain IDs/sharing; no deletion and no accumulating daily CSV copies.
+    for (const file of readableCsv) readableFiles.push(await upsertReadableCsv(drive, folderId, path.join(work, file.name), { ...file, backupId: id, createdAt }));
+    const result = { id, status: "success", createdAt: manifest.createdAt, readableFiles, recoveryFile: path.basename(archive), checksumFile: path.basename(checksumPath), bytes: archiveCheck.bytes, md5: archiveCheck.md5, sha256: checksum, driveFileId: archiveCheck.id, driveChecksumFileId: checksumCheck.id, driveFolderId: folderId, verified: { localArchive: true, driveSize: true, driveMd5: true, freshDriveRead: true, restoreInstructions: Boolean(instructions.id), readableCsv: readableFiles.length === 2 } };
     await runBackupRetention(result, {
       drive: () => manageDriveRetention(drive, folderId, { directory: BACKUP_DIR, verifiedBackup: result, policy: offsiteRetentionPolicy }),
       local: () => retainLocal(BACKUP_DIR, { verifiedBackup: result, policy: localRetentionPolicy })
@@ -326,4 +366,4 @@ if (require.main === module) {
       .catch(error => { process.stderr.write(error.message + "\n"); process.exitCode = 1; });
   } else { process.stderr.write("Neveljavni argumenti. Za pregled uporabi --inspect-retention.\n"); process.exitCode = 1; }
 }
-module.exports = { dumpConsistentDatabase, dumpDatabase, writeSanitizedState, sanitize, restoreGuide, inspectOrMarkDriveRetention };
+module.exports = { dumpConsistentDatabase, dumpDatabase, writeSanitizedState, sanitize, restoreGuide, inspectOrMarkDriveRetention, upsertReadableCsv };
