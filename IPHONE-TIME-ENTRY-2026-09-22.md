@@ -85,3 +85,15 @@ WebKit na Windows ni fizični iOS compositor, zato je za prenehanje praznine
 s prijavljene slike še vedno potrebna potrditev na uporabnikovem iPhonu.
 Povrnitev te dopolnitve: koda `4e92712`, brez obnove poslovne baze.
 Pripravljene spremembe Drive hrambe niso del tega popravka.
+
+Objavljeno `d2079b6` dne 23. 10. 2026; GitHub posodobljen. Čisti kandidat:
+337 strežniških testov uspešnih (1 preskočen, pokrit z ločenim PG prehodom),
+112 Chromium, 19 Firefox (1 touch preizkus ni podprt), 7 WebKit in 32
+PostgreSQL/restore/upgrade preverjanj. Pred preklopom je uspešna preverjena
+kopija `indus-ure-recovery-20261023T121838Z.tar.gz` (zaključek 12:19:44 UTC).
+Produkcijski brskalnik: nov obrazec, dolg opis in Material brez skoka,
+obnova osnutka in zavrženje z X; obstoječe opravilo ostane nespremenjeno,
+priloga HTTP 200, obračunski pogled deluje. Poslovni zapisi v testih blokirani,
+brez JS napak; health OK in brez novih opozoril storitve. Vizualno pregledane
+slike iz WebKita in produkcijskega Chromiuma. Potrditev na fizičnem iPhonu
+ostaja odprta; samo uspeh teh testov ne dokazuje odprave iOS GPU praznine.
