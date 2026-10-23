@@ -234,15 +234,35 @@ Stare preverjene kopije pred objavami se ob uvedbi lahko označijo z
 `scripts/mark-backup-deployment.js --directory <BACKUP_DIR> --release <git-id>
 --archive <točno-ime-arhiva>`. Tudi ta korak preveri SHA-256 in ničesar ne briše.
 
-### Samodejno redčenje Google Drive kopij (7. 10. 2026)
+### Samodejno redčenje Google Drive kopij (23. 10. 2026)
 
 Isti nočni backup (02:15–02:30 Europe/Ljubljana) po uspešni izdelavi in
-preverjanju nove lokalne/oddaljene kopije ohrani **zadnjo kopijo vsakega od
-zadnjih 90 koledarskih dni + zadnje 3 kopije pred objavo**. Dnevno in
-pred-objavno pravilo se prekrivata, ne seštevata slepo. Ohrani vsaj tri
-popolne kopije; datumov v prihodnosti ne briše. Nastavitvi sta
-`BACKUP_OFFSITE_RETENTION_DAYS=90` (30–365) in
-`BACKUP_OFFSITE_DEPLOYMENT_COPIES=3` (3–100).
+preverjanju nove lokalne/oddaljene kopije ohrani **največ 7 popolnih kopij**:
+
+- zadnjo kopijo za danes, včeraj in predvčeraj;
+- po eno zadnjo kopijo iz vsakega od zadnjih 4 zaključenih tednov.
+
+Tedni so ponedeljek–nedelja. Obdobja se določajo po lokalnem datumu Europe/Ljubljana, zato
+prehod poletnega časa ne spremeni števila dnevnih kopij. To je periodična
+rotacija 1–2–3 dni + 1–2–3–4 tedne, ne obljuba natančne starosti 7/14/28 dni
+ob vsakem zagonu. Tretja tedenska kopija mora ostati, da lahko naslednji teden
+postane četrta. Ob manjkajočem tednu je ta točka prazna. Ena datoteka lahko
+pokriva dnevno in tedensko točko; zato je ob rednih zagonih v ponedeljek in
+torek 6 paketov, ostale dni 7. Na začetku ali po izpadih
+se ohranijo vsaj tri popolne kopije, če so na voljo. Datum v prihodnosti
+ustavi celotno čiščenje, da napačna ura ne povzroči izgube podatkov.
+
+Politika je `BACKUP_OFFSITE_RETENTION_MODE=daily3-weekly4-v1` (privzeto).
+Stari `BACKUP_OFFSITE_RETENTION_DAYS` in `BACKUP_OFFSITE_DEPLOYMENT_COPIES`
+se ne uporabljata več. **Dodatnih pred-objavnih kopij na Drivu ne hrani.**
+Lokalno pravilo 7 dnevnih + 3 pred-objavne ostaja nespremenjeno.
+Trajni izbris zahteva ločeno nastavitev `BACKUP_OFFSITE_DELETE_APPROVED=true`,
+ki se omogoči samo po izrecnem dovoljenju lastnika. Brez nje je predogled
+omogočen, dejansko čiščenje pa se ustavi z opozorilom. Splošna uporabnikova
+preferenca `_Trash` ostaja veljavna za druge datoteke: premik v to mapo
+ne sprosti prostora, zato je trajno brisanje kopij ločena izjema.
+Lastnik je 23. 10. 2026 izrecno dovolil trajni izbris presežkov INDUS URE in
+tedensko poravnavo pravila. To dovoljenje ne velja za Fakture ali druge datoteke.
 
 Obravnava le lastne, aplikacijsko označene pare recovery arhiv + SHA-256
 v namenski mapi. Nepopolne pare, ročne kopije, navodila in neznane datoteke
@@ -267,11 +287,16 @@ Neuspešno Drive čiščenje preskoči lokalno brisanje. Dejanska napaka izdelav
 nalaganja ali preverjanja nove kopije ostaja kritična `backup-failed` in
 neuspešen izhod storitve. Prejšnjih neprebranih napak uspešen zagon ne briše.
 
-Lokalne pred-objavne oznake po preverjanju SHA-256 prepiše v zasebne Drive
+Lokalne pred-objavne oznake obstoječih parov po preverjanju SHA-256 prepiše v zasebne Drive
 `appProperties` arhiva (`deploymentRelease`, `deploymentSha256`). Objavni
-postopek mora pred preklopom izdaje potrditi tudi to oddaljeno oznako.
-Zaščita zato preživi izgubo lokalnega strežnika. Obnova stare kode tega
-pravila nima nujno; po rollbacku preveri politiko kopij.
+postopek mora pred preklopom izdaje potrditi tudi to oddaljeno oznako za
+točno zahtevano novo kopijo. Stare lokalne oznake lahko po novem preživijo
+izbris oddaljenega para in ne smejo ustaviti naslednje kopije. Oddaljena
+oznaka je evidenca izvora, ne izjema od največ sedmih arhivov. Obnova stare
+kode tega pravila nima nujno; po rollbacku preveri politiko kopij. Stari
+backup pred to spremembo lahko zahteva že izbrisane oddaljene pred-objavne
+kopije; pri povrnitvi aplikacije je treba ohraniti novo backup orodje oziroma
+ponovno uskladiti njegov postopek, ne slepo zagnati starega čiščenja.
 
 Pregled brez sprememb (tudi brez zapisovanja Drive oznak):
 `sudo node --env-file=/etc/indus-ure.env /opt/indus-ure/current/scripts/backup-indus-ure.js --inspect-retention`.
@@ -280,8 +305,12 @@ zaženi običajni `indus-ure-backup.service`; ta najprej ustvari novo kopijo.
 Drive čiščenje in označevanje uporabljata isti PostgreSQL advisory lock in
 lokalni `.retention-lock`. Rezultat in delni napredek ob napaki sta zapisana
 v `indus_backup_runs.data.driveRetention` (imena, sproščeni bajti, pravilo).
-Arhivi se trajno izbrišejo, ne prestavijo v plačljiv koš. Rollback kode jih
-ne obnovi; ohranjene dnevne in pred-objavne kopije ostanejo na voljo.
+Po izrecnem dovoljenju in zgornji nastavitvi se arhivi trajno izbrišejo,
+ne prestavijo v plačljiv koš. Rollback kode jih ne obnovi; ohranjene dnevne
+in periodične kopije ostanejo na voljo. Berljiva `dogodki.csv` in
+`vpisi-ur.csv` ter navodila za obnovo niso kandidati čiščenja.
+Po brisanju se vsak izbrisani ID preveri z odgovorom Drive 404, ohranjeni
+pari pa ponovno z velikostjo, MD5, lokacijo in lastništvom.
 
 ### Mediji aplikacije
 

@@ -5,7 +5,7 @@ const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 const crypto = require("node:crypto");
-const { driveRetentionPolicy, manageDriveRetention } = require("../scripts/drive-backup-retention");
+const { driveRetentionPolicy, planDriveRetention, manageDriveRetention } = require("../scripts/drive-backup-retention");
 const { markDeploymentBackup } = require("../scripts/backup-retention");
 const now = Date.parse("2026-10-07T12:00:00Z");
 const name = stamp => `indus-ure-recovery-${stamp}.tar.gz`;
@@ -40,21 +40,100 @@ async function fixture(t) {
   };
   const drive = { files: {
     async list({ pageToken }) { const all = [...files.values()], start = Number(pageToken || 0); return { data: { files: structuredClone(all.slice(start, start + 4)), nextPageToken: start + 4 < all.length ? String(start + 4) : undefined } }; },
-    async get({ fileId, alt }) { if (!files.has(fileId)) throw new Error("not found"); return { data: alt === "media" ? bodies.get(fileId) : structuredClone(files.get(fileId)) }; },
+    async get({ fileId, alt }) { if (!files.has(fileId)) throw Object.assign(new Error("not found"), { code: 404 }); return { data: alt === "media" ? bodies.get(fileId) : structuredClone(files.get(fileId)) }; },
     async update({ fileId, requestBody }) { updates.push(fileId); const f = files.get(fileId); Object.assign(f, structuredClone(requestBody), { version: String(Number(f.version) + 1) }); return { data: { id: fileId } }; },
     async delete({ fileId }) { deleted.push(fileId); files.delete(fileId); return {}; }
   } };
   const fresh = await add("20261007T110000Z", { local: true });
   await add("20261006T110000Z"); await add("20261005T110000Z");
   const old = await add("20261007T100000Z");
-  const run = options => manageDriveRetention(drive, "backup-folder", { directory, now, verifiedBackup: fresh, ...options });
+  const run = options => manageDriveRetention(drive, "backup-folder", { directory, now, verifiedBackup: fresh, allowPermanentDelete: true, ...options });
   return { directory, drive, files, bodies, deleted, updates, add, fresh, old, run };
 }
 
-test("Drive policy is 90 Ljubljana calendar days plus at least three deployment copies", () => {
-  assert.deepEqual(driveRetentionPolicy({}), { dailyDays: 90, deploymentCopies: 3, timeZone: "Europe/Ljubljana" });
-  for (const v of ["NaN", "", "29", "366", "90.1"]) assert.throws(() => driveRetentionPolicy({ BACKUP_OFFSITE_RETENTION_DAYS: v }));
-  assert.throws(() => driveRetentionPolicy({ BACKUP_OFFSITE_DEPLOYMENT_COPIES: "2" }));
+test("compact Drive policy caps three daily and four completed weeks without extra deployments", () => {
+  assert.deepEqual(driveRetentionPolicy({}), { mode: "daily3-weekly4-v1", dailyDays: 3, weeklyCopies: 4,
+    deploymentCopies: 0, timeZone: "Europe/Ljubljana" });
+  assert.deepEqual(driveRetentionPolicy({ BACKUP_OFFSITE_RETENTION_DAYS: "90", BACKUP_OFFSITE_DEPLOYMENT_COPIES: "3" }), driveRetentionPolicy({}));
+  assert.throws(() => driveRetentionPolicy({ BACKUP_OFFSITE_RETENTION_MODE: "unknown" }));
+  assert.throws(() => planDriveRetention([], { policy: { ...driveRetentionPolicy({}), dailyDays: 90 } }));
+});
+
+function record(iso, deployment = null) {
+  return { name: name(new Date(iso).toISOString().replace(/[-:]/g, "").replace(/\.000Z$/, "Z")), time: Date.parse(iso), deployment };
+}
+test("each daily slot keeps only its latest copy; historical slots share copies and checkpoints expire", () => {
+  const records = Array.from({ length: 100 }, (_, i) => record(new Date(Date.parse("2026-10-23T10:00:00Z") - i * 86400000).toISOString(), { release: "123abcd" }));
+  records.push(record("2026-10-23T08:00:00Z"));
+  const plan = planDriveRetention(records, { now: Date.parse("2026-10-23T12:00:00Z") });
+  assert.ok(plan.keep.length <= 7);
+  assert.deepEqual(plan.slots.daily, ["20261023", "20261022", "20261021"].map(d => name(d + "T100000Z")));
+  assert.deepEqual(plan.slots.weekly, ["20261018", "20261011", "20261004", "20260927"].map(d => name(d + "T100000Z")));
+  assert.equal(plan.keep.length, 7);
+});
+
+test("rotation remains correct after daily pruning for two years, including DST/leap/month/year boundaries", () => {
+  let retained = [];
+  const history = [];
+  const start = Date.parse("2027-01-01T10:00:00Z");
+  for (let day = 0; day < 760; day++) {
+    // Miss a few scheduled backups, and occasionally publish twice a day.
+    if (day % 47 === 23) continue;
+    const time = start + day * 86400000;
+    const additions = [record(new Date(time).toISOString())];
+    if (day % 5 === 0) additions.push(record(new Date(time + 3600000).toISOString()));
+    history.push(...additions);
+    const options = { now: time + 7200000 };
+    const compact = planDriveRetention([...retained, ...additions], options);
+    const unlimited = planDriveRetention(history, options);
+    assert.deepEqual(compact.slots, unlimited.slots, `lost a rotation candidate on day ${day}`);
+    assert.ok(compact.keep.length <= 7, `too many backups on day ${day}`);
+    assert.ok(compact.keep.some(row => row.name === additions.at(-1).name));
+    retained = compact.keep;
+  }
+});
+
+test("Ljubljana date boundaries, sparse history and future clock safety", () => {
+  const records = ["2026-10-24T22:30:00Z", "2026-10-24T20:00:00Z", "2026-10-23T20:00:00Z", "2026-09-30T10:00:00Z"].map(iso => record(iso));
+  const options = { now: Date.parse("2026-10-25T12:00:00Z") };
+  const plan = planDriveRetention(records, options);
+  assert.equal(plan.slots.daily.length, 3);
+  assert.ok(plan.keep.some(r => r.name === records[3].name));
+  assert.throws(() => planDriveRetention([...records, record("2026-10-26T10:00:00Z")], options), /prihodnosti/);
+  assert.throws(() => planDriveRetention(records, { now: NaN }), /neveljaven/);
+  assert.equal(planDriveRetention(records.slice(0, 2), options).keep.length, 2);
+});
+
+test("daily and weekly copies overlap on Monday and Tuesday, week three becomes week four", () => {
+  const history = Array.from({ length: 50 }, (_, i) => record(new Date(Date.parse("2026-10-26T10:00:00Z") - i * 86400000).toISOString()));
+  const monday = planDriveRetention(history, { now: Date.parse("2026-10-26T12:00:00Z") });
+  assert.equal(monday.keep.length, 6);
+  assert.equal(monday.slots.weekly[0], monday.slots.daily[1]);
+  const previous = planDriveRetention(history.filter(r => r.time < Date.parse("2026-10-26")), { now: Date.parse("2026-10-25T12:00:00Z") });
+  assert.equal(previous.slots.weekly[2], monday.slots.weekly[3]);
+  assert.ok(monday.remove.some(r => r.name === previous.slots.weekly[3]));
+});
+
+test("rotation survives missed weeks and long outages without inventing weekly copies", () => {
+  const history = []; let retained = [];
+  for (let day = 0; day < 500; day++) {
+    if (day % 91 >= 52 && day % 91 <= 82) continue;
+    const time = Date.parse("2026-01-01T10:00:00Z") + day * 86400000;
+    const addition = record(new Date(time).toISOString()); history.push(addition);
+    const options = { now: time + 3600000 };
+    const plan = planDriveRetention([...retained, addition], options);
+    assert.deepEqual(plan.slots, planDriveRetention(history, options).slots, `day ${day}`);
+    assert.ok(plan.keep.length <= 7);
+    assert.ok(plan.keep.length >= Math.min(3, history.length));
+    retained = plan.keep;
+  }
+});
+
+test("permanent Drive deletion needs explicit opt-in, preview still works without it", async t => {
+  const f = await fixture(t);
+  await assert.rejects(f.run({ allowPermanentDelete: false }), /izrecno dovoljenje/);
+  assert.deepEqual(f.deleted, []);
+  assert.ok((await f.run({ allowPermanentDelete: false, dryRun: true })).remove.length);
 });
 
 test("Drive preview paginates, never writes, and pruning removes only extra complete pairs", async t => {
@@ -68,26 +147,29 @@ test("Drive preview paginates, never writes, and pruning removes only extra comp
   assert.deepEqual((await f.run()).removed, []);
 });
 
-test("local checkpoint markers migrate to Drive and survive without the original local server", async t => {
+test("deployment markers remain auditable but do not extend compact off-site retention", async t => {
   const f = await fixture(t);
   const protectedCopy = await f.add("20260301T100000Z", { local: true });
+  await f.add("20261004T100000Z"); await f.add("20260930T100000Z"); await f.add("20260927T100000Z");
   await markDeploymentBackup(f.directory, { archive: protectedCopy.recoveryFile, release: "123abcd" });
-  assert.ok((await f.run({ dryRun: true })).kept.includes(protectedCopy.recoveryFile)); assert.deepEqual(f.updates, []);
-  await f.run({ markOnly: true, verifiedBackup: undefined });
+  assert.ok((await f.run({ dryRun: true })).remove.includes(protectedCopy.recoveryFile)); assert.deepEqual(f.updates, []);
+  await f.run({ markOnly: true, requiredArchive: protectedCopy.recoveryFile, verifiedBackup: undefined });
   assert.deepEqual(f.deleted, []); assert.equal(f.updates.length, 1);
   await fs.unlink(path.join(f.directory, protectedCopy.recoveryFile + ".deployment.json"));
-  assert.ok((await f.run()).kept.includes(protectedCopy.recoveryFile));
+  assert.ok((await f.run()).removed.includes(protectedCopy.recoveryFile));
 });
 
-test("the fourth old checkpoint expires but one daily copy survives 90 calendar days", async t => {
+test("all old deployment checkpoints expire unless selected by a calendar slot", async t => {
   const f = await fixture(t);
   const checkpoints = [];
   for (const day of [1, 2, 3, 4]) checkpoints.push(await f.add(`2026030${day}T100000Z`, { checkpoint: true }));
-  const boundary = await f.add("20260709T220000Z"), expired = await f.add("20260709T215959Z");
+  const weekly = await f.add("20261004T100000Z"), extra = await f.add("20260930T100000Z");
+  const olderWeek = await f.add("20260927T100000Z");
   const result = await f.run();
-  assert.equal(result.checkpoints.length, 3);
-  assert.ok(result.removed.includes(checkpoints[0].recoveryFile));
-  assert.ok(result.kept.includes(boundary.recoveryFile)); assert.ok(result.removed.includes(expired.recoveryFile));
+  assert.equal(result.checkpoints.length, 0);
+  for (const p of checkpoints) assert.ok(result.removed.includes(p.recoveryFile));
+  assert.ok(result.kept.includes(weekly.recoveryFile)); assert.ok(result.kept.includes(olderWeek.recoveryFile));
+  assert.ok(result.removed.includes(extra.recoveryFile));
 });
 
 test("missing, stale or mismatching fresh backup proof prevents all Drive deletions", async t => {
@@ -212,7 +294,7 @@ test("lost local checkpoints and conflicting locks fail closed", async t => {
   const f = await fixture(t);
   await markDeploymentBackup(f.directory, { archive: f.fresh.recoveryFile, release: "123abcd" });
   f.files.delete(f.fresh.driveChecksumFileId);
-  await assert.rejects(f.run(), /preverjenega para/); assert.deepEqual(f.deleted, []);
+  await assert.rejects(f.run({ markOnly: true, requiredArchive: f.fresh.recoveryFile }), /preverjenega para/); assert.deepEqual(f.deleted, []);
   await fs.mkdir(path.join(f.directory, ".retention-lock"));
   await assert.rejects(f.run(), { code: "EEXIST" }); assert.deepEqual(f.deleted, []);
 });
@@ -226,14 +308,33 @@ test("partial deletion failures preserve progress and never prune an incomplete 
   const retry = await f.run(); assert.deepEqual(retry.removed, []); assert.ok(retry.ignored.includes(f.old.driveChecksumFileId));
 });
 
-test("a fourth local checkpoint already removed remotely does not block safe retries", async t => {
+test("successful delete response without an absent file fails verification", async t => {
+  const f = await fixture(t);
+  f.drive.files.delete = async () => ({});
+  await assert.rejects(f.run(), /ni potrdil trajnega izbrisa/);
+  assert.ok(f.files.has(f.old.driveChecksumFileId));
+});
+
+test("retained pairs are freshly verified again after deletion", async t => {
+  const f = await fixture(t), remove = f.drive.files.delete;
+  f.drive.files.delete = async args => {
+    const result = await remove(args);
+    f.files.get(f.fresh.driveFileId).md5Checksum = "0".repeat(32);
+    return result;
+  };
+  await assert.rejects(f.run(), /spremenila.*md5Checksum/);
+});
+
+test("expired local checkpoints missing remotely do not block the next backup", async t => {
   const f = await fixture(t), checkpoints = [];
   for (const day of [1, 2, 3, 4]) {
     const p = await f.add(`2026030${day}T100000Z`, { local: true }); checkpoints.push(p);
     await markDeploymentBackup(f.directory, { archive: p.recoveryFile, release: "123abcd" });
   }
   f.files.delete(checkpoints[0].driveFileId); f.files.delete(checkpoints[0].driveChecksumFileId);
+  await f.add("20261004T100000Z"); await f.add("20260930T100000Z"); await f.add("20260927T100000Z");
   const result = await f.run();
-  assert.equal(result.checkpoints.length, 3);
-  for (const p of checkpoints.slice(1)) assert.ok(result.kept.includes(p.recoveryFile));
+  assert.equal(result.checkpoints.length, 0);
+  for (const p of checkpoints.slice(1)) assert.ok(result.removed.includes(p.recoveryFile));
+  assert.deepEqual((await f.run()).removed, []);
 });

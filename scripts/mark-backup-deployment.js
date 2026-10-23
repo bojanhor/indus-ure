@@ -23,7 +23,7 @@ async function main(args) {
   // the explicitly supplied, trusted systemd file; never log its contents.
   if (options["--env-file"]) {
     process.loadEnvFile(options["--env-file"]);
-    await require("./backup-indus-ure").inspectOrMarkDriveRetention({ markOnly: true });
+    await require("./backup-indus-ure").inspectOrMarkDriveRetention({ markOnly: true, requiredArchive: marker.archive });
   }
   process.stdout.write(`Zaščitena kopija pred objavo ${marker.release}: ${marker.archive}\n`);
 }
