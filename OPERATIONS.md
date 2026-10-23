@@ -312,6 +312,41 @@ in periodične kopije ostanejo na voljo. Berljiva `dogodki.csv` in
 Po brisanju se vsak izbrisani ID preveri z odgovorom Drive 404, ohranjeni
 pari pa ponovno z velikostjo, MD5, lokacijo in lastništvom.
 
+#### Preverjena objava in prvo čiščenje, 23. 10. 2026
+
+Objavljena koda: `d879d4a` (prejšnja izdaja `d2079b6`). Pred preklopom je
+uspela kopija `indus-ure-recovery-20261023T124044Z.tar.gz`. Nato sta bili
+vključeni zgoraj navedeni nastavitvi za novo politiko in izrecno odobren
+trajni izbris. Zasebna kopija prejšnjih nastavitev je ostala na strežniku
+kot `/etc/indus-ure.env.before-weekly-retention-20261023` z dovoljenji 0600.
+
+Redni servis je ustvaril in preveril novo kopijo
+`indus-ure-recovery-20261023T124234Z.tar.gz`. Zaključil je ob 12:47:33 UTC
+z `status=success`, `cleanupStatus=success` ter uspešnima Drive in lokalno
+hrambo. Nova rutina je trajno odstranila 86 parov arhiv/kontrolna datoteka
+in sprostila **10.881.349.996 bajtov**. Ohranila je sedem parov,
+**1.420.643.370 bajtov**, z datumi 23., 22., 21., 18., 11. in 4. oktober
+ter 27. september. Ponovni `--inspect-retention` je potrdil sedem
+ohranjenih parov, nič kandidatov za izbris in tri izvzete datoteke.
+Neodvisen pregled mape Drive je potrdil 17 datotek: sedem parov,
+nespremenjena ID-ja obeh posodobljenih CSV-izvozov in navodila za obnovo.
+Celotna mapa ob preverjanju: 1.421.143.039 bajtov.
+
+Preverjanja: 345 uspešnih enotskih testov in en namensko preskočen;
+končni celotni Chromium prehod 112/112; Firefox 19 uspešnih in en
+preskočen test dotika; 32 PostgreSQL/API/restore/upgrade/rollback preverjanj.
+Prvi Chromium prehod je imel en prehoden timeout pri javni Google prijavi
+(111/112); sledilo je 9/9 ponovitev prijavnih testov in čist celotni
+112/112 prehod, brez spremembe prijavne kode. Vzrok tega posameznega
+timeouta ni dokazan. Rotacija kopij ima tudi 760-dnevno simulacijo,
+preizkuse časovnega pasu, izpadov in varovalk pred izbrisom.
+
+Produkcijski brskalniški preizkus je potrdil prijavo, odpiranje in zapiranje
+obstoječega opravila brez spremembe njegovih podatkov, prilogo HTTP 200 in
+obračunski pogled; brez poslovnih zapisov ali JavaScript napak. Storitev
+je zdrava, brez opozoril v preverjenem intervalu. Časovnik ostaja vključen;
+naslednji zagon ob preverjanju je 24. 10. ob 02:17:09 po lokalnem času.
+
 ### Mediji aplikacije
 
 Brisanje metapodatkov je transakcijsko. `save()` po COMMIT ne briše fizične
