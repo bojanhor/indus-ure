@@ -585,10 +585,36 @@ function renderTodoTaskSuggestions() {
 function autosizeTodoNarrativeFields() {
       ["todoFormNotes", "todoFormMaterial"].forEach((id) => {
         const field = $(id);
-        if (!field || field.closest(".hidden")) return;
-        const minHeight = Math.max(82, Number.parseFloat(getComputedStyle(field).minHeight) || 0);
-        field.style.height = "0px";
-        field.style.height = `${Math.max(minHeight, field.scrollHeight)}px`;
+        if (!field || field.closest(".hidden") || !field.getClientRects().length) return;
+        const width = field.getBoundingClientRect().width;
+        if (!width) return;
+        const style = getComputedStyle(field);
+        const minHeight = Math.max(82, Number.parseFloat(style.minHeight) || 0);
+        // Never collapse the live textarea to measure it. WebKit clamps the
+        // enclosing scroller when that temporarily removes a long description
+        // from the layout (even while the user is typing in Material).
+        const measure = document.createElement("textarea");
+        measure.tabIndex = -1;
+        measure.setAttribute("aria-hidden", "true");
+        measure.setAttribute("inert", "");
+        for (const property of ["fontFamily", "fontSize", "fontWeight", "fontStyle", "fontStretch",
+          "lineHeight", "letterSpacing", "wordSpacing", "textIndent", "textTransform", "tabSize",
+          "whiteSpace", "overflowWrap", "wordBreak", "direction", "paddingTop", "paddingRight",
+          "paddingBottom", "paddingLeft", "borderTopWidth", "borderRightWidth", "borderBottomWidth",
+          "borderLeftWidth", "borderStyle"]) measure.style[property] = style[property];
+        Object.assign(measure.style, {
+          position: "absolute", top: "0", left: "0", visibility: "hidden", pointerEvents: "none",
+          boxSizing: "border-box", width: `${width}px`, height: "0px", minHeight: "0px",
+          maxHeight: "none", margin: "0", overflow: "hidden"
+        });
+        measure.value = field.value || field.placeholder || "";
+        let height;
+        try {
+          field.parentElement.append(measure);
+          const border = (Number.parseFloat(style.borderTopWidth) || 0) + (Number.parseFloat(style.borderBottomWidth) || 0);
+          height = `${Math.max(minHeight, Math.ceil(measure.scrollHeight + border))}px`;
+        } finally { measure.remove(); }
+        if (field.style.height !== height) field.style.height = height;
       });
     }
 
@@ -766,6 +792,7 @@ function installTaskFormBindings1() {
       });
     });
     ["todoFormNotes", "todoFormMaterial"].forEach((id) => $(id).addEventListener("input", autosizeTodoNarrativeFields));
+    window.addEventListener("resize", autosizeTodoNarrativeFieldsAfterLayout);
     $("todoFormHourlyRate").addEventListener("input", () => {
       $("todoFormHourlyRate").dataset.autoRate = "false";
     });

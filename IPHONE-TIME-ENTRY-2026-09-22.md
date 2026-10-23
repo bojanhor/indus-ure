@@ -56,3 +56,32 @@ health `ok`, Ure in Fakture aktivni, brez novih opozoril storitve Ure.
 Vizualno preverjen lokalni obrazec; prijavljen produkcijski UI in fizični iPhone
 nista bila preizkušena. Končna potrditev prenehanja utripanja na napravi ostaja
 pri uporabniku. GitHub push ni izveden.
+
+## Ponovitev težave in popravek 23. 10. 2026
+
+Nova slika je iz Safarija na iPhonu: v obrazcu »Vpis ur« je zgornji del
+vsebine prazen, Material in kilometrina ostaneta vidna. Natančnega vzroka
+neizrisanih slikovnih plasti na fizični napravi še ne moremo potrditi.
+
+V izoliranem WebKitu je dokazana dodatna napaka samodejnega raztezanja
+opisnih polj: vsaka sprememba Materiala je tudi Opis del začasno skrčila na
+nič, prebrala `scrollHeight` in ga znova razširila. Pri 80 vrsticah opisa
+se je notranji pomik spremenil iz 1614 na 2303 px, položaj Materiala pa
+iz 418 na −271 px, čeprav se končna višina opisa ni spremenila.
+Regresijski test na stari kodi zanesljivo pade.
+
+Merjenje zdaj uporablja začasno nevidno kopijo z enako širino in tipografijo,
+izven toka dokumenta. Pravo polje se ne sesede, višina se zapiše samo ob
+spremembi in upošteva tudi obrobo. Kopija nima ID-ja ali imena, ni dosegljiva
+s tipkovnico in se takoj odstrani. Ob spremembi širine se opis ponovno
+izmeri; besedila, osnutki, dovoljenja in zapisovanje podatkov so nespremenjeni.
+Ohranjen je notranji scroller in obstoječa prilagoditev tipkovnici; ni novih
+repaint časovnikov ali produkcijske diagnostike.
+
+Preverjanje: razširjen `time-entry-rendering.spec.cjs`, vključno z rastjo,
+krčenjem, vrtenjem zaslona in nespremenjenim položajem pri tipkanju;
+WebKit, Chromium, običajni strežniški testi in PostgreSQL/restore prehod.
+WebKit na Windows ni fizični iOS compositor, zato je za prenehanje praznine
+s prijavljene slike še vedno potrebna potrditev na uporabnikovem iPhonu.
+Povrnitev te dopolnitve: koda `4e92712`, brez obnove poslovne baze.
+Pripravljene spremembe Drive hrambe niso del tega popravka.

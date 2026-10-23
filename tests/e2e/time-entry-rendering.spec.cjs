@@ -5,6 +5,56 @@ let app;
 test.beforeAll(async () => { app = await startIsolatedTestApp(); });
 test.afterAll(async () => { await app?.stop(); });
 
+test('typing beside a long description does not collapse the live form or jump its scroller', async ({ browser }) => {
+  const context = await browser.newContext({
+    viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true,
+    deviceScaleFactor: 3
+  });
+  const page = await context.newPage();
+  try {
+    await page.goto(app.baseUrl);
+    await page.locator('#localTestUser').selectOption('ibro');
+    await page.locator('#localTestPassword').fill(TEST_PASSWORD);
+    await page.locator('#localTestLoginBtn').click();
+    await page.locator('#writeHoursButton').click();
+    await page.screenshot({ path: test.info().outputPath('new-time-entry-phone.png') });
+    await page.locator('#todoFormNotes').fill('Dolgo besedilo na terenu.\n'.repeat(80));
+    await page.locator('#todoFormMaterial').fill('Kabel');
+    await page.locator('#todoFormMaterial').scrollIntoViewIfNeeded();
+    const measurements = await page.evaluate(() => {
+      const scroll = document.getElementById('todoDialogScroll');
+      const notes = document.getElementById('todoFormNotes');
+      const material = document.getElementById('todoFormMaterial');
+      const measure = () => ({
+        scrollTop: scroll.scrollTop, notesHeight: notes.offsetHeight,
+        materialTop: material.getBoundingClientRect().top
+      });
+      const before = measure();
+      material.value += ' in vtičnica';
+      material.dispatchEvent(new Event('input', { bubbles: true }));
+      return { before, after: measure() };
+    });
+    expect(measurements.after).toEqual(measurements.before);
+    await expect(page.locator('#todoFormMaterial')).toBeInViewport();
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    await page.screenshot({ path: test.info().outputPath('long-description-stable-scroll.png') });
+
+    // The measurement must still grow/shrink correctly and never leak a
+    // duplicate form control into drafts, tab navigation, or a saved entry.
+    await page.locator('#todoFormNotes').fill('Kratek opis.');
+    await expect.poll(() => page.locator('#todoFormNotes').evaluate(field => field.offsetHeight)).toBe(82);
+    await expect(page.locator('#todoFormNotes')).toHaveCount(1);
+    await expect(page.locator('#todoFormMaterial')).toHaveCount(1);
+    await expect(page.locator('#todoForm textarea')).toHaveCount(2);
+    await page.locator('#todoFormNotes').fill('Besedilo s prelomi glede na širino zaslona. '.repeat(30));
+    const portraitHeight = await page.locator('#todoFormNotes').evaluate(field => field.offsetHeight);
+    await page.setViewportSize({ width: 844, height: 390 });
+    await expect.poll(() => page.locator('#todoFormNotes').evaluate(field => field.offsetHeight)).toBeLessThan(portraitHeight);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect.poll(() => page.locator('#todoFormNotes').evaluate(field => field.offsetHeight)).toBe(portraitHeight);
+  } finally { await context.close(); }
+});
+
 // Run this spec with --browser=webkit as well as the normal Chromium suite.
 // WebKit on Windows covers layout/interaction, not the physical iOS compositor.
 for (const userId of ["ibro", "bojan"]) {
