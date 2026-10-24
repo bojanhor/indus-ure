@@ -1,6 +1,7 @@
 "use strict";
 
 const { IMAGE_SIGNATURES } = require("./attachment-model");
+const { referencedMediaIds } = require("./media-lifecycle");
 
 // attachment-transfer: explicit dependencies; factory creation has no I/O or UI effects.
 function createAttachmentTransfer({
@@ -27,8 +28,9 @@ function createAttachmentTransfer({
 function pruneUnusedTodoAttachments(db) {
   const pending = new Set(Object.keys(pendingAttachmentMap(db)));
   const used = new Set([
-    ...(db.todos || []).flatMap((todo) => (todo.photos || []).map((photo) => photo.attachmentId)),
-    ...(db.debts || []).flatMap((debt) => (debt.photos || []).map((photo) => photo.attachmentId)),
+    // Include nested historical snapshots: restoring a previous revision must
+    // retain both the physical file AND its MIME/storage metadata.
+    ...referencedMediaIds([db.todos, db.entries, db.debts, db.payrolls, db.clientBills, db.undoJournal]),
     ...undoProtectedAttachmentIds(db)
   ].filter(validTodoAttachmentId));
   let changed = false;
@@ -275,8 +277,8 @@ async function receiveLocalTodoImage(input = {}) {
       createdFiles: { display: displayCreated, thumbnail: thumbnailCreated }
     };
   } catch (error) {
-    if (displayCreated && displayTargetPath) await moduleValues.fsp.rm(displayTargetPath, { force: true }).catch(() => {});
-    if (thumbnailCreated && thumbnailTargetPath) await moduleValues.fsp.rm(thumbnailTargetPath, { force: true }).catch(() => {});
+    // Published hashes may already be reused by another upload. Only the
+    // locked post-backup collector may remove unreferenced published files.
     throw error;
   } finally {
     await Promise.all([sourcePath, displayTempPath, thumbnailTempPath].map((file) => moduleValues.fsp.rm(file, { force: true }).catch(() => {})));
@@ -429,9 +431,14 @@ async function handleAttachmentDownload(req, res, url) {
 }
 
 async function handleAttachmentUpload(req, res, url) {
+  if (req.method !== "POST" || !["/api/todos/image", "/api/todos/video", "/api/todos/pdf"].includes(url.pathname)) return false;
+  const user = await requireUser(req, res);
+  if (!user) return true;
+  const work = () => handleAttachmentUploadWithLease(req, res, url, user);
+  return moduleValues.DATABASE_URL ? getPgStore().withMediaLease(work) : work();
+}
+async function handleAttachmentUploadWithLease(req, res, url, user) {
     if (url.pathname === "/api/todos/image" && req.method === "POST") {
-      const user = await requireUser(req, res);
-      if (!user) return true;
       let name = String(req.headers["x-indus-file-name"] || "fotografija");
       try { name = decodeURIComponent(name); } catch { /* keep encoded value */ }
       const received = await receiveLocalTodoImage({
@@ -473,8 +480,7 @@ async function handleAttachmentUpload(req, res, url) {
         });
         sendJson(res, 201, { photo });
       } catch (error) {
-        if (received.createdFiles?.display) await moduleValues.fsp.rm(received.displayTargetPath, { force: true }).catch(() => {});
-        if (received.createdFiles?.thumbnail) await moduleValues.fsp.rm(received.thumbnailTargetPath, { force: true }).catch(() => {});
+        // Retain published files for the reference-aware collector.
         throw error;
       }
       return true;
@@ -482,8 +488,6 @@ async function handleAttachmentUpload(req, res, url) {
 
     if (["/api/todos/video", "/api/todos/pdf"].includes(url.pathname) && req.method === "POST") {
       const pdf = url.pathname.endsWith("/pdf");
-      const user = await requireUser(req, res);
-      if (!user) return true;
       let name = String(req.headers["x-indus-file-name"] || "video");
       try { name = decodeURIComponent(name); } catch { /* keep encoded value */ }
       const received = await receiveLocalTodoVideo({
@@ -526,7 +530,7 @@ async function handleAttachmentUpload(req, res, url) {
         sendJson(res, 201, { photo });
       } catch (error) {
         // A concurrent upload may already reference the same content hash.
-        if (!pdf && received.createdFile) await moduleValues.fsp.rm(received.targetPath, { force: true }).catch(() => {});
+        // Retain published files for the reference-aware collector.
         throw error;
       }
       return true;

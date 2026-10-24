@@ -76,6 +76,9 @@ async function main() {
     const client = await pool.connect();
     try {
       await client.query("begin");
+      await client.query("select pg_advisory_xact_lock_shared(hashtext($1))", [require("../outputs/media-lifecycle").MEDIA_LOCK]);
+      const revision = await client.query("select data from indus_meta where key = 'storage_revision' for update");
+      if (revision.rowCount !== 1) throw new Error("Manjka storage_revision; obnova ustavljena.");
       const liveRows = await client.query("select id, data from indus_tasks where id = any($1::text[]) for update", [[...candidates.keys()]]);
       const liveById = new Map(liveRows.rows.map((row) => [String(row.id), row]));
       const plan = [];
@@ -107,6 +110,7 @@ async function main() {
           await client.query("update indus_tasks set data = $2::jsonb, updated_at = now() where id = $1", [item.id, JSON.stringify({ ...item.data, photos: item.photos })]);
         }
       }
+      if (apply && plan.length) await client.query("update indus_meta set data = $1::jsonb, updated_at = now() where key = 'storage_revision'", [JSON.stringify({ revision: Number(revision.rows[0].data.revision) + 1 })]);
       await client.query("commit");
       process.stdout.write(`${JSON.stringify({ mode: apply ? "apply" : "dry-run", archive, backupTasksWithAttachments: candidates.size, existingTasksMatched: plan.length, attachmentReferencesRestored: plan.flatMap((item) => item.attachments).length, filesCopied: apply ? copied.length : 0, skippedMissingTasks: candidates.size - plan.length })}\n`);
     } catch (error) {
@@ -114,7 +118,8 @@ async function main() {
       throw error;
     } finally { client.release(); }
   } catch (error) {
-    if (apply) await Promise.all(copied.map((file) => fsp.rm(file, { force: true }).catch(() => {})));
+    // Published hash-named files may already be reused by another upload.
+    // Unreferenced leftovers are collected only after a verified backup.
     throw error;
   } finally {
     await pool.end();

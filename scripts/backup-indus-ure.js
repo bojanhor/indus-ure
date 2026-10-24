@@ -336,7 +336,8 @@ async function main() {
     const result = { id, status: "success", createdAt: manifest.createdAt, readableFiles, recoveryFile: path.basename(archive), checksumFile: path.basename(checksumPath), bytes: archiveCheck.bytes, md5: archiveCheck.md5, sha256: checksum, driveFileId: archiveCheck.id, driveChecksumFileId: checksumCheck.id, driveFolderId: folderId, verified: { localArchive: true, driveSize: true, driveMd5: true, freshDriveRead: true, restoreInstructions: Boolean(instructions.id), readableCsv: readableFiles.length === 2 } };
     await runBackupRetention(result, {
       drive: () => manageDriveRetention(drive, folderId, { directory: BACKUP_DIR, verifiedBackup: result, policy: offsiteRetentionPolicy, allowPermanentDelete: process.env.BACKUP_OFFSITE_DELETE_APPROVED === "true" }),
-      local: () => retainLocal(BACKUP_DIR, { verifiedBackup: result, policy: localRetentionPolicy })
+      local: () => retainLocal(BACKUP_DIR, { verifiedBackup: result, policy: localRetentionPolicy }),
+      media: () => require("./media-cleanup").cleanupMedia(backupLock, MEDIA_DIR, { proof: result })
     });
     await recordRun(pool, id, "success", result);
     // The app monitor reports cleanup warnings separately from backup failure.

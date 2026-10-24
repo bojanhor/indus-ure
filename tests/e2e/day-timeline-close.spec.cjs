@@ -62,7 +62,7 @@ for (const width of [390, 1024]) {
       await expect(page.locator("#dayTimelineDialog")).toBeVisible();
       expect(batch.count()).toBe(1);
       expect(await page.evaluate(id => state.todos.find(todo => todo.id === id).start, id)).toBe("11:00");
-      await expect(page.locator("#saveDayTimeline")).toBeDisabled();
+      await expect(page.locator("#saveDayTimeline")).toBeEnabled();
       await page.locator("#closeDayTimeline").click();
       await expect(page.locator("#dayTimelineDialog")).toBeHidden();
     } finally { batch.release(); }

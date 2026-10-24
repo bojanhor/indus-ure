@@ -414,6 +414,44 @@ async function main() {
     assert.equal(final.todos.some(todo => todo.title === "Must not partially save"), false);
     check("http.script_race_returns_409_without_partial_business_write");
   } finally { await stop(child); }
+  // Exercise the real advisory/row-lock protocol, not just mocked SQL.
+  const { cleanupMedia } = require("./media-cleanup");
+  const { MEDIA_LOCK } = require("../outputs/media-lifecycle");
+  const gcClient = await pool.connect();
+  try {
+    const stale = new Date(Date.now() - 2 * 86400000);
+    const orphan = "e".repeat(64), history = "f".repeat(64);
+    for (const id of [orphan, history]) {
+      const file = path.join(media, "objects", `${id}.jpg`);
+      await fs.writeFile(file, "gc-qa"); await fs.utimes(file, stale, stale);
+    }
+    await pool.query("insert into indus_meta(key,data) values ('qa_gc_history',$1::jsonb)", [JSON.stringify({ undo: { before: { attachmentId: history } } })]);
+    await store.withMediaLease(async () => {
+      assert.equal((await cleanupMedia(gcClient, media, { dryRun: true })).skipped, true);
+      const nested = await other.load(); await other.save(nested);
+    });
+    check("media.active_upload_lease_defers_gc_without_deadlocking_nested_save");
+    await gcClient.query("select pg_advisory_lock(hashtext($1))", [MEDIA_LOCK]);
+    let saved = false;
+    const snapshot = await other.load();
+    const save = other.save(snapshot).then(() => { saved = true; });
+    await delay(150); assert.equal(saved, false);
+    await gcClient.query("select pg_advisory_unlock(hashtext($1))", [MEDIA_LOCK]);
+    await save;
+    check("media.collector_excludes_concurrent_metadata_writer");
+    const proof = { status: "success", createdAt: new Date().toISOString(), verified: { localArchive: true, driveMd5: true, freshDriveRead: true, readableCsv: true } };
+    const result = await cleanupMedia(gcClient, media, { proof });
+    assert.equal(result.removed, 1);
+    await assert.rejects(fs.stat(path.join(media, "objects", `${orphan}.jpg`)), /ENOENT/);
+    assert.equal(await fs.readFile(path.join(media, "objects", `${history}.jpg`), "utf8"), "gc-qa");
+    assert.ok(await store.getAttachment(attachmentId));
+    await pool.query("delete from indus_meta where key='qa_gc_history'");
+    await fs.unlink(path.join(media, "objects", `${history}.jpg`));
+    check("media.gc_removes_only_old_orphan_and_preserves_history_and_live_attachment");
+    const ordered = await store.load(); ordered.todos[0].calendarOrder = 17; await store.save(ordered);
+    assert.equal((await store.load()).todos[0].calendarOrder, 17);
+    check("calendar.shared_order_round_trips_postgres");
+  } finally { gcClient.release(); }
   const recoveryDigest = await digest(true);
   const workDir = path.dirname(reportPath);
   const csvMetadata = { backupId: "pg-qa-backup", createdAt: new Date().toISOString() };

@@ -1147,7 +1147,7 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
       await expect(page.locator("#todoFormEnd")).toHaveValue(times.end);
       await page.locator("#closeTodoDialog").click();
       await expect(page.locator("#dayTimelineDialog")).toBeVisible();
-      await expect(page.locator("#saveDayTimeline")).toBeDisabled();
+      await expect(page.locator("#saveDayTimeline")).toBeEnabled();
 
       const persisted = await page.evaluate(async (taskTitle) => {
         const response = await fetch("/api/todos");

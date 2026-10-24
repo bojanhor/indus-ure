@@ -63,7 +63,7 @@ for (const pointer of ["mouse", "touch"]) {
       await down(box.x + box.width * 0.49, box.y + 6);
       await move(box.x + box.width * 0.6, box.y + 96); await up();
       expect(await page.evaluate(() => state.dayTimelineDrafts.size)).toBe(0);
-      await expect(page.locator("#saveDayTimeline")).toBeDisabled();
+      await expect(page.locator("#saveDayTimeline")).toBeEnabled();
       // A short click/tap on the safe side still opens the existing editor.
       box = await reset(); await down(box.x + box.width * 0.25, box.y + box.height / 2); await up();
       await expect(page.locator("#todoDialog")).toBeVisible();

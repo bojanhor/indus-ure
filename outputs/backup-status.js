@@ -2,12 +2,12 @@
 
 // A verified recovery copy and housekeeping are separate outcomes. Cleanup
 // errors must stay visible, but must not turn an intact copy into a failure.
-async function runBackupRetention(result, { drive, local }) {
+async function runBackupRetention(result, { drive, local, media }) {
   if (result?.status !== "success" || !["localArchive", "driveSize", "driveMd5", "freshDriveRead", "restoreInstructions"].every(key => result.verified?.[key] === true)) {
     throw new Error("Čiščenje zahteva uspešno preverjeno varnostno kopijo.");
   }
   result.cleanupStatus = "success";
-  for (const [key, run] of [["driveRetention", drive], ["localRetention", local]]) {
+  for (const [key, run] of [["driveRetention", drive], ["localRetention", local], ...(media ? [["mediaCleanup", media]] : [])]) {
     try {
       result[key] = { ...await run(), status: "success" };
     } catch (error) {
@@ -23,7 +23,7 @@ async function runBackupRetention(result, { drive, local }) {
 
 function backupCleanupIssue(result) {
   if (result?.status !== "success" || result.cleanupStatus !== "warning") return null;
-  const details = [["Google Drive", result.driveRetention], ["Lokalno", result.localRetention]]
+  const details = [["Google Drive", result.driveRetention], ["Lokalno", result.localRetention], ["Priloge", result.mediaCleanup]]
     .filter(([, item]) => item?.status === "failed")
     .map(([label, item]) => `${label}: ${item.error}`).join("; ").slice(0, 600);
   return { code: "backup-cleanup-failed", severity: "warning", title: "Kopija je uspela; čiščenje kopij ni uspelo",

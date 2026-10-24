@@ -65,6 +65,8 @@ test('absence UI, private access, read-only viewers, live sync, conflict protect
     await login(boss); await login(worker, 'ibro');
     const baseline = await call(boss, '/api/todos');
     await boss.locator('#absenceEntryButton').click();
+    await expect(boss.locator('#calendarAbsenceButton')).toHaveCount(0);
+    await expect(boss.locator('#absenceWorker')).toBeVisible();
     await boss.locator('#absenceWorker').selectOption('bojan');
     await boss.locator('#absenceReason').selectOption('illness');
     const today = await boss.evaluate(() => dateKey(new Date()));
@@ -98,6 +100,8 @@ test('absence UI, private access, read-only viewers, live sync, conflict protect
     await worker.locator('#closeAbsence').click();
     await worker.locator('#dayAbsenceButton').click();
     await expect(worker.locator('#absenceWorker')).toHaveValue('ibro');
+    await expect(worker.locator('#absenceWorker')).not.toBeVisible();
+    await expect(worker.locator('#absenceWorkerName')).toHaveText('Ibro');
     await worker.locator('#saveAbsence').click();
     await expect(worker.locator('#absenceDialog')).not.toBeVisible();
     const own = (await call(worker, '/api/absences')).data.absences.find(a => a.workerId === 'ibro');

@@ -352,16 +352,35 @@ naslednji zagon ob preverjanju je 24. 10. ob 02:17:09 po lokalnem času.
 Brisanje metapodatkov je transakcijsko. `save()` po COMMIT ne briše fizične
 datoteke: drug zapis jo lahko medtem znova uporabi. Običajno datoteko varuje
 že content-addressed ključ; Undo dodatno zadrži potrebne metapodatke.
-Nepovezane fizične datoteke zato lahko ostanejo do ločenega vzdrževalnega
-čiščenja. Pri čiščenju je treba ustaviti vse zapisovalce in nalaganja, narediti
-kopijo ter dokazati, da ključ ni v metapodatkih, začasnih nalaganjih ali Undo.
-Samodejno fizično čiščenje ni vključeno v ta poseg.
+Po preverjeni recovery kopiji se izvede `scripts/media-cleanup.js`.
+Čisti samo starejše od 24 ur, nepovezane datoteke s kanoničnim 64-hex
+imenom v `media/objects` in `media/thumbnails`. Ne dotika se `.uploads`,
+neznanih imen, simbolnih ali trdih povezav, drugih projektov ali Drive datotek.
+Koš, zgodovina, Undo, čakajoča nalaganja in vse ostale shranjene reference
+zaščitijo datoteko. Metapodatki zgodovinskih prilog se prav tako ohranijo.
+
+Vsi spletni uploadi, ZIP izvoz/obnova in `PostgresStore.save()` uporabljajo
+skupni advisory zaklep `indus-ure-media-lifecycle-v1`. GC poskusi izključni
+zaklep (nikoli ne čaka), nato zaklene `storage_revision`, ponovno prebere
+reference in preveri datoteke. Če poteka nalaganje/zapis, se čiščenje odloži
+do naslednje kopije. Drugi recovery backupi so izključeni z obstoječim
+`indus-ure-recovery-backup` zaklepom. Zunanji vzdrževalni zapisovalci morajo
+uporabljati isti protokol ali ustavljeno aplikacijo in backup časovnik.
+Obnova prilog iz recovery paketa uporablja isti vrstni red zaklepov in
+poveča revizijo baze, da zastarel posnetek ne prepiše obnovitve.
+
+GC zahteva svežo preverjeno lokalno in Drive kopijo ter oba CSV-izvoza.
+Izid je v `indus_backup_runs.data.mediaCleanup` (candidates, removed,
+freedBytes, skipped). Napaka čiščenja ne spremeni uspešne kopije v neuspešno,
+ampak ustvari opozorilo. Prva kopija pred čiščenjem še vsebuje odstranjene
+datoteke; manjša je naslednja. Fizični izbris ni povrnjen z rollbackom kode;
+datoteke ostanejo v preverjeni predhodni kopiji do njene redne rotacije.
 
 Pregled 7. 10. 2026: čiščenje koša/arhiva periodično odstrani metapodatke
 nepreklicno izbrisanih dogodkov. Stare aplikacijsko upravljane Drive priloge
 poskusi izbrisati pred izbrisom dogodka; ob napaki obdrži dogodek za ponovni
 poskus. Zunanjih povezav ne briše. Splošnega iskanja osirotelih Drive datotek
-ali fizičnih datotek `media/objects` in `media/thumbnails` ni. Zato take
+ali fizičnih datotek `media/objects` in `media/thumbnails` takrat ni bilo. Zato take
 datoteke ostajajo tudi v naslednjih celovitih recovery kopijah. Pred
 uvedbo fizičnega čiščenja je potreben ločen, usklajen GC z zaščito vseh
 referenc, zgodovine/Undo in nalaganj v teku; zgolj brisanje po ID dogodka

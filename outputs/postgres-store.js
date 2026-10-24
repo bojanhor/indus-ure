@@ -11,6 +11,7 @@ const fsp = fs.promises;
 const path = require("path");
 const { isDeepStrictEqual } = require("node:util");
 const { workerKmRateForUser } = require("./worker-billing-settings");
+const { MEDIA_LOCK, withMediaLease } = require("./media-lifecycle");
 
 class StaleSnapshotError extends Error {
   constructor(message = "Podatki so bili medtem spremenjeni. Osveži pogled in ponovi shranjevanje; tvoja sprememba ni bila zapisana.") {
@@ -707,6 +708,8 @@ class PostgresStore {
     };
   }
 
+  withMediaLease(work) { return withMediaLease(this.pool, work); }
+
   async save(db, { protectedAttachmentIds = [], initialize = false } = {}) {
     const snapshot = this.snapshots.get(db);
     if (!snapshot && !initialize) throw new StaleSnapshotError("Zapis brez izvornega posnetka ni dovoljen. Skripta mora najprej uporabiti store.load().");
@@ -716,6 +719,7 @@ class PostgresStore {
     let nextRevision;
     try {
       await client.query("begin");
+      await client.query("select pg_advisory_xact_lock_shared(hashtext($1))", [MEDIA_LOCK]);
       const current = await client.query("select data from indus_meta where key = 'storage_revision' for update");
       if (!current.rowCount) throw new Error("Manjka migracija storage_revision.");
       const revision = Number(current.rows[0].data.revision);
@@ -750,8 +754,8 @@ class PostgresStore {
     } finally { client.release(); }
     this.snapshots.set(db, { revision: nextRevision, db: clone(db) });
     // Do not unlink after COMMIT: another writer can already have reused the
-    // same content-addressed key. Unreferenced media is retained for the safe
-    // offline garbage-collection procedure documented in OPERATIONS.md.
+    // same content-addressed key. The post-backup collector rechecks all
+    // references under the exclusive media lease before removing old files.
     return { revision: nextRevision, retainedMediaKeys: filesToDelete.length };
   }
 

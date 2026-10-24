@@ -4469,6 +4469,8 @@ async function runArchiveRetentionCleanup() {
   const candidates = archiveRetentionCandidates(db);
   const archiveApproval = await approveRetentionGroupsForPurge(db, candidates.groups, "Arhivske priloge");
   const purged = purgeArchivedTodoGroups(db, archiveApproval.approvedGroups);
+  // Expired Undo/pending uploads must not pin unused metadata forever.
+  const unusedAttachmentsPruned = pruneUnusedTodoAttachments(db);
   const drive = {
     deleted: trashApproval.drive.deleted + archiveApproval.drive.deleted,
     skipped: trashApproval.drive.skipped + archiveApproval.drive.skipped
@@ -4491,7 +4493,7 @@ async function runArchiveRetentionCleanup() {
     }
   } : null;
   if (!DATABASE_URL && cleanupAudit) recordAuditLog(db, cleanupAudit);
-  if (purged.todos || trashed.todos || (!DATABASE_URL && cleanupAudit)) await writeDbAsync(db);
+  if (purged.todos || trashed.todos || unusedAttachmentsPruned || (!DATABASE_URL && cleanupAudit)) await writeDbAsync(db);
   if (DATABASE_URL && cleanupAudit) scheduleAuditLog(cleanupAudit);
   if (blocked) {
     await recordOperationalAlert({
@@ -5252,8 +5254,9 @@ async function handleApi(req, res) {
         sendJson(res, 403, { error: "Varnostno kopijo lahko izvozi samo šef." });
         return;
       }
-      const db = await readRequestDb(req);
-      await sendBrowserBackup(res, db);
+      const exportBackup = async () => sendBrowserBackup(res, await readDbAsync());
+      if (DATABASE_URL) await getPgStore().withMediaLease(exportBackup);
+      else await exportBackup();
       return;
     }
 
@@ -5275,7 +5278,8 @@ async function handleApi(req, res) {
       }
       const current = await readDbAsync();
       const upload = await receiveBrowserRestoreZip(req);
-      const result = await restoreBrowserBackup(upload, current);
+      const restore = () => restoreBrowserBackup(upload, current);
+      const result = DATABASE_URL ? await getPgStore().withMediaLease(restore) : await restore();
       clearSessionCookie(req, res);
       sendJson(res, 200, { ok: true, ...result, requiresLogin: true });
       return;
@@ -6031,6 +6035,16 @@ async function handleApi(req, res) {
       if (!user) return;
       const db = await readRequestDb(req);
       sendJson(res, 200, { todos: visibleTrashedTodosForUser(db, user), retentionDays: DELETED_TODO_RETENTION_DAYS });
+      return;
+    }
+    if (url.pathname === "/api/todos/calendar-order" && req.method === "POST") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      const body = await readBody(req), db = await readRequestDb(req);
+      const result = require("./calendar-order").reorder(db, user, body, todo => todoAssignmentEditLockConflict(db, todo, user));
+      if (result.error) { sendJson(res, result.status || 400, { error: result.error }); return; }
+      await writeDbAsync(db);
+      sendJson(res, 200, { todos: visibleTodosForUser(db, user) });
       return;
     }
     if (url.pathname === "/api/todos/reorder" && req.method === "POST") {
@@ -7595,6 +7609,7 @@ async function handleApi(req, res) {
       todo = {
         ...todo,
         sharedManualBucket,
+        calendarOrder: previousTodo.calendarOrder,
         sharedManualOrder: manualDomainChanged
           ? sharedManualOrderBefore(db, { domain: nextManualDomain, bucket: sharedManualBucket })
           : todoSharedManualOrder(previousTodo)

@@ -18,6 +18,10 @@ function createAbsenceUi({ $, state, api, render, escapeHtml, showNotice, showAp
     if (item && !users.some(user => user.id === item.workerId)) users.push({ id: item.workerId, name: item.workerName || item.workerId });
     $("absenceWorker").innerHTML = users.map(user => `<option value="${escapeHtml(user.id)}">${escapeHtml(user.name || user.id)}</option>`).join("");
     $("absenceWorker").value = item?.workerId || (users.some(user => user.id === activeWorkerId()) ? activeWorkerId() : state.user.id);
+    const boss = state.user.role === "boss";
+    $("absenceWorker").hidden = !boss;
+    $("absenceWorkerName").hidden = boss;
+    $("absenceWorkerName").textContent = users.find(user => user.id === $("absenceWorker").value)?.name || item?.workerName || state.user.name;
     $("absenceDate").value = item?.date || date;
     $("absenceEndDate").value = item?.endDate || date;
     $("absenceReason").value = item?.reason || "vacation";
@@ -53,7 +57,7 @@ function createAbsenceUi({ $, state, api, render, escapeHtml, showNotice, showAp
   $("saveAbsence").addEventListener("click", () => mutate());
   $("deleteAbsence").addEventListener("click", () => mutate(true));
   $("absenceForm").addEventListener("submit", event => { event.preventDefault(); mutate(); });
-  for (const id of ["absenceEntryButton", "calendarAbsenceButton", "dayAbsenceButton"]) $(id).addEventListener("click", () => open(null, id === "dayAbsenceButton" ? state.dayTimelineDate : dateKey(new Date())));
+  for (const id of ["absenceEntryButton", "dayAbsenceButton"]) $(id).addEventListener("click", () => open(null, id === "dayAbsenceButton" ? state.dayTimelineDate : dateKey(new Date())));
   function resume() {
     if (!pendingLink || !state.absencesLoaded) return;
     const id = pendingLink; pendingLink = "";

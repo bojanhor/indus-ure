@@ -2814,6 +2814,8 @@
 
     /* Večdnevni dogodki dobijo skupno, po vrsticah poravnano stezo. Posamezna
        nadaljevanja se stikajo čez rob dneva, naslov pa ostane le na začetku. */
+    .day-single-untimed { display: flex; flex-direction: column; gap: 7px; flex-shrink: 0; }
+    .day-single-untimed:empty:not([style]) { display: none; }
     .day-multiday-lanes {
       display: grid;
       gap: 3px;
@@ -3144,7 +3146,13 @@
 
     .day-all-day.hidden { display: none; }
     .day-all-day-label { padding-top: 7px; color: var(--muted); font-size: 11px; font-weight: 800; }
-    .day-all-day-items { display: flex; min-width: 0; flex-wrap: wrap; gap: 6px; }
+    .day-all-day-items { display: flex; min-width: 0; flex-direction: column; gap: 6px; }
+    .calendar-order-handle { display: inline-flex; align-items: center; justify-content: center; float: left; width: 28px; min-height: 28px; margin-right: 5px; border-radius: 5px; background: #ffffff66; color: inherit; touch-action: none; user-select: none; cursor: default; }
+    .calendar-order-handle:focus-visible { outline: 2px solid var(--accent); }
+    .calendar-order-moving { opacity: .6; outline: 2px dashed var(--accent); }
+    .calendar-order-before { box-shadow: 0 -3px 0 var(--accent) !important; }
+    .calendar-order-after { box-shadow: 0 3px 0 var(--accent) !important; }
+    #absenceWorker[hidden], #absenceWorkerName[hidden] { display: none; }
     .day-all-day-item {
       min-height: 34px;
       max-width: 100%;
@@ -5891,7 +5899,6 @@
         <div class="month-title calendar-view">
           <button class="icon-btn" id="prevMonth" type="button" title="Prej&#353;nji mesec">&lsaquo;</button>
           <h2 id="monthTitle"></h2>
-          <button class="secondary" id="calendarAbsenceButton" type="button">Odsotnost</button>
           <button class="icon-btn" id="nextMonth" type="button" title="Naslednji mesec">&rsaquo;</button>
           <button class="today-calendar-btn" id="todayBtn" type="button" title="Danes" aria-label="Danes">
             <span class="today-calendar-icon" aria-hidden="true"><span class="today-calendar-day" id="todayDayNumber"></span></span>
@@ -6175,7 +6182,7 @@
       </div>
       <div class="absence-fields">
         <p id="absenceError" role="alert"></p>
-        <label>Odsotni delavec<select id="absenceWorker"></select></label>
+        <label>Odsotni delavec<select id="absenceWorker"></select><strong id="absenceWorkerName" hidden></strong></label>
         <label>Razlog<select id="absenceReason"><option value="vacation">Dopust</option><option value="illness">Bolezen</option></select></label>
         <div class="form-grid">
           <label>Od<input id="absenceDate" type="date" required></label>
@@ -9984,6 +9991,9 @@ function calendarTodos({ includeArchived = false } = {}) {
 
 /* @indus-module:worker-access */
 /* @indus-module:absence-model */
+/* @indus-module:calendar-order */
+/* @indus-module:editor/calendar-order */
+const calendarOrderUi = createCalendarOrderUi({ state, api, render, showNotice });
 /* @indus-module:editor/absences */
 const absenceUi = createAbsenceUi({ $, state, api, render, escapeHtml, showNotice, showAppConfirm, dateKey, activeWorkerId });
 function calendarAbsences() {
@@ -10628,7 +10638,7 @@ function calendarDayTodoSort(a, b) {
       const aHasTime = Boolean(a.start && a.end);
       const bHasTime = Boolean(b.start && b.end);
       if (aHasTime !== bHasTime) return aHasTime ? 1 : -1;
-      if (!aHasTime) return todoSort(a, b);
+      if (!aHasTime) return CalendarOrder.compare(a, b);
       return String(a.start).localeCompare(String(b.start))
         || String(a.end).localeCompare(String(b.end))
         || todoSort(a, b);
@@ -10643,15 +10653,15 @@ function monthMultiDayLayout(todos, gridStart, dayCount = 42) {
       const visibleEnd = shiftDateKey(visibleStart, dayCount - 1);
       const spans = todos
         .filter((todo) => todoIsMultiDayCalendarSpan(todo) && todo.date <= visibleEnd && todoEndDate(todo) >= visibleStart)
-        .sort((a, b) => String(a.date).localeCompare(String(b.date))
-          || String(todoEndDate(b)).localeCompare(String(todoEndDate(a)))
+        .sort((a, b) => CalendarOrder.duration(a) - CalendarOrder.duration(b)
+          || String(a.date).localeCompare(String(b.date))
           || todoSort(a, b));
-      const laneEnds = [];
+      const laneSpans = [];
       const spanByTodoId = new Map();
       spans.forEach((todo) => {
-        let lane = laneEnds.findIndex((endDate) => endDate < todo.date);
-        if (lane < 0) lane = laneEnds.length;
-        laneEnds[lane] = todoEndDate(todo);
+        let lane = laneSpans.findIndex((items) => items.every(item => todoEndDate(item) < todo.date || todoEndDate(todo) < item.date));
+        if (lane < 0) { lane = laneSpans.length; laneSpans.push([]); }
+        laneSpans[lane].push(todo);
         spanByTodoId.set(todo.id, lane);
       });
 
@@ -10915,6 +10925,17 @@ let monthFitFrame = 0;
 let monthFitReposition = false;
 const monthTitleHome = document.createComment("month title home");
 document.querySelector(".month-title").before(monthTitleHome);
+function alignMonthUntimedRows() {
+      const days = [...$("calendar").children];
+      const sections = days.map(day => day.querySelector(".day-single-untimed"));
+      sections.forEach(section => { if (section) section.style.minHeight = ""; });
+      for (let i = 0; i < days.length; i += 7) {
+        if (!days.slice(i, i + 7).some(day => day.querySelector(".day-multiday-lanes"))) continue;
+        const row = sections.slice(i, i + 7).filter(Boolean);
+        const height = Math.max(0, ...row.map(section => section.offsetHeight));
+        row.forEach(section => { section.style.minHeight = height + "px"; });
+      }
+    }
 function updateMonthFit() {
       monthFitFrame = 0;
       const viewport = $("monthGridViewport"), grid = $("monthGrid");
@@ -10927,6 +10948,7 @@ function updateMonthFit() {
         if (title.parentElement === shell) monthTitleHome.after(title);
         grid.style.width = grid.style.transform = grid.style.left = "";
         viewport.style.height = "";
+        alignMonthUntimedRows();
         monthFitReposition = false;
         return;
       }
@@ -10941,6 +10963,7 @@ function updateMonthFit() {
       const naturalWidth = Math.max(width, matchMedia("(max-width: 760px)").matches ? 728 : 840);
       grid.style.width = naturalWidth + "px";
       grid.style.transform = "none";
+      alignMonthUntimedRows();
       const naturalHeight = grid.scrollHeight;
       const bottom = (window.visualViewport?.offsetTop || 0) + (window.visualViewport?.height || innerHeight);
       const availableHeight = Math.max(1, bottom - viewport.getBoundingClientRect().top - 12);
@@ -11028,6 +11051,9 @@ function renderMonth() {
         add.addEventListener('click', () => startTodoForDate(key));
         head.appendChild(add);
         day.appendChild(head);
+        const singleUntimed = document.createElement('div');
+        singleUntimed.className = 'day-single-untimed';
+        day.appendChild(singleUntimed);
         appendMonthMultiDayLanes(day, key, Math.floor(i / 7), multiDayLayout);
 
         todos
@@ -11057,7 +11083,8 @@ function renderMonth() {
               }
               openCalendarTodo(todo);
             });
-            day.appendChild(item);
+            calendarOrderUi.attach(item, todo, key);
+            (todo.start && todo.end ? day : singleUntimed).appendChild(item);
           });
 
         calendar.appendChild(day);
@@ -11215,7 +11242,11 @@ function saveDayTimelineDraft(todo, start, end, date) {
     }
 
 async function saveDayTimelineDrafts({ announce = true, closeAfterSave = false } = {}) {
-      if (!state.dayTimelineDrafts.size || state.dayTimelineSaving) return;
+      if (state.dayTimelineSaving) return;
+      if (!state.dayTimelineDrafts.size) {
+        if (closeAfterSave) $("dayTimelineDialog").close();
+        return;
+      }
       const day = state.dayTimelineDate;
       const sessionId = state.dayTimelineSessionId;
       const submittedDrafts = new Map(state.dayTimelineDrafts);
@@ -11513,7 +11544,7 @@ function dayWorkBlocks(todos) {
       return blocks;
     }
 function syncDayTimelineActions() {
-      $("saveDayTimeline").disabled = state.dayTimelineSaving || state.dayTimelineDrafts.size === 0;
+      $("saveDayTimeline").disabled = state.dayTimelineSaving;
       const close = $("closeDayTimeline");
       close.disabled = false;
       close.title = state.dayTimelineSaving ? "Zapri; shranjevanje se nadaljuje" : "Prekliči spremembe";
@@ -11540,7 +11571,8 @@ function renderDayTimeline() {
       const todos = dayTimelineTodos();
       // Date ranges are all-day planning tasks. They never expose clock drag
       // handles in the daily timeline, even when an older import still has a time.
-      const allDay = todos.filter((todo) => todoIsMultiDayCalendarSpan(todo) || !todo.start || !todo.end).sort(todoSort);
+      const allDay = todos.filter((todo) => todoIsMultiDayCalendarSpan(todo) || !todo.start || !todo.end)
+        .sort(CalendarOrder.compareUntimed);
       const allDayShell = $("dayAllDay");
       const allDayItems = $("dayAllDayItems");
       allDayShell.classList.toggle("hidden", !allDay.length);
@@ -11577,6 +11609,7 @@ function renderDayTimeline() {
           }
           openTodoFromDayTimeline(todo).catch((error) => showNotice(error.message));
         });
+        calendarOrderUi.attach(button, todo, state.dayTimelineDate);
         allDayItems.appendChild(button);
       });
 

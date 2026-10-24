@@ -120,12 +120,13 @@ test("image upload validates generated JPEGs and persists owned original/thumbna
   assert.equal(fs.existsSync(path.join(fixture.dir, attachment.storageKey)), true);
 });
 
-test("failed image persistence cleans newly created files without deleting deduplicated existing files", async t => {
+test("failed image persistence leaves published files for lease-protected GC and preserves deduplicated files", async t => {
   const fresh = await imageFixture(t);
   fresh.failWrite();
   await assert.rejects(fresh.upload(), /Persistence failed/);
-  assert.deepEqual(await fsp.readdir(path.join(fresh.dir, "objects")), []);
-  assert.deepEqual(await fsp.readdir(path.join(fresh.dir, "thumbnails")), []);
+  assert.equal((await fsp.readdir(path.join(fresh.dir, "objects"))).length, 1);
+  assert.equal((await fsp.readdir(path.join(fresh.dir, "thumbnails"))).length, 1);
+  assert.deepEqual(await fsp.readdir(path.join(fresh.dir, ".uploads")), []);
   const existing = await imageFixture(t);
   await existing.upload();
   const id = existing.response().body.photo.attachmentId;
