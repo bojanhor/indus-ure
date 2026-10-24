@@ -385,3 +385,55 @@ datoteke ostajajo tudi v naslednjih celovitih recovery kopijah. Pred
 uvedbo fizičnega čiščenja je potreben ločen, usklajen GC z zaščito vseh
 referenc, zgodovine/Undo in nalaganj v teku; zgolj brisanje po ID dogodka
 ni varno.
+
+#### Objava TODO in avtomatskega GC, 24. 10. 2026
+
+Produkcija: `0d8ee39`, prejšnja izdaja `d879d4a`. GitHub `origin/main`
+vsebuje izvorno kodo. Pred preklopom je bila ustvarjena in preverjena kopija
+`indus-ure-recovery-20261024T090302Z.tar.gz`. Urejeno:
+
+- odstranjen samo gumb Odsotnost ob mesečnem naslovu;
+- delavec v odsotnosti vidi svoje ime, ne izbire drugega delavca; šef ima izbiro;
+- dnevna kljukica je aktivna tudi brez sprememb in takrat zapre pogled;
+  med dejanskim shranjevanjem prepreči podvojeno oddajo; X ostane aktiven;
+- enodnevna opravila brez ure se ročno razvrščajo zgoraj, večdnevna pa spodaj
+  od krajših proti daljšim; mesečne povezane pasice ostanejo poravnane;
+- vrstni red je skupen mesečnemu/dnevnemu pogledu in vsem udeležencem;
+  kratek dotik ročaja odpre opravilo, pridržanje in vlečenje razvršča;
+- zgoraj opisano samodejno fizično čiščenje lokalnih prilog.
+
+Preverjanja na končni kodi: Windows 352 uspešnih enotskih testov + 1 namensko
+preskočen; na strežniku 353/353; Chromium 114/114; Firefox 22 uspešnih + 2
+preskočena testa, ki zahtevata Chromiumov dispatcher dotika. 36 dejanskih
+PostgreSQL/API/restore/upgrade/rollback preverjanj. Nova testna primera
+preverita tudi držani dotik in miško, ne le programskega klika. Prvi razvojni
+prehod je odkril prestrezanje dotika z novim ročajem; popravljeno in ponovljeno
+v celotnem prehodu. En prehoden Playwrightov »file data stream« error ni bil
+ponovljen v čistem končnem prehodu; ne šteje kot uspešen prvi prehod.
+
+Produkcijski preizkus: šef in Ibro, odsotnost, prazna dnevna kljukica,
+odpiranje/zapiranje obstoječega opravila brez spremembe, priloga HTTP 200,
+obračunski pogled; nič poslovnih zapisov in nič JS napak. Ponovljeno tudi
+po GC. Storitev aktivna, backup timer vključen, brez opozoril v pregledanem
+intervalu po objavi. Testi ne pomenijo preizkusa na fizičnem iPhonu.
+
+Prvi novi backup `indus-ure-recovery-20261024T090419Z.tar.gz` je uspel z vsemi
+preveritvami in `cleanupStatus=success`. GC je odstranil 26 starih
+nepovezanih datotek, **9.245.135 bajtov**. Predhodni dry-run je pokazal iste
+količine. Drive še naprej hrani sedem paketov po obstoječem pravilu.
+
+Neodvisna kontrola po GC: 80 vrstic metapodatkov, 116 lokalnih poti;
+114 datotek obstaja. **Dve manjkajoči poti sta stara težava iste fotografije**:
+`objects/0d9cf0dde3c45dbc70955e3481836d2fa75c3807ad9ba514fe281dc5f9840bac.jpg`
+in enako ime v `thumbnails/`. Metapodatki navajajo JPEG 998.155 bajtov,
+ustvarjen 1. 9. 2026 ob 13:23:04 UTC. Trenutne reference so na opravilu
+»Elektro omara Tržič - Montaža teren« in treh vpisih 1.–2. 9. 2026:
+`a4f739d8-5e36-49fa-9adc-9427f7532104`,
+`661ed8c5-a1c4-4e62-9c7d-e9c8b6726f20`,
+`acfb2ddf-f018-4a0c-b652-c4ee289080ca`,
+`57e76d14-e885-4f40-8343-1cccf3c1dc17`.
+Obe poti manjkata tudi v kopiji **pred današnjo objavo** in v vseh lokalnih
+recovery arhivih 18.–24. 10.; današnji GC ni vzrok. Povezave/metapodatki niso
+odstranjeni. Za iskanje starejšega izvora je dodana ločena odprta točka v
+Google TODO, objavljene stare točke pa so odstranjene. Starejših Drive
+arhivov v tem posegu nismo prenašali ali pregledovali.
