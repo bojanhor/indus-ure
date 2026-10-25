@@ -98,6 +98,27 @@ fiksno pravilo zase/zunanji (torej novih omejitev ali razširitev ne upošteva).
 Po povrnitvi in ponovni nadgradnji je treba dovoljenja pregledati, saj stara
 normalizacija v seznam lahko ponovno doda uporabnika samega.
 
+Objavljeno kot `41b524c`; prejšnja izdaja `0d8ee39` ostane za povrnitev.
+Pred preklopom je uspešno preverjena kopija
+`indus-ure-recovery-20261025T101655Z.tar.gz` (lokalni arhiv, Drive velikost/MD5,
+sveže branje, navodila za obnovo, CSV; tudi vsa tri čiščenja uspešna).
+Pravih dovoljenj ob objavi nismo spreminjali (`explicitlyConfigured: []`).
+
+Končni prehodi: Windows 352 uspešnih enotskih/API testov in en namensko
+preskočen; Linux 353/353. Chromium 115/115; Firefox 23 uspešnih in dva
+namensko preskočena testa Chromiumovega dotika. PostgreSQL/obnova/nadgradnja/
+povrnitev 39 preverjanj. Novi brskalniški test uporablja novo testno delavko
+z osebno LAN prijavo: šef s kljukicami dodeli pravico, delavka prek obrazca
+vpiše sodelavčeve ure, odvzem pa zavrne zastareli zapis in premik časovnice.
+Preverjeni so tudi prazen seznam, neveljavni ID-ji, samo en izvajalec in
+nespremenjena omejitev odsotnosti. Testi ne pomenijo testa na fizičnem telefonu.
+
+Produkcijski bralni preizkus: vseh pet aktivnih kartic dovoljenj, delavčev
+obrazec, odsotnost, odpiranje/zapiranje obstoječega opravila brez spremembe,
+priloga HTTP 200 in obračunski pogled; brez poslovnih zapisov ali JS napak.
+Storitev in backup timer aktivna, v preverjenem intervalu ni opozoril.
+Opravljena točka odstranjena iz Google TODO po preverjanju objave.
+
 Dnevni pogled (19. 10. 2026): kratek klik/dotik na dogodek odpre urejevalnik.
 Premik časovnega ali celodnevnega dogodka se omogoči po 400 ms pridržanja
 z miško, pisalom ali dotikom; črtkan okvir označi pripravljenost. Spust brez
