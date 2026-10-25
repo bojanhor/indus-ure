@@ -162,6 +162,8 @@ async function main() {
   db.users.ibro.avatarInitial = "ž";
   db.users.ibro.avatarColor = "#ffd000";
   db.users.ibro.billing.workerOwnVehicleKmRate = 0.49;
+  db.users.ibro.timeEntryPermissionsConfigured = true;
+  db.users.ibro.timeEntryForIds = ["ibro"];
   const lanCredential = await require("../outputs/lan-auth").hash("postgres-qa-personal-password");
   db.users.ibro.lanPasswordHash = lanCredential;
   const bossToken = createSession(db, "bojan");
@@ -181,6 +183,10 @@ async function main() {
     assert.equal(profile.avatarColor, "#ffd000");
   }
   check("workers.avatar_persists_in_snapshot_directory_and_lightweight_session");
+  assert.equal(sessionWorker.timeEntryPermissionsConfigured, true);
+  assert.deepEqual(sessionWorker.timeEntryForIds, ["ibro"]);
+  assert.equal(db.users.ibro.timeEntryPermissionsConfigured, true);
+  check("workers.time_entry_permissions_persist_in_snapshot_and_lightweight_session");
   assert.equal(db.users.ibro.billing.workerOwnVehicleKmRate, 0.49);
   const quickWorker = (await store.quickCreateSeed(db.users.bojan)).workers.find(item => item.id === "ibro");
   assert.equal(quickWorker.workerOwnVehicleKmRate, 0.49);
@@ -321,6 +327,12 @@ async function main() {
       }
     }
     check("http.full_and_initial_bootstrap_keep_complete_assignees_without_private_rows");
+    for (const route of ["/api/me", "/api/bootstrap?initial=1", "/api/bootstrap"]) {
+      const profile = await (await request(route, { headers: worker })).json();
+      assert.equal(profile.user.timeEntryPermissionsConfigured, true, route);
+      assert.deepEqual(profile.user.timeEntryForIds, ["ibro"], route);
+    }
+    check("http.time_entry_permissions_match_in_lightweight_and_full_profiles");
     const privateId = (await store.load()).absences[0].id;
     assert.equal((await request(`/api/absences/${privateId}`, { headers: worker })).status, 404);
     check("http.absence_privacy_in_full_initial_and_detail_routes");
@@ -333,6 +345,25 @@ async function main() {
     await response.arrayBuffer();
     assert.equal(fullLoads(), loadCount);
     check("http.attachment_zero_full_snapshots_and_unauthorized_404");
+
+    const managedWorker = (await (await request("/api/workers")).json()).workers.find(item => item.id === "ibro");
+    const grant = await request("/api/workers/ibro", { method: "PUT", body: JSON.stringify({ ...managedWorker, timeEntryForIds: ["ibro", "bojan"] }) });
+    assert.equal(grant.status, 200, await grant.text());
+    const grantedProfile = await (await request("/api/me", { headers: worker })).json();
+    assert.deepEqual(grantedProfile.user.timeEntryForIds, ["ibro", "bojan"]);
+    const delegated = { title: "PG delegated hours", status: "execution", clientId, client: "Izolirana QA stranka", date: "2032-04-17", start: "08:00", end: "09:00", assigneeIds: ["bojan"] };
+    const allowedWrite = await request("/api/todos", { method: "POST", headers: worker, body: JSON.stringify(delegated) });
+    assert.equal(allowedWrite.status, 200, await allowedWrite.text());
+    const savedDelegated = (await store.load()).todos.find(item => item.title === delegated.title);
+    assert.equal(savedDelegated.syncUser, "bojan");
+    assert.equal(savedDelegated.createdBy, "ibro");
+    const revoke = await request("/api/workers/ibro", { method: "PUT", body: JSON.stringify({ ...managedWorker, timeEntryForIds: ["ibro"] }) });
+    assert.equal(revoke.status, 200, await revoke.text());
+    const rejectedWrite = await request("/api/todos", { method: "POST", headers: worker, body: JSON.stringify({ ...delegated, date: "2032-04-18" }) });
+    assert.equal(rejectedWrite.status, 403, await rejectedWrite.text());
+    const rejectedEdit = await request(`/api/todos/${savedDelegated.id}`, { method: "PUT", headers: worker, body: JSON.stringify({ ...savedDelegated, assigneeIds: ["bojan"] }) });
+    assert.equal(rejectedEdit.status, 403, await rejectedEdit.text());
+    check("http.postgres_hour_permission_grant_and_revocation_apply_to_existing_session");
 
     const pdfBytes = Buffer.alloc(2 * 1048576, 32); pdfBytes.write("%PDF-1.4\\n");
     const pdfUpload = await request("/api/todos/pdf", { method: "POST", headers: { ...boss, "Content-Type": "application/pdf", "X-Indus-File-Name": "pg-qa.pdf" }, body: pdfBytes });

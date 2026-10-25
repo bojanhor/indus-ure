@@ -779,7 +779,8 @@ test("lokalna testna instanca omogoča ločeno prijavo samo v testnem načinu", 
         assigneeIds: [createdWorker.id]
       })
     });
-    assert.equal(delegatedHours.status, 403, delegatedHours.body);
+    assert.equal(delegatedHours.status, 200, delegatedHours.body);
+    assert.equal(JSON.parse(delegatedHours.body).todos.find(todo => todo.title === "Ibro may enter delegated worker hours").syncUser, createdWorker.id);
     const crossAssigned = await request(port, "/api/todos", {
       method: "POST",
       headers: ibroTodoHeaders,
@@ -825,7 +826,7 @@ test("lokalna testna instanca omogoča ločeno prijavo samo v testnem načinu", 
     });
     assert.equal(foreignHoursUpdate.status, 403, foreignHoursUpdate.body);
     assert.equal(JSON.parse(foreignHoursUpdate.body).error, JSON.parse(foreignHours.body).error);
-    assert.match(JSON.parse(foreignHours.body).error, /vpiše ure samo sebi/);
+    assert.match(JSON.parse(foreignHours.body).error, /nimaš dovoljenja za vpis ur/);
     const removedWorker = await request(port, `/api/workers/${encodeURIComponent(createdWorker.id)}`, {
       method: "DELETE",
       headers: bossTodoHeaders

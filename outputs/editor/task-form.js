@@ -212,7 +212,9 @@ function renderTodoFormAssignees(selectedIds = [], onlyIds = null, { disabled = 
       const selected = new Set(selectedIds);
       const allowed = onlyIds ? new Set(onlyIds) : null;
       const users = state.users.filter((user) => !allowed || allowed.has(user.id)).slice().sort((left, right) => String(left.name || left.id).localeCompare(String(right.name || right.id), "sl"));
-      $("todoFormAssignees").innerHTML = users.map((user) => `
+      $("todoFormAssignees").innerHTML = single && !users.length
+        ? '<p class="todo-meta">Nimaš dovoljenja za vpis ur. Dovoljenja nastavi šef v nastavitvah delavcev.</p>'
+        : users.map((user) => `
         <label>
           <input type="${single ? "radio" : "checkbox"}" ${single ? 'name="todo-time-entry-assignee"' : ""} value="${escapeHtml(user.id)}" ${selected.has(user.id) ? "checked" : ""} ${disabled ? "disabled" : ""}>
           ${escapeHtml(user.name || user.id)}

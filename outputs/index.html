@@ -14206,7 +14206,8 @@ function renderWorkerManagement() {
         const disabled = worker.active ? "" : "disabled";
         const dailyReport = worker.dailyReport || {};
         const billing = worker.billing || {};
-        const targets = WorkerAccess.targets(activeTargets, worker).map(target => escapeHtml(target.name || target.id)).join(", ");
+        const allowedIds = new Set(worker.timeEntryForIds || []);
+        const targets = activeTargets.map(target => `<label><input type="checkbox" data-worker-time-entry-for value="${escapeHtml(target.id)}" ${locked || allowedIds.has(target.id) ? "checked" : ""} ${locked || !worker.active ? "disabled" : ""}>${escapeHtml(target.name || target.id)}${target.id === worker.id ? " (zase)" : ""}</label>`).join("");
         return `<article class="worker-management-card ${worker.active ? "" : "inactive"}" data-worker-id="${escapeHtml(worker.id)}">
           <div class="worker-management-head"><div><h4>${escapeHtml(worker.name || worker.id)}</h4><span class="worker-management-status">${escapeHtml(workerManagementLabel(worker))}</span></div><label class="worker-active-field"><input type="checkbox" data-worker-active ${worker.active ? "checked" : ""} ${locked ? "disabled" : ""}>Aktiven</label></div>
           <div class="worker-management-grid">
@@ -14232,7 +14233,7 @@ function renderWorkerManagement() {
               <label>Ponovi novo geslo<input type="password" data-worker-lan-password-repeat autocomplete="new-password" maxlength="128"></label>
               <div class="worker-management-actions"><button class="secondary" type="button" data-set-lan-password>Nastavi geslo</button>${worker.lanPasswordConfigured ? '<button class="secondary" type="button" data-disable-lan-password>Izklopi prijavo z geslom</button>' : ''}</div>
             </fieldset>
-            <fieldset class="worker-permissions"><legend>Lahko vpisuje ure za</legend><p>${worker.role === "boss" ? "Vse delavce, vsakega posebej." : "Samo zase ali za zunanje izvajalce, posamično."}</p><div class="worker-permissions-list">${targets}</div></fieldset>
+            <fieldset class="worker-permissions" ${disabled}><legend>Lahko vpisuje ure za</legend><p class="todo-meta">${locked ? "Šef lahko vedno vpisuje ure za vse aktivne delavce, vsakega posebej." : "Označi dovoljene izvajalce in shrani. Če ni izbran nihče, vpis ur ni dovoljen. Odsotnost lahko delavec še vedno vnese samo zase."}</p><div class="worker-permissions-list">${targets}</div></fieldset>
             <fieldset class="worker-report-delivery" ${disabled}>
               <legend>Dnevna poročila po e-pošti</legend>
               <div class="worker-report-delivery-grid">
@@ -14310,6 +14311,7 @@ async function saveManagedWorker(card, { activate = false } = {}) {
           avatarInitial: card.querySelector("[data-worker-avatar-initial]")?.value || "",
           avatarColor: card.querySelector("[data-worker-avatar-color]")?.value || "",
           active: activate || Boolean(card.querySelector("[data-worker-active]")?.checked),
+          timeEntryForIds: [...card.querySelectorAll("[data-worker-time-entry-for]:checked")].map(input => input.value),
           dailyReport: {
             emailEnabled: Boolean(card.querySelector("[data-worker-report-email-enabled]")?.checked),
             recipientEmail: card.querySelector("[data-worker-report-recipient]")?.value || "",

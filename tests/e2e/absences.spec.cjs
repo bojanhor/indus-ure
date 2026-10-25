@@ -17,15 +17,13 @@ const call = (page, path, method = 'GET', body) => page.evaluate(async ({ path, 
   catch (error) { return { status: error.status, error: error.message }; }
 }, { path, method, body });
 
-test('hour entries allow self OR external; boss chooses every worker singly; server rejects stale permissions', async ({ browser }) => {
+test('default hour permissions allow self OR external; boss chooses every worker singly', async ({ browser }) => {
   const bossContext = await browser.newContext(), workerContext = await browser.newContext();
   const boss = await bossContext.newPage(), worker = await workerContext.newPage();
   try {
     await login(boss);
     const external = (await call(boss, '/api/workers', 'POST', { name: 'Zunanji izvajalci' })).data.worker;
     const other = (await call(boss, '/api/workers', 'POST', { name: 'Štajerc QA' })).data.worker;
-    const ibro = (await call(boss, '/api/workers')).data.workers.find(w => w.id === 'ibro');
-    await call(boss, '/api/workers/ibro', 'PUT', { ...ibro, timeEntryForIds: ['ibro', 'bojan', other.id] });
     await login(worker, 'ibro');
     await worker.locator('#writeHoursButton').click();
     await expect(worker.locator('#todoFormAssignees input')).toHaveCount(2);

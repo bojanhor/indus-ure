@@ -1400,7 +1400,7 @@ test("visible todos expose attachment metadata without eager media payloads", ()
     mimeType: "image/jpeg"
   });
 });
-test("delavec lahko vpisuje ure samo zase ali zunanjim izvajalcem, ne glede na stara pooblastila", () => {
+test("privzeti vpis ur ostane zase ali zunanjim izvajalcem; stara pooblastila se ne aktivirajo", () => {
   const workerDb = {
     users: {
       bojan: { id: "bojan", role: "boss", active: true, timeEntryForIds: ["bojan"] },
@@ -1420,6 +1420,20 @@ test("delavec lahko vpisuje ure samo zase ali zunanjim izvajalcem, ne glede na s
   assert.equal(canRecordHoursFor(workerDb, workerDb.users.ibro, "bojan"), false);
   assert.equal(canRecordHoursFor(workerDb, workerDb.users.ibro, "marko"), false);
   assert.equal(canRecordHoursFor(workerDb, workerDb.users.bojan, "maja"), true);
+  // The boss explicitly selects a different list, not necessarily including self.
+  workerDb.users.maja.timeEntryPermissionsConfigured = true;
+  workerDb.users.maja.timeEntryForIds = ["ibro", "bojan", "marko"];
+  normalizeWorkerProfile("maja", workerDb.users.maja, workerDb.users);
+  assert.deepEqual(timeEntryTargetIds(workerDb, workerDb.users.maja), ["bojan", "ibro"]);
+  assert.equal(canRecordHoursFor(workerDb, workerDb.users.maja, "maja"), false);
+  assert.equal(canRecordHoursFor(workerDb, workerDb.users.maja, "external"), false);
+  workerDb.users.maja.timeEntryForIds = [];
+  normalizeWorkerProfile("maja", workerDb.users.maja, workerDb.users);
+  assert.deepEqual(timeEntryTargetIds(workerDb, workerDb.users.maja), []);
+  workerDb.users.maja.active = false;
+  workerDb.users.maja.timeEntryForIds = ["bojan"];
+  assert.equal(canRecordHoursFor(workerDb, workerDb.users.maja, "bojan"), false);
+  assert.deepEqual(timeEntryTargetIds(workerDb, null), []);
 });
 
 test("normalizacija delavca ohrani neobvezno Google prijavo in odstrani neaktivna pooblastila", () => {

@@ -415,6 +415,7 @@ class PostgresStore {
                 'active', coalesce(u.data -> 'active', 'true'::jsonb),
                 'employmentType', coalesce(u.data ->> 'employmentType', 'contractor'),
                 'workerKind', coalesce(u.data ->> 'workerKind', ''),
+                'timeEntryPermissionsConfigured', coalesce(u.data -> 'timeEntryPermissionsConfigured', 'false'::jsonb),
                 'timeEntryForIds', coalesce(u.data -> 'timeEntryForIds', '[]'::jsonb)
               ) as user,
               coalesce(m.data ->> 'syncRevision', '0') as revision

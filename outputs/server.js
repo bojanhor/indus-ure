@@ -2307,7 +2307,8 @@ function publicUser(user) {
     avatarColor: user.avatarColor || "",
     employmentType: user.employmentType || "contractor",
     workerKind: workerAccess.kind(user),
-    timeEntryForIds: [user.id]
+    timeEntryPermissionsConfigured: user.timeEntryPermissionsConfigured === true,
+    timeEntryForIds: user.timeEntryPermissionsConfigured === true && Array.isArray(user.timeEntryForIds) ? user.timeEntryForIds : [user.id]
   };
 }
 function publicDirectoryUser(user) {
@@ -3049,7 +3050,7 @@ function timeEntryTargetIds(db, user) {
 
 function canRecordHoursFor(db, user, workerId) {
   const targetId = cleanUserId(workerId);
-  if (!user || !targetId || !db?.users?.[targetId] || db.users[targetId].active === false) return false;
+  if (!user || user.active === false || !targetId || !db?.users?.[targetId] || db.users[targetId].active === false) return false;
   if (user.role === "boss") return true;
   return timeEntryTargetIds(db, user).includes(targetId);
 }
@@ -3071,11 +3072,12 @@ function normalizeWorkerProfile(id, user, users = {}) {
     user.employmentType = employmentType;
     changed = true;
   }
-  // Keep the old field for a code rollback, but never authorize from it.
-  // Effective choices come exclusively from the actor and external profile.
-  const ids = [...new Set([id, ...(Array.isArray(user.timeEntryForIds) ? user.timeEntryForIds : [])]
+  // Old values are inert until the boss explicitly saves the new permissions.
+  // An explicit empty allowlist must stay empty (do not silently add self).
+  const configured = user.timeEntryPermissionsConfigured === true;
+  const ids = active ? [...new Set([...(configured ? [] : [id]), ...(Array.isArray(user.timeEntryForIds) ? user.timeEntryForIds : [])]
     .map(cleanUserId)
-    .filter(targetId => Boolean(users[targetId]) && users[targetId].active !== false))];
+    .filter(targetId => Boolean(users[targetId]) && users[targetId].active !== false))] : [];
   if (JSON.stringify(user.timeEntryForIds || []) !== JSON.stringify(ids)) {
     user.timeEntryForIds = ids;
     changed = true;
@@ -3195,6 +3197,7 @@ function publicWorkerManagementUser(db, user) {
     avatarInitial: user.avatarInitial || "",
     avatarColor: user.avatarColor || "",
     employmentType: user.employmentType || "contractor",
+    timeEntryPermissionsConfigured: user.timeEntryPermissionsConfigured === true,
     timeEntryForIds: timeEntryTargetIds(db, user),
     dailyReport: workerDailyReportSettings(db, user),
     billing: {
@@ -5798,7 +5801,15 @@ async function handleApi(req, res) {
         sendJson(res, 400, { error: "Izberi eno črko slovenske abecede in veljavno barvo." });
         return;
       }
-      const timeEntryForIds = Array.isArray(worker.timeEntryForIds) ? worker.timeEntryForIds : [id];
+      const permissionsProvided = Object.hasOwn(body, "timeEntryForIds");
+      if (permissionsProvided && (!Array.isArray(body.timeEntryForIds)
+          || body.timeEntryForIds.some(targetId => typeof targetId !== "string" || !cleanUserId(targetId)
+            || !Object.hasOwn(db.users, targetId) || (db.users[targetId].active === false && !(targetId === id && active))))) {
+        sendJson(res, 400, { error: "Za vpis ur izberi samo aktivne delavce." }); return;
+      }
+      const timeEntryForIds = permissionsProvided ? [...new Set(body.timeEntryForIds)]
+        : Array.isArray(worker.timeEntryForIds) ? worker.timeEntryForIds : [id];
+      const previousTimeEntryForIds = timeEntryTargetIds(db, worker);
       const billing = body.billing === undefined ? null : normalizeWorkerBillingInput(db, id, body.billing);
       if (body.billing !== undefined && !billing) {
         sendJson(res, 400, { error: "Vnesi veljavno urno postavko, kilometrino in pot v službo." });
@@ -5825,6 +5836,7 @@ async function handleApi(req, res) {
       worker.employmentType = "contractor";
       if (billing) worker.billing = billing;
       worker.timeEntryForIds = active ? timeEntryForIds : [];
+      if (permissionsProvided && worker.role !== "boss") worker.timeEntryPermissionsConfigured = true;
       worker.dailyReport = {
         emailEnabled: reportEmailEnabled,
         recipientEmail: reportRecipientEmail,
@@ -5840,7 +5852,7 @@ async function handleApi(req, res) {
         action: "spremenjen delavec",
         targetType: "worker",
         targetId: id,
-        context: { userId: id, name, hasGoogleLogin: Boolean(email), active: worker.active, employmentType: worker.employmentType, timeEntryForIds: worker.timeEntryForIds, dailyReport: worker.dailyReport }
+        context: { userId: id, name, hasGoogleLogin: Boolean(email), active: worker.active, employmentType: worker.employmentType, previousTimeEntryForIds, timeEntryForIds: timeEntryTargetIds(db, worker), dailyReport: worker.dailyReport }
       });
       await writeDbAsync(db);
       sendJson(res, 200, {
@@ -6653,7 +6665,7 @@ async function handleApi(req, res) {
           .filter((assigneeId) => Boolean(db.users?.[assigneeId]) && db.users[assigneeId].active !== false))]
         : [];
       if (user.role !== "boss" && TIME_ENTRY_TODO_STATUSES.has(todo.status) && requestedAssigneeIds.some((assigneeId) => !canRecordHoursFor(db, user, assigneeId))) {
-        sendJson(res, 403, { error: "Delavec lahko vpiše ure samo sebi ali zunanjim izvajalcem, posamično." });
+        sendJson(res, 403, { error: "Za tega delavca nimaš dovoljenja za vpis ur. Dovoljenja nastavi šef v nastavitvah delavcev." });
         return;
       }
       if (hasExplicitAssignees && !requestedAssigneeIds.length && !["meal", "material", "note"].includes(todo.status)) {
@@ -6664,7 +6676,7 @@ async function handleApi(req, res) {
         ? requestedAssigneeIds
         : todoAssigneesForRequest(user, todo.syncUser, db.users);
       if (TIME_ENTRY_TODO_STATUSES.has(todo.status) && assigneeIds.some(id => !canRecordHoursFor(db, user, id))) {
-        sendJson(res, 403, { error: "Delavec lahko vpiše ure samo sebi ali zunanjim izvajalcem, posamično." }); return;
+        sendJson(res, 403, { error: "Za tega delavca nimaš dovoljenja za vpis ur. Dovoljenja nastavi šef v nastavitvah delavcev." }); return;
       }
       if (["material", "note"].includes(todo.status)) assigneeIds = [syncUserForRequest(user, todo.syncUser || assigneeIds[0] || user.id, "", db.users)];
       if (TIME_ENTRY_TODO_STATUSES.has(todo.status) && assigneeIds.length !== 1) {
@@ -6779,6 +6791,9 @@ async function handleApi(req, res) {
         return;
       }
       entry.syncUser = sourceTodo.syncUser;
+      if (!canRecordHoursFor(db, user, entry.syncUser)) {
+        sendJson(res, 403, { error: "Za tega delavca nimaš dovoljenja za vpis ur." }); return;
+      }
       db.entries.push({
         id: crypto.randomUUID(),
         ...entry,
@@ -6869,10 +6884,14 @@ async function handleApi(req, res) {
         return;
       }
       entry.sourceTodoId = db.entries[index].sourceTodoId || "";
+      const targetWorkerId = syncUserForRequest(user, entry.syncUser, db.entries[index].syncUser, db.users);
+      if (!canRecordHoursFor(db, user, targetWorkerId) || !canRecordHoursFor(db, user, db.entries[index].syncUser || db.entries[index].createdBy)) {
+        sendJson(res, 403, { error: "Za tega delavca nimaš dovoljenja za vpis ur." }); return;
+      }
       db.entries[index] = {
         ...db.entries[index],
         ...entry,
-        syncUser: syncUserForRequest(user, entry.syncUser, db.entries[index].syncUser, db.users),
+        syncUser: targetWorkerId,
         updatedBy: user.id,
         updatedByName: user.name,
         updatedAt: new Date().toISOString(),
@@ -7252,6 +7271,9 @@ async function handleApi(req, res) {
           return;
         }
         const assignmentItems = todoAssignmentItems(db, previousTodo);
+        if (assignmentItems.some(item => TIME_ENTRY_TODO_STATUSES.has(item.status) && !canRecordHoursFor(db, user, item.syncUser))) {
+          sendJson(res, 403, { error: "Za tega delavca nimaš dovoljenja za vpis ur." }); return;
+        }
         const lockTokens = [...new Set(assignmentItems
           .map((item) => String(requestedLockTokens[String(item.id || "")] || "").trim())
           .filter(Boolean))];
@@ -7365,6 +7387,9 @@ async function handleApi(req, res) {
       if (!canManageTodo(user, previousTodo) || isTrashedTodo(previousTodo)) {
         sendJson(res, 403, { error: "Tega opravila ne moreš spreminjati." });
         return;
+      }
+      if (todoAssignmentItems(db, previousTodo).some(item => TIME_ENTRY_TODO_STATUSES.has(item.status) && !canRecordHoursFor(db, user, item.syncUser))) {
+        sendJson(res, 403, { error: "Za tega delavca nimaš dovoljenja za vpis ur." }); return;
       }
       const editLock = todoAssignmentEditLockConflict(db, previousTodo, user, editLockToken);
       if (editLock || !ownsTodoAssignmentEditLock(db, previousTodo, user, editLockToken)) {
@@ -7577,6 +7602,9 @@ async function handleApi(req, res) {
         return;
       }
       const clientBillLock = clientBillLockForTodos(db, todoAssignmentItems(db, previousTodo));
+      if (todoAssignmentItems(db, previousTodo).some(item => TIME_ENTRY_TODO_STATUSES.has(item.status) && !canRecordHoursFor(db, user, item.syncUser))) {
+        sendJson(res, 403, { error: "Za tega delavca nimaš dovoljenja za vpis ur." }); return;
+      }
       if (clientBillLock) {
         sendJson(res, 403, { error: clientBillEditLockMessage(clientBillLock) });
         return;
@@ -7650,7 +7678,7 @@ async function handleApi(req, res) {
       }
 
       if (TIME_ENTRY_TODO_STATUSES.has(todo.status) && assigneeIds.some((assigneeId) => !canRecordHoursFor(db, user, assigneeId))) {
-        sendJson(res, 403, { error: "Delavec lahko vpiše ure samo sebi ali zunanjim izvajalcem, posamično." });
+        sendJson(res, 403, { error: "Za tega delavca nimaš dovoljenja za vpis ur. Dovoljenja nastavi šef v nastavitvah delavcev." });
         return;
       }
       if (["material", "note"].includes(todo.status)) assigneeIds = [syncUserForRequest(user, todo.syncUser || assigneeIds[0] || previousTodo.syncUser || user.id, previousTodo.syncUser, db.users)];

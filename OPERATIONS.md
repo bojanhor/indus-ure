@@ -73,6 +73,31 @@ ne prekliče že izdanih sej; po potrebi jih je treba preklicati ločeno.
 
 ## Tehnična konfiguracija
 
+### Dovoljenja za vpis ur (25. 10. 2026)
+
+Šef določi ciljne izvajalce v **Nastavitve → Delavci → Lahko vpisuje ure za**
+in klikne Shrani pri posameznem delavcu. Izbrati je mogoče aktivne delavce,
+vključno s sabo in zunanjimi izvajalci. Prazna izbira onemogoči vpis ur.
+Posamezen vpis je še vedno samo za enega izvajalca; šef lahko vedno izbira vse.
+To ne razširi dostopa do tujih opravil, obračunov ali odsotnosti. Delavec
+odsotnost še naprej vpisuje samo zase, dodeljevanje sodelavcev planiranju pa
+ostane ločeno od dovoljenj za vpis ur.
+
+Brez izrecno shranjene nastavitve ostane dosedanje pravilo zase/zunanji.
+Stara prezrta polja `timeEntryForIds` sama ne podelijo nobenih novih pravic:
+upoštevajo se samo skupaj z `timeEntryPermissionsConfigured: true`, ki ga
+postavi šefovski API. API preveri aktivne ID-je, hrani tudi prazen seznam,
+ob odvzemu pa zavrne nove vpise in spreminjanje ur tudi iz zastarelega
+obrazca, časovnice ter stare poti `/api/entries`. Normalni zapis profila
+brez polja dovoljenj nastavitev ohrani. Audit vsebuje prejšnji in novi
+učinkoviti seznam. Neaktivni/odstranjeni cilji ne ostanejo pooblaščeni.
+
+Gre za aditivno polje uporabniškega JSON, brez spremembe SQL sheme in brez
+spreminjanja obstoječih vpisov. Povrnitev kode na `0d8ee39` vrne prejšnje
+fiksno pravilo zase/zunanji (torej novih omejitev ali razširitev ne upošteva).
+Po povrnitvi in ponovni nadgradnji je treba dovoljenja pregledati, saj stara
+normalizacija v seznam lahko ponovno doda uporabnika samega.
+
 Dnevni pogled (19. 10. 2026): kratek klik/dotik na dogodek odpre urejevalnik.
 Premik časovnega ali celodnevnega dogodka se omogoči po 400 ms pridržanja
 z miško, pisalom ali dotikom; črtkan okvir označi pripravljenost. Spust brez
