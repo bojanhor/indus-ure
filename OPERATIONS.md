@@ -109,6 +109,12 @@ Nov obrazec ob mesečnem + ponuja Odsotnost z izbranim datumom. Prehod ne
 ustvari vpisa ur in ohrani nedokončan osnutek opravila. Delavec izbira samo
 svojo odsotnost, šef pa katerega koli delavca.
 
+Rezultat iskanja je v mesečnem pogledu mogoče pridržati in povleči na dan.
+Nedatiran dogodek dobi datum, časovni ohrani obe uri, večdnevni pa dolžino.
+Dodelitve se ne pošiljajo znova; veljajo obstoječe pravice, zaklepi in
+revizijska zaščita zapisa. Kratek dotik odpre urejevalnik; dotik z drsenjem
+pred pridržanjem premika seznam rezultatov. Ni dodatnega dragpada.
+
 ### Dovoljenja za vpis ur (25. 10. 2026)
 
 Šef določi ciljne izvajalce v **Nastavitve → Delavci → Lahko vpisuje ure za**

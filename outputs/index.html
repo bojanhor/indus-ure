@@ -3419,6 +3419,9 @@
 
     .search-result-open:hover strong,
     .search-result-open:focus-visible strong { color: var(--accent-dark); }
+    .search-result-calendar-drag { touch-action: none; user-select: none; -webkit-user-select: none; }
+    .search-result-calendar-drag.month-dragging { opacity: .42; outline: 2px dashed var(--accent); }
+    .search-result-calendar-drag.month-todo-drag-ghost { display: grid; grid-template-columns: 1fr; padding: 10px; border-radius: 8px; background: var(--panel); }
 
     .search-result-locate {
       width: 38px;
@@ -10757,7 +10760,8 @@ function panMonthTodoPointerGesture(drag, event) {
       if (drag.panAxis === "x" && drag.scrollHost) {
         drag.scrollHost.scrollLeft = drag.scrollLeft - deltaX;
       } else if (drag.panAxis === "y") {
-        window.scrollTo(drag.windowScrollX, drag.windowScrollY - deltaY);
+        if (drag.searchScrollHost) drag.searchScrollHost.scrollTop = drag.searchScrollTop - deltaY;
+        else window.scrollTo(drag.windowScrollX, drag.windowScrollY - deltaY);
       }
     }
 
@@ -10806,6 +10810,7 @@ function activateMonthTodoPointerDrag() {
       ghost.removeAttribute("id");
       ghost.setAttribute("aria-hidden", "true");
       ghost.style.width = `${drag.item.getBoundingClientRect().width}px`;
+      if (drag.searchScrollHost) drag.grabOffsetX = Math.min(drag.grabOffsetX, 140);
       drag.ghostElement = ghost;
       document.body.append(ghost);
       try {
@@ -10824,7 +10829,9 @@ function beginMonthTodoPointerDrag(event, item, todo, originDate = todo.date) {
       if (!event.isPrimary || (event.pointerType === "mouse" && event.button !== 0)) return;
       clearMonthTodoPointerDrag();
       const rect = item.getBoundingClientRect();
-      const scrollHost = item.closest(".calendar-shell");
+      const searchScrollHost = item.closest("#searchPanel");
+      if (searchScrollHost && state.view !== "calendar") return;
+      const scrollHost = item.closest(".calendar-shell") || (searchScrollHost ? document.querySelector(".calendar-shell") : null);
       const drag = {
         pointerId: event.pointerId,
         pointerType: event.pointerType,
@@ -10845,6 +10852,8 @@ function beginMonthTodoPointerDrag(event, item, todo, originDate = todo.date) {
         targetElement: null,
         ghostElement: null,
         scrollHost,
+        searchScrollHost,
+        searchScrollTop: searchScrollHost?.scrollTop || 0,
         scrollLeft: scrollHost?.scrollLeft || 0,
         windowScrollX: window.scrollX,
         windowScrollY: window.scrollY,
@@ -10898,13 +10907,13 @@ function finishMonthTodoPointerDrag(event) {
       const wasPanning = drag.panning;
       const targetDate = drag.targetDate;
       const todo = state.todos.find(item => item.id === drag.todo.id) || drag.todo;
-      const originDate = drag.originDate || todo.date;
+      const originDate = drag.originDate || todo.date || targetDate;
       if (wasPanning) lastMonthTodoDragAt = Date.now();
       if (wasActive || wasPanning) event.preventDefault();
       clearMonthTodoPointerDrag();
       if (!wasActive) return;
       lastMonthTodoDragAt = Date.now();
-      if (!targetDate || targetDate === originDate) return;
+      if (!targetDate || (todo.date && targetDate === originDate)) return;
       const dayShift = Math.round((parseDate(targetDate) - parseDate(originDate)) / 86400000);
       // Moving a card changes its schedule, never its participants. Omission
       // also preserves the server's complete assignment set after offline sync.
@@ -13633,7 +13642,16 @@ function renderSearchContent() {
             <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8.5" cy="8.5" r="4.75"></circle><path d="m12 12 4.25 4.25"></path><path d="M8.5 6.5v4M6.5 8.5h4"></path></svg>
           </button>
         `;
-        item.querySelector(".search-result-open").addEventListener("click", () => {
+        const openButton = item.querySelector(".search-result-open");
+        if (state.view === "calendar" && !todo.imported && !todo.archivedAt && !todo.trashedAt) {
+          openButton.classList.add("search-result-calendar-drag");
+          openButton.title = "Klikni za urejanje; pridrži in povleci na dan v koledarju. Ura ostane nespremenjena.";
+          openButton.addEventListener("pointerdown", event => beginMonthTodoPointerDrag(event, openButton, todo));
+          openButton.addEventListener("lostpointercapture", cancelMonthTodoPointerDrag);
+          openButton.addEventListener("contextmenu", event => event.preventDefault());
+        }
+        openButton.addEventListener("click", event => {
+          if (Date.now() - lastMonthTodoDragAt < 450) { event.preventDefault(); event.stopPropagation(); return; }
           clearClientSearchAndRestoreView();
           openTodoDialog(todo);
         });
@@ -14835,6 +14853,7 @@ $("clientsSearch").addEventListener("input", renderClients);
 $("clearClientSearch").addEventListener("click", clearClientSearchAndRestoreView);
 document.addEventListener("click", (event) => {
       if (!$("clientSearch").value.trim()) return;
+      if (Date.now() - lastMonthTodoDragAt < 450) { event.preventDefault(); event.stopPropagation(); return; }
       if (event.target.closest('#searchPanel .result, #searchPanel .search-filter-bar label, #searchPanel .search-filter-bar button, #clientSearch, #clearClientSearch')) return;
       clearClientSearchAndRestoreView();
     }, true);
