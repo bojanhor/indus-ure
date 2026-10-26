@@ -115,6 +115,40 @@ Dodelitve se ne pošiljajo znova; veljajo obstoječe pravice, zaklepi in
 revizijska zaščita zapisa. Kratek dotik odpre urejevalnik; dotik z drsenjem
 pred pridržanjem premika seznam rezultatov. Ni dodatnega dragpada.
 
+#### Dokaz objave 26. 10. 2026
+
+Produkcija: `004229c`, prejšnja izdaja `41b524c`; GitHub `origin/main`
+vsebuje oba izvedbena commita (`fed6bc2`, `004229c`). Pred preklopom je bila
+ustvarjena in preverjena kopija `indus-ure-recovery-20261026T043822Z.tar.gz`.
+Preverjeni so lokalni arhiv, ponovni Drive read, velikost/MD5, berljivi CSV
+in navodila za obnovo. Retencija lokalno/Drive ter media GC: success.
+
+Na končni kodi: Windows 354 uspešnih enotskih testov + 1 namensko preskočen;
+strežnik 355/355; Chromium 119/119; Firefox 26 uspešnih + 3 namensko
+preskočeni testi, ki zahtevajo Chromiumov dispatcher dotika. PostgreSQL:
+34 svežih preverjanj, 1 restore, 2 recovery in 4 upgrade/rollback, skupaj 41.
+Kopija produkcijske baze po normalizaciji ohrani vse stare finančne vrednosti
+in postavke. Preverjeni so različni tarifi, ničelna tarifa, enkratni dnevni
+prevoz, nespremenljivost potrjenih obračunov in XLSX formule/zaokroževanje.
+Povrnitev stare kode je bila preverjena nad starimi podatki; za nove obračune
+z ločenima tarifama velja omejitev povrnitve, opisana zgoraj.
+
+Razvojni prehodi so odkrili izgubljeno vrnitev iz odsotnosti v dnevni pogled
+in skupno stanje testnih odsotnosti; oboje je popravljeno in pokrito z
+regresijskim testom. Popravljen je bil tudi test centnega zaokroževanja.
+En prehoden ECONNRESET pri prijavnem testu ni bil ponovljen v končnem prehodu.
+
+Produkcijski brskalniški pregled: šef in Ibro, novi gumb Odsotnost in njegov
+datum, odsotnost brez izbire drugega delavca, brez dragpadov, ločen povzetek
+prevozov; pri vseh petih aktivnih delavcih nova privzeta tarifa ustreza
+dosedanji. Dodatno: obstoječe opravilo se odpre/zapre brez spremembe,
+priloga HTTP 200, obračunski pogled deluje. Ni poslovnih zapisov in ni JS napak.
+Vizualno pregledani posnetki mobilne širine. Dejanski premiki/saves so bili
+izvedeni samo v izolirani aplikaciji, z miško in simuliranim dotikom; to ni
+preizkus na fizičnem telefonu. Storitev je aktivna, backup timer vključen,
+brez opozoril v pregledanem intervalu po objavi. Štiri zaključene točke so
+odstranjene iz Google TODO z revizijsko zaščito.
+
 ### Dovoljenja za vpis ur (25. 10. 2026)
 
 Šef določi ciljne izvajalce v **Nastavitve → Delavci → Lahko vpisuje ure za**
