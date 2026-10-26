@@ -3147,11 +3147,6 @@
     .day-all-day.hidden { display: none; }
     .day-all-day-label { padding-top: 7px; color: var(--muted); font-size: 11px; font-weight: 800; }
     .day-all-day-items { display: flex; min-width: 0; flex-direction: column; gap: 6px; }
-    .calendar-order-handle { display: inline-flex; align-items: center; justify-content: center; float: left; width: 28px; min-height: 28px; margin-right: 5px; border-radius: 5px; background: #ffffff66; color: inherit; touch-action: none; user-select: none; cursor: default; }
-    .calendar-order-handle:focus-visible { outline: 2px solid var(--accent); }
-    .calendar-order-moving { opacity: .6; outline: 2px dashed var(--accent); }
-    .calendar-order-before { box-shadow: 0 -3px 0 var(--accent) !important; }
-    .calendar-order-after { box-shadow: 0 3px 0 var(--accent) !important; }
     #absenceWorker[hidden], #absenceWorkerName[hidden] { display: none; }
     .day-all-day-item {
       min-height: 34px;
@@ -6279,6 +6274,7 @@
         <button class="todo-creation-tab" type="button" role="tab" data-create-mode="hours">Vpis ur</button>
         <button class="todo-creation-tab" type="button" role="tab" data-create-mode="material">Vpis materiala</button>
         <button class="todo-creation-tab" type="button" role="tab" data-create-mode="note">Zapisek</button>
+        <button class="todo-creation-tab" type="button" id="todoCreationAbsence">Odsotnost</button>
       </div>
       <div class="modal-body">
         <input type="hidden" id="todoFormId">
@@ -7727,6 +7723,7 @@ const {
     }
 });
 
+/* @indus-module:payroll-travel */
 /* @indus-module:editor/worker-billing */
 const {
   saveBillingSettings,
@@ -9992,10 +9989,8 @@ function calendarTodos({ includeArchived = false } = {}) {
 /* @indus-module:worker-access */
 /* @indus-module:absence-model */
 /* @indus-module:calendar-order */
-/* @indus-module:editor/calendar-order */
-const calendarOrderUi = createCalendarOrderUi({ state, api, render, showNotice });
 /* @indus-module:editor/absences */
-const absenceUi = createAbsenceUi({ $, state, api, render, escapeHtml, showNotice, showAppConfirm, dateKey, activeWorkerId });
+const absenceUi = createAbsenceUi({ $, state, api, render, escapeHtml, showNotice, showAppConfirm, dateKey, activeWorkerId, closeModalBeforeTransition, openDayTimeline });
 function calendarAbsences() {
       return (state.absences || []).filter(item => isAdminView() || Absences.canView(item, { id: activeWorkerId(), role: "worker" }))
         .map(item => Absences.calendarItem(item)).filter(calendarWorkerMatches);
@@ -11083,7 +11078,6 @@ function renderMonth() {
               }
               openCalendarTodo(todo);
             });
-            calendarOrderUi.attach(item, todo, key);
             (todo.start && todo.end ? day : singleUntimed).appendChild(item);
           });
 
@@ -11609,7 +11603,6 @@ function renderDayTimeline() {
           }
           openTodoFromDayTimeline(todo).catch((error) => showNotice(error.message));
         });
-        calendarOrderUi.attach(button, todo, state.dayTimelineDate);
         allDayItems.appendChild(button);
       });
 
@@ -14220,11 +14213,12 @@ function renderWorkerManagement() {
           <fieldset class="worker-billing-settings" ${disabled}><legend>Obračun delavca</legend>
             <div class="worker-billing-settings-grid">
               <label>Privzeta urna postavka (EUR/h)<input data-worker-hourly-rate type="number" min="0" max="10000" step="0.01" value="${Number(billing.hourlyRate ?? 0)}" required></label>
-              <label>Pot v službo — ena smer (km)<input data-worker-commute-km type="number" min="0" max="1000000" step="0.1" value="${Number(billing.commuteKmOneWay ?? 0)}" required></label>
-              <label>Povračilo za lastno vozilo (EUR/km)<input data-worker-km-rate type="number" min="0" max="1000" step="0.01" value="${Number(billing.workerOwnVehicleKmRate ?? 0)}" required></label>
+              <label>Prevoz do podjetja — ena smer (km)<input data-worker-commute-km type="number" min="0" max="1000000" step="0.1" value="${Number(billing.commuteKmOneWay ?? 0)}" required></label>
+              <label>Prevoz do podjetja (EUR/km)<input data-worker-commute-rate type="number" min="0" max="1000" step="0.01" value="${Number(billing.commuteKmRate ?? billing.workerOwnVehicleKmRate ?? 0)}" required></label>
+              <label>Prevoz na delo — do strank (EUR/km)<input data-worker-km-rate type="number" min="0" max="1000" step="0.01" value="${Number(billing.workerOwnVehicleKmRate ?? 0)}" required></label>
               <label>Naziv v izvozu<input data-worker-export-title type="text" maxlength="120" value="${escapeHtml(billing.exportTitle || "")}" placeholder="Npr. monter"></label>
             </div>
-            <p class="todo-meta">Kilometrina velja samo za tega delavca, tudi za pot v službo. Stroški prevoza za stranko so ločeni. Potrjeni obračuni se ne spreminjajo.</p>
+            <p class="todo-meta">Prevoz do podjetja: pot dom–podjetje × 2, največ enkrat na dan z označenim prihodom. Prevoz na delo: vpisani službeni kilometri do strank z lastnim vozilom. Postavki veljata za tega delavca; stroški za stranko so ločeni. Potrjeni obračuni se ne spreminjajo.</p>
           </fieldset>
           <div class="worker-management-details">
             <fieldset class="worker-lan-password" ${disabled}><legend>Geslo za prijavo v LAN</legend>
@@ -14293,6 +14287,7 @@ async function saveManagedWorker(card, { activate = false } = {}) {
       for (const [key, selector, max] of [
         ["hourlyRate", "[data-worker-hourly-rate]", 10_000],
         ["commuteKmOneWay", "[data-worker-commute-km]", 1_000_000],
+        ["commuteKmRate", "[data-worker-commute-rate]", 1_000],
         ["workerOwnVehicleKmRate", "[data-worker-km-rate]", 1_000]
       ]) {
         const input = card.querySelector(selector);

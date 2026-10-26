@@ -1,4 +1,5 @@
 "use strict";
+const PayrollTravel = require("./payroll-travel");
 
 // report-service: explicit dependencies; factory creation has no I/O or UI effects.
 function createReportService({
@@ -59,7 +60,7 @@ function workerPayrollXlsxReport(db, workerId, rangeInput) {
 function workerPayrollXlsxEntries(report) {
   const detailRows = (report.payroll.lines || []).map((line) => ({
     date: xlsxDateSerial(line.date), start: xlsxTimeSerial(line.start), end: xlsxTimeSerial(line.end),
-    hourlyRate: Number(line.hourlyRate || 0), workerKm: Number(line.workerKm || 0), kmRate: Number(line.kmRate || 0), commuteKm: Number(line.commuteKm || 0),
+    hourlyRate: Number(line.hourlyRate || 0), ...PayrollTravel.parts(line),
     client: line.client || "", title: line.title || "", status: line.status || ""
   }));
   const financialRows = [
@@ -76,19 +77,21 @@ function workerPayrollXlsxEntries(report) {
     [{ value: "Obdobje", style: 2 }, { value: `${report.range.from} – ${report.range.to}`, style: 3 }],
     [{ value: "Stanje", style: 2 }, { value: report.payroll.status === "paid" ? "Plačano" : report.payroll.status === "confirmed" ? "Potrjeno" : "V pripravi", style: 3 }],
     [{ value: "Ure", style: 4 }, { value: "", style: 6, formula: `SUM('Vnosi'!D2:D${entryLastRow})` }, { value: "Delo", style: 4 }, { value: "", style: 7, formula: `SUM('Vnosi'!F2:F${entryLastRow})` }],
-    [{ value: "Kilometrina", style: 4 }, { value: "", style: 6, formula: `SUM('Vnosi'!G2:G${entryLastRow})+SUM('Vnosi'!J2:J${entryLastRow})` }, { value: "Kilometrina", style: 4 }, { value: "", style: 7, formula: `SUM('Vnosi'!K2:K${entryLastRow})` }],
-    [{ value: "Znesek skupaj", style: 8 }, { value: "", style: 9, formula: "D5+D6" }],
+    [{ value: "Prevoz na delo (do strank)", style: 4 }, { value: "", style: 6, formula: `SUM('Vnosi'!G2:G${entryLastRow})` }, { value: "EUR", style: 4 }, { value: "", style: 7, formula: `SUM('Vnosi'!I2:I${entryLastRow})` }],
+    [{ value: "Prevoz do podjetja", style: 4 }, { value: "", style: 6, formula: `SUM('Vnosi'!J2:J${entryLastRow})` }, { value: "EUR", style: 4 }, { value: "", style: 7, formula: `SUM('Vnosi'!L2:L${entryLastRow})` }],
+    [{ value: "Znesek skupaj", style: 8 }, { value: "", style: 9, formula: "D5+D6+D7" }],
     [{ value: "Založeno", style: 4 }, { value: "", style: 7, formula: `SUMIF('Finančni vnosi'!B2:B${financialLastRow},"Založeno",'Finančni vnosi'!D2:D${financialLastRow})` }],
     [{ value: "Prejeta sredstva", style: 4 }, { value: "", style: 7, formula: `SUMIF('Finančni vnosi'!B2:B${financialLastRow},"Prejeta sredstva",'Finančni vnosi'!D2:D${financialLastRow})` }],
     [{ value: "Osebni nakupi", style: 4 }, { value: "", style: 7, formula: `SUMIF('Finančni vnosi'!B2:B${financialLastRow},"Osebni nakup",'Finančni vnosi'!D2:D${financialLastRow})` }],
     [{ value: "Že izplačano", style: 4 }, { value: "", style: 7, formula: `SUMIF('Finančni vnosi'!B2:B${financialLastRow},"Že izplačano",'Finančni vnosi'!D2:D${financialLastRow})` }],
-    [{ value: "Razlika", style: 8 }, { value: "", style: 9, formula: "B8+B9-B10-B11" }],
-    [{ value: "Za izplačilo", style: 10 }, { value: "", style: 11, formula: "B7+B12" }]
+    [{ value: "Razlika", style: 8 }, { value: "", style: 9, formula: "B9+B10-B11-B12" }],
+    [{ value: "Za izplačilo", style: 10 }, { value: "", style: 11, formula: "B8+B13" }]
   ];
-  const details = [["Datum", "Od", "Do", "Ure", "EUR/h", "Delo", "Km delavca", "EUR/km", "Vožnja", "Pot v službo", "Kilometrina", "Skupaj", "Stranka", "Ime opravila", "Status"]]
+  const details = [["Datum", "Od", "Do", "Ure", "EUR/h", "Delo", "Do strank (km)", "Do strank (EUR/km)", "Do strank (EUR)", "Do podjetja (km)", "Do podjetja (EUR/km)", "Do podjetja (EUR)", "Prevoz skupaj", "Skupaj", "Stranka", "Ime opravila", "Status", "Zgodovinska razlika zaokroževanja"]]
     .concat(detailRows.map((line, index) => {
       const row = index + 2;
-      return [line.date, line.start, line.end, { formula: `IF(OR(B${row}=\"\",C${row}=\"\"),0,(C${row}-B${row})*24)` }, line.hourlyRate, { formula: `D${row}*E${row}` }, line.workerKm, line.kmRate, { formula: `G${row}*H${row}` }, line.commuteKm, { formula: `(G${row}+J${row})*H${row}` }, { formula: `F${row}+K${row}` }, line.client, line.title, line.status];
+      const rounding = Number((line.workerKmAmount - Number((line.workerKm * line.kmRate).toFixed(2))).toFixed(2));
+      return [line.date, line.start, line.end, { formula: `IF(OR(B${row}=\"\",C${row}=\"\"),0,(C${row}-B${row})*24)` }, line.hourlyRate, { formula: `D${row}*E${row}` }, line.workerKm, line.kmRate, { formula: `ROUND(G${row}*H${row},2)+R${row}` }, line.commuteKm, line.commuteKmRate, { formula: `ROUND(J${row}*K${row},2)` }, { formula: `I${row}+L${row}` }, { formula: `F${row}+M${row}` }, line.client, line.title, line.status, rounding];
     }));
   const finances = [["Datum", "Vrsta", "Opis", "Znesek", "Vpliv na izplačilo"]]
     .concat(financialRows.map((line) => [xlsxDateSerial(line.date), line.type, line.reason, line.amount, line.impact]));
@@ -102,8 +105,8 @@ async function sendWorkerPayrollXlsx(res, report) {
     const style = rowIndex === 0 ? 1
       : columnIndex === 0 ? 12
         : [1, 2].includes(columnIndex) ? 13
-          : [3, 4, 6, 7, 9].includes(columnIndex) ? 14
-            : [5, 8, 10, 11].includes(columnIndex) ? 15 : 3;
+          : [3, 4, 6, 7, 9, 10].includes(columnIndex) ? 14
+            : [5, 8, 11, 12, 13, 17].includes(columnIndex) ? 15 : 3;
     return { ...cell, style };
   }));
   const financialSheetRows = rows(sheets.finances).map((row, rowIndex) => row.map((cell, columnIndex) => ({
@@ -117,7 +120,7 @@ async function sendWorkerPayrollXlsx(res, report) {
     "xl/_rels/workbook.xml.rels": `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet3.xml"/><Relationship Id="rId4" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`,
     "xl/styles.xml": `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="4"><numFmt numFmtId="164" formatCode="dd.mm.yyyy"/><numFmt numFmtId="165" formatCode="hh:mm"/><numFmt numFmtId="166" formatCode="0.00"/><numFmt numFmtId="167" formatCode="# ##0.00 &quot;EUR&quot;"/></numFmts><fonts count="3"><font><sz val="10"/><name val="Aptos"/></font><font><b/><sz val="10"/><name val="Aptos Display"/></font><font><b/><color rgb="FFFFFFFF"/><sz val="10"/><name val="Aptos Display"/></font></fonts><fills count="5"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF1E6172"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFE6F2EF"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FF173F4C"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border><border><left style="thin"><color rgb="FFD7E0DD"/></left><right style="thin"><color rgb="FFD7E0DD"/></right><top style="thin"><color rgb="FFD7E0DD"/></top><bottom style="thin"><color rgb="FFD7E0DD"/></bottom><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="16"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/><xf numFmtId="0" fontId="2" fillId="2" borderId="0" applyFont="1" applyFill="1"/><xf numFmtId="0" fontId="1" fillId="3" borderId="1" applyFont="1" applyFill="1" applyBorder="1"/><xf numFmtId="0" fontId="0" fillId="0" borderId="1" applyBorder="1"/><xf numFmtId="0" fontId="1" fillId="0" borderId="1" applyFont="1" applyBorder="1"/><xf numFmtId="166" fontId="0" fillId="0" borderId="1" applyNumberFormat="1" applyBorder="1"/><xf numFmtId="166" fontId="1" fillId="3" borderId="1" applyNumberFormat="1" applyFont="1" applyFill="1" applyBorder="1"/><xf numFmtId="167" fontId="1" fillId="3" borderId="1" applyNumberFormat="1" applyFont="1" applyFill="1" applyBorder="1"/><xf numFmtId="0" fontId="1" fillId="3" borderId="1" applyFont="1" applyFill="1" applyBorder="1"/><xf numFmtId="167" fontId="1" fillId="3" borderId="1" applyNumberFormat="1" applyFont="1" applyFill="1" applyBorder="1"/><xf numFmtId="0" fontId="2" fillId="4" borderId="1" applyFont="1" applyFill="1" applyBorder="1"/><xf numFmtId="167" fontId="2" fillId="4" borderId="1" applyNumberFormat="1" applyFont="1" applyFill="1" applyBorder="1"/><xf numFmtId="164" fontId="0" fillId="0" borderId="1" applyNumberFormat="1" applyBorder="1"/><xf numFmtId="165" fontId="0" fillId="0" borderId="1" applyNumberFormat="1" applyBorder="1"/><xf numFmtId="166" fontId="0" fillId="0" borderId="1" applyNumberFormat="1" applyBorder="1"/><xf numFmtId="167" fontId="0" fillId="0" borderId="1" applyNumberFormat="1" applyBorder="1"/></cellXfs></styleSheet>`,
     "xl/worksheets/sheet1.xml": xlsxSheetXml(rows(sheets.summary), [28, 26, 20, 22]),
-    "xl/worksheets/sheet2.xml": xlsxSheetXml(detailSheetRows, [13, 9, 9, 10, 11, 14, 14, 11, 14, 14, 15, 15, 28, 45, 16]),
+    "xl/worksheets/sheet2.xml": xlsxSheetXml(detailSheetRows, [13, 9, 9, 10, 11, 14, 18, 21, 18, 20, 23, 20, 18, 15, 28, 45, 16, 35]),
     "xl/worksheets/sheet3.xml": xlsxSheetXml(financialSheetRows, [13, 20, 50, 16, 22]),
     "docProps/core.xml": `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:creator>INDUS URE</dc:creator><dc:title>Obračun delavca</dc:title><dcterms:created xsi:type="dcterms:W3CDTF">${new Date().toISOString()}</dcterms:created></cp:coreProperties>`,
     "docProps/app.xml": `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes"><Application>INDUS URE</Application><TitlesOfParts><vt:vector size="3" baseType="lpstr"><vt:lpstr>Povzetek</vt:lpstr><vt:lpstr>Vnosi</vt:lpstr><vt:lpstr>Finančni vnosi</vt:lpstr></vt:vector></TitlesOfParts></Properties>`
@@ -828,7 +831,10 @@ function buildWorkerDailyReportPdf(db, report) {
         if (line.client) reportPdfLine(doc, "Stranka", line.client);
         reportPdfLine(doc, "Vpisane ure", `${Number(line.hours || 0).toLocaleString("sl-SI", { maximumFractionDigits: 2 })} h`);
         reportPdfLine(doc, "Urna postavka", `${Number(line.hourlyRate || 0).toLocaleString("sl-SI", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR/h`);
-        if (Number(line.km || 0)) reportPdfLine(doc, "Kilometrina", `${Number(line.km || 0).toLocaleString("sl-SI", { maximumFractionDigits: 1 })} km`);
+        const travel = PayrollTravel.parts(line);
+        for (const [label, km, rate, amount] of [["Prevoz do podjetja", travel.commuteKm, travel.commuteKmRate, travel.commuteKmAmount], ["Prevoz na delo (do strank)", travel.workerKm, travel.kmRate, travel.workerKmAmount]]) {
+          if (km || amount) reportPdfLine(doc, label, `${km.toLocaleString("sl-SI")} km × ${rate.toLocaleString("sl-SI")} EUR/km = ${amount.toLocaleString("sl-SI", { minimumFractionDigits: 2 })} EUR`);
+        }
         doc.moveDown(0.4);
         doc.strokeColor("#a9c5bd").lineWidth(1.2).moveTo(doc.page.margins.left, doc.y).lineTo(doc.page.width - doc.page.margins.right, doc.y).stroke();
         doc.moveDown(0.5);
@@ -843,13 +849,15 @@ function buildWorkerDailyReportPdf(db, report) {
         doc.moveDown(0.35);
       }
 
-      const totals = payrollTotals(lines);
+      const totals = { ...payrollTotals(lines), ...PayrollTravel.totals(lines) };
       reportPdfEnsureSpace(doc, 90);
       doc.moveDown(0.35);
       doc.font(reportPdfFontPath("bold")).fontSize(13).fillColor("#0d536b").text("Povzetek dneva");
       reportPdfLine(doc, "Ure", `${Number(totals.hours || 0).toLocaleString("sl-SI", { maximumFractionDigits: 2 })} h`);
       reportPdfLine(doc, "Delo", `${Number(totals.workAmount || 0).toLocaleString("sl-SI", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR`);
-      reportPdfLine(doc, "Kilometrina", `${Number(totals.km || 0).toLocaleString("sl-SI", { maximumFractionDigits: 1 })} km - ${Number(totals.kmAmount || 0).toLocaleString("sl-SI", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR`);
+      for (const [label, distance, amount] of [["Prevoz do podjetja", "commuteKm", "commuteKmAmount"], ["Prevoz na delo (do strank)", "workerKm", "workerKmAmount"]]) {
+        reportPdfLine(doc, label, `${totals[distance].toLocaleString("sl-SI")} km - ${totals[amount].toLocaleString("sl-SI", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR`);
+      }
       reportPdfLine(doc, "Skupaj", `${Number(totals.totalAmount || 0).toLocaleString("sl-SI", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR`);
       doc.end();
     } catch (error) {

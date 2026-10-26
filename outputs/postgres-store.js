@@ -10,7 +10,7 @@ const fs = require("fs");
 const fsp = fs.promises;
 const path = require("path");
 const { isDeepStrictEqual } = require("node:util");
-const { workerKmRateForUser } = require("./worker-billing-settings");
+const { workerKmRateForUser, workerCommuteKmRateForUser } = require("./worker-billing-settings");
 const { MEDIA_LOCK, withMediaLease } = require("./media-lifecycle");
 
 class StaleSnapshotError extends Error {
@@ -498,6 +498,7 @@ class PostgresStore {
         hourlyRate: Number.isFinite(Number(row.data?.billing?.hourlyRate)) ? Number(row.data.billing.hourlyRate) : fallbackRate,
         exportTitle: String(row.data?.billing?.exportTitle || ""),
         commuteKmOneWay: Number(row.data?.billing?.commuteKmOneWay || 0),
+        commuteKmRate: workerCommuteKmRateForUser({ users: { [row.id]: row.data }, settings }, row.id),
         workerOwnVehicleKmRate: workerKmRateForUser({ users: { [row.id]: row.data }, settings }, row.id)
       }));
     return {

@@ -94,9 +94,12 @@ function withDailyCommuteInBilling(lines, workerId) {
         if (addCommute) appliedDates.add(line.date);
         const commuteKm = addCommute ? dailyCommuteKm : 0;
         const km = Number((workerKm + commuteKm).toFixed(2));
-        const kmAmount = Number((km * Number(line.kmRate || 0)).toFixed(2));
+        const worker = state.workerBilling.find(item => item.id === workerId);
+        const travel = PayrollTravel.priced({ workerKm, commuteKm, kmRate: Number(line.kmRate || 0), commuteKmRate: Number(worker?.commuteKmRate ?? line.kmRate ?? 0) });
+        const kmAmount = travel.kmAmount;
         return {
           ...line,
+          ...travel,
           workerKm,
           commuteKm,
           km,
@@ -721,7 +724,7 @@ function billingLineTotals(lines) {
       const workAmount = Number(lines.reduce((total, line) => total + Number(line.workAmount || 0), 0).toFixed(2));
       const km = Number(lines.reduce((total, line) => total + Number(line.km || 0), 0).toFixed(2));
       const kmAmount = Number(lines.reduce((total, line) => total + Number(line.kmAmount || 0), 0).toFixed(2));
-      return { minutes, hours: minutes / 60, km, workAmount, kmAmount, totalAmount: Number((workAmount + kmAmount).toFixed(2)) };
+      return { minutes, hours: minutes / 60, km, workAmount, kmAmount, ...PayrollTravel.totals(lines), totalAmount: Number((workAmount + kmAmount).toFixed(2)) };
     }
 
 function billingUnpaidMealMinutes(line) {
@@ -769,16 +772,15 @@ function billingDayBreakdownMarkup(lines, totals) {
         else workGroups.push({ minutes: minutesValue, hourlyRate, type });
       };
       const appendKm = (line) => {
-        const km = Math.max(0, Number(line?.km || 0));
-        if (!km) return;
-        const kmRate = Number.isFinite(Number(line?.kmRate)) ? Number(line.kmRate) : 0;
-        const amount = Number(line?.kmAmount || 0);
-        const existing = kmGroups.find((group) => group.kmRate === kmRate);
-        if (existing) {
-          existing.km += km;
-          existing.amount += amount;
-        } else {
-          kmGroups.push({ km, kmRate, amount });
+        const travel = PayrollTravel.parts(line);
+        for (const [type, km, kmRate, amount] of [
+          ["Prevoz do podjetja", travel.commuteKm, travel.commuteKmRate, travel.commuteKmAmount],
+          ["Prevoz na delo (do strank)", travel.workerKm, travel.kmRate, travel.workerKmAmount]
+        ]) {
+          if (!km && !amount) continue;
+          const existing = kmGroups.find(group => group.type === type && group.kmRate === kmRate);
+          if (existing) { existing.km += km; existing.amount += amount; }
+          else kmGroups.push({ type, km, kmRate, amount });
         }
       };
       lines.forEach((line) => {
@@ -794,7 +796,7 @@ function billingDayBreakdownMarkup(lines, totals) {
           return `<span class="billing-day-breakdown-line is-detail"><span>${escapeHtml(label)}</span><strong>${money(hours * group.hourlyRate)} EUR</strong></span>`;
         }),
         ...kmGroups.map((group) => {
-          const label = `Prevoz: ${group.km.toLocaleString("sl-SI", { maximumFractionDigits: 1 })} km po ${money(group.kmRate)} EUR/km`;
+          const label = `${group.type}: ${group.km.toLocaleString("sl-SI", { maximumFractionDigits: 1 })} km po ${money(group.kmRate)} EUR/km`;
           return `<span class="billing-day-breakdown-line is-detail"><span>${escapeHtml(label)}</span><strong>${money(group.amount)} EUR</strong></span>`;
         })
       ];
@@ -948,7 +950,10 @@ function renderBillingView() {
       const differenceAmount = Number((advanceAmount + clientReceiptAmount - personalPurchaseAmount - paidAmount).toFixed(2));
       const summaryRows = [
         { label: "Ure", formula: `${baseTotals.hours.toLocaleString("sl-SI", { maximumFractionDigits: 2 })} h`, value: `${money(baseTotals.workAmount)} EUR` },
-        { label: "Kilometrina", formula: `${baseTotals.km.toLocaleString("sl-SI", { maximumFractionDigits: 1 })} km`, value: `${money(baseTotals.kmAmount)} EUR` },
+        ...[["Prevoz do podjetja", "commuteKm", "commuteKmAmount"], ["Prevoz na delo (do strank)", "workerKm", "workerKmAmount"]].map(([label, distance, amount]) => {
+          const travel = PayrollTravel.totals(lines);
+          return { label, formula: `${travel[distance].toLocaleString("sl-SI", { maximumFractionDigits: 1 })} km`, value: `${money(travel[amount])} EUR` };
+        }),
         { label: "Znesek skupaj", value: `${money(baseAmount)} EUR`, emphasis: true },
         { label: "Zalo\u017eeno", value: `${money(advanceAmount)} EUR` },
         { label: "Prejeta sredstva", value: `${money(clientReceiptAmount)} EUR` },

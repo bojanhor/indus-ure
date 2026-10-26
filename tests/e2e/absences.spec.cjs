@@ -2,8 +2,8 @@ const { test, expect } = require('@playwright/test');
 const { TEST_PASSWORD, startIsolatedTestApp } = require('./test-app.cjs');
 test.use({ serviceWorkers: 'block' });
 let app;
-test.beforeAll(async () => { app = await startIsolatedTestApp(); });
-test.afterAll(async () => { await app?.stop(); });
+test.beforeEach(async () => { app = await startIsolatedTestApp(); });
+test.afterEach(async () => { await app?.stop(); });
 async function login(page, user = 'bojan') {
   await page.goto(app.baseUrl);
   await page.locator('#localTestUser').selectOption(user);
@@ -16,6 +16,39 @@ const call = (page, path, method = 'GET', body) => page.evaluate(async ({ path, 
   try { return { status: 200, data: await api(path, { method, ...(body ? { body: JSON.stringify(body) } : {}) }) }; }
   catch (error) { return { status: error.status, error: error.message }; }
 }, { path, method, body });
+
+for (const user of ['bojan', 'ibro']) test(`${user}: month plus opens absence for selected date without losing task draft`, async ({ page }, info) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await login(page, user);
+  const before = (await call(page, '/api/todos')).data.todos.length;
+  await page.evaluate(() => { state.current = new Date(2026, 9, 1); });
+  await page.locator('#calendarViewBtn').click();
+  await page.locator('.day[data-date="2026-10-26"] .quick-add').click();
+  await expect(page.locator('#todoDialog')).toBeVisible();
+  await page.locator('#todoFormTask').fill('Keep this unfinished task');
+  await page.locator('#todoCreationAbsence').click();
+  await expect(page.locator('#todoDialog')).toBeHidden();
+  await expect(page.locator('#absenceDialog')).toBeVisible();
+  await expect(page.locator('#absenceDate')).toHaveValue('2026-10-26');
+  await expect(page.locator('#absenceEndDate')).toHaveValue('2026-10-26');
+  if (user === 'bojan') await expect(page.locator('#absenceWorker')).toBeVisible();
+  else { await expect(page.locator('#absenceWorker')).toBeHidden(); await expect(page.locator('#absenceWorkerName')).toHaveText('Ibro'); }
+  await page.screenshot({ path: info.outputPath('absence-from-month-plus.png') });
+  await page.locator('#saveAbsence').click();
+  await expect(page.locator('#absenceDialog')).toBeHidden();
+  expect((await call(page, '/api/absences')).data.absences.some(a => a.workerId === user && a.date === '2026-10-26')).toBe(true);
+  expect((await call(page, '/api/todos')).data.todos.length).toBe(before);
+  await page.locator('.day[data-date="2026-10-26"] .quick-add').click();
+  await expect(page.locator('#todoFormTask')).toHaveValue('Keep this unfinished task');
+  await page.locator('#closeTodoDialog').click();
+  await page.evaluate(() => openDayTimeline('2026-10-26'));
+  await page.evaluate(() => openNewTodoFromDayTimeline($('dayTimeline').getBoundingClientRect().top + 100));
+  await expect(page.locator('#todoDialog')).toBeVisible();
+  await page.locator('#todoCreationAbsence').click();
+  await expect(page.locator('#absenceDialog')).toBeVisible();
+  await page.locator('#closeAbsence').click();
+  await expect(page.locator('#dayTimelineDialog')).toBeVisible();
+});
 
 test('default hour permissions allow self OR external; boss chooses every worker singly', async ({ browser }) => {
   const bossContext = await browser.newContext(), workerContext = await browser.newContext();

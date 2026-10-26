@@ -1,4 +1,5 @@
 "use strict";
+const PayrollTravel = require("./payroll-travel");
 
 // settlement-service: explicit dependencies; factory creation has no I/O or UI effects.
 function createSettlementService({
@@ -64,13 +65,19 @@ function workerCorrectionSnapshot(db, todo, fallback = {}) {
   const commuteKm = nonnegativeNumber(fallback.commuteKm, 0, 1_000_000);
   const km = Number((workerKm + commuteKm).toFixed(2));
   const workAmount = Number((minutes / 60 * hourlyRate).toFixed(2));
-  const kmAmount = Number((km * kmRate).toFixed(2));
-  return { todoId: String(todo?.id || fallback.todoId || ""), assignmentGroupId: String(todo?.assignmentGroupId || fallback.assignmentGroupId || ""), workerId: String(todo?.syncUser || todo?.createdBy || fallback.workerId || ""), date: isDateKey(todo?.date) ? String(todo.date) : String(fallback.date || ""), start: String(todo?.start || ""), end: String(todo?.end || ""), title: String(todo?.title || fallback.title || "").slice(0, 300), client: String(todo?.client || fallback.client || "").slice(0, 240), status: String(todo?.status || fallback.status || ""), minutes, hours: Number((minutes / 60).toFixed(4)), hourlyRate, workerKm, workFromHome: Boolean(todo?.workFromHome), commuteKm, km, kmRate, workAmount, kmAmount, totalAmount: Number((workAmount + kmAmount).toFixed(2)) };
+  const baseline = PayrollTravel.parts(fallback);
+  const travel = PayrollTravel.priced({ workerKm, commuteKm, kmRate, commuteKmRate: nonnegativeNumber(fallback.commuteKmRate, kmRate, 1_000) });
+  const rounding = Number((baseline.workerKmAmount - Number((baseline.workerKm * baseline.kmRate).toFixed(2))).toFixed(2));
+  travel.workerKmAmount = Number((travel.workerKmAmount + rounding).toFixed(2));
+  const kmAmount = Number((travel.workerKmAmount + travel.commuteKmAmount).toFixed(2));
+  return { todoId: String(todo?.id || fallback.todoId || ""), assignmentGroupId: String(todo?.assignmentGroupId || fallback.assignmentGroupId || ""), workerId: String(todo?.syncUser || todo?.createdBy || fallback.workerId || ""), date: isDateKey(todo?.date) ? String(todo.date) : String(fallback.date || ""), start: String(todo?.start || ""), end: String(todo?.end || ""), title: String(todo?.title || fallback.title || "").slice(0, 300), client: String(todo?.client || fallback.client || "").slice(0, 240), status: String(todo?.status || fallback.status || ""), minutes, hours: Number((minutes / 60).toFixed(4)), hourlyRate, workerKm, workFromHome: Boolean(todo?.workFromHome), commuteKm, km, kmRate, ...travel, workAmount, kmAmount, totalAmount: Number((workAmount + kmAmount).toFixed(2)) };
 }
 
 function workerCorrectionDelta(before = {}, after = {}) {
+  before = { ...before, ...PayrollTravel.parts(before) };
+  after = { ...after, ...PayrollTravel.parts(after) };
   const result = {};
-  for (const key of ["minutes", "hours", "workerKm", "commuteKm", "km", "workAmount", "kmAmount", "totalAmount"]) result[key] = Number((signedNumber(after[key]) - signedNumber(before[key])).toFixed(key === "minutes" ? 0 : 2));
+  for (const key of ["minutes", "hours", "workerKm", "commuteKm", "workerKmAmount", "commuteKmAmount", "km", "workAmount", "kmAmount", "totalAmount"]) result[key] = Number((signedNumber(after[key]) - signedNumber(before[key])).toFixed(key === "minutes" ? 0 : 2));
   return result;
 }
 
@@ -85,6 +92,8 @@ function zeroWorkerCorrectionSnapshot(baseline = {}) {
     hours: 0,
     workerKm: 0,
     commuteKm: 0,
+    workerKmAmount: 0,
+    commuteKmAmount: 0,
     km: 0,
     workAmount: 0,
     kmAmount: 0,
@@ -166,7 +175,13 @@ function upsertSettlementCorrections(db, beforeTodos, afterTodos, actor, now = n
 
 function correctionPayrollLine(correction) {
   const after = correction.after || {}, delta = correction.delta || {};
-  return { todoId: "correction:" + correction.id, sourceTodoId: String(correction.todoId || ""), correctionId: String(correction.id || ""), correction: true, assignmentGroupId: String(after.assignmentGroupId || correction.eventId || correction.todoId || ""), workerId: String(correction.workerId || after.workerId || ""), date: String(correction.effectiveDate || correctionDateKey()), start: "", end: "", title: "Popravek: " + String(after.title || "vpis ur").slice(0, 270), client: String(after.client || ""), status: "correction", minutes: Math.round(signedNumber(delta.minutes)), unpaidMealMinutes: 0, hours: signedNumber(delta.hours), hourlyRate: nonnegativeNumber(after.hourlyRate, 0, 10_000), workerKm: signedNumber(delta.workerKm), workFromHome: Boolean(after.workFromHome), commuteKm: signedNumber(delta.commuteKm), km: signedNumber(delta.km), kmRate: nonnegativeNumber(after.kmRate, 0, 1_000), workAmount: Number(signedNumber(delta.workAmount).toFixed(2)), kmAmount: Number(signedNumber(delta.kmAmount).toFixed(2)), totalAmount: Number(signedNumber(delta.totalAmount).toFixed(2)) };
+  const commuteKmAmount = signedNumber(delta.commuteKmAmount,
+    PayrollTravel.parts(after).commuteKmAmount - PayrollTravel.parts(correction.before).commuteKmAmount);
+  return { todoId: "correction:" + correction.id, sourceTodoId: String(correction.todoId || ""), correctionId: String(correction.id || ""), correction: true, assignmentGroupId: String(after.assignmentGroupId || correction.eventId || correction.todoId || ""), workerId: String(correction.workerId || after.workerId || ""), date: String(correction.effectiveDate || correctionDateKey()), start: "", end: "", title: "Popravek: " + String(after.title || "vpis ur").slice(0, 270), client: String(after.client || ""), status: "correction", minutes: Math.round(signedNumber(delta.minutes)), unpaidMealMinutes: 0, hours: signedNumber(delta.hours), hourlyRate: nonnegativeNumber(after.hourlyRate, 0, 10_000), workerKm: signedNumber(delta.workerKm), workFromHome: Boolean(after.workFromHome), commuteKm: signedNumber(delta.commuteKm), km: signedNumber(delta.km), kmRate: nonnegativeNumber(after.kmRate, 0, 1_000),
+    commuteKmRate: nonnegativeNumber(after.commuteKmRate, nonnegativeNumber(after.kmRate, 0, 1_000), 1_000),
+    commuteKmAmount: Number(commuteKmAmount.toFixed(2)),
+    workerKmAmount: Number(signedNumber(delta.workerKmAmount, signedNumber(delta.kmAmount) - commuteKmAmount).toFixed(2)),
+    workAmount: Number(signedNumber(delta.workAmount).toFixed(2)), kmAmount: Number(signedNumber(delta.kmAmount).toFixed(2)), totalAmount: Number(signedNumber(delta.totalAmount).toFixed(2)) };
 }
 
 function settleCorrectionsForPayroll(db, payroll, actor) {

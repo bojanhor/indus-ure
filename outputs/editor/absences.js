@@ -1,7 +1,8 @@
 "use strict";
 
-function createAbsenceUi({ $, state, api, render, escapeHtml, showNotice, showAppConfirm, dateKey, activeWorkerId }) {
+function createAbsenceUi({ $, state, api, render, escapeHtml, showNotice, showAppConfirm, dateKey, activeWorkerId, closeModalBeforeTransition, openDayTimeline }) {
   let current = null, saving = false, pendingLink = new URL(location.href).searchParams.get("absence");
+  let returnDay = null;
   const dialog = $("absenceDialog");
   function viewers(selected = []) {
     const workerId = $("absenceWorker").value;
@@ -58,6 +59,23 @@ function createAbsenceUi({ $, state, api, render, escapeHtml, showNotice, showAp
   $("deleteAbsence").addEventListener("click", () => mutate(true));
   $("absenceForm").addEventListener("submit", event => { event.preventDefault(); mutate(); });
   for (const id of ["absenceEntryButton", "dayAbsenceButton"]) $(id).addEventListener("click", () => open(null, id === "dayAbsenceButton" ? state.dayTimelineDate : dateKey(new Date())));
+  $("todoCreationAbsence").addEventListener("click", async () => {
+    // Closing a new task preserves its draft through the existing close binding.
+    // Do not turn an unfinished task into an absence or save a work entry.
+    const date = $("todoFormDate").value || $("todoCreationTabs").dataset.date || dateKey(new Date());
+    const back = state.todoDialogReturnDayDate ? { date: state.todoDialogReturnDayDate, viewSnapshot: state.todoDialogReturnDayView } : null;
+    state.todoDialogReturnDayDate = "";
+    state.todoDialogReturnDayView = null;
+    await closeModalBeforeTransition($("todoDialog"));
+    open(null, date);
+    returnDay = back;
+  });
+  dialog.addEventListener("close", async () => {
+    const back = returnDay; returnDay = null;
+    if (!back) return;
+    await closeModalBeforeTransition(dialog);
+    if (!dialog.open && !$("todoDialog").open && !$("dayTimelineDialog").open) openDayTimeline(back.date, { viewSnapshot: back.viewSnapshot });
+  });
   function resume() {
     if (!pendingLink || !state.absencesLoaded) return;
     const id = pendingLink; pendingLink = "";

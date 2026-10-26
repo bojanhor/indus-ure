@@ -13,4 +13,13 @@ function workerKmRateForUser(db, userId) {
   return 0;
 }
 
-module.exports = { workerKmRateForUser };
+function workerCommuteKmRateForUser(db, userId) {
+  const value = db.users?.[userId]?.billing?.commuteKmRate;
+  if (value !== null && value !== undefined && value !== "") {
+    const number = Number(value);
+    if (Number.isFinite(number) && number >= 0 && number <= 1000) return number;
+  }
+  return workerKmRateForUser(db, userId);
+}
+
+module.exports = { workerKmRateForUser, workerCommuteKmRateForUser };

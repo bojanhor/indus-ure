@@ -2,7 +2,8 @@
 const crypto = require("node:crypto");
 
 // Payroll domain rules; settlement orchestration/HTTP are in settlement-service.js.
-const { workerKmRateForUser } = require("./worker-billing-settings");
+const { workerKmRateForUser, workerCommuteKmRateForUser } = require("./worker-billing-settings");
+const PayrollTravel = require("./payroll-travel");
 
 function createPayrollRules({ isDateKey, nonnegativeNumber, defaultHourlyRateForUser, cleanUserId, signedNumber, isTrashedTodo, correctionPayrollLine, PAYROLL_STATUSES, PAYROLL_PAID_TODO_STATUSES }) {
 // BEGIN preserved payroll rules
@@ -103,6 +104,7 @@ function payrollLineForTodo(db, todo, workerId = "") {
   // Kilometrina delavca je povračilo za njegovo lastno vozilo.
   // Ne sme se mešati s tarifo, ki se zaračuna stranki za kombi ali osebni avto.
   const kmRate = workerKmRateForUser(db, workerId || todo.syncUser || todo.createdBy);
+  const commuteKmRate = workerCommuteKmRateForUser(db, workerId || todo.syncUser || todo.createdBy);
   const hours = minutes / 60;
   const workAmount = Number((hours * hourlyRate).toFixed(2));
   const kmAmount = Number((workerKm * kmRate).toFixed(2));
@@ -126,6 +128,9 @@ function payrollLineForTodo(db, todo, workerId = "") {
     commuteKm: 0,
     km: workerKm,
     kmRate,
+    commuteKmRate,
+    workerKmAmount: kmAmount,
+    commuteKmAmount: 0,
     workAmount,
     kmAmount,
     totalAmount: Number((workAmount + kmAmount).toFixed(2))
@@ -154,9 +159,11 @@ function withDailyCommuteInPayroll(db, workerId, lines = []) {
     if (addCommute) appliedDates.add(line.date);
     const lineCommuteKm = addCommute ? commuteKm : 0;
     const km = Number((workerKm + lineCommuteKm).toFixed(2));
-    const kmAmount = Number((km * Number(line.kmRate || 0)).toFixed(2));
+    const travel = PayrollTravel.priced({ workerKm, commuteKm: lineCommuteKm, kmRate: Number(line.kmRate || 0), commuteKmRate: workerCommuteKmRateForUser(db, workerId) });
+    const kmAmount = travel.kmAmount;
     return {
       ...line,
+      ...travel,
       workerKm,
       workFromHome: Boolean(line.workFromHome),
       commuteKm: lineCommuteKm,
@@ -175,6 +182,7 @@ function payrollTotals(lines = []) {
   return {
     minutes,
     hours: minutes / 60,
+    ...(lines.some(line => line.commuteKmRate != null) ? PayrollTravel.totals(lines) : {}),
     km,
     workAmount,
     kmAmount,
@@ -217,7 +225,12 @@ function normalizePayroll(input, db) {
       : 0;
     const hours = correction ? signedNumber(line?.hours, minutes / 60) : minutes / 60;
     const workAmount = correction ? signedNumber(line?.workAmount, hours * hourlyRate) : Number((hours * hourlyRate).toFixed(2));
-    const kmAmount = correction ? signedNumber(line?.kmAmount, km * kmRate) : Number((km * kmRate).toFixed(2));
+    const commuteKmRate = nonnegativeNumber(line?.commuteKmRate, kmRate, 1_000);
+    const calculated = PayrollTravel.priced({ workerKm, commuteKm, kmRate, commuteKmRate });
+    const fallbackKmAmount = line.commuteKmRate == null ? Number((km * kmRate).toFixed(2)) : calculated.kmAmount;
+    const kmAmount = correction ? signedNumber(line?.kmAmount, fallbackKmAmount)
+      : nonnegativeNumber(line?.kmAmount, fallbackKmAmount, Number.MAX_SAFE_INTEGER);
+    const travel = PayrollTravel.parts({ ...line, workerKm, commuteKm, kmRate, commuteKmRate, kmAmount });
     return {
       todoId: String(line.todoId),
       sourceTodoId: correction ? String(line?.sourceTodoId || "") : "",
@@ -237,6 +250,7 @@ function normalizePayroll(input, db) {
       hourlyRate,
       workerKm,
       workFromHome: Boolean(line?.workFromHome),
+      ...(line.commuteKmRate != null ? travel : {}),
       commuteKm,
       km,
       kmRate,

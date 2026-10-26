@@ -21,12 +21,13 @@ test('worker card atomically saves billing; preview matches confirmation and his
   await card.locator('[data-worker-hourly-rate]').fill('25');
   await card.locator('[data-worker-commute-km]').fill('7');
   await card.locator('[data-worker-km-rate]').fill('0.49');
+  await card.locator('[data-worker-commute-rate]').fill('0.22');
   await card.locator('[data-worker-export-title]').fill('Monter QA');
   await card.locator('[data-save-worker]').click();
   await expect(card.locator('[data-worker-km-rate]')).toHaveValue('0.49');
   await page.waitForLoadState('networkidle');
   const saved = await page.evaluate(async () => (await api('/api/workers/billing')).workers);
-  expect(saved.find(w => w.id === 'ibro')).toMatchObject({ hourlyRate: 25, commuteKmOneWay: 7, workerOwnVehicleKmRate: 0.49, exportTitle: 'Monter QA' });
+  expect(saved.find(w => w.id === 'ibro')).toMatchObject({ hourlyRate: 25, commuteKmOneWay: 7, workerOwnVehicleKmRate: 0.49, commuteKmRate: 0.22, exportTitle: 'Monter QA' });
   expect(saved.find(w => w.id === 'bojan')).toEqual(original.find(w => w.id === 'bojan'));
   await page.setViewportSize({ width: 390, height: 844 });
   await card.locator('.worker-billing-settings').scrollIntoViewIfNeeded();
@@ -39,12 +40,15 @@ test('worker card atomically saves billing; preview matches confirmation and his
     saveBillingRangeSelection('ibro', { from: '2026-01-02', to: '2026-01-02' }); renderBillingView();
   });
   await expect(page.locator('#billingDayList')).toContainText('0,49');
-  await expect(page.locator('#billingDayList')).toContainText('33,33');
+  await expect(page.locator('#billingDayList')).toContainText('29,55');
+  await expect(page.locator('#billingDayList')).toContainText('Prevoz do podjetja: 14 km po 0,22');
+  await expect(page.locator('#billingDayList')).toContainText('Prevoz na delo (do strank): 3 km po 0,49');
+  await page.screenshot({ path: info.outputPath('separate-travel-billing-mobile.png') });
   const payroll = await page.evaluate(async () => (await api('/api/payrolls', { method: 'POST', body: JSON.stringify({ workerId: 'ibro', from: '2026-01-02', to: '2026-01-02' }) })).payroll);
-  expect(payroll.lines[0]).toMatchObject({ kmRate: 0.49, km: 17, totalAmount: 33.33 });
+  expect(payroll.lines[0]).toMatchObject({ kmRate: 0.49, commuteKmRate: 0.22, workerKmAmount: 1.47, commuteKmAmount: 3.08, km: 17, totalAmount: 29.55 });
   await page.evaluate(async () => {
     const worker = (await api('/api/workers')).workers.find(w => w.id === 'ibro');
-    await api('/api/workers/ibro', { method: 'PUT', body: JSON.stringify({ ...worker, billing: { ...worker.billing, workerOwnVehicleKmRate: 0 } }) });
+    await api('/api/workers/ibro', { method: 'PUT', body: JSON.stringify({ ...worker, billing: { ...worker.billing, workerOwnVehicleKmRate: 0, commuteKmRate: 0 } }) });
   });
   const after = await page.evaluate(async () => (await api('/api/payrolls')).payrolls);
   expect(after.find(p => p.id === payroll.id).lines).toEqual(payroll.lines);
@@ -66,7 +70,7 @@ test('invalid billing is rejected atomically; worker cannot change personal rate
       const before = (await api('/api/workers')).workers.find(w => w.id === 'ibro');
       const statuses = [];
       for (const invalid of [-1, 1001, '', null, true, 'NaN']) {
-        try { await api('/api/workers/ibro', { method: 'PUT', body: JSON.stringify({ ...before, name: 'MUST NOT SAVE', billing: { workerOwnVehicleKmRate: invalid } }) }); statuses.push(200); }
+        try { await api('/api/workers/ibro', { method: 'PUT', body: JSON.stringify({ ...before, name: 'MUST NOT SAVE', billing: { commuteKmRate: invalid } }) }); statuses.push(200); }
         catch (error) { statuses.push(error.status); }
       }
       const after = (await api('/api/workers')).workers.find(w => w.id === 'ibro');

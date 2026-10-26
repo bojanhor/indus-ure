@@ -83,7 +83,14 @@ async function main() {
     const before = await digest();
     await store.ensure({});
     const db = await store.load();
+    const moneySnapshot = snapshot => (snapshot.payrolls || []).map(p => ({ id: p.id,
+      totalAmount: p.totalAmount, workAmount: p.workAmount, kmAmount: p.kmAmount,
+      payoutAmount: p.payoutAmount, paidAmount: p.paidAmount,
+      lines: (p.lines || []).map(l => ({ todoId: l.todoId, kmRate: l.kmRate, kmAmount: l.kmAmount, workAmount: l.workAmount, totalAmount: l.totalAmount })) }));
+    const oldPayrollMoney = moneySnapshot(db);
     normalizeDb(db);
+    assert.deepEqual(moneySnapshot(db), oldPayrollMoney, 'Upgrade repriced a historical production payroll');
+    check('upgrade.production_clone_payroll_amounts_and_rates_unchanged');
     await store.save(db);
     const after = await digest();
     for (const table of tables.filter(table => !["indus_meta", "indus_sessions", "indus_attachments"].includes(table))) {
@@ -162,6 +169,7 @@ async function main() {
   db.users.ibro.avatarInitial = "ž";
   db.users.ibro.avatarColor = "#ffd000";
   db.users.ibro.billing.workerOwnVehicleKmRate = 0.49;
+  db.users.ibro.billing.commuteKmRate = 0.22;
   db.users.ibro.timeEntryPermissionsConfigured = true;
   db.users.ibro.timeEntryForIds = ["ibro"];
   const lanCredential = await require("../outputs/lan-auth").hash("postgres-qa-personal-password");
@@ -190,6 +198,8 @@ async function main() {
   assert.equal(db.users.ibro.billing.workerOwnVehicleKmRate, 0.49);
   const quickWorker = (await store.quickCreateSeed(db.users.bojan)).workers.find(item => item.id === "ibro");
   assert.equal(quickWorker.workerOwnVehicleKmRate, 0.49);
+  assert.equal(db.users.ibro.billing.commuteKmRate, 0.22);
+  assert.equal(quickWorker.commuteKmRate, 0.22);
   check("workers.personal_mileage_persists_and_is_in_quick_create_seed");
   assert.equal(db.users.ibro.lanPasswordHash, lanCredential);
   assert.equal(directoryWorker.lanPasswordHash, undefined);
@@ -333,6 +343,28 @@ async function main() {
       assert.deepEqual(profile.user.timeEntryForIds, ["ibro"], route);
     }
     check("http.time_entry_permissions_match_in_lightweight_and_full_profiles");
+    for (const route of ["/api/workers/billing", "/api/quick-create?mode=hours"]) {
+      const result = await (await request(route)).json();
+      const profile = result.workers.find(item => item.id === "ibro");
+      assert.equal(profile.commuteKmRate, 0.22, route);
+      assert.equal(profile.workerOwnVehicleKmRate, 0.49, route);
+    }
+    const billingWorker = (await (await request('/api/workers')).json()).workers.find(w => w.id === 'ibro');
+    const billingSave = await request('/api/workers/ibro', { method: 'PUT', body: JSON.stringify({ ...billingWorker, billing: { ...billingWorker.billing, commuteKmOneWay: 7 } }) });
+    assert.equal(billingSave.status, 200, await billingSave.text());
+    const travelTodo = { title: 'PG two travel rates', status: 'execution', clientId, client: 'Izolirana QA stranka', date: '2026-01-02', start: '08:00', end: '09:00', assigneeIds: ['ibro'], billingHourlyRate: 25, billingKm: 3, commuteEligible: true };
+    const travelWrite = await request('/api/todos', { method: 'POST', body: JSON.stringify(travelTodo) });
+    assert.equal(travelWrite.status, 200, await travelWrite.text());
+    const payrollResponse = await request('/api/payrolls', { method: 'POST', body: JSON.stringify({ workerId: 'ibro', from: travelTodo.date, to: travelTodo.date }) });
+    assert.equal(payrollResponse.status, 200);
+    const travelPayroll = (await payrollResponse.json()).payroll;
+    assert.equal(travelPayroll.lines[0].commuteKmAmount, 3.08);
+    assert.equal(travelPayroll.lines[0].workerKmAmount, 1.47);
+    assert.equal(travelPayroll.totalAmount, 29.55);
+    const persistedPayroll = (await store.load()).payrolls.find(p => p.id === travelPayroll.id);
+    assert.equal(persistedPayroll.lines[0].commuteKmRate, 0.22);
+    assert.equal(persistedPayroll.lines[0].kmAmount, 4.55);
+    check('http.postgres_independent_travel_rates_roundtrip_and_payroll');
     const privateId = (await store.load()).absences[0].id;
     assert.equal((await request(`/api/absences/${privateId}`, { headers: worker })).status, 404);
     check("http.absence_privacy_in_full_initial_and_detail_routes");

@@ -145,6 +145,30 @@ function attachments() {
   return createAttachmentModel({ MAX_TODO_IMAGE_DATA_LENGTH: 1024, MAX_TODO_PDF_DATA_LENGTH: 1024, MAX_TODO_ATTACHMENTS_DATA_LENGTH: 2048, MAX_TODO_THUMBNAIL_DATA_LENGTH: 1024, MAX_TODO_ATTACHMENTS: 40 });
 }
 
+test("commute and business travel use independent rates; snapshots keep amounts and legacy rounding", () => {
+  const rules = payrollRules();
+  const travel = require('../outputs/payroll-travel');
+  const { workerCommuteKmRateForUser } = require('../outputs/worker-billing-settings');
+  const db = { users: { maja: { billing: { workerOwnVehicleKmRate: 0.49, commuteKmRate: 0.22, commuteKmOneWay: 7 } } }, settings: {} };
+  assert.equal(workerCommuteKmRateForUser(db, 'maja'), 0.22);
+  const todo = { id: 'one', syncUser: 'maja', date: '2026-10-01', start: '08:00', end: '09:00', status: 'execution', billingHourlyRate: 25, billingKm: 3, commuteEligible: true };
+  const lines = rules.withDailyCommuteInPayroll(db, 'maja', [rules.payrollLineForTodo(db, todo), rules.payrollLineForTodo(db, { ...todo, id: 'two', start: '10:00', end: '11:00' })]);
+  assert.equal(lines[0].totalAmount, 29.55);
+  assert.equal(lines[1].totalAmount, 26.47);
+  assert.deepEqual(travel.totals(lines), { workerKm: 6, commuteKm: 14, workerKmAmount: 2.94, commuteKmAmount: 3.08 });
+  const snapshot = rules.normalizePayroll({ workerId: 'maja', from: todo.date, to: todo.date, status: 'confirmed', lines }, db);
+  db.users.maja.billing.commuteKmRate = 0;
+  db.users.maja.billing.workerOwnVehicleKmRate = 0;
+  assert.equal(workerCommuteKmRateForUser(db, 'maja'), 0);
+  assert.deepEqual(rules.normalizePayroll(snapshot, db), snapshot);
+  const legacy = { ...lines[0], workerKm: 0.1, commuteKm: 0.1, km: 0.2, kmRate: 0.25, kmAmount: 0.05 };
+  delete legacy.commuteKmRate; delete legacy.workerKmAmount; delete legacy.commuteKmAmount;
+  const historical = rules.normalizePayroll({ workerId: 'maja', from: todo.date, to: todo.date, lines: [legacy] }, db);
+  assert.equal(historical.kmAmount, 0.05);
+  assert.deepEqual(rules.normalizePayroll(historical, db), historical);
+  assert.equal(travel.totals(historical.lines).workerKmAmount + travel.totals(historical.lines).commuteKmAmount, 0.05);
+});
+
 test("attachment module checks signatures and keeps hydration metadata-only", () => {
   const model = attachments();
   const data = "data:image/png;base64," + Buffer.from([137,80,78,71,13,10,26,10]).toString("base64");

@@ -14,7 +14,7 @@ const { renderAppShell } = require("./app-shell");
 const { backupCleanupIssue } = require("./backup-status");
 const planningCalendar = require("./planning-calendar");
 const workerAccess = require("./worker-access");
-const { workerKmRateForUser } = require("./worker-billing-settings");
+const { workerKmRateForUser, workerCommuteKmRateForUser } = require("./worker-billing-settings");
 const lanAuth = require("./lan-auth");
 const lanPasswordAttempts = lanAuth.createLimiter();
 const absences = require("./absence-model");
@@ -3203,6 +3203,7 @@ function publicWorkerManagementUser(db, user) {
     billing: {
       hourlyRate: defaultHourlyRateForUser(db, user.id),
       commuteKmOneWay: commuteKmOneWayForUser(db, user.id),
+      commuteKmRate: workerCommuteKmRateForUser(db, user.id),
       exportTitle: String(user.billing?.exportTitle || ""),
       workerOwnVehicleKmRate: workerKmRateForUser(db, user.id)
     }
@@ -3263,8 +3264,8 @@ function defaultHourlyRateForUser(db, userId) {
 
 function normalizeWorkerBillingInput(db, id, input) {
   if (!input || typeof input !== "object" || Array.isArray(input)) return null;
-  const billing = { ...(db.users?.[id]?.billing || {}) };
-  const fields = { hourlyRate: 10_000, commuteKmOneWay: 1_000_000, workerOwnVehicleKmRate: 1_000 };
+  const billing = { ...(db.users?.[id]?.billing || {}), commuteKmRate: workerCommuteKmRateForUser(db, id) };
+  const fields = { hourlyRate: 10_000, commuteKmOneWay: 1_000_000, workerOwnVehicleKmRate: 1_000, commuteKmRate: 1_000 };
   for (const [key, maximum] of Object.entries(fields)) {
     if (!Object.hasOwn(input, key)) continue;
     if (!["number", "string"].includes(typeof input[key]) || String(input[key]).trim() === "") return null;
@@ -3290,6 +3291,7 @@ function quickCreateBootstrapFromDb(db, user) {
         hourlyRate: defaultHourlyRateForUser(db, worker.id),
         exportTitle: String(worker.billing?.exportTitle || ""),
         commuteKmOneWay: commuteKmOneWayForUser(db, worker.id),
+        commuteKmRate: workerCommuteKmRateForUser(db, worker.id),
         workerOwnVehicleKmRate: workerKmRateForUser(db, worker.id)
       })),
     settings: db.settings || {}
@@ -5595,6 +5597,7 @@ async function handleApi(req, res) {
           hourlyRate: defaultHourlyRateForUser(db, worker.id),
           exportTitle: String(worker.billing?.exportTitle || ""),
           commuteKmOneWay: commuteKmOneWayForUser(db, worker.id),
+          commuteKmRate: workerCommuteKmRateForUser(db, worker.id),
           workerOwnVehicleKmRate: workerKmRateForUser(db, worker.id)
         }));
       const snapshot = {
@@ -5929,6 +5932,7 @@ async function handleApi(req, res) {
         hourlyRate: defaultHourlyRateForUser(db, worker.id),
         exportTitle: String(worker.billing?.exportTitle || ""),
         commuteKmOneWay: commuteKmOneWayForUser(db, worker.id),
+        commuteKmRate: workerCommuteKmRateForUser(db, worker.id),
         workerOwnVehicleKmRate: workerKmRateForUser(db, worker.id)
       }));
       sendJson(res, 200, { workers });
@@ -5959,6 +5963,7 @@ async function handleApi(req, res) {
         hourlyRate: defaultHourlyRateForUser(db, worker.id),
         exportTitle: String(worker.billing?.exportTitle || ""),
         commuteKmOneWay: commuteKmOneWayForUser(db, worker.id),
+        commuteKmRate: workerCommuteKmRateForUser(db, worker.id),
         workerOwnVehicleKmRate: workerKmRateForUser(db, worker.id)
       }));
       sendJson(res, 200, { workers });

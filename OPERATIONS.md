@@ -73,6 +73,42 @@ ne prekliče že izdanih sej; po potrebi jih je treba preklicati ločeno.
 
 ## Tehnična konfiguracija
 
+### Ločeni vrsti prevoza in koledar (26. 10. 2026)
+
+Nastavitve → Delavci → Obračun delavca ločijo:
+
+- `commuteKmOneWay`: razdalja dom–podjetje v eno smer;
+- `commuteKmRate`: EUR/km za prevoz do podjetja (razdalja × 2, enkrat na
+  dan z upravičenim vpisom; brez malice ali dela od doma);
+- `workerOwnVehicleKmRate`: EUR/km za službeno vožnjo do strank z lastnim
+  vozilom; kilometri se še naprej vnesejo pri posameznem vpisu.
+
+Dokler nova tarifa ni shranjena, podeduje dosedanjo učinkovito postavko
+delavca. Shranitev obračunskih nastavitev jo zapiše samostojno, tudi če
+starejši odjemalec pošlje samo drugo postavko. Nič je veljavna vrednost.
+Stroški, ki se zaračunajo stranki, ostajajo neodvisni.
+
+Predogled, dnevni razrez, povzetek in XLSX ločijo obe razdalji in zneska.
+Novi obračuni shranijo obe postavki in zneska, zato poznejše spremembe
+nastavitev ne spreminjajo shranjenih obračunov. Zgodovinski obračuni ohranijo
+staro obliko in znesek; prikaz razdeli le informativni del prevoza. Morebitni
+cent zaradi starega skupnega zaokroževanja ostane pri službenem prevozu.
+Za ta primer XLSX vsebuje izrecno razliko zaokroževanja. SQL shema je ista.
+
+Povrnitev kode pred uvedbo dveh postavk je varna samo pred nastankom novih
+obračunov z ločenima tarifama. Stara koda teh polj ne razume in pri
+normalizaciji lahko preračuna oba prevoza po stari skupni tarifi. Pozneje
+je potreben združljiv popravek naprej oziroma povrnitev UI ob ohranitvi
+novega obračunskega modula; ne slepo preklapljanje stare kode ali vračanje
+celotne baze čez nove uporabniške vnose.
+
+Odstranjeni so novi pikčasti ročaji za razvrščanje v mesečnem in dnevnem
+koledarju. Shranjeni vrstni red in razvrščanje večdnevnih opravil po dolžini
+ostajata; pridržanje za premik datuma/termina ter robni ročaji za ure ostanejo.
+Nov obrazec ob mesečnem + ponuja Odsotnost z izbranim datumom. Prehod ne
+ustvari vpisa ur in ohrani nedokončan osnutek opravila. Delavec izbira samo
+svojo odsotnost, šef pa katerega koli delavca.
+
 ### Dovoljenja za vpis ur (25. 10. 2026)
 
 Šef določi ciljne izvajalce v **Nastavitve → Delavci → Lahko vpisuje ure za**
