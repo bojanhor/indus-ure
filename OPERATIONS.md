@@ -559,3 +559,28 @@ recovery arhivih 18.–24. 10.; današnji GC ni vzrok. Povezave/metapodatki niso
 odstranjeni. Za iskanje starejšega izvora je dodana ločena odprta točka v
 Google TODO, objavljene stare točke pa so odstranjene. Starejših Drive
 arhivov v tem posegu nismo prenašali ali pregledovali.
+
+
+## Zagon in zataknjena lokalna shramba (27. 10. 2026)
+
+Reproducirana napaka: prijavljen zagon je neomejeno čakal na IndexedDB.
+Star odprt zavihek lahko blokira nadgradnjo baze; prejšnja koda ni obravnavala
+`blocked`, ni zapirala povezav in ni imela roka. Zasebni zavihek te baze nima.
+To reproducira prijavljen simptom, ni pa neposreden dokaz stanja konkretnega
+telefona. Dodatno je omrežni rok prej zajel le glave in ne telesa odziva.
+
+Popravek: blokiran ali neodziven lokalni cache ne ustavi spletnega zagona;
+odpiranje/branje ima 3 s rok, zapis 30 s, povezave se zaprejo in zapis se
+potrdi šele po uspešni transakciji. Ob prekinitvi se transakcija razveljavi.
+API in prijavne možnosti imajo rok tudi za prenos telesa. Ob napaki je
+prikazan ponovni poskus, skupno varovalo zagona pa se sproži po 30 s.
+Neveljavna seja še vedno odpre prijavo. Omrežna napaka se ne obravnava kot
+odjava. Ponovni poskus zgolj ponovno naloži stran; ne briše IndexedDB,
+osnutkov, čakajočih vnosov, localStorage ali prijavnih piškotkov.
+
+Diagnostika: preveri zasebni zavihek in običajni zavihek, brez brisanja
+podatkov. Po objavi zapri/ponovno odpri ali osveži običajni zavihek, da naloži
+novo kodo. Zastala lokalna baza lahko zahteva zaprtje drugih starih zavihkov.
+V konzoli je `INDUS startup failed` z vrsto/statusom, brez vsebine podatkov.
+Regresije so v `tests/e2e/startup-recovery.spec.cjs`; vključene so tudi v
+Firefox prehod. SQL shema in poslovna pravila ostajajo enaka.

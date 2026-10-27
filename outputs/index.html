@@ -65,6 +65,8 @@
       background: #0d1b1f;
       font-weight: 800;
     }
+    #startupFailure { position: fixed; inset: 0; z-index: 10000; padding: 32px 24px; background: var(--bg); color: var(--ink); overflow: auto; }
+    #startupFailure > div { max-width: 480px; margin: 12vh auto; }
     #bootScreen::before {
       content: "";
       width: 22px;
@@ -5779,6 +5781,7 @@
     }  </style>
 </head>
 <body class="booting">
+  <section id="startupFailure" class="hidden" role="alert"><div><h1>Nalaganje ni uspelo</h1><p id="startupFailureMessage"></p><p>Lokalni vnosi ostanejo shranjeni. Podatkov brskalnika ni treba brisati.</p><button id="startupRetry" type="button">Poskusi znova</button></div></section>
   <section id="bootScreen" aria-live="polite" aria-label="Odpiram INDUS URE">Odpiram INDUS URE</section>
   <section id="clientBillProcessing" class="client-bill-processing-overlay hidden" aria-live="assertive" aria-busy="true" aria-hidden="true" role="status">
     <div class="client-bill-processing-card">
@@ -8099,9 +8102,9 @@ async function loadLocalTestMode() {
       const button = $("localTestLoginBtn");
       try {
         const support = new URLSearchParams(location.search).get("lan_support") === "1";
-        const response = await fetch("/api/auth/options" + (support ? "?support=1" : ""), { credentials: "same-origin", cache: "no-store", headers: { Accept: "application/json" } });
+        const { response, text } = await fetchWithTimeout("/api/auth/options" + (support ? "?support=1" : ""), { credentials: "same-origin", cache: "no-store", headers: { Accept: "application/json" } }, apiRequestTimeoutMs, true);
         if (!response.ok) throw new Error("Možnosti prijave niso dosegljive.");
-        const data = await response.json();
+        const data = JSON.parse(text);
         state.loginOptionsLoaded = true;
         state.googleLoginAvailable = data.google === true;
         state.localTestMode = data.test === true || data.support === true;
@@ -8178,10 +8181,9 @@ async function requestGoogleLoginUrl(automatic = false) {
       const loginHint = localStorage.getItem(googleEmailKey) || "";
       if (automatic && loginHint) params.set("login_hint", loginHint);
       const query = params.toString();
-      const response = await fetch("/api/auth/google-url" + (query ? "?" + query : ""), {
+      const { response, text } = await fetchWithTimeout("/api/auth/google-url" + (query ? "?" + query : ""), {
         headers: { Accept: "application/json" }
-      });
-      const text = await response.text();
+      }, apiRequestTimeoutMs, true);
       const data = text ? JSON.parse(text) : null;
       if (!response.ok || !data?.url) throw new Error(data?.error || "Google prijave ni bilo mogoče zagnati.");
       return data;
@@ -8526,25 +8528,65 @@ let offlineTodoRetryDelayMs = 1_500;
 
 function offlineTodoDb() {
       return new Promise((resolve, reject) => {
-        const request = indexedDB.open(offlineTodoDbName, offlineDbVersion);
+        let settled = false;
+        const fail = (error) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          reject(error);
+        };
+        const timer = window.setTimeout(() => fail(new Error("Lokalna shramba se ni odzvala. Zapri druge zavihke Ure in poskusi znova.")), 3_000);
+        let request;
+        try { request = indexedDB.open(offlineTodoDbName, offlineDbVersion); }
+        catch (error) { fail(error); return; }
+        request.onblocked = () => fail(new Error("Drugi zavihek uporablja starejšo lokalno shrambo. Zapri ga in poskusi znova."));
         request.onupgradeneeded = () => {
+          // A timed-out open can complete later; never leave a new connection
+          // behind or perform an upgrade after the caller has given up.
+          if (settled) { request.transaction.abort(); return; }
           const database = request.result;
           if (!database.objectStoreNames.contains("todoOps")) database.createObjectStore("todoOps", { keyPath: "id", autoIncrement: true });
           if (!database.objectStoreNames.contains(offlineSnapshotStore)) database.createObjectStore(offlineSnapshotStore, { keyPath: "userId" });
           if (!database.objectStoreNames.contains(offlineTodoCreationDraftStore)) database.createObjectStore(offlineTodoCreationDraftStore, { keyPath: "key" });
         };
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () => reject(request.error);
+        request.onsuccess = () => {
+          const database = request.result;
+          if (settled) { database.close(); return; }
+          settled = true;
+          clearTimeout(timer);
+          database.onversionchange = () => database.close();
+          resolve(database);
+        };
+        request.onerror = () => fail(request.error);
       });
     }
 
 function offlineStoreRequest(storeName, mode, operation) {
       return offlineTodoDb().then((database) => new Promise((resolve, reject) => {
-        const transaction = database.transaction(storeName, mode);
-        const store = transaction.objectStore(storeName);
-        const request = operation(store);
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () => reject(request.error);
+        let transaction, request, settled = false;
+        const finish = (error) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          database.close();
+          if (error) reject(error);
+          else resolve(request.result);
+        };
+        const timer = window.setTimeout(() => {
+          try { transaction?.abort(); } catch {}
+          finish(new Error("Lokalna shramba se ni odzvala. Poskusi znova."));
+        }, mode === "readonly" ? 3_000 : 30_000);
+        try {
+          transaction = database.transaction(storeName, mode);
+          request = operation(transaction.objectStore(storeName));
+          // Success is the committed transaction, not just a successful put.
+          transaction.oncomplete = () => finish();
+          transaction.onabort = () => finish(transaction.error || new Error("Lokalna sprememba ni bila shranjena."));
+          transaction.onerror = () => finish(transaction.error || request.error);
+        } catch (error) {
+          try { transaction?.abort(); } catch {}
+          finish(error);
+        }
       }));
     }
 
@@ -9002,30 +9044,30 @@ function apiTimeoutForRequest(path, requestOptions = {}) {
       return apiRequestTimeoutMs;
     }
 
-async function fetchWithTimeout(path, options = {}, timeoutMs = apiRequestTimeoutMs) {
+async function fetchWithTimeout(path, options = {}, timeoutMs = apiRequestTimeoutMs, readBody = false) {
       const controller = new AbortController();
       const signal = options.signal;
       const abortFromCaller = () => controller.abort(signal?.reason);
-      let timedOut = false;
+      let timeout;
       if (signal) {
         if (signal.aborted) abortFromCaller();
         else signal.addEventListener("abort", abortFromCaller, { once: true });
       }
-      const timeout = window.setTimeout(() => {
-        timedOut = true;
-        controller.abort();
-      }, Math.max(1_000, Number(timeoutMs) || apiRequestTimeoutMs));
-      try {
-        return await fetch(path, { ...options, signal: controller.signal });
-      } catch (cause) {
-        if (timedOut) {
-          const error = new Error("Stre\u017enik se predolgo ni odzval.");
+      const deadline = new Promise((resolve, reject) => {
+        timeout = window.setTimeout(() => {
+          const error = new Error("Strežnik se predolgo ni odzval.");
           error.name = "TimeoutError";
           error.timeout = true;
-          error.cause = cause;
-          throw error;
-        }
-        throw cause;
+          reject(error);
+          controller.abort();
+        }, Math.max(1_000, Number(timeoutMs) || apiRequestTimeoutMs));
+      });
+      try {
+        return await Promise.race([deadline, (async () => {
+          const response = await fetch(path, { ...options, signal: controller.signal });
+          // Keep the deadline alive through the body, including stalled streams.
+          return readBody ? { response, text: await response.text() } : response;
+        })()]);
       } finally {
         clearTimeout(timeout);
         if (signal) signal.removeEventListener("abort", abortFromCaller);
@@ -9046,9 +9088,9 @@ async function api(path, options = {}) {
       const unsafe = !["GET", "HEAD", "OPTIONS"].includes(String(requestOptions.method || "GET").toUpperCase());
       if (unsafe && state.csrfToken) headers["X-CSRF-Token"] = state.csrfToken;
       const hadSession = Boolean(state.token && state.token !== "offline");
-      let response;
+      let response, text;
       try {
-        response = await fetchWithTimeout(path, { ...requestOptions, headers, credentials: "same-origin" }, requestTimeoutMs || apiTimeoutForRequest(path, requestOptions));
+        ({ response, text } = await fetchWithTimeout(path, { ...requestOptions, headers, credentials: "same-origin" }, requestTimeoutMs || apiTimeoutForRequest(path, requestOptions), true));
       } catch (cause) {
         const error = new Error(cause?.timeout ? cause.message : "Povezava s stre\u017enikom ni uspela.");
         error.status = 0;
@@ -9056,7 +9098,6 @@ async function api(path, options = {}) {
         error.cause = cause;
         throw error;
       }
-      const text = await response.text();
       let data = null;
       try { data = text ? JSON.parse(text) : null; } catch { data = null; }
       const csrfFailure = response.status === 403 && unsafe && /varnostna potrditev seje manjka/i.test(String(data?.error || ""));
@@ -9189,7 +9230,18 @@ function refreshBootstrapAfterTodoLink({ defer = false } = {}) {
       }
     }
 
+function showStartupFailure(error) {
+      document.body.classList.remove("booting");
+      setStartupHydrating(false);
+      $("startupFailureMessage").textContent = error?.message || "Aplikacije ni bilo mogoče odpreti. Poskusi znova.";
+      $("startupFailure").classList.remove("hidden");
+      console.warn("INDUS startup failed", { name: error?.name, status: error?.status, timeout: Boolean(error?.timeout) });
+    }
+$("startupRetry").addEventListener("click", () => location.reload());
+
 async function boot() {
+      const watchdog = window.setTimeout(() => showStartupFailure(new Error("Odpiranje traja predolgo. Preveri povezavo in poskusi znova.")), 30_000);
+      try {
       setDefaultReportRange();
       if (location.protocol === "file:") {
         showLoginScreen();
@@ -9255,6 +9307,7 @@ async function boot() {
       } catch (error) {
         const openedOffline = isNetworkError(error) ? await activateOfflineSnapshot().catch(() => false) : false;
         if (openedOffline) return;
+        if (error?.status !== 401) { showStartupFailure(error); return; }
         state.token = "";
         state.csrfToken = "";
         state.offlineMode = false;
@@ -9264,6 +9317,8 @@ async function boot() {
         if (error?.status === 401 && await startPublicGoogleLogin()) return;
         showLoginScreen();
       }
+      } catch (error) { showStartupFailure(error); }
+      finally { clearTimeout(watchdog); }
     }
 async function reconnectAfterOffline() {
       if (!state.user || !navigator.onLine) return false;
@@ -9745,6 +9800,7 @@ function applyOnlineCachedSnapshot(snapshot) {
       return true;
     }
 function showLoginScreen() {
+      $("startupFailure").classList.add("hidden");
       state.absences = []; state.absencesLoaded = false;
       setStartupHydrating(false);
       document.body.classList.remove("booting");
@@ -9754,6 +9810,7 @@ function showLoginScreen() {
     }
 
 function showApp({ minimal = false } = {}) {
+      $("startupFailure").classList.add("hidden");
       try { sessionStorage.removeItem(automaticLoginAttemptKey); sessionStorage.removeItem("indus-ure-explicit-logout"); } catch {}
       protectLoggedInHistory();
       document.body.classList.remove("booting", "login-ready");
