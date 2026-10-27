@@ -584,3 +584,28 @@ novo kodo. Zastala lokalna baza lahko zahteva zaprtje drugih starih zavihkov.
 V konzoli je `INDUS startup failed` z vrsto/statusom, brez vsebine podatkov.
 Regresije so v `tests/e2e/startup-recovery.spec.cjs`; vključene so tudi v
 Firefox prehod. SQL shema in poslovna pravila ostajajo enaka.
+
+### Dokaz objave popravka zagona
+
+27. 10. 2026 ob približno 18:19 CET je aktivna izdaja `fb35088`
+(`fb3508805f48c5ccb3a018814629779e960dadb6`), predhodna `004229c`.
+Commit je na `origin/main`. Zaščitena in preverjena predhodna kopija:
+`indus-ure-recovery-20261027T171758Z.tar.gz`; backup service `Result=success`.
+Objava je uporabila obstoječi `deploy-indus-ure` z veljavnim QA dokazilom.
+
+Končna preverjanja: Windows 354 uspešnih + 1 namensko preskočen enotski test;
+Linux celotni enotski prehod uspešen; PostgreSQL 34 fresh + 1 restore + 2
+recovery + 4 upgrade/rollback preverjanja. Chromium 124/124, Firefox 31
+uspešnih + 3 namensko preskočeni testi dotika, WebKit vseh 5 novih mobilnih
+regresij. Prvi Windows enotski prehod je imel prehoden ECONNRESET v osebni
+LAN-prijavi; ponovljeni celotni prehod je brez napake. Pred popravkom je
+novi test resnično blokirane IndexedDB nadgradnje odpovedal na skritem #app;
+po popravku uspe in potrdi ohranitev čakajočega lokalnega zapisa.
+
+Produkcijski pregled: podpora se prijavi kot Bojan in Ibro v svežem
+brskalniškem kontekstu širine 390 px; prvi prikaz in reload uspešna, brez
+JS napak, nato odjava preverjevalnih sej. Poslovnih vnosov nismo ustvarjali.
+Ure HTTPS 200, /fakture/ 303, oba lokalna health endpointa uspešna, Nginx in
+obe aplikaciji aktivni; v pregledanem intervalu ni opozoril Ure. Testi so
+avtomatizirani brskalniki, ne fizični uporabnikov telefon. Na telefonu je
+za prevzem nove kode treba osvežiti ali ponovno odpreti običajni zavihek.
