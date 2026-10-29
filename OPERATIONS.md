@@ -644,3 +644,37 @@ so bile aktivne brez opozoril, sveže Bojanove testne seje pa so se zagnale.
 Uporabnik je naknadno poročal o zastoju tudi v zasebnem zavihku; potrebujemo
 rezultat `/api/health` in sliko mesta zastoja na konkretni napravi. Podatkov
 brskalnika, čakajočih zapisov in osnutkov ne briši kot diagnostični korak.
+
+### Dokaz objave 29. 10. 2026
+
+Aktivna izdaja `6ce16af` (`6ce16afdec0f6bcefb91fc79e726d3bd86649224`) je
+objavljena na `origin/main`; prejšnja izdaja je `fb35088`. SHA-256 prenesenega
+arhiva: `bcd07860e7b7424f6dfd70033b4e90eb7b1200bfea535d07e2ef83a5d2b75a16`.
+Pred preklopom je wrapper uspešno preveril in zaščitil kopijo
+`indus-ure-recovery-20261029T084658Z.tar.gz`; backup service `Result=success`.
+
+Preverjanja: Windows 357 uspešnih + 1 namensko preskočen enotski/API test,
+Linux 358/358; PostgreSQL 34 fresh + 1 restore + 2 recovery + 4
+upgrade/rollback preverjanja. Celotni Chromium 127/127, Firefox 33 uspešnih
++ 3 namensko preskočeni testi dotika, dodatni mobilni Firefox test 1/1,
+WebKit 6/6 (koledar, drsnik, tipkovnica, dolgi opisi, osnutek in shranjevanje).
+Prvi enotski prehod je ponovil `ECONNRESET` iz zgornje opombe; po izolaciji
+HTTP povezav sta celoten prehod in še samostojen ponovni LAN preizkus uspela.
+Prvi Chromium prehod je bil med ustavljanjem ločenega testnega procesa
+prekinjen; nato je ponovljen celotni prehod uspešno zaključil vseh 127 testov.
+
+Produkcijski preizkus: Firefox/Bojan in WebKit/Ibro pri 390 px potrdita
+šest ISO tednov, praznično barvo in dosegljivost polj vse do spodnjega gumba
+obrazca. Odpiranje obstoječega opravila in zaprtje ga ne spremenita; priloga
+vrne 200, obračunski pogled je viden. Sveža prijava in reload z vključenim
+service workerjem uspeta v Chromiumu, Firefoxu in WebKitu; izmerjeni zagoni
+171–401 ms v lokalnem testnem okolju. Brez JS napak in brez poslovnih
+zapisov; začasne preverjevalne seje so odjavljene. To niso fizične naprave.
+Ure HTTPS 200, lokalni health uspešen, Nginx/PG/Ure/Fakture aktivni,
+Fakture HTTPS 303; po preklopu ni opozoril Ure v pregledanem intervalu.
+
+Google TODO je po objavi prebran s svežo revizijo in nato preverjeno urejen:
+zaključeni koledarski točki sta odstranjeni. Izvorno besedilo o Safariju in
+slika ostaneta s pripisom, da čakamo potrditev fizičnega iPhona. Ločeno je
+zabeležen še nerešen Firefox Android zastoj. Nobene od teh dveh prijav
+ne štejemo kot potrjeno zaključeno samo na podlagi namiznega testiranja.
