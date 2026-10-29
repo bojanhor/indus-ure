@@ -3008,7 +3008,7 @@
     .weekdays,
     .calendar {
       display: grid;
-      grid-template-columns: repeat(7, minmax(120px, 1fr));
+      grid-template-columns: 32px repeat(7, minmax(120px, 1fr));
     }
 
     .weekdays {
@@ -3024,6 +3024,17 @@
     }
 
     .calendar { min-height: 540px; }
+    .calendar-week-number {
+      padding: 14px 2px;
+      border-right: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+      background: #eef3ee;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      text-align: center;
+    }
+    .weekdays .calendar-week-heading { padding-inline: 2px; text-align: center; }
 
     .day {
       container-type: inline-size;
@@ -3064,7 +3075,7 @@
       .day-todo-worker .avatar { width: 14px; height: 14px; font-size: 8px; }
     }
 
-    .day:nth-child(7n) { border-right: 0; }
+    .day:nth-child(8n) { border-right: 0; }
     .day.other { background: #f4f6f1; color: #9aa19c; }
     .day.today { box-shadow: inset 0 0 0 2px var(--accent); }
 
@@ -3077,6 +3088,7 @@
     }
 
     .day-number { font-weight: 800; font-size: 16px; }
+    .day.is-work-free-holiday .day-number { color: #b3261e; }
     .day-edit-hint { width: 26px; height: 26px; padding: 0; border-radius: 7px; color: var(--accent-dark); background: transparent; font-size: 19px; }
 
     .quick-add {
@@ -4109,6 +4121,23 @@
     #todoForm .modal-body > *,
     #todoForm .modal-body input,
     #todoForm .modal-body select { min-width: 0; }
+    @media (pointer: coarse) {
+      /* Keep the scrollport at the small (browser chrome visible) viewport
+         height during a touch scroll. Resizing a flex scrollport as Safari's
+         toolbar collapses can invalidate its painted tiles. The visual viewport
+         max-height still shrinks the form for the keyboard or pinch zoom.
+         Only the inner scroller clips: no second rounded overflow clip around
+         the native top-layer dialog, and no forced GPU layer on every field. */
+      #todoDialog { height: calc(100svh - 20px); overflow: visible; }
+      #todoForm { height: 100%; max-height: 100%; }
+      #todoForm > .modal-head { border-radius: 10px 10px 0 0; }
+      #todoForm > .todo-dialog-scroll {
+        flex: 1 1 0%;
+        position: relative;
+        background: var(--panel);
+        border-radius: 0 0 10px 10px;
+      }
+    }
     #completionRequestDialog { width: min(560px, calc(100vw - 26px)); }
     #completionRequestDialog textarea { min-height: 130px; resize: vertical; }
     #workerDailyDigestDialog { width: min(760px, calc(100vw - 26px)); max-height: calc(100dvh - 20px); overflow-y: auto; }
@@ -5260,7 +5289,7 @@
       .sidebar { position: static; }
       .stats { grid-template-columns: repeat(2, 1fr); }
       .weekdays,
-      .calendar { grid-template-columns: repeat(7, minmax(104px, 1fr)); }
+      .calendar { grid-template-columns: 32px repeat(7, minmax(104px, 1fr)); }
       .calendar-shell { overflow-x: auto; }
       .day { padding: 4px; gap: 3px; }
     }
@@ -5413,8 +5442,8 @@
       }
       .weekdays,
       .calendar {
-        min-width: 728px;
-        grid-template-columns: repeat(7, minmax(104px, 1fr));
+        min-width: 760px;
+        grid-template-columns: 32px repeat(7, minmax(104px, 1fr));
       }
       .weekdays div {
         padding: 7px 2px;
@@ -6142,6 +6171,7 @@
         </div>
         <div class="month-grid-viewport" id="monthGridViewport"><div id="monthGrid">
         <div class="weekdays">
+          <div class="calendar-week-heading" title="Številka tedna (ISO)" aria-label="Teden">T</div>
           <div>Pon</div>
           <div>Tor</div>
           <div>Sre</div>
@@ -10049,6 +10079,7 @@ function calendarTodos({ includeArchived = false } = {}) {
 /* @indus-module:worker-access */
 /* @indus-module:absence-model */
 /* @indus-module:calendar-order */
+/* @indus-module:calendar-dates */
 /* @indus-module:editor/absences */
 const absenceUi = createAbsenceUi({ $, state, api, render, escapeHtml, showNotice, showAppConfirm, dateKey, activeWorkerId, closeModalBeforeTransition, openDayTimeline });
 function calendarAbsences() {
@@ -10987,7 +11018,7 @@ let monthFitReposition = false;
 const monthTitleHome = document.createComment("month title home");
 document.querySelector(".month-title").before(monthTitleHome);
 function alignMonthUntimedRows() {
-      const days = [...$("calendar").children];
+      const days = [...$("calendar").querySelectorAll(":scope > .day")];
       const sections = days.map(day => day.querySelector(".day-single-untimed"));
       sections.forEach(section => { if (section) section.style.minHeight = ""; });
       for (let i = 0; i < days.length; i += 7) {
@@ -11021,7 +11052,7 @@ function updateMonthFit() {
       const width = viewport.clientWidth;
       // Keep normal readable card layout before scaling; do not crop days or
       // collapse their contents just to meet a fixed row height.
-      const naturalWidth = Math.max(width, matchMedia("(max-width: 760px)").matches ? 728 : 840);
+      const naturalWidth = Math.max(width, matchMedia("(max-width: 760px)").matches ? 760 : 872);
       grid.style.width = naturalWidth + "px";
       grid.style.transform = "none";
       alignMonthUntimedRows();
@@ -11070,9 +11101,21 @@ function renderMonth() {
         const dayDate = new Date(gridStart);
         dayDate.setDate(gridStart.getDate() + i);
         const key = dateKey(dayDate);
+        if (i % 7 === 0) {
+          const { year: weekYear, week } = CalendarDates.isoWeek(key);
+          const weekNumber = document.createElement('div');
+          weekNumber.className = 'calendar-week-number';
+          weekNumber.dataset.week = `${weekYear}-W${String(week).padStart(2, '0')}`;
+          weekNumber.textContent = week;
+          weekNumber.title = `${week}. teden, ${weekYear}`;
+          weekNumber.setAttribute('aria-label', weekNumber.title);
+          calendar.appendChild(weekNumber);
+        }
+        const holiday = CalendarDates.workFreeHoliday(key);
         const day = document.createElement('div');
         day.className = 'day';
         day.dataset.date = key;
+        if (holiday) day.classList.add('is-work-free-holiday');
         if (dayDate.getMonth() !== month) day.classList.add('other');
         if (key === today) day.classList.add('today');
         if (entries.some((entry) => entry.date === key && entry.status === 'vacation')) {
@@ -11084,7 +11127,7 @@ function renderMonth() {
         head.dataset.date = key;
         head.setAttribute('role', 'button');
         head.tabIndex = 0;
-        head.setAttribute('aria-label', `Odpri dnevni pregled za ${dayDate.toLocaleDateString('sl-SI')}`);
+        head.setAttribute('aria-label', `Odpri dnevni pregled za ${dayDate.toLocaleDateString('sl-SI')}${holiday ? `; ${holiday}, dela prost dan` : ''}`);
         head.addEventListener('click', () => openDayTimeline(key));
         head.addEventListener('keydown', (event) => {
           if (event.key === 'Enter' || event.key === ' ') {
@@ -11094,6 +11137,7 @@ function renderMonth() {
         });
 
         head.innerHTML = `<span class="day-number">${dayDate.getDate()}</span>`;
+        if (holiday) head.querySelector('.day-number').title = `${holiday} — dela prost dan`;
         const editHint = document.createElement('button');
         editHint.className = 'day-edit-hint';
         editHint.type = 'button';

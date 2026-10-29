@@ -609,3 +609,38 @@ Ure HTTPS 200, /fakture/ 303, oba lokalna health endpointa uspešna, Nginx in
 obe aplikaciji aktivni; v pregledanem intervalu ni opozoril Ure. Testi so
 avtomatizirani brskalniki, ne fizični uporabnikov telefon. Na telefonu je
 za prevzem nove kode treba osvežiti ali ponovno odpreti običajni zavihek.
+
+## TODO: prazniki, tedni in mobilni drsnik (29. 10. 2026)
+
+- Mesečni koledar dobi levi stolpec ISO tednov (ponedeljek–nedelja, pravilno
+  leto tedna ob novem letu). Pri poravnavi večdnevnih pasic se šteje samo
+  sedem dejanskih dnevov, ne novi stolpec. Cel mesec se še vedno prilagodi
+  širini in višini; kliki in premiki dogodkov uporabljajo iste dnevne tarče.
+- `calendar-dates.js` označi rdeče številke slovenskih zakonsko dela prostih
+  praznikov, tudi v sosednjem mesecu. Velika noč/ponedeljek in binkošti se
+  izračunajo za prikazano leto. Spominski prazniki, ki niso dela prosti, niso
+  rdeči; praznik se ne prestavi na ponedeljek. Ime praznika je v naslovu in
+  dostopnostni oznaki datuma. Vir preverjen 29. 10. 2026:
+  https://www.gov.si/teme/drzavni-prazniki-in-dela-prosti-dnevi/.
+- Na napravah z dotikom urejevalnik uporabi stabilno višino `100svh`, ki se
+  med skrivanjem brskalniških vrstic ne razteguje. VisualViewport ga še vedno
+  zmanjša za tipkovnico/povečavo. Odstranjeno je zunanje obrezovanje dialoga;
+  drsi in obrezuje samo notranja površina. Glava ostane zunaj drsnika.
+  Brez prisilnih GPU plasti, časovnih repaint trikov ali spremembe podatkov.
+  To je preverjen popravek postavitve, ne dokaz odprave prikazane iOS napake:
+  fizičnega iPhona nimamo, izginjanja ploščic tudi pred popravkom v namiznem
+  WebKitu nismo reproducirali. V TODO mora ostati potrditev uporabnika po
+  osvežitvi in drsenju na njegovem telefonu.
+- HTTP testni odjemalec ne uporablja skupnega keep-alive sklada za kratkožive
+  strežnike; prehoden `ECONNRESET` v preizkusu LAN gesel je nastopil tudi pred
+  tem posegom. To ne spreminja produkcijskega HTTP strežnika ali prijave.
+
+Ni spremembe sheme, obračuna, pravic, poslovnih podatkov ali formata osnutkov.
+Povrnitev samo te izdaje na predhodni `fb35088` je mogoča z običajnim postopkom
+objave in varnostno kopijo; baze se zaradi tega popravka ne obnavlja.
+Ločena prijava neskončnega nalaganja v Firefoxu Android ni s tem označena kot
+rešena. 29. 10. ob 08:27 UTC so javni HTTP in lokalni health uspeli, storitve
+so bile aktivne brez opozoril, sveže Bojanove testne seje pa so se zagnale.
+Uporabnik je naknadno poročal o zastoju tudi v zasebnem zavihku; potrebujemo
+rezultat `/api/health` in sliko mesta zastoja na konkretni napravi. Podatkov
+brskalnika, čakajočih zapisov in osnutkov ne briši kot diagnostični korak.

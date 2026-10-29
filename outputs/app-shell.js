@@ -9,6 +9,7 @@ const browserModules = [
   ["worker-access", "worker-access.js"],
   ["absence-model", "absence-model.js"],
   ["calendar-order", "calendar-order.js"],
+  ["calendar-dates", "calendar-dates.js"],
   ["payroll-travel", "payroll-travel.js"],
   ["editor/absences", "editor/absences.js"],
   ["editor/contact-links", "editor/contact-links.js"],

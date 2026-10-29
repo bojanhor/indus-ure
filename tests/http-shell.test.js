@@ -533,7 +533,9 @@ test("mese\u010dni in dnevni pogled ohranita berljivost nujnih in zaklju\u010den
 
 function request(port, pathname, { method = "GET", headers = {}, body = "" } = {}) {
   return new Promise((resolve, reject) => {
-    const request = http.request({ host: "127.0.0.1", port, path: pathname, method, headers }, (response) => {
+    // Each fixture has a short-lived server. Do not borrow pooled sockets
+    // which may have reached its keep-alive deadline during password hashing.
+    const request = http.request({ host: "127.0.0.1", port, path: pathname, method, headers, agent: false }, (response) => {
       let responseBody = "";
       response.setEncoding("utf8");
       response.on("data", (chunk) => { responseBody += chunk; });

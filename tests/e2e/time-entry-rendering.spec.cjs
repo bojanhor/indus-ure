@@ -5,6 +5,48 @@ let app;
 test.beforeAll(async () => { app = await startIsolatedTestApp(); });
 test.afterAll(async () => { await app?.stop(); });
 
+test('mobile scroll surface stays stable when browser chrome expands its viewport, with a separate keyboard cap', async ({ browser, browserName }) => {
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: browserName !== 'firefox', deviceScaleFactor: 3 });
+  const page = await context.newPage();
+  try {
+    expect((await context.request.post(app.baseUrl + '/api/test-login', { data: { userId: 'ibro', password: TEST_PASSWORD } })).ok()).toBeTruthy();
+    await page.goto(app.baseUrl);
+    await page.locator('#writeHoursButton').click();
+    await expect(page.locator('#todoDialog')).toBeVisible();
+    const geometry = () => page.locator('#todoDialogScroll').evaluate(el => ({ top: el.getBoundingClientRect().top, height: el.clientHeight }));
+    const before = await geometry();
+    await page.evaluate(() => {
+      // Mobile browser chrome can increase the visual viewport without
+      // changing the stable small-viewport unit used by the editor.
+      Object.defineProperty(window.visualViewport, 'height', { configurable: true, value: innerHeight + 90 });
+      window.visualViewport.dispatchEvent(new Event('resize'));
+    });
+    expect(await geometry()).toEqual(before);
+    await expect(page.locator('#todoDialog')).toHaveCSS('overflow-y', 'visible');
+    await expect(page.locator('#todoDialogScroll')).toHaveCSS('overflow-y', 'auto');
+    const scroller = await page.locator('#todoDialogScroll').boundingBox();
+    await page.mouse.move(scroller.x + scroller.width / 2, scroller.y + scroller.height / 2);
+    // Playwright's mobile WebKit has no native wheel/touch-drag dispatcher.
+    // This checks its layout, not the physical iPhone's momentum compositor.
+    if (browserName === 'webkit') await page.locator('#todoDialogScroll').evaluate(el => el.scrollBy(0, 450));
+    else await page.mouse.wheel(0, 450);
+    await expect.poll(() => page.locator('#todoDialogScroll').evaluate(el => el.scrollTop)).toBeGreaterThan(100);
+    await page.screenshot({ path: test.info().outputPath('mobile-scroll-surface.png') });
+    await page.evaluate(() => {
+      Object.defineProperty(window.visualViewport, 'height', { configurable: true, value: 350 });
+      Object.defineProperty(window.visualViewport, 'offsetTop', { configurable: true, value: 80 });
+      window.visualViewport.dispatchEvent(new Event('resize'));
+      window.visualViewport.dispatchEvent(new Event('scroll'));
+    });
+    const box = await page.locator('#todoDialog').boundingBox();
+    expect(box.y).toBeGreaterThanOrEqual(80);
+    expect(box.y + box.height).toBeLessThanOrEqual(430);
+    await expect(page.locator('#closeTodoDialog')).toBeInViewport();
+    await page.locator('#closeTodoDialog').click();
+    await expect(page.locator('#todoDialog')).toBeHidden();
+  } finally { await context.close(); }
+});
+
 test('typing beside a long description does not collapse the live form or jump its scroller', async ({ browser }) => {
   const context = await browser.newContext({
     viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true,
