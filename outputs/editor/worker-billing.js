@@ -23,7 +23,6 @@ function createWorkerBilling({
   renderDebtDialog,
   renderReport,
   setView,
-  setWorkContext,
   showAppConfirm,
   showAppPrompt,
   showFormValidationError,
@@ -715,8 +714,10 @@ function billingGapLabel(value) {
 
 function openBillingDayTimeline(workerId, date) {
       if (!date) return;
-      if (isAdminView() && workerId && workerId !== activeWorkerId()) setWorkContext(`worker:${workerId}`);
-      openDayTimeline(date, { includeArchived: true });
+      // A payroll drill-down selects data, not the boss's identity/view.
+      // Keep administration and its rate editor available; scope only this day.
+      openDayTimeline(date, { includeArchived: true,
+        workerFilter: isAdminView() && workerId ? { ids: [workerId] } : null });
     }
 
 function billingLineTotals(lines) {

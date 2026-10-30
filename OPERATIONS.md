@@ -678,3 +678,25 @@ zaključeni koledarski točki sta odstranjeni. Izvorno besedilo o Safariju in
 slika ostaneta s pripisom, da čakamo potrditev fizičnega iPhona. Ločeno je
 zabeležen še nerešen Firefox Android zastoj. Nobene od teh dveh prijav
 ne štejemo kot potrjeno zaključeno samo na podlagi namiznega testiranja.
+
+## Urejanje postavke iz obračuna delavca (30. 10. 2026)
+
+Potrjen vzrok: `openBillingDayTimeline()` je pri kliku na dan tujega delavca
+poklical `setWorkContext(worker:...)`. To je trajno zapisalo delavski pogled
+v localStorage in skrilo šefovska polja, tudi postavko posameznega vpisa.
+Na produkcijskem Štajerčevem vpisu 30. 10. je brskalnik pred popravkom
+potrdil oba simptoma; vpis je ostal nespremenjen.
+
+Odpiranje dneva zdaj ohrani šefovski pogled in uporabi samo začasni filter
+izvajalca v časovnici. Filter sledi prejšnjemu/naslednjemu dnevu ter vrnitvi
+iz urejevalnika; izbira vseh/posameznih izvajalcev v tem pogledu ne prepiše
+filtra mesečnega koledarja. Ob zaprtju se začasni filter odstrani.
+Obstoječe pravice API, zaklenjeni obračuni in privzete postavke so nespremenjeni.
+Že shranjenega uporabnikovega delavskega pogleda ne preklapljamo samodejno,
+ker je lahko namerno izbran; uporabnik enkrat izbere Šef.
+
+Regresija `payroll-entry-rate.spec.cjs` preverja mobilno/namizno pot iz
+obračuna, navigacijo dni in filter, spremembo 25 na 30,75 in nato 0 EUR/h,
+API readback, nespremenjeno privzeto postavko 25 EUR/h, vrnitev in reload.
+Vključena je v Chromium in Firefox prehod. Ni migracije baze; povrnitev je
+običajni preklop prejšnje kode brez obnove poslovnih podatkov.

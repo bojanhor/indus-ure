@@ -7236,6 +7236,7 @@ const state = {
       todoDialogReturnDayView: null,
       dayTimelineDate: "",
       dayTimelineIncludeArchived: false,
+      dayTimelineWorkerFilter: null,
       dayTimelineDrafts: new Map(),
       dayTimelineSaving: false,
       dayTimelineSessionId: 0,
@@ -7802,7 +7803,6 @@ const {
     renderDebtDialog: (...args) => renderDebtDialog(...args),
     renderReport: (...args) => renderReport(...args),
     setView: (...args) => setView(...args),
-    setWorkContext: (...args) => setWorkContext(...args),
     showAppConfirm: (...args) => showAppConfirm(...args),
     showAppPrompt: (...args) => showAppPrompt(...args),
     showFormValidationError: (...args) => showFormValidationError(...args),
@@ -8029,7 +8029,11 @@ function calendarWorkerFilterStorageKey() {
     }
 
 function calendarWorkerMatches(todo) {
-      return !isAdminView() || state.calendarWorkerIds === null || todoAssigneeIds(todo).some(id => state.calendarWorkerIds.includes(id));
+      return calendarWorkerMatchesIds(todo, state.calendarWorkerIds);
+    }
+
+function calendarWorkerMatchesIds(todo, workerIds) {
+      return !isAdminView() || workerIds === null || todoAssigneeIds(todo).some(id => workerIds.includes(id));
     }
 
 function renderCalendarWorkerFilter() {
@@ -8043,14 +8047,16 @@ function renderCalendarWorkerFilter() {
         if (!workers.has(id)) workers.set(id, userDisplayName(id));
       }));
       (state.calendarWorkerIds || []).forEach(id => { if (!workers.has(id)) workers.set(id, userDisplayName(id)); });
-      const all = state.calendarWorkerIds === null;
       const options = [...workers].sort((a, b) => a[1].localeCompare(b[1], "sl"));
-      const label = all ? "Vsi izvajalci" : !state.calendarWorkerIds.length ? "Nihče" : state.calendarWorkerIds.map(id => workers.get(id)).join(", ");
       [$("calendarWorkerFilter"), $("dayTimelineWorkerFilter")].forEach(picker => {
+        const ids = picker.id === "dayTimelineWorkerFilter" && state.dayTimelineWorkerFilter
+          ? state.dayTimelineWorkerFilter.ids : state.calendarWorkerIds;
+        const all = ids === null;
+        const label = all ? "Vsi izvajalci" : !ids.length ? "Nihče" : ids.map(id => workers.get(id) || userDisplayName(id)).join(", ");
         const focus = picker.contains(document.activeElement) ? document.activeElement.dataset.calendarWorkerId : undefined;
         picker.querySelector("summary").textContent = label;
-        picker.querySelector(".calendar-worker-choices").innerHTML = [["", "Vsi izvajalci"], ...options].map(([id, name]) => `<label><input type="checkbox" data-calendar-worker-id="${escapeHtml(id)}" ${(!id ? all : all || state.calendarWorkerIds.includes(id)) ? "checked" : ""}>${escapeHtml(name)}</label>`).join("");
-        picker.querySelector('[data-calendar-worker-id=""]').indeterminate = !all && state.calendarWorkerIds.length > 0;
+        picker.querySelector(".calendar-worker-choices").innerHTML = [["", "Vsi izvajalci"], ...options].map(([id, name]) => `<label><input type="checkbox" data-calendar-worker-id="${escapeHtml(id)}" ${(!id ? all : all || ids.includes(id)) ? "checked" : ""}>${escapeHtml(name)}</label>`).join("");
+        picker.querySelector('[data-calendar-worker-id=""]').indeterminate = !all && ids.length > 0;
         if (focus !== undefined) picker.querySelector(`[data-calendar-worker-id="${CSS.escape(focus)}"]`)?.focus({ preventScroll: true });
       });
     }
@@ -8065,14 +8071,20 @@ function changeCalendarWorkerFilter(event) {
       }
       const wasFullDay = dayTimelineIsFullDay();
       const id = input.dataset.calendarWorkerId;
-      if (!id) state.calendarWorkerIds = input.checked ? null : [];
+      const scoped = Boolean(input.closest("#dayTimelineWorkerFilter") && state.dayTimelineWorkerFilter);
+      let ids = scoped ? state.dayTimelineWorkerFilter.ids : state.calendarWorkerIds;
+      if (!id) ids = input.checked ? null : [];
       else {
-        const selected = new Set(state.calendarWorkerIds === null ? [...input.closest(".calendar-worker-choices").querySelectorAll("[data-calendar-worker-id]")].map(item => item.dataset.calendarWorkerId).filter(Boolean) : state.calendarWorkerIds);
+        const selected = new Set(ids === null ? [...input.closest(".calendar-worker-choices").querySelectorAll("[data-calendar-worker-id]")].map(item => item.dataset.calendarWorkerId).filter(Boolean) : ids);
         if (input.checked) selected.add(id); else selected.delete(id);
-        state.calendarWorkerIds = [...selected];
+        ids = [...selected];
       }
-      localStorage.setItem(calendarWorkerFilterStorageKey(), JSON.stringify(state.calendarWorkerIds));
-      renderMonth();
+      if (scoped) state.dayTimelineWorkerFilter = { ids };
+      else {
+        state.calendarWorkerIds = ids;
+        localStorage.setItem(calendarWorkerFilterStorageKey(), JSON.stringify(ids));
+        renderMonth();
+      }
       if ($("dayTimelineDialog").open) {
         renderDayTimeline();
         if (wasFullDay) setDayTimelineZoom($("dayTimelineScroll").clientHeight / 1440);
@@ -10072,8 +10084,8 @@ function isImportedTodo(todo) {
       return Boolean(todo?.imported);
     }
 
-function calendarTodos({ includeArchived = false } = {}) {
-      return [...uniqueTodosByEventId(contextTodos()).filter((todo) => !isImportedTodo(todo) && (includeArchived || !todo.archivedAt) && calendarWorkerMatches(todo)), ...calendarAbsences()];
+function calendarTodos({ includeArchived = false, workerIds = state.calendarWorkerIds } = {}) {
+      return [...uniqueTodosByEventId(contextTodos()).filter((todo) => !isImportedTodo(todo) && (includeArchived || !todo.archivedAt) && calendarWorkerMatchesIds(todo, workerIds)), ...calendarAbsences(workerIds)];
     }
 
 /* @indus-module:worker-access */
@@ -10082,9 +10094,9 @@ function calendarTodos({ includeArchived = false } = {}) {
 /* @indus-module:calendar-dates */
 /* @indus-module:editor/absences */
 const absenceUi = createAbsenceUi({ $, state, api, render, escapeHtml, showNotice, showAppConfirm, dateKey, activeWorkerId, closeModalBeforeTransition, openDayTimeline });
-function calendarAbsences() {
+function calendarAbsences(workerIds = state.calendarWorkerIds) {
       return (state.absences || []).filter(item => isAdminView() || Absences.canView(item, { id: activeWorkerId(), role: "worker" }))
-        .map(item => Absences.calendarItem(item)).filter(calendarWorkerMatches);
+        .map(item => Absences.calendarItem(item)).filter(todo => calendarWorkerMatchesIds(todo, workerIds));
     }
 function openCalendarTodo(todo) {
       if (todo._absence) absenceUi.open(state.absences.find(item => item.id === todo.id));
@@ -11280,7 +11292,8 @@ function dayTimelineLayouts(todos) {
 
 function dayTimelineTodos() {
       if (!state.dayTimelineDate) return [];
-      return calendarTodos({ includeArchived: state.dayTimelineIncludeArchived }).map((todo) => {
+      return calendarTodos({ includeArchived: state.dayTimelineIncludeArchived,
+        workerIds: state.dayTimelineWorkerFilter ? state.dayTimelineWorkerFilter.ids : state.calendarWorkerIds }).map((todo) => {
         const draft = state.dayTimelineDrafts.get(todo.id);
         return draft ? { ...todo, ...draft } : todo;
       }).filter((todo) => todoOccursOnDate(todo, state.dayTimelineDate)).sort((a, b) => {
@@ -11290,7 +11303,7 @@ function dayTimelineTodos() {
     }
 
 function firstFreeDayTimelineSlot(date) {
-      const intervals = calendarTodos()
+      const intervals = calendarTodos({ workerIds: state.dayTimelineWorkerFilter ? state.dayTimelineWorkerFilter.ids : state.calendarWorkerIds })
         .filter((todo) => todo.date === date && todo.start && todo.end)
         .map((todo) => {
           const start = dayTimelineMinutes(todo.start);
@@ -11428,6 +11441,7 @@ function rememberDayTimelineEditorReturn() {
       state.todoDialogReturnDayView = {
         date: state.dayTimelineDate,
         includeArchived: state.dayTimelineIncludeArchived,
+        workerFilter: state.dayTimelineWorkerFilter,
         minuteHeight: state.dayTimelineMinuteHeight,
         scrollTop: scroll.scrollTop,
         scrollLeft: scroll.scrollLeft
@@ -11896,10 +11910,10 @@ function fitDayTimeline() {
       scroll.scrollTop = hours === 24 ? 0 : 5 * 60 * state.dayTimelineMinuteHeight;
     }
 
-function openDayTimeline(date, { includeArchived = false, viewSnapshot = null } = {}) {
+function openDayTimeline(date, { includeArchived = false, viewSnapshot = null, workerFilter = null } = {}) {
       if (viewSnapshot && modalHistoryIgnoreNextPopstate) {
         void waitForModalHistoryTraversal().then(() => {
-          if (!document.querySelector("dialog[open]")) openDayTimeline(date, { includeArchived, viewSnapshot });
+          if (!document.querySelector("dialog[open]")) openDayTimeline(date, { includeArchived, viewSnapshot, workerFilter });
         });
         return;
       }
@@ -11912,6 +11926,7 @@ function openDayTimeline(date, { includeArchived = false, viewSnapshot = null } 
       state.dayTimelineDate = date;
       const restoreView = viewSnapshot?.date === date ? viewSnapshot : null;
       state.dayTimelineIncludeArchived = Boolean(restoreView?.includeArchived ?? includeArchived);
+      state.dayTimelineWorkerFilter = isAdminView() ? (restoreView?.workerFilter ?? workerFilter) : null;
       if (restoreView) state.dayTimelineMinuteHeight = restoreView.minuteHeight;
       state.dayTimelineInteraction = null;
       clearDayAllDayDropPreview();
@@ -11938,7 +11953,7 @@ function navigateDayTimeline(dayOffset) {
       const date = parseDate(state.dayTimelineDate);
       if (!date) return;
       date.setDate(date.getDate() + dayOffset);
-      openDayTimeline(dateKey(date), { includeArchived: state.dayTimelineIncludeArchived });
+      openDayTimeline(dateKey(date), { includeArchived: state.dayTimelineIncludeArchived, workerFilter: state.dayTimelineWorkerFilter });
     }
 
 function dayTimelineResizeModeAtPointer(event, eventElement) {
@@ -14920,6 +14935,9 @@ document.addEventListener("pointercancel", (event) => {
     });
 $("dayTimelineDialog").addEventListener("close", () => {
       state.dayTimelineSessionId += 1;
+      // Editor return has its own snapshot; a closed payroll day must not
+      // leave a temporary worker filter on later calendar actions.
+      state.dayTimelineWorkerFilter = null;
       const interaction = state.dayTimelineInteraction;
       state.dayTimelineInteraction = null;
       state.dayTimelinePointers.clear();

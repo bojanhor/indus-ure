@@ -1147,7 +1147,7 @@ test("calendar-only task controls are date-bound, unavailable for time entries, 
   assert.match(html, /if \(!canShowOnlyInCalendar\) calendarOnly\.checked = false;/);
   assert.match(html, /calendarOnly: Boolean\(!moduleValues\.timeEntryStatusIds\.has\(selectedStatus\) && !materialEntry && !noteEntry && \$\("todoFormDate"\)\.value && \$\("todoFormCalendarOnly"\)\.checked\)/);
   assert.match(html, /!todo\.calendarOnly && \(state\.todoSortMode === "imported" \? isImportedTodo\(todo\) : !isImportedTodo\(todo\)\)/);
-  assert.match(html, /function calendarTodos\(\{ includeArchived = false \} = \{\}\) \{[\s\S]*?!isImportedTodo\(todo\)/);
+  assert.match(html, /function calendarTodos\(\{ includeArchived = false, workerIds = state\.calendarWorkerIds \} = \{\}\) \{[\s\S]*?!isImportedTodo\(todo\)/);
 });
 
 test("vpis ur uporablja enak seznam izvornih statusov v brskalniku in strežniku", async () => {
