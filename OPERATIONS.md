@@ -721,3 +721,26 @@ bili spreminjani. Začetni lokalni neuspeh testa je bil zagon testnega
 strežnika; nato sta bili popravljeni priprava novega testnega delavca in
 testna kilometrina (potrditev 0 km ni del tega scenarija). Končni prehodi
 so uspešni; dodatnega posega v izračun ali pravice ni bilo.
+
+## Privzeta postavka pri preklopu ustvarjanja (30. 10. 2026)
+
+Potrjena druga napaka: novo planirano opravilo je v skritem polju hranilo
+privzeto postavko aktivnega delavca (Bojan 25 EUR/h). Po izbiri Štajerca
+in preklopu na Vpis ur je osnutek to številko prenesel kot izrecno postavko,
+namesto da bi prevzel njegovih 15 EUR/h. Regresijski brskalniški test je na
+prejšnji kodi ponovil 25 namesto 15.
+
+Osnutek zdaj hrani izvor postavke (samodejna/ročna in pripadajoči delavec).
+Samodejna postavka se ob prehodu ali obnovi osnutka določi za dejansko
+izbranega izvajalca. Ročna postavka, tudi 0, ostane pri istem izvajalcu;
+zamenjava izvajalca uporabi njegove privzete nastavitve. Pri starih osnutkih
+planiranja brez podatka o izvoru se skrita postavka obravnava kot privzeta.
+Prazen/null vhod ni ničelna postavka. Obstoječi shranjeni vpisi, nastavitve
+delavcev, obračunske formule in pravice se ne spreminjajo.
+
+Regresija preverja preklop opravilo–ure, zamenjavo delavca, ročni 17,50 in
+0 EUR/h, osvežitev z obnovo osnutka, dejanski zapis 15 EUR/h in API readback,
+stari osnutek ter izbiro iz več načrtovanih izvajalcev. Teče na namizni in
+mobilni širini v Chromiumu in Firefoxu. Nova polja so samo metapodatki
+odjemalčevega osnutka; brez migracije baze. Povrnitev je kodna na `5ecfbf3`;
+stara koda novih metapodatkov ne uporabi in lahko ponovno povzroči napako.

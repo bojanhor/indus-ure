@@ -806,6 +806,7 @@ function installTaskFormBindings1() {
       if (assignees.length !== 1 || (!isTimeEntry && hourlyRate.dataset.autoRate !== "true")) return;
       hourlyRate.value = workerDefaultHourlyRate(assignees[0]);
       hourlyRate.dataset.autoRate = "true";
+      hourlyRate.dataset.rateWorkerId = assignees[0];
     });
     $("todoFormClient").addEventListener("focus", renderTodoClientSuggestions);
     $("todoFormClient").addEventListener("input", () => {

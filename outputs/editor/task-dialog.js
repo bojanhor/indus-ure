@@ -343,13 +343,22 @@ async function openTodoDialog(todo = {}, { reportNavigationIds = null } = {}) {
       // image decoder and network queue are started.
       renderTodoFormPhotos({ imagePreviews: false });
       renderTodoFormDriveFiles();
-      const rateWorkerId = todo.syncUser || selectedAssignees[0] || activeWorkerId();
-      const requestedHourlyRate = Number(todo.billingHourlyRate);
+      const rateWorkerId = $("todoFormAssignees").querySelector("input:checked")?.value || todo.syncUser || activeWorkerId();
+      const requestedHourlyRate = todo.billingHourlyRate === null || String(todo.billingHourlyRate ?? "").trim() === ""
+        ? NaN : Number(todo.billingHourlyRate);
+      // A hidden planning-field default is not a deliberate payroll override.
+      // Keep its origin through tab changes/draft recovery, and resolve it for
+      // the actually selected worker (a radio group may reduce many assignees).
+      const legacyPlanningRate = todo._billingHourlyRateAuto === undefined
+        && ["task", "material", "note", "meal"].includes(todo._creationMode);
+      const rateWorkerChanged = Boolean(todo._billingHourlyRateWorkerId && todo._billingHourlyRateWorkerId !== rateWorkerId);
+      const useDefaultRate = todo._billingHourlyRateAuto === true || legacyPlanningRate || rateWorkerChanged || !Number.isFinite(requestedHourlyRate);
       const hourlyRateInput = $("todoFormHourlyRate");
       hourlyRateInput.value = editing
         ? todoHourlyRate(todo)
-        : (Number.isFinite(requestedHourlyRate) ? requestedHourlyRate : workerDefaultHourlyRate(rateWorkerId));
-      hourlyRateInput.dataset.autoRate = String(!editing && !Number.isFinite(requestedHourlyRate));
+        : (useDefaultRate ? workerDefaultHourlyRate(rateWorkerId) : requestedHourlyRate);
+      hourlyRateInput.dataset.autoRate = String(!editing && useDefaultRate);
+      hourlyRateInput.dataset.rateWorkerId = rateWorkerId;
       $("todoFormBillingKm").value = Number(todo.billingKm || 0);
       $("todoFormClientKm").value = Number(todo.clientKm || 0);
       const clientBillableHoursInput = $("todoFormClientBillableHours");

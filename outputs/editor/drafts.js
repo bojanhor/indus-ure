@@ -55,6 +55,8 @@ function todoCreationDraftFromForm() {
         workFromHome: $("todoFormWorkFromHome").checked,
         calendarOnly: $("todoFormCalendarOnly").checked,
         billingHourlyRate: optionalNumber("todoFormHourlyRate"),
+        _billingHourlyRateAuto: $("todoFormHourlyRate").dataset.autoRate === "true",
+        _billingHourlyRateWorkerId: $("todoFormHourlyRate").dataset.rateWorkerId || "",
         billingKm: optionalNumber("todoFormBillingKm"),
         clientKm: optionalNumber("todoFormClientKm"),
         clientVehicle: $("todoFormClientVehicle").value,

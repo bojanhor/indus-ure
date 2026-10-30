@@ -7,6 +7,89 @@ test.beforeEach(async () => { app = await startIsolatedTestApp(); });
 test.afterEach(async () => { await app?.stop(); });
 
 for (const width of [1280, 390]) {
+  test(`creation tabs use the selected worker rate and preserve intentional overrides at ${width}px`, async ({ page }, info) => {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto(app.baseUrl);
+    await page.locator('#localTestUser').selectOption('bojan');
+    await page.locator('#localTestPassword').fill(TEST_PASSWORD);
+    await page.locator('#localTestLoginBtn').click();
+    await expect(page.locator('#app')).toBeVisible();
+    await page.waitForLoadState('networkidle');
+    const workerId = await page.evaluate(async () => {
+      const worker = (await api('/api/workers', { method: 'POST', body: JSON.stringify({ name: 'Štajerc QA' }) })).worker;
+      for (const [userId, hourlyRate] of [['bojan', 25], [worker.id, 15]]) {
+        await api('/api/workers/billing', { method: 'PUT', body: JSON.stringify({ userId, hourlyRate }) });
+      }
+      await refreshAfterWorkerManagement(); setWorkContext('admin'); setView('todos');
+      return worker.id;
+    });
+    const rate = page.locator('#todoFormHourlyRate');
+    const selectWorker = () => page.locator(`#todoFormAssignees input[value="${workerId}"]`).check();
+    const switchMode = async mode => {
+      await page.locator(`#todoCreationTabs [data-create-mode="${mode}"]`).click();
+      await expect(page.locator(`#todoCreationTabs [data-create-mode="${mode}"]`)).toHaveAttribute('aria-selected', 'true');
+    };
+    await page.locator('#newTodoButton').click();
+    await selectWorker();
+    await page.locator('#todoFormTask').fill('QA selected worker default');
+    await switchMode('hours');
+    await expect(rate).toHaveValue('15');
+    await expect(page.locator(`#todoFormAssignees input[value="${workerId}"]`)).toBeChecked();
+    await page.screenshot({ path: info.outputPath('selected-worker-default.png') });
+
+    // An explicit rate, including zero, survives a tab round trip and reload.
+    for (const value of ['17.5', '0']) {
+      await rate.fill(value);
+      await switchMode('task');
+      await switchMode('hours');
+      await expect(rate).toHaveValue(value);
+      await page.evaluate(() => persistTodoCreationDraft());
+      await page.reload();
+      await expect(page.locator('#todoDialog')).toBeVisible();
+      await expect(rate).toHaveValue(value);
+    }
+    // Changing the worker while the rate is hidden must discard the old
+    // worker's override, just as changing the worker in the hours form does.
+    await switchMode('task');
+    await page.locator(`#todoFormAssignees input[value="${workerId}"]`).uncheck();
+    await page.locator('#todoFormAssignees input[value="bojan"]').check();
+    await switchMode('hours');
+    await expect(rate).toHaveValue('25');
+    await selectWorker();
+    await expect(rate).toHaveValue('15');
+    await switchMode('task');
+    await switchMode('hours');
+    await expect(rate).toHaveValue('15');
+    await page.locator('#todoFormClient').fill('QA stranka');
+    await page.locator('#todoFormTask').click();
+    await page.locator('#todoFormDate').fill('2026-10-30');
+    await page.evaluate(() => {
+      document.getElementById('todoFormStart').value = '07:30';
+      document.getElementById('todoFormEnd').value = '08:30';
+    });
+    await page.locator('#todoFormBillingKm').fill('3');
+    await page.locator('#todoFormClientKm').fill('3');
+    await page.locator('#saveTodoDialog').click();
+    await expect(page.locator('#todoDialog')).toBeHidden();
+    expect(await page.evaluate(async id => {
+      const todo = (await api('/api/todos')).todos.find(t => t.title === 'QA selected worker default');
+      return { worker: todo.syncUser === id, rate: todo.billingHourlyRate };
+    }, workerId)).toEqual({ worker: true, rate: 15 });
+
+    // Previously persisted planning drafts contain a hidden numeric rate,
+    // but no indication that it was only a default for the original worker.
+    await page.evaluate(id => openTodoDialog({ _creationMode: 'task', _standaloneHours: true, _adminCreate: true,
+      _draftAssigneeIds: [id], title: 'Legacy planning draft', billingHourlyRate: 25, _skipPersistedDraft: true }), workerId);
+    await expect(rate).toHaveValue('15');
+    await page.locator('#closeTodoDialog').click();
+    await expect(page.locator('#todoDialog')).toBeHidden();
+    await page.evaluate(id => openTodoDialog({ _standaloneHours: true, _adminCreate: true,
+      _draftAssigneeIds: [id, 'bojan'], billingHourlyRate: null, _skipPersistedDraft: true }), workerId);
+    expect(await page.evaluate(() => Number(document.getElementById('todoFormHourlyRate').value)))
+      .toBe(await page.evaluate(() => workerDefaultHourlyRate(selectedTodoFormAssignees()[0])));
+    await page.locator('#closeTodoDialog').click();
+  });
+
   test(`boss keeps administration and edits an individual payroll entry at ${width}px`, async ({ page }, info) => {
     await page.setViewportSize({ width, height: 900 });
     await page.goto(app.baseUrl);
