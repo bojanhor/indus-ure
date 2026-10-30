@@ -744,3 +744,17 @@ stari osnutek ter izbiro iz več načrtovanih izvajalcev. Teče na namizni in
 mobilni širini v Chromiumu in Firefoxu. Nova polja so samo metapodatki
 odjemalčevega osnutka; brez migracije baze. Povrnitev je kodna na `5ecfbf3`;
 stara koda novih metapodatkov ne uporabi in lahko ponovno povzroči napako.
+
+Lokalni kandidat `4d269ce`: Windows 357 uspešnih + 1 namensko preskočen
+enotski/API test, Chromium 131/131, Firefox 37 uspešnih + 3 namensko
+preskočeni testi dotika. Začetna regresija pred popravkom je pravilno padla
+pri 25 namesto 15; med pripravo je bil prilagojen še test, ki je poskušal
+izpolniti onemogočen, samodejni končni datum enodnevnega vpisa.
+Produkcijski bralni pregled na `5ecfbf3` je napako ponovil: Bojanova
+privzeta 25, Štajerčeva 15, nov obrazec po preklopu 25. Obstoječi testni
+vpis je pred/po identičen; brez poslovnih zapisov in JS napak.
+Objava kandidata še NI izvedena: varnostni nadzor zahteva izrecno dovoljenje
+za ta konkretni push na `origin/main` in produkcijski preklop. Pred objavo
+ostajajo obvezni strežniški PostgreSQL/restore QA, sveža preverjena recovery
+kopija ter produkcijski bralni smoke. Pripravljen je
+`tmp/rate-origin-production-20261030.cjs` v lokalnem delovnem prostoru.
