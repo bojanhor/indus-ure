@@ -700,3 +700,24 @@ obračuna, navigacijo dni in filter, spremembo 25 na 30,75 in nato 0 EUR/h,
 API readback, nespremenjeno privzeto postavko 25 EUR/h, vrnitev in reload.
 Vključena je v Chromium in Firefox prehod. Ni migracije baze; povrnitev je
 običajni preklop prejšnje kode brez obnove poslovnih podatkov.
+
+Objava: `5ecfbf3` (`5ecfbf341922b92b3f9c426bc8dbdabaf5cb8060`), predhodna
+`6ce16af`; izvorna koda na `origin/main`. Pred preklopom preverjena kopija
+`indus-ure-recovery-20261030T062335Z.tar.gz`, backup `Result=success`.
+Prehodi: Windows 357 uspešnih + 1 namensko preskočen test, Linux 358/358;
+Chromium 129/129, Firefox 35 uspešnih + 3 namensko preskočeni testi dotika,
+še ponovitev obeh novih Firefox regresij na končnem commitu. PostgreSQL
+34 fresh + 1 restore + 2 recovery/CSV + 4 produkcijski clone/rollback.
+
+Produkcijski brskalnik je dvakrat potrdil šefovski kontekst, vidno/omogočeno
+postavko in vrnitev v obračun za Štajerca 30. 10.; celotni poslovni zapis
+pred/po je identičen. Pri preverjanju je treba počakati na pridobljen zaklep,
+ne samo na prvo izrisano lupino obrazca. Produkcijske postavke niso bile
+spreminjane; dejanski zapis 30,75 in 0 EUR/h je preverjen v izolirani bazi.
+Splošni smoke: odpiranje/zaprtje opravila brez spremembe, priloga HTTP 200,
+obračun viden, brez JS napak. Ure HTTPS 200, Fakture HTTPS 303,
+Ure/Nginx/PostgreSQL/Fakture aktivni. Fakture in njuna infrastruktura nista
+bili spreminjani. Začetni lokalni neuspeh testa je bil zagon testnega
+strežnika; nato sta bili popravljeni priprava novega testnega delavca in
+testna kilometrina (potrditev 0 km ni del tega scenarija). Končni prehodi
+so uspešni; dodatnega posega v izračun ali pravice ni bilo.
