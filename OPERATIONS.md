@@ -753,8 +753,32 @@ izpolniti onemogočen, samodejni končni datum enodnevnega vpisa.
 Produkcijski bralni pregled na `5ecfbf3` je napako ponovil: Bojanova
 privzeta 25, Štajerčeva 15, nov obrazec po preklopu 25. Obstoječi testni
 vpis je pred/po identičen; brez poslovnih zapisov in JS napak.
-Objava kandidata še NI izvedena: varnostni nadzor zahteva izrecno dovoljenje
-za ta konkretni push na `origin/main` in produkcijski preklop. Pred objavo
-ostajajo obvezni strežniški PostgreSQL/restore QA, sveža preverjena recovery
-kopija ter produkcijski bralni smoke. Pripravljen je
-`tmp/rate-origin-production-20261030.cjs` v lokalnem delovnem prostoru.
+Prvotni push je varnostni nadzor ustavil do izrecnega dovoljenja. Uporabnik
+je nato 30. 10. 2026 odobril kopijo in objavo tega popravka, brez spreminjanja
+obstoječega testnega vpisa ali kilometrov.
+
+Objavljeno kot `4d269ce` (`4d269cecfda1e31e93092073f003dd3a738ba32f`),
+prejšnja izdaja `5ecfbf3`; koda je na `origin/main`. Strežniški prehod:
+358/358 testov, PostgreSQL 34 fresh + 1 restore + 2 recovery/CSV + 4
+production-clone/rollback. Obstoječi zneski in postavke v kopiji so enaki.
+Arhiv kandidata SHA-256:
+`29a75ec6b5cecfcb0d5dbccc106d91ab8862210a5c02e7883b94ee8e430627d9`.
+
+Pred preklopom uspešno preverjena recovery kopija
+`indus-ure-recovery-20261030T085038Z.tar.gz` (204426245 B), SHA-256
+`46c98ea8f69589e0b5acd0cd9252582b9b6b7075792b6b3e8824e8ab661fe318`.
+Potrjeni lokalni arhiv, Drive velikost/MD5/sveže branje, navodila in oba
+berljiva CSV (582 dogodkov, 380 vpisov ur). Obstoječa retencija in media GC
+sta zaključena uspešno; nastavitev hrambe v tej objavi nismo spreminjali.
+
+Produkcijski brskalnik na mobilni širini je po objavi potrdil 15 EUR/h
+za Štajerca po poti novo opravilo → izberi Štajerca → Vpis ur. Njegov
+obstoječi testni vpis s 25 EUR/h je pred/po identičen. Splošni bralni smoke:
+obstoječe opravilo se odpre/zapre nespremenjeno, priloga HTTP 200, obračun
+viden, brez poslovnih zapisov ali JS napak. Vizualno preverjen posnetek polja
+15 EUR/h; to ni preizkus na fizičnem telefonu. Skripta je v lokalnem prostoru
+`tmp/rate-origin-production-20261030.cjs`.
+Ure HTTPS 200, Fakture HTTPS 303, vse štiri storitve aktivne, backup timer
+vključen; v pregledanem intervalu ni opozoril Ure. Fakture niso spremenjene.
+Namestitev je ponovila opozorilo o dveh moderate ranljivostih obstoječih
+odvisnosti; njihove različice niso del tega popravka in niso bile spremenjene.
