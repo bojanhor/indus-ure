@@ -31,6 +31,7 @@ test('workers: global discard and atomic save including invalid second worker an
   await page.locator('#saveAllWorkers').click(); expect((await success).status()).toBe(200);
   await expect.poll(names).toEqual(expect.arrayContaining(['QA Boss','QA Worker']));
   await expect(page.locator('#saveAllWorkers')).toBeEnabled();
+  expect(await page.evaluate(async()=>(await api('/api/workers')).workers.find(w=>w.id==='ibro').timeEntryPermissionsConfigured)).toBe(false);
   const stale=await page.evaluate(async()=>{const w=(await api('/api/workers')).workers.find(x=>x.id==='ibro');
     await api('/api/workers/ibro',{method:'PUT',body:JSON.stringify({...w,name:'Concurrent'})});
     try{await api('/api/workers',{method:'PUT',body:JSON.stringify({workers:[{id:w.id,base:w,changes:{...w,name:'Stale'}}]})});return 200;}catch(e){return e.status;}
@@ -48,6 +49,8 @@ test('undated manual view, resettable search and authenticated share link',async
   await expect(page.locator('#todoItems')).toContainText('Lookup no date'); await expect(page.locator('#todoItems')).not.toContainText('Lookup dated');
   await page.locator('#clientSearch').fill('Lookup'); await page.locator('[data-search-filter="undated"]').check();
   await expect(page.locator('#searchPanel .result')).toHaveCount(1);
+  await page.locator('#clientSearch').fill('Look'); await expect(page.locator('[data-search-filter="undated"]')).not.toBeChecked();
+  await page.locator('[data-search-filter="undated"]').check();
   await page.locator('[data-close-search]').click(); await page.locator('#clientSearch').fill('Lookup');
   await expect(page.locator('#searchPanel .result')).toHaveCount(2); await expect(page.locator('[data-search-filter="undated"]')).not.toBeChecked();
   await page.locator('#searchPanel .search-result-open').filter({hasText:'Lookup no date'}).click();

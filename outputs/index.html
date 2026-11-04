@@ -5722,6 +5722,8 @@
     .worker-management-list { display: grid; gap: 12px; margin: 0; }
     .worker-management-card { border: 1px solid var(--line); border-radius: 12px; padding: 14px; background: #fff; }
     .worker-management-card.inactive { opacity: .68; background: #f7f8f8; }
+    #workersDialog .modal-head .actions { display:flex; flex-flow:row nowrap; align-items:center; gap:6px; margin:0; }
+    #workersDialog .modal-head .actions > button { flex:none; }
     .worker-management-card > summary { cursor: pointer; padding: 4px; }
     .worker-management-card[open] > summary { margin-bottom: 10px; }
     .worker-management-card[hidden] { display:none; }
@@ -6866,12 +6868,12 @@
   <dialog id="workersDialog" class="workers-dialog">
     <form method="dialog" id="workersForm">
       <div class="modal-head">
-        <div><h3>Delavci</h3><p class="todo-meta">Google e-pošta je neobvezna: brez nje je delavec v evidenci, prijaviti pa se še ne more.</p></div>
+        <h3>Delavci</h3>
         <div class="actions"><button class="primary" id="saveAllWorkers" type="button">Shrani</button><button class="secondary" id="cancelWorkers" type="button">Zavrzi</button><button class="icon-btn" id="closeWorkers" type="button" title="Zapri brez shranjevanja">&times;</button></div>
       </div>
       <div class="modal-body">
         <section class="worker-create-panel">
-          <h4>Dodaj delavca</h4>
+          <div><h4>Dodaj delavca</h4><p class="todo-meta">Google e-pošta je neobvezna. Brez nje se delavec ne more prijaviti.</p></div>
           <div class="worker-create-grid">
             <label>Ime in priimek<input id="workerCreateName" type="text" maxlength="120" autocomplete="name" placeholder="Npr. Janez Novak" required></label>
             <label>Google e-pošta <span class="todo-meta">(neobvezno)</span><input id="workerCreateEmail" type="email" maxlength="240" autocomplete="email" placeholder="ime@podjetje.si"></label>
@@ -13688,6 +13690,7 @@ function rememberSearchReturnState() {
 
 let clientSearchRenderTimer = 0;
 function handleClientSearchInput() {
+      state.searchHideDated = false;
       const hasQuery = Boolean($("clientSearch").value.trim());
       if (hasQuery) rememberSearchReturnState();
       else state.searchReturnState = null;
@@ -14490,7 +14493,13 @@ async function saveAllManagedWorkers() {
       if ([...$("workerManagementList").querySelectorAll('input[type=password]')].some(el => el.value)) {
         throw new Error("LAN-geslo nastavi posebej. Pred skupnim shranjevanjem izprazni polji za novo geslo.");
       }
-      const workers = cards.map(card => ({ id: card.dataset.workerId, base: state.workerManagement.find(w => w.id === card.dataset.workerId), changes: managedWorkerChanges(card) }));
+      const workers = cards.map(card => {
+        const id = card.dataset.workerId, base = state.workerManagement.find(w => w.id === id);
+        const changes = managedWorkerChanges(card);
+        // Saving a name or rate must not turn inherited time-entry permissions into a fixed allowlist.
+        if (changes.timeEntryForIds.length === base.timeEntryForIds.length && changes.timeEntryForIds.every(id => base.timeEntryForIds.includes(id))) delete changes.timeEntryForIds;
+        return { id, base, changes };
+      });
       savingWorkers = true;
       $("saveAllWorkers").disabled = true;
       $("workerManagementList").inert = true;
