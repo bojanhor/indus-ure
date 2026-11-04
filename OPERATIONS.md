@@ -271,6 +271,24 @@ Ni migracije ali popravkov obstoječih poslovnih zapisov. Povrnitev na
 komentarja odsotnosti ne prikazuje. Poseg ne spreminja Faktur, Nginxa ali
 pravil za kopije.
 
+Objavljeno: `b8c8fc6`, prejšnja izdaja `4d269ce`. Sveža preverjena kopija
+`indus-ure-recovery-20261104T133634Z.tar.gz` (lokalni arhiv, sveže Drive
+branje, velikost/MD5, oba CSV in navodila). Med pripravo je zmanjkalo prostora
+na začasnem tmpfs; oba kandidata tega posega sta bila odstranjena, končni
+kandidat znova pripravljen. Nespremenjeni lockfile in node_modules sta bila
+primerjana z delujočo izdajo. Na končnem kandidatu: Windows 357 uspešnih in
+1 namensko preskočen; Linux 358; Chromium 134; Firefox 40 in 3 namensko
+preskočeni; PostgreSQL 36 fresh, 1 restore, 2 recovery in 4 upgrade/rollback.
+
+Produkcijski bralni smoke: delavci/filtri/koledar/odsotnost/deljenje,
+Ibrova povezava do obstoječega opravila, priloga HTTP 200 in obračun, brez
+poslovnih zapisov. Konkretni primer iz e-pošte je v košu od 3. 11. 2026 ob
+11:51 po lokalnem času: dostop je pravilno zavrnjen, dogodek ni bil obnovljen.
+Dostop avtorja pri dodelitvi izključno drugemu in zahtevek s preizkusnim
+žetonom sta bila preverjena v izolirani PostgreSQL bazi, brez pošiljanja
+prave e-pošte. Po preverjanju iz TODO odstranjenih osem točk in pripadajoče
+slike; ponovno branje je potrdilo prazen seznam.
+
 ## Obvezni postopek objave Ure
 
 1. Čisto commitano stanje, pregled diff-a in brez sprememb tujih projektov.
