@@ -189,7 +189,7 @@ test("front-end naročila in foto urejevalnik ohranita dogovorjeni mobilni prika
   assert.match(html, /overscroll-behavior-y: none/);
   assert.match(html, /function panMonthTodoPointerGesture\(drag, event\)/);
   assert.match(html, /id="toolsMenuNotificationsCount"/);
-  assert.match(html, /todoSortModes = \["manual", "client", "date", "order", "completed", "open", "in_progress", "imported"\]/);
+  assert.match(html, /todoSortModes = \["manual", "manual_undated", "client", "date", "order", "completed", "open", "in_progress", "imported"\]/);
   assert.match(html, /function isImportedTodo\(todo\)/);
   assert.match(html, /state\.todoSortMode === "imported" \? isImportedTodo\(todo\) : !isImportedTodo\(todo\)/);
   assert.match(html, /id="todoImportedOption" value="imported" hidden disabled/);
@@ -283,7 +283,7 @@ test("ročni filter loči in omogoča razvrščanje nujnih opravil", async () =>
   assert.match(html, /function todoManualCategory\(todo\) \{\s*if \(todo\?\.urgent\) return "urgent";/);
   assert.match(html, /if \(manualOrderingStatusIds\.has\(todo\?\.status\)\) return "ordering";/);
   assert.match(html, /const positions = \{ urgent: 0, ordering: 1, unsorted: 2, sorted: 3 \}/);
-  assert.match(html, /if \(state\.todoSortMode === "manual"\) \{\s*return list\.filter\(\(todo\) => !todo\.done && !timeEntryStatusIds\.has\(todo\.status\)\)\.sort\(todoManualCategorySort\);/);
+  assert.match(html, /if \(isManualTodoMode\(\)\) \{\s*return list\.filter\(\(todo\) => !todo\.done && !timeEntryStatusIds\.has\(todo\.status\) && \(state\.todoSortMode !== "manual_undated" \|\| !todo\.date\)\)\.sort\(todoManualCategorySort\);/);
   assert.match(html, /urgent: \["Nujno", "Nujna opravila"\]/);
   assert.match(html, /const collapsible = bucket === "ordering";/);
   assert.match(html, /function appendTodoOrderSection\(items, bucket, itemCount = 0\)/);
@@ -894,7 +894,7 @@ test("e-poštna povezava odpre ciljno opravilo pred celotnim nalaganjem", async 
     fs.readFile(path.join(__dirname, "..", "outputs", "postgres-store.js"), "utf8")
   ]);
   assert.match(server, /function visibleTodoForUser\(db, user, id\) \{/);
-  assert.match(server, /const todo = visibleTodoForUser\(db, user, id\);/);
+  assert.match(server, /const todo = visibleTodoForUser\(db, user, targetId\);/);
   assert.match(server, /async function requireUserForFocusedTodo\(req, res\) \{/);
   const storage = await fs.readFile(path.join(__dirname, "..", "outputs", "storage.js"), "utf8");
   assert.match(storage, /function getFocusedPgPool\(\) \{/);

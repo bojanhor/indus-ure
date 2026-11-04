@@ -59,9 +59,11 @@ test('worker icon and permissions persist; removal hides worker without deleting
     await openWorkersDialog(); return worker.id;
   });
   const card = page.locator(`[data-worker-id="${id}"]`);
+  await card.locator('summary').click();
   await card.locator('[data-worker-avatar-initial]').selectOption('ž');
   await card.locator('[data-worker-avatar-color]').fill('#ffd000');
-  await card.locator('[data-save-worker]').click();
+  await page.locator('#saveAllWorkers').click();
+  await expect(page.locator('#saveAllWorkers')).toBeEnabled();
   await expect(card.locator('[data-worker-avatar-initial]')).toHaveValue('ž');
   const saved = await page.evaluate(async id => {
     const { workers } = await api('/api/workers');
@@ -82,16 +84,17 @@ test('worker icon and permissions persist; removal hides worker without deleting
   await page.evaluate(() => openWorkersDialog());
   await page.setViewportSize({ width: 390, height: 844 });
   await page.screenshot({ path: info.outputPath('worker-settings-mobile.png') });
+  await card.locator('summary').click();
   await card.locator('[data-remove-worker]').click();
   await page.locator('#appConfirmAccept').click();
-  await expect(card).toHaveCount(0);
+  await expect(card).toBeHidden();
   expect((await page.evaluate(async () => (await api('/api/workers')).workers.find(w => w.id === 'ibro'))).timeEntryForIds).not.toContain(id);
   await page.locator('#showInactiveWorkers').check();
   await expect(card).toHaveCount(1);
   await expect(card.locator('[data-reactivate-worker]')).toBeVisible();
   expect(await page.evaluate(async () => (await api('/api/todos')).todos.some(t => t.title === 'Zgodovina ikone QA'))).toBe(true);
   await card.locator('[data-reactivate-worker]').click();
-  await expect(card.locator('[data-save-worker]')).toBeEnabled();
+  await expect(card.locator('[data-worker-name]')).toBeEnabled();
 });
 
 test('month opens at today and orders have an orange stripe, not a filled card', async ({ page }, info) => {

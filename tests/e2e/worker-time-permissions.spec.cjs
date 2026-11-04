@@ -42,6 +42,7 @@ test('boss edits per-worker hour allowlist; generic worker sees grants, revocati
     await boss.evaluate(() => openWorkersDialog());
     await boss.setViewportSize({ width: 390, height: 844 });
     const card = boss.locator(`[data-worker-id="${actor.id}"]`);
+    await card.locator('summary').click();
     const check = id => card.locator(`[data-worker-time-entry-for][value="${id}"]`);
     await expect(check(actor.id)).toBeChecked();
     await expect(check(external.id)).toBeChecked();
@@ -49,7 +50,7 @@ test('boss edits per-worker hour allowlist; generic worker sees grants, revocati
     await check(target.id).check();
     await card.locator('.worker-permissions').scrollIntoViewIfNeeded();
     await boss.screenshot({ path: info.outputPath('worker-hour-permissions-mobile.png') });
-    await card.locator('[data-save-worker]').click();
+    await boss.locator('#saveAllWorkers').click();
     await expect.poll(async () => (await call(boss, '/api/workers')).data.workers.find(w => w.id === actor.id).timeEntryForIds).toEqual([actor.id, target.id]);
     await worker.evaluate(() => autoRefreshSharedData());
     await expect.poll(() => worker.evaluate(() => state.user.timeEntryForIds)).toContain(target.id);
@@ -78,14 +79,14 @@ test('boss edits per-worker hour allowlist; generic worker sees grants, revocati
     await worker.locator('#closeAbsence').click();
     // Revoke while the worker still holds the old permission list in memory.
     await check(target.id).uncheck();
-    await card.locator('[data-save-worker]').click();
+    await boss.locator('#saveAllWorkers').click();
     await expect.poll(async () => (await call(boss, '/api/workers')).data.workers.find(w => w.id === actor.id).timeEntryForIds).toEqual([actor.id]);
     expect((await call(worker, '/api/todos', 'POST', { ...entry, assigneeIds: [target.id] })).status).toBe(403);
     expect((await call(worker, `/api/todos/${saved.id}`, 'PUT', { ...saved, assigneeIds: [target.id], baseUpdatedAt: saved.updatedAt })).status).toBe(403);
     expect((await call(worker, '/api/todos/time-batch', 'POST', { items: [{ id: saved.id, date: saved.date, start: '09:00', end: '10:00', baseUpdatedAt: saved.updatedAt }] })).status).toBe(403);
     expect((await call(worker, `/api/todos/${saved.id}/time`, 'POST', { start: '09:00', end: '10:00' })).status).toBe(403);
     await check(actor.id).uncheck();
-    await card.locator('[data-save-worker]').click();
+    await boss.locator('#saveAllWorkers').click();
     await expect.poll(async () => (await call(boss, '/api/workers')).data.workers.find(w => w.id === actor.id).timeEntryForIds).toEqual([]);
     await worker.reload(); await expect(worker.locator('#app')).toBeVisible();
     await worker.locator('#writeHoursButton').click();

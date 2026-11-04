@@ -33,10 +33,13 @@ for (const user of ['bojan', 'ibro']) test(`${user}: month plus opens absence fo
   await expect(page.locator('#absenceEndDate')).toHaveValue('2026-10-26');
   if (user === 'bojan') await expect(page.locator('#absenceWorker')).toBeVisible();
   else { await expect(page.locator('#absenceWorker')).toBeHidden(); await expect(page.locator('#absenceWorkerName')).toHaveText('Ibro'); }
+  await page.locator('#absenceComment').fill('QA komentar odsotnosti');
   await page.screenshot({ path: info.outputPath('absence-from-month-plus.png') });
   await page.locator('#saveAbsence').click();
   await expect(page.locator('#absenceDialog')).toBeHidden();
-  expect((await call(page, '/api/absences')).data.absences.some(a => a.workerId === user && a.date === '2026-10-26')).toBe(true);
+  expect((await call(page, '/api/absences')).data.absences.some(a => a.workerId === user && a.date === '2026-10-26' && a.comment === 'QA komentar odsotnosti')).toBe(true);
+  await expect(page.locator('.day[data-date="2026-10-26"]')).toContainText('QA komentar odsotnosti');
+  expect(await page.evaluate(() => Absences.calendarItem(state.absences[0],{external:true}).title)).toBe('Odsotnost');
   expect((await call(page, '/api/todos')).data.todos.length).toBe(before);
   await page.locator('.day[data-date="2026-10-26"] .quick-add').click();
   await expect(page.locator('#todoFormTask')).toHaveValue('Keep this unfinished task');

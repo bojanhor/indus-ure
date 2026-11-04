@@ -619,7 +619,27 @@ function installTaskSaveBindings1() {
       await openTodoDialog(source);
     });
     $("writeHoursFromTodo").addEventListener("click", () => openHoursTodoFromCurrent().catch((error) => showNotice(error.message)));
-    $("shareTodoPdf").addEventListener("click", () => shareTodoPdf().catch((error) => showNotice(error.message)));
+    $("shareTodoPdf").addEventListener("click", () => {
+      const todo = state.todos.find(t => t.id === $("todoFormId").value);
+      if (!todo) return;
+      const url = new URL("/", location.origin);
+      url.searchParams.set("todo", todo.assignmentGroupId || todo.id);
+      $("shareEventLink").value = url.href;
+      $("shareEventLink").hidden = true;
+      $("shareEventDialog").showModal();
+    });
+    $("shareEventExport").addEventListener("click", () => {
+      $("shareEventDialog").close();
+      shareTodoPdf().catch(error => showNotice(error.message));
+    });
+    $("shareEventCopy").addEventListener("click", async () => {
+      const field = $("shareEventLink");
+      try {
+        await navigator.clipboard.writeText(field.value);
+        $("shareEventDialog").close();
+        showNotice("Povezava je kopirana.");
+      } catch { field.hidden = false; field.focus(); field.select(); }
+    });
     $("requestTodoCompletion").addEventListener("click", () => {
       try { openCompletionRequestDialog($("todoFormId").value); } catch (error) { showNotice(error.message); }
     });

@@ -17,14 +17,15 @@ const Absences = (() => {
     if (!Object.hasOwn(reasons, input.reason)) throw new Error("Izberi razlog: bolezen ali dopust.");
     const viewers = Array.isArray(input.viewerIds) ? input.viewerIds.map(String) : [];
     if (viewers.some(id => !users[id])) throw new Error("Izbrana oseba za ogled ne obstaja.");
-    return { workerId, date: input.date, endDate: input.endDate, reason: input.reason,
+    const comment = String(input.comment ?? previous?.comment ?? "").trim().slice(0, 300);
+    return { workerId, date: input.date, endDate: input.endDate, reason: input.reason, comment,
       viewerIds: [...new Set([workerId, ...Object.values(users).filter(user => user.role === "boss").map(user => user.id), ...viewers])],
       deletedAt: "" };
   }
   function calendarItem(item, { external = false } = {}) {
     // Whitelist: medical/vacation reason and viewer list never enter exports.
     return { id: item.id, assignmentGroupId: `absence-${item.id}`, status: "absence", _absence: true,
-      title: external ? "Odsotnost" : `Odsotnost · ${reasons[item.reason] || ""}`,
+      title: external ? "Odsotnost" : ["Odsotnost", reasons[item.reason], item.comment].filter(Boolean).join(" · "),
       date: item.date, endDate: item.endDate, start: "", end: "", assigneeIds: [item.workerId],
       syncUser: item.workerId, createdAt: item.createdAt, updatedAt: item.updatedAt, client: "", notes: "" };
   }

@@ -3185,6 +3185,81 @@ function workerHasBusinessData(db, userId) {
     .some((collection) => Array.isArray(collection) && collection.some(refersToUser));
 }
 
+function applyWorkerProfileEdit(db, user, id, body) {
+  const worker = db.users?.[id];
+  if (!worker) {
+    throw Object.assign(new Error("Delavec ne obstaja."), { status: 404 });
+  }
+  const name = String(body.name || "").trim().replace(/\s+/g, " ").slice(0, 120);
+  const email = String(body.email || "").trim().toLowerCase();
+  if (!name) {
+    throw Object.assign(new Error("Vpiši ime delavca."), { status: 400 });
+  }
+  if (email && !validEmailAddress(email)) {
+    throw Object.assign(new Error("Google e-pošta ni pravilna."), { status: 400 });
+  }
+  if (email && Object.values(db.users || {}).some((candidate) => candidate.id !== id && String(candidate.email || "").toLowerCase() === email)) {
+    throw Object.assign(new Error("Ta Google e-pošta je že dodeljena drugemu delavcu."), { status: 409 });
+  }
+  const active = worker.role === "boss" ? true : body.active !== false;
+  const avatarInitial = String(body.avatarInitial ?? worker.avatarInitial ?? "");
+  const avatarColor = String(body.avatarColor ?? worker.avatarColor ?? "");
+  if ((avatarInitial && !/^[ABCČDEFGHIJKLMNOPRSŠTUVZŽabcčdefghijklmnoprsštuvzž]$/.test(avatarInitial))
+      || (avatarColor && !/^#[0-9a-f]{6}$/i.test(avatarColor))) {
+    throw Object.assign(new Error("Izberi eno črko slovenske abecede in veljavno barvo."), { status: 400 });
+  }
+  const permissionsProvided = Object.hasOwn(body, "timeEntryForIds");
+  if (permissionsProvided && (!Array.isArray(body.timeEntryForIds)
+      || body.timeEntryForIds.some(targetId => typeof targetId !== "string" || !cleanUserId(targetId)
+        || !Object.hasOwn(db.users, targetId) || (db.users[targetId].active === false && !(targetId === id && active))))) {
+    throw Object.assign(new Error("Za vpis ur izberi samo aktivne delavce."), { status: 400 });
+  }
+  const timeEntryForIds = permissionsProvided ? [...new Set(body.timeEntryForIds)]
+    : Array.isArray(worker.timeEntryForIds) ? worker.timeEntryForIds : [id];
+  const previousTimeEntryForIds = timeEntryTargetIds(db, worker);
+  const billing = body.billing === undefined ? null : normalizeWorkerBillingInput(db, id, body.billing);
+  if (body.billing !== undefined && !billing) {
+    throw Object.assign(new Error("Vnesi veljavno urno postavko, kilometrino in pot v službo."), { status: 400 });
+  }
+  const currentDailyReport = workerDailyReportSettings(db, worker);
+  const requestedDailyReport = body.dailyReport && typeof body.dailyReport === "object" ? body.dailyReport : currentDailyReport;
+  const reportEmailEnabled = requestedDailyReport.emailEnabled !== false;
+  const requestedReportRecipient = String(requestedDailyReport.recipientEmail || "").trim().toLowerCase();
+  const reportRecipientEmail = requestedReportRecipient || dailyReportBossEmail(db);
+  if (reportEmailEnabled && !validEmailAddress(reportRecipientEmail)) {
+    throw Object.assign(new Error("Vpiši veljaven e-poštni naslov za dnevna poročila."), { status: 400 });
+  }
+  if (requestedReportRecipient && !validEmailAddress(requestedReportRecipient)) {
+    throw Object.assign(new Error("E-poštni naslov za dnevna poročila ni pravilen."), { status: 400 });
+  }
+  worker.name = name;
+  worker.email = email;
+  worker.active = active;
+  worker.avatarInitial = avatarInitial;
+  worker.avatarColor = avatarColor;
+  worker.employmentType = "contractor";
+  if (billing) worker.billing = billing;
+  worker.timeEntryForIds = active ? timeEntryForIds : [];
+  if (permissionsProvided && worker.role !== "boss") worker.timeEntryPermissionsConfigured = true;
+  worker.dailyReport = {
+    emailEnabled: reportEmailEnabled,
+    recipientEmail: reportRecipientEmail,
+    includeZeroHours: requestedDailyReport.includeZeroHours === true
+  };
+  for (const candidate of Object.values(db.users || {})) {
+    if (!candidate || candidate.id === id) continue;
+    if (!active && Array.isArray(candidate.timeEntryForIds)) candidate.timeEntryForIds = candidate.timeEntryForIds.filter((targetId) => targetId !== id);
+  }
+  normalizeWorkerProfile(id, worker, db.users);
+  recordAuditLog(db, {
+    actor: user,
+    action: "spremenjen delavec",
+    targetType: "worker",
+    targetId: id,
+    context: { userId: id, name, hasGoogleLogin: Boolean(email), active: worker.active, employmentType: worker.employmentType, previousTimeEntryForIds, timeEntryForIds: timeEntryTargetIds(db, worker), dailyReport: worker.dailyReport }
+  });
+}
+
 function publicWorkerManagementUser(db, user) {
   return {
     id: user.id,
@@ -5767,100 +5842,36 @@ async function handleApi(req, res) {
       return;
     }
     const workerMatch = url.pathname === "/api/workers/billing" ? null : /^\/api\/workers\/([^/]+)$/.exec(url.pathname);
-    if (workerMatch && req.method === "PUT") {
+    const bulkWorkers = url.pathname === "/api/workers" && req.method === "PUT";
+    if ((workerMatch && req.method === "PUT") || bulkWorkers) {
       const user = await requireUser(req, res);
       if (!user) return;
-      if (user.role !== "boss") {
-        sendJson(res, 403, { error: "Delavce lahko upravlja samo šef." });
-        return;
-      }
-      const id = cleanUserId(decodeURIComponent(workerMatch[1]));
-      const body = await readBody(req);
+      if (user.role !== "boss") { sendJson(res, 403, { error: "Delavce lahko upravlja samo šef." }); return; }
+      const input = await readBody(req);
       const db = await readRequestDb(req);
-      const worker = db.users?.[id];
-      if (!worker) {
-        sendJson(res, 404, { error: "Delavec ne obstaja." });
-        return;
+      const edits = bulkWorkers ? input.workers : [{ id: cleanUserId(decodeURIComponent(workerMatch[1])), changes: input }];
+      if (!Array.isArray(edits) || !edits.length || edits.length > Object.keys(db.users).length
+          || edits.some(e => !e || typeof e.id !== "string" || !Object.hasOwn(db.users, e.id) || !e.changes || typeof e.changes !== "object")
+          || new Set(edits.map(e => e.id)).size !== edits.length) {
+        sendJson(res, bulkWorkers ? 400 : 404, { error: "Neveljaven seznam delavcev." }); return;
       }
-      const name = String(body.name || "").trim().replace(/\s+/g, " ").slice(0, 120);
-      const email = String(body.email || "").trim().toLowerCase();
-      if (!name) {
-        sendJson(res, 400, { error: "Vpiši ime delavca." });
-        return;
+      if (bulkWorkers && edits.some(e => stableJsonForHash(e.base) !== stableJsonForHash(publicWorkerManagementUser(db, db.users[e.id])))) {
+        sendJson(res, 409, { error: "Nastavitve so se med urejanjem spremenile. Znova odpri delavce." }); return;
       }
-      if (email && !validEmailAddress(email)) {
-        sendJson(res, 400, { error: "Google e-pošta ni pravilna." });
-        return;
+      // All validations and audit events use this request's private snapshot.
+      // Commit once only after every edited worker has passed validation.
+      try {
+        for (const { id, changes } of edits.slice().sort((a,b) => Number(a.changes.active === false) - Number(b.changes.active === false))) {
+          applyWorkerProfileEdit(db, user, id, changes);
+        }
+      } catch (error) {
+        if (!error.status) throw error;
+        sendJson(res, error.status, { error: error.message }); return;
       }
-      if (email && Object.values(db.users || {}).some((candidate) => candidate.id !== id && String(candidate.email || "").toLowerCase() === email)) {
-        sendJson(res, 409, { error: "Ta Google e-pošta je že dodeljena drugemu delavcu." });
-        return;
-      }
-      const active = worker.role === "boss" ? true : body.active !== false;
-      const avatarInitial = String(body.avatarInitial ?? worker.avatarInitial ?? "");
-      const avatarColor = String(body.avatarColor ?? worker.avatarColor ?? "");
-      if ((avatarInitial && !/^[ABCČDEFGHIJKLMNOPRSŠTUVZŽabcčdefghijklmnoprsštuvzž]$/.test(avatarInitial))
-          || (avatarColor && !/^#[0-9a-f]{6}$/i.test(avatarColor))) {
-        sendJson(res, 400, { error: "Izberi eno črko slovenske abecede in veljavno barvo." });
-        return;
-      }
-      const permissionsProvided = Object.hasOwn(body, "timeEntryForIds");
-      if (permissionsProvided && (!Array.isArray(body.timeEntryForIds)
-          || body.timeEntryForIds.some(targetId => typeof targetId !== "string" || !cleanUserId(targetId)
-            || !Object.hasOwn(db.users, targetId) || (db.users[targetId].active === false && !(targetId === id && active))))) {
-        sendJson(res, 400, { error: "Za vpis ur izberi samo aktivne delavce." }); return;
-      }
-      const timeEntryForIds = permissionsProvided ? [...new Set(body.timeEntryForIds)]
-        : Array.isArray(worker.timeEntryForIds) ? worker.timeEntryForIds : [id];
-      const previousTimeEntryForIds = timeEntryTargetIds(db, worker);
-      const billing = body.billing === undefined ? null : normalizeWorkerBillingInput(db, id, body.billing);
-      if (body.billing !== undefined && !billing) {
-        sendJson(res, 400, { error: "Vnesi veljavno urno postavko, kilometrino in pot v službo." });
-        return;
-      }
-      const currentDailyReport = workerDailyReportSettings(db, worker);
-      const requestedDailyReport = body.dailyReport && typeof body.dailyReport === "object" ? body.dailyReport : currentDailyReport;
-      const reportEmailEnabled = requestedDailyReport.emailEnabled !== false;
-      const requestedReportRecipient = String(requestedDailyReport.recipientEmail || "").trim().toLowerCase();
-      const reportRecipientEmail = requestedReportRecipient || dailyReportBossEmail(db);
-      if (reportEmailEnabled && !validEmailAddress(reportRecipientEmail)) {
-        sendJson(res, 400, { error: "Vpiši veljaven e-poštni naslov za dnevna poročila." });
-        return;
-      }
-      if (requestedReportRecipient && !validEmailAddress(requestedReportRecipient)) {
-        sendJson(res, 400, { error: "E-poštni naslov za dnevna poročila ni pravilen." });
-        return;
-      }
-      worker.name = name;
-      worker.email = email;
-      worker.active = active;
-      worker.avatarInitial = avatarInitial;
-      worker.avatarColor = avatarColor;
-      worker.employmentType = "contractor";
-      if (billing) worker.billing = billing;
-      worker.timeEntryForIds = active ? timeEntryForIds : [];
-      if (permissionsProvided && worker.role !== "boss") worker.timeEntryPermissionsConfigured = true;
-      worker.dailyReport = {
-        emailEnabled: reportEmailEnabled,
-        recipientEmail: reportRecipientEmail,
-        includeZeroHours: requestedDailyReport.includeZeroHours === true
-      };
-      for (const candidate of Object.values(db.users || {})) {
-        if (!candidate || candidate.id === id) continue;
-        if (!active && Array.isArray(candidate.timeEntryForIds)) candidate.timeEntryForIds = candidate.timeEntryForIds.filter((targetId) => targetId !== id);
-      }
-      normalizeWorkerProfile(id, worker, db.users);
-      recordAuditLog(db, {
-        actor: user,
-        action: "spremenjen delavec",
-        targetType: "worker",
-        targetId: id,
-        context: { userId: id, name, hasGoogleLogin: Boolean(email), active: worker.active, employmentType: worker.employmentType, previousTimeEntryForIds, timeEntryForIds: timeEntryTargetIds(db, worker), dailyReport: worker.dailyReport }
-      });
       await writeDbAsync(db);
       sendJson(res, 200, {
-        worker: publicWorkerManagementUser(db, worker),
-        workers: Object.values(db.users).map((candidate) => publicWorkerManagementUser(db, candidate))
+        ...(!bulkWorkers ? { worker: publicWorkerManagementUser(db, db.users[edits[0].id]) } : {}),
+        workers: Object.values(db.users).map(candidate => publicWorkerManagementUser(db, candidate))
       });
       return;
     }
@@ -7056,7 +7067,8 @@ async function handleApi(req, res) {
           sendJson(res, 403, { error: "Povezava za dopolnitev ni veljavna ali je potekla." });
           return;
         }
-        if (!request.recipientUserIds.includes(user.id)) {
+        const addressed = request.recipientUserIds.includes(user.id);
+        if (!addressed && requestGroup.createdBy !== user.id && user.role !== "boss") {
           sendJson(res, 403, { error: "Ta povezava je namenjena drugemu uporabniku." });
           return;
         }
@@ -7064,7 +7076,7 @@ async function handleApi(req, res) {
           const candidate = assignment?.data || {};
           return user.role === "boss"
             || String(candidate.syncUser || "") === user.id
-            || String(candidate.createdBy || "") === user.id
+            || requestGroup.createdBy === user.id
             || String(assignment.workerId || "") === user.id;
         });
         if (!recipientAssignment) {
@@ -7081,14 +7093,16 @@ async function handleApi(req, res) {
           ...source,
           assigneeIds: focused.assigneeIds
         });
-        const { completionRequests, ...todo } = hydrated;
+        const { completionRequests, history, revisionHistory, changeNotices, ...publicTodo } = hydrated;
+        const todo = { ...publicTodo, ...(user.role === "boss" ? { history, revisionHistory } : {}),
+          clientSettlement: clientSettlementFromBill(await getPgStore().confirmedClientBillForEvent(todoBillingEventId(source))) };
         sendJson(res, 200, {
           todo,
-          request: {
+          request: addressed ? {
             requestedByName: request.requestedByName || request.requestedBy,
             comment: request.comment,
             expiresAt: request.expiresAt
-          }
+          } : null
         });
         return;
       }
@@ -7106,7 +7120,8 @@ async function handleApi(req, res) {
         }
         todo = match.todo;
         const request = match.request;
-        if (!request.recipientUserIds.includes(user.id)) {
+        const addressed = request.recipientUserIds.includes(user.id);
+        if (!addressed && todo.createdBy !== user.id && user.role !== "boss") {
           sendJson(res, 403, { error: "Ta povezava je namenjena drugemu uporabniku." });
           return;
         }
@@ -7118,11 +7133,11 @@ async function handleApi(req, res) {
         const visible = visibleTodosForUser({ ...db, todos: [recipientTodo] }, user)[0];
         sendJson(res, 200, {
           todo: visible,
-          request: {
+          request: addressed ? {
             requestedByName: request.requestedByName || request.requestedBy,
             comment: request.comment,
             expiresAt: request.expiresAt
-          }
+          } : null
         });
         return;
       }
@@ -7542,7 +7557,8 @@ async function handleApi(req, res) {
       const user = await requireUserForFocusedTodo(req, res);
       if (!user) return;
       if (DATABASE_URL) {
-        const focused = await getPgStore().focusedTodo(id);
+        const targetId = url.searchParams.get("shared") === "1" ? await getPgStore().sharedAssignmentId(id, user) : id;
+        const focused = targetId ? await getPgStore().focusedTodo(targetId) : null;
         const source = focused?.todo;
         if (!source || isTrashedTodo(source) || !canManageTodo(user, source)) {
           sendJson(res, 404, { error: "Opravilo ne obstaja ali ni na voljo." });
@@ -7564,7 +7580,11 @@ async function handleApi(req, res) {
         return;
       }
       const db = req.indusDb || await readDbAsync();
-      const todo = visibleTodoForUser(db, user, id);
+      const target = (db.todos || []).find(t => t.id === id);
+      const group = target?.assignmentGroupId || id;
+      const targetId = url.searchParams.get("shared") === "1"
+        ? db.todos.find(t => (t.assignmentGroupId || t.id) === group && !isTrashedTodo(t) && canManageTodo(user, t))?.id : id;
+      const todo = visibleTodoForUser(db, user, targetId);
       if (!todo) {
         sendJson(res, 404, { error: "Opravilo ne obstaja ali ni na voljo." });
         return;

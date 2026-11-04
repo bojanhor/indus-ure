@@ -26,7 +26,8 @@ function createAbsenceUi({ $, state, api, render, escapeHtml, showNotice, showAp
     $("absenceDate").value = item?.date || date;
     $("absenceEndDate").value = item?.endDate || date;
     $("absenceReason").value = item?.reason || "vacation";
-    for (const id of ["absenceWorker", "absenceDate", "absenceEndDate", "absenceReason"]) $(id).disabled = !editable;
+    $("absenceComment").value = item?.comment || "";
+    for (const id of ["absenceWorker", "absenceDate", "absenceEndDate", "absenceReason", "absenceComment"]) $(id).disabled = !editable;
     $("absenceWorker").disabled = !editable || state.user.role !== "boss";
     $("absenceTitle").textContent = item ? editable ? "Uredi odsotnost" : "Odsotnost – samo ogled" : "Nova odsotnost";
     $("saveAbsence").classList.toggle("hidden", !editable);
@@ -41,7 +42,7 @@ function createAbsenceUi({ $, state, api, render, escapeHtml, showNotice, showAp
     if (remove && !await showAppConfirm("Izbrišem to odsotnost? Šef jo lahko obnovi prek zgodovine Undo.")) return;
     const item = current;
     const body = { workerId: $("absenceWorker").value, date: $("absenceDate").value, endDate: $("absenceEndDate").value,
-      reason: $("absenceReason").value, viewerIds: [...$("absenceViewers").querySelectorAll("input:checked")].map(input => input.value), baseUpdatedAt: item?.updatedAt };
+      reason: $("absenceReason").value, comment: $("absenceComment").value, viewerIds: [...$("absenceViewers").querySelectorAll("input:checked")].map(input => input.value), baseUpdatedAt: item?.updatedAt };
     saving = true; $("saveAbsence").disabled = true; $("deleteAbsence").disabled = true;
     try {
       const data = await api(`/api/absences${item ? `/${encodeURIComponent(item.id)}` : ""}`, { method: remove ? "DELETE" : item ? "PUT" : "POST", body: JSON.stringify(body) });

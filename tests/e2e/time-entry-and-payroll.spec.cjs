@@ -165,13 +165,15 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
         await page.locator("#workersMenuBtn").click();
         await expect(page.locator("#workersDialog")).toBeVisible();
         await expect(page.locator(".worker-management-card")).toHaveCount(2);
+        await expect(page.locator(".worker-management-card[open]")).toHaveCount(0);
+        await page.locator(".worker-management-card > summary").first().click();
         const layout = await page.locator("#workersDialog").evaluate((dialog) => {
           const box = dialog.getBoundingClientRect();
           const body = dialog.querySelector(".modal-body");
           const create = dialog.querySelector(".worker-create-panel");
           const card = dialog.querySelector(".worker-management-card");
           const details = card.querySelector(".worker-management-details");
-          const inputs = [...dialog.querySelectorAll("input, select")].map((input) => {
+          const inputs = [...dialog.querySelectorAll("input, select")].filter(el => el.getBoundingClientRect().width > 0).map((input) => {
             const rect = input.getBoundingClientRect();
             return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: rect.width, type: input.type };
           });
@@ -723,6 +725,7 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
       await expect(page.locator("#shareTodoPdf")).toBeVisible();
       const downloadPromise = page.waitForEvent("download");
       await page.locator("#shareTodoPdf").click();
+      await page.locator("#shareEventExport").click();
       const download = await downloadPromise;
       expect(download.suggestedFilename()).toMatch(/^dogodek-.*\.pdf$/i);
       const stream = await download.createReadStream();

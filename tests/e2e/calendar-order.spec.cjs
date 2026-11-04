@@ -14,6 +14,7 @@ for (const pointer of ['mouse', 'touch']) test(`${pointer}: no ordering dragpads
   await page.locator('#localTestLoginBtn').click();
   await expect(page.locator('#app')).toBeVisible();
   await page.waitForLoadState('networkidle');
+  await page.locator('#calendarViewBtn').click(); // First open selects the actual current month.
   const date = '2026-10-20';
   await page.evaluate(async date => {
     for (const [title, endDate] of [['QA A', date], ['QA B', date], ['QA Short', '2026-10-21'], ['QA Long', '2026-10-24']]) {
@@ -24,7 +25,6 @@ for (const pointer of ['mouse', 'touch']) test(`${pointer}: no ordering dragpads
     applyBootstrapSnapshot(await api('/api/bootstrap'));
     state.current = parseDate(date); state.view = 'calendar'; render();
   }, date);
-  await page.locator('#calendarViewBtn').click();
   const day = page.locator(`.day[data-date="${date}"]`);
   await expect(page.locator('.calendar-order-handle')).toHaveCount(0);
   await expect(day.locator('.day-single-untimed .day-todo').first()).toContainText('QA B');

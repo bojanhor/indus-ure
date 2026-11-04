@@ -5722,6 +5722,9 @@
     .worker-management-list { display: grid; gap: 12px; margin: 0; }
     .worker-management-card { border: 1px solid var(--line); border-radius: 12px; padding: 14px; background: #fff; }
     .worker-management-card.inactive { opacity: .68; background: #f7f8f8; }
+    .worker-management-card > summary { cursor: pointer; padding: 4px; }
+    .worker-management-card[open] > summary { margin-bottom: 10px; }
+    .worker-management-card[hidden] { display:none; }
     .worker-management-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
     .worker-management-head h4 { margin: 0; }
     .worker-management-status { display: inline-flex; margin-top: 3px; color: var(--muted); font-size: 12px; font-weight: 800; }
@@ -6080,7 +6083,8 @@
               <label class="todo-sort-control">
                 <span>Prikaz</span>
                 <select id="todoSortMode">
-                  <option value="manual">RO&#268;NO</option>
+                  <option value="manual">ROČNO – VSE</option>
+                  <option value="manual_undated">ROČNO – BREZ DATUMA</option>
                   <option value="client">PO STRANKAH</option>
                   <option value="date">DATUMSKO</option>
                   <option value="order">NARO&#268;I</option>
@@ -6215,6 +6219,7 @@
         <p id="absenceError" role="alert"></p>
         <label>Odsotni delavec<select id="absenceWorker"></select><strong id="absenceWorkerName" hidden></strong></label>
         <label>Razlog<select id="absenceReason"><option value="vacation">Dopust</option><option value="illness">Bolezen</option></select></label>
+        <label>Komentar (neobvezno)<input id="absenceComment" type="text" maxlength="300" placeholder="Prikazan v internem koledarju"></label>
         <div class="form-grid">
           <label>Od<input id="absenceDate" type="date" required></label>
           <label>Do (vključno)<input id="absenceEndDate" type="date" required></label>
@@ -6298,7 +6303,7 @@
           <button class="todo-modal-action danger hidden" id="deleteTodoFromDialog" type="button" title="Izbriši opravilo" aria-label="Izbriši opravilo">&#128465;</button>
           <button class="todo-modal-action secondary hidden" id="duplicateTodoFromDialog" type="button" title="Podvoji opravilo" aria-label="Podvoji opravilo">&#10697;</button>
           <button class="todo-modal-action secondary hidden" id="writeHoursFromTodo" type="button" title="Piši ure na ta projekt" aria-label="Piši ure na ta projekt">&#9201;</button>
-          <button class="todo-modal-action secondary hidden" id="shareTodoPdf" type="button" title="Deli dogodek kot PDF" aria-label="Deli dogodek kot PDF">&#128228;</button>
+          <button class="todo-modal-action secondary hidden" id="shareTodoPdf" type="button" title="Deli dogodek" aria-label="Deli dogodek"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m8 11 8-5M8 13l8 5"/><circle cx="5" cy="12" r="3"/><circle cx="18" cy="5" r="3"/><circle cx="18" cy="19" r="3"/></svg></button>
           <button class="todo-modal-action secondary" id="saveTodoWithoutClosing" type="button" title="Shrani brez zapiranja" aria-label="Shrani brez zapiranja">&#128190;</button>
           <button class="todo-modal-action primary" id="saveTodoDialog" type="submit" title="Shrani in zapri" aria-label="Shrani in zapri">&#10003;</button>
           <button class="icon-btn" id="closeTodoDialog" type="button" title="Zapri brez shranjevanja" aria-label="Zapri brez shranjevanja">&times;</button>
@@ -6851,11 +6856,18 @@
     </form>
   </dialog>
 
+  <dialog id="shareEventDialog" aria-labelledby="shareEventTitle">
+    <form method="dialog"><div class="modal-head"><h3 id="shareEventTitle">Deli dogodek</h3><button class="icon-btn" aria-label="Zapri">×</button></div>
+      <div class="modal-body"><div class="actions"><button type="button" class="secondary" id="shareEventExport">Izvozi PDF</button><button type="button" class="primary" id="shareEventCopy">Kopiraj povezavo</button></div>
+        <p class="todo-meta">Povezavo lahko odprejo šef, avtor in dodeljeni delavci po prijavi.</p>
+        <input type="url" id="shareEventLink" readonly aria-label="Povezava do dogodka" hidden>
+      </div></form>
+  </dialog>
   <dialog id="workersDialog" class="workers-dialog">
     <form method="dialog" id="workersForm">
       <div class="modal-head">
         <div><h3>Delavci</h3><p class="todo-meta">Google e-pošta je neobvezna: brez nje je delavec v evidenci, prijaviti pa se še ne more.</p></div>
-        <button class="icon-btn" id="closeWorkers" type="button" title="Zapri">&times;</button>
+        <div class="actions"><button class="primary" id="saveAllWorkers" type="button">Shrani</button><button class="secondary" id="cancelWorkers" type="button">Zavrzi</button><button class="icon-btn" id="closeWorkers" type="button" title="Zapri brez shranjevanja">&times;</button></div>
       </div>
       <div class="modal-body">
         <section class="worker-create-panel">
@@ -6869,7 +6881,7 @@
         </section>
         <label class="worker-active-field"><input id="showInactiveWorkers" type="checkbox">Prikaži tudi odstranjene / neaktivne delavce</label>
         <div class="worker-management-list" id="workerManagementList" aria-live="polite"></div>
-        <div class="actions"><button class="secondary" id="cancelWorkers" type="button">Zapri</button></div>
+        <p class="todo-meta">Shrani velja za nastavitve vseh delavcev. Dodajanje, odstranitev in LAN-geslo so ločena dejanja.</p>
       </div>
     </form>
   </dialog>
@@ -7004,7 +7016,8 @@ const todoBillingFilterKey = "indus-ure-todo-billing-filter";
 const clientBillingFilterKey = "indus-ure-client-billing-filter";
 const calendarCompletedFilterKey = "indus-ure-calendar-show-completed";
 const billingWorkerKey = "indus-ure-billing-worker";
-const todoSortModes = ["manual", "client", "date", "order", "completed", "open", "in_progress", "imported"];
+const todoSortModes = ["manual", "manual_undated", "client", "date", "order", "completed", "open", "in_progress", "imported"];
+function isManualTodoMode() { return ["manual", "manual_undated"].includes(state.todoSortMode); }
 const reportClientSortModes = ["recent", "hours_desc", "oldest", "count_desc", "name_asc", "name_desc"];
 const timeEntryStatusIds = new Set(["execution", "meal", "drive", "purchase"]);
 const monthlyHiddenTodoStatusIds = new Set(["meal", "drive"]);
@@ -7299,6 +7312,7 @@ const state = {
       searchReturnState: null,
       searchIncludeCompleted: false,
       searchIncludeOther: true,
+      searchHideDated: false,
       todoSearchHighlightTimer: null,
       sharedDataRefreshing: false,
       todoEditLock: null,
@@ -8319,9 +8333,9 @@ async function openTodoFromLink({ render = true } = {}) {
           const data = await api("/api/todos/" + encodeURIComponent(todoId) + "/completion-request?token=" + encodeURIComponent(token), { recoverSession: false });
           todo = data.todo;
           const comment = String(data.request?.comment || "").trim();
-          notice = "Odprt je zahtevek od " + (data.request?.requestedByName || "\u0161efa") + (comment ? ": " + comment : ".");
+          if (data.request) notice = "Odprt je zahtevek od " + (data.request.requestedByName || "\u0161efa") + (comment ? ": " + comment : ".");
         } else {
-          const data = await api("/api/todos/" + encodeURIComponent(todoId), { recoverSession: false });
+          const data = await api("/api/todos/" + encodeURIComponent(todoId) + "?shared=1", { recoverSession: false });
           todo = data.todo;
         }
         const index = state.todos.findIndex((item) => item.id === todo.id);
@@ -9308,8 +9322,8 @@ async function boot() {
         // behind the editor. This keeps the link quick even for a large
         // history while ordinary launches still use exactly one data request.
         if (hasTodoLink()) {
-          const me = await api("/api/me", { recoverSession: false });
-          applyLightweightSession(me, [me.user].filter(Boolean));
+          const [me, directory] = await Promise.all([api("/api/me", {recoverSession:false}), api("/api/users", {recoverSession:false})]);
+          applyLightweightSession(me, directory.users);
           initializeWorkContext();
           const restoredSessionUi = restoreSessionRecoveryUiState();
           showApp();
@@ -10669,8 +10683,8 @@ function sortedTodosForMode(todos = contextTodos()) {
       if (state.todoSortMode === "open") return list.filter((todo) => todo.status === "open" || todoUsesTextOrdering(todo)).sort(todoManualBucketSort);
       if (state.todoSortMode === "in_progress") return list.filter((todo) => todo.status === "in_progress").sort(todoManualBucketSort);
       if (state.todoSortMode === "client") return list.filter((todo) => !timeEntryStatusIds.has(todo.status) || todo.status === "execution").sort(todoSort);
-      if (state.todoSortMode === "manual") {
-        return list.filter((todo) => !todo.done && !timeEntryStatusIds.has(todo.status)).sort(todoManualCategorySort);
+      if (isManualTodoMode()) {
+        return list.filter((todo) => !todo.done && !timeEntryStatusIds.has(todo.status) && (state.todoSortMode !== "manual_undated" || !todo.date)).sort(todoManualCategorySort);
       }
       if (state.todoSortMode === "completed") {
         const unique = new Map();
@@ -10764,7 +10778,7 @@ function monthMultiDayLayout(todos, gridStart, dayCount = 42) {
       });
 
       const byDate = new Map();
-      const laneCounts = Array.from({ length: Math.ceil(dayCount / 7) }, () => 0);
+
       spans.forEach((todo) => {
         const lane = spanByTodoId.get(todo.id);
         const firstDate = todo.date > visibleStart ? todo.date : visibleStart;
@@ -10773,29 +10787,26 @@ function monthMultiDayLayout(todos, gridStart, dayCount = 42) {
           const entries = byDate.get(key) || [];
           entries.push({ todo, lane });
           byDate.set(key, entries);
-          const offset = Math.round((parseDate(key) - gridStart) / 86_400_000);
-          if (offset >= 0 && offset < dayCount) {
-            const weekIndex = Math.floor(offset / 7);
-            laneCounts[weekIndex] = Math.max(laneCounts[weekIndex], lane + 1);
-          }
+
         }
       });
-      return { byDate, laneCounts, todoIds: new Set(spans.map((todo) => todo.id)) };
+      return { byDate, todoIds: new Set(spans.map((todo) => todo.id)) };
     }
 
 function appendMonthMultiDayLanes(day, key, weekIndex, layout) {
-      const laneCount = layout.laneCounts[weekIndex] || 0;
-      if (!laneCount) return;
+      const occupied = layout.byDate.get(key) || [];
+      if (!occupied.length) return;
       const entriesByLane = new Map((layout.byDate.get(key) || []).map((entry) => [entry.lane, entry]));
       const lanes = document.createElement('div');
       lanes.className = 'day-multiday-lanes';
-      lanes.style.gridTemplateRows = `repeat(${laneCount}, minmax(29px, auto))`;
-      for (let lane = 0; lane < laneCount; lane += 1) {
+      for (const lane of [...entriesByLane.keys()].sort((a,b) => a-b)) {
         const slot = document.createElement('div');
         slot.className = 'day-multiday-slot';
         const entry = entriesByLane.get(lane);
         if (entry) {
           const { todo } = entry;
+          slot.dataset.spanGroup = `${weekIndex}:${todo.id}`;
+          slot.dataset.lane = lane;
           const actualStart = todo.date === key;
           const actualEnd = todoEndDate(todo) === key;
           const item = document.createElement('button');
@@ -11030,14 +11041,23 @@ let monthFitReposition = false;
 const monthTitleHome = document.createComment("month title home");
 document.querySelector(".month-title").before(monthTitleHome);
 function alignMonthUntimedRows() {
-      const days = [...$("calendar").querySelectorAll(":scope > .day")];
-      const sections = days.map(day => day.querySelector(".day-single-untimed"));
-      sections.forEach(section => { if (section) section.style.minHeight = ""; });
-      for (let i = 0; i < days.length; i += 7) {
-        if (!days.slice(i, i + 7).some(day => day.querySelector(".day-multiday-lanes"))) continue;
-        const row = sections.slice(i, i + 7).filter(Boolean);
-        const height = Math.max(0, ...row.map(section => section.offsetHeight));
-        row.forEach(section => { section.style.minHeight = height + "px"; });
+      // Measure once, then align each bar only across the dates it occupies.
+      // Earlier overlapping bars add space only to their own columns.
+      const slots = [...$("calendar").querySelectorAll(".day-multiday-slot")];
+      slots.forEach(slot => { slot.style.marginTop = ""; });
+      const groups = new Map(), added = new Map();
+      for (const slot of slots) {
+        const key = slot.dataset.spanGroup;
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push({ slot, col: slot.parentElement, top: slot.getBoundingClientRect().top, lane: Number(slot.dataset.lane) });
+      }
+      for (const parts of [...groups.values()].sort((a,b) => a[0].lane - b[0].lane)) {
+        const top = Math.max(...parts.map(p => p.top + (added.get(p.col) || 0)));
+        for (const p of parts) {
+          const previous = added.get(p.col) || 0;
+          const gap = top - p.top - previous;
+          if (gap > 0) { p.slot.style.marginTop = gap + "px"; added.set(p.col, previous + gap); }
+        }
       }
     }
 function updateMonthFit() {
@@ -13075,7 +13095,7 @@ function renderTodoItems() {
         return;
       }
 
-      const showManualSections = state.todoSortMode === "manual";
+      const showManualSections = isManualTodoMode();
       const todoDisplayEntries = showManualSections ? todoManualDisplayEntries(todos) : todos.map((todo) => ({ todo, bucket: "", orderingReference: false }));
       let completedGroupKey = "";
       let currentManualCategory = "";
@@ -13110,7 +13130,7 @@ function renderTodoItems() {
           if (manualCategory === "ordering" && collapsedManualSections.has("ordering")) return;
         }
         const item = document.createElement("div");
-        const reorderable = state.todoSortMode === "manual" && !orderingReference && todoCanManualReorder(todo);
+        const reorderable = isManualTodoMode() && !orderingReference && todoCanManualReorder(todo);
         if (showManualSections && reorderable) manualTailTargetId = todo.id;
         const hasExpandedDetails = todoHasExpandedDetails(todo);
         const detailsExpanded = state.expandedTodoIds.has(todo.id);
@@ -13494,7 +13514,7 @@ async function reorderTodos(sourceId, targetId = "", targetPlacement = "before",
 
 function renderTodoReorderOrigin() {
           document.querySelectorAll('.todo-reorder-origin').forEach((marker) => marker.remove());
-          if (state.todoSortMode === "manual" && state.todoReorderOrigin) {
+          if (isManualTodoMode() && state.todoReorderOrigin) {
             const {previousId, nextId} = state.todoReorderOrigin;
             const rows = [...document.querySelectorAll('#todoItems .todo-item[data-todo-id]:not([data-todo-ordering-reference])')];
             const before = rows.find((row) => row.dataset.todoId === nextId);
@@ -13714,20 +13734,21 @@ function renderSearchContent() {
       panel.innerHTML = "";
       if (!query) {
         panel.classList.remove("active");
+        state.searchHideDated = false;
         return;
       }
       syncSearchPanelStickyOffset();
       const matches = contextTodos()
         .filter((todo) => normalizeText([todoClientSearchText(todo), todo.title, todo.notes, todo.createdByName].join(" ")).includes(normalizeText(query)))
         .sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")) || todoSort(a, b));
-      const results = matches.filter((todo) => reportTodoIsCompleted(todo)
-        ? state.searchIncludeCompleted
-        : state.searchIncludeOther);
+      const results = matches.filter(todo => (!state.searchHideDated || !todo.date) && (reportTodoIsCompleted(todo)
+        ? state.searchIncludeCompleted : state.searchIncludeOther));
       panel.classList.add("active");
       panel.innerHTML = `
         <div class="search-filter-bar" role="group" aria-label="Prikaz zadetkov iskanja">
           <label><input type="checkbox" data-search-filter="completed" ${state.searchIncludeCompleted ? "checked" : ""}> Zaključeno</label>
           <label><input type="checkbox" data-search-filter="other" ${state.searchIncludeOther ? "checked" : ""}> Ostali dogodki</label>
+          <label><input type="checkbox" data-search-filter="undated" ${state.searchHideDated ? "checked" : ""}> Skrij dogodke z datumom</label>
           <span class="search-filter-count">${results.length} / ${matches.length} zadetkov</span>
           <button type="button" data-close-search aria-label="Zapri iskanje">×</button>
         </div>
@@ -13736,6 +13757,7 @@ function renderSearchContent() {
       panel.querySelectorAll("[data-search-filter]").forEach((input) => input.addEventListener("change", () => {
         if (input.dataset.searchFilter === "completed") state.searchIncludeCompleted = input.checked;
         if (input.dataset.searchFilter === "other") state.searchIncludeOther = input.checked;
+        if (input.dataset.searchFilter === "undated") state.searchHideDated = input.checked;
         renderSearch();
       }));
       if (!results.length) {
@@ -13789,7 +13811,7 @@ function revealTodoFromSearch(todo) {
       if (state.todoSortMode === "client") {
         setClientTodoGroupExpanded(clientTodoGroupKey(todo), true);
         renderTodos();
-      } else if (state.todoSortMode === "manual" && todoManualCategory(todo) === "ordering" && collapsedTodoSections().has("ordering")) {
+      } else if (isManualTodoMode() && todoManualCategory(todo) === "ordering" && collapsedTodoSections().has("ordering")) {
         setTodoSectionCollapsed("ordering", false);
         renderTodos();
       }
@@ -14328,15 +14350,17 @@ function renderWorkerManagement() {
         return;
       }
       const activeTargets = workers.filter((worker) => worker.active);
-      list.innerHTML = workers.filter(worker => worker.active || state.showInactiveWorkers).map((worker) => {
+      const expanded = new Set([...list.querySelectorAll("details[open]")].map(el => el.dataset.workerId));
+      list.innerHTML = workers.map((worker) => {
         const locked = worker.role === "boss";
         const disabled = worker.active ? "" : "disabled";
         const dailyReport = worker.dailyReport || {};
         const billing = worker.billing || {};
         const allowedIds = new Set(worker.timeEntryForIds || []);
         const targets = activeTargets.map(target => `<label><input type="checkbox" data-worker-time-entry-for value="${escapeHtml(target.id)}" ${locked || allowedIds.has(target.id) ? "checked" : ""} ${locked || !worker.active ? "disabled" : ""}>${escapeHtml(target.name || target.id)}${target.id === worker.id ? " (zase)" : ""}</label>`).join("");
-        return `<article class="worker-management-card ${worker.active ? "" : "inactive"}" data-worker-id="${escapeHtml(worker.id)}">
-          <div class="worker-management-head"><div><h4>${escapeHtml(worker.name || worker.id)}</h4><span class="worker-management-status">${escapeHtml(workerManagementLabel(worker))}</span></div><label class="worker-active-field"><input type="checkbox" data-worker-active ${worker.active ? "checked" : ""} ${locked ? "disabled" : ""}>Aktiven</label></div>
+        return `<details class="worker-management-card ${worker.active ? "" : "inactive"}" data-worker-id="${escapeHtml(worker.id)}" ${expanded.has(worker.id) ? "open" : ""} ${!worker.active && !state.showInactiveWorkers ? "hidden" : ""}>
+          <summary><strong>${escapeHtml(worker.name || worker.id)}</strong> · <span class="worker-management-status">${escapeHtml(workerManagementLabel(worker))}</span></summary>
+          <label class="worker-active-field"><input type="checkbox" data-worker-active ${worker.active ? "checked" : ""} ${locked ? "disabled" : ""}>Aktiven</label>
           <div class="worker-management-grid">
             <label>Ime in priimek<input data-worker-name type="text" maxlength="120" value="${escapeHtml(worker.name || "")}" ${disabled}></label>
             <label>Google e-pošta <span class="todo-meta">(neobvezno)</span><input data-worker-email type="email" maxlength="240" value="${escapeHtml(worker.email || "")}" placeholder="Brez prijave z Googlom" ${disabled}></label>
@@ -14374,11 +14398,12 @@ function renderWorkerManagement() {
           </div>
           <p class="todo-meta">${worker.email ? "Google prijava je omogočena za navedeni naslov." : "Brez Google e-pošte je delavec pripravljen v evidenci, dostop pa se vključi pozneje z vpisom e-pošte."}</p>
           <div class="worker-management-actions">
-            <button class="secondary" type="button" data-save-worker ${worker.active ? "" : "disabled"}>Shrani</button>
+
             ${locked ? "" : worker.active ? '<button class="secondary danger" type="button" data-remove-worker>Odstrani</button>' : '<button class="secondary" type="button" data-reactivate-worker>Ponovno aktiviraj</button>'}
           </div>
-        </article>`;
+        </details>`;
       }).join("");
+      for (const card of list.children) workerBaselines.set(card, workerProfileInputs(card));
     }
 
 async function refreshAfterWorkerManagement(data = null) {
@@ -14395,11 +14420,14 @@ async function openWorkersDialog() {
       const data = await api("/api/workers");
       state.workerManagement = data.workers || [];
       $("showInactiveWorkers").checked = state.showInactiveWorkers;
+      $("workerManagementList").replaceChildren();
+      $("workerCreateName").value = $("workerCreateEmail").value = "";
       renderWorkerManagement();
       $("workersDialog").showModal();
     }
 
 async function createWorkerFromForm() {
+      beforeAccountAction();
       const data = await api("/api/workers", {
         method: "POST",
         body: JSON.stringify({
@@ -14414,9 +14442,18 @@ async function createWorkerFromForm() {
       showNotice("Delavec je dodan. Google prijavo lahko dodaš zdaj ali pozneje.");
     }
 
-async function saveManagedWorker(card, { activate = false } = {}) {
-      const id = card?.dataset.workerId || "";
-      if (!id) return;
+const workerBaselines = new WeakMap();
+let savingWorkers = false;
+function workerProfileInputs(card) {
+      return JSON.stringify([...card.querySelectorAll('input:not([type=password]),select')].map(el => el.type === "checkbox" ? el.checked : el.value));
+    }
+function dirtyWorkerCards() {
+      return [...$("workerManagementList").querySelectorAll("[data-worker-id]")].filter(card => workerProfileInputs(card) !== workerBaselines.get(card));
+    }
+function beforeAccountAction() {
+      if (savingWorkers || dirtyWorkerCards().length) throw new Error("Pred tem dejanjem najprej shrani ali zavrzi spremenjene nastavitve delavcev.");
+    }
+function managedWorkerChanges(card, activate = false) {
       const billing = {};
       for (const [key, selector, max] of [
         ["hourlyRate", "[data-worker-hourly-rate]", 10_000],
@@ -14426,13 +14463,11 @@ async function saveManagedWorker(card, { activate = false } = {}) {
       ]) {
         const input = card.querySelector(selector);
         const value = input.value.trim() ? parseBillingNumber(input.value, max) : null;
-        if (value === null) { input.focus(); throw new Error("Vnesi veljavno urno postavko, kilometrino in pot v službo."); }
+        if (value === null) { card.open = true; input.focus(); throw new Error("Vnesi veljavno urno postavko, kilometrino in pot v službo."); }
         billing[key] = value;
       }
       billing.exportTitle = card.querySelector("[data-worker-export-title]").value.trim();
-      const data = await api(`/api/workers/${encodeURIComponent(id)}`, {
-        method: "PUT",
-        body: JSON.stringify({
+      return {
           name: card.querySelector("[data-worker-name]")?.value || "",
           email: card.querySelector("[data-worker-email]")?.value || "",
           employmentType: "contractor",
@@ -14446,13 +14481,35 @@ async function saveManagedWorker(card, { activate = false } = {}) {
             recipientEmail: card.querySelector("[data-worker-report-recipient]")?.value || "",
             includeZeroHours: Boolean(card.querySelector("[data-worker-report-zero-hours]")?.checked)
           }
-        })
-      });
+      };
+    }
+async function saveAllManagedWorkers() {
+      if (savingWorkers) return;
+      const cards = dirtyWorkerCards();
+      if (!cards.length) { showNotice("Ni sprememb za shranjevanje."); return; }
+      if ([...$("workerManagementList").querySelectorAll('input[type=password]')].some(el => el.value)) {
+        throw new Error("LAN-geslo nastavi posebej. Pred skupnim shranjevanjem izprazni polji za novo geslo.");
+      }
+      const workers = cards.map(card => ({ id: card.dataset.workerId, base: state.workerManagement.find(w => w.id === card.dataset.workerId), changes: managedWorkerChanges(card) }));
+      savingWorkers = true;
+      $("saveAllWorkers").disabled = true;
+      $("workerManagementList").inert = true;
+      try {
+        const data = await api("/api/workers", {method:"PUT",body:JSON.stringify({workers})});
+        await refreshAfterWorkerManagement(data);
+        showNotice("Nastavitve delavcev so shranjene.");
+      } finally { savingWorkers = false; $("saveAllWorkers").disabled = false; $("workerManagementList").inert = false; }
+    }
+async function reactivateManagedWorker(card) {
+      beforeAccountAction();
+      const id = card.dataset.workerId;
+      const data = await api("/api/workers/" + encodeURIComponent(id), {method:"PUT",body:JSON.stringify(managedWorkerChanges(card,true))});
       await refreshAfterWorkerManagement(data);
-      showNotice(activate ? "Delavec je ponovno aktiven." : "Podatki delavca so shranjeni.");
+      showNotice("Delavec je ponovno aktiven.");
     }
 
 async function setManagedLanPassword(card, disable = false) {
+      beforeAccountAction();
       if (!card?.dataset.workerId) return;
       const input = card.querySelector("[data-worker-lan-password]");
       const repeat = card.querySelector("[data-worker-lan-password-repeat]");
@@ -14471,6 +14528,7 @@ async function setManagedLanPassword(card, disable = false) {
     }
 
 async function removeManagedWorker(card) {
+      beforeAccountAction();
       const id = card?.dataset.workerId || "";
       const name = card?.querySelector("[data-worker-name]")?.value || "tega delavca";
       if (!id || !await showAppConfirm(`Odstranim ${name}? Če ima že zgodovino vpisov, se varno deaktivira namesto fizičnega izbrisa.`)) return;
@@ -14561,6 +14619,7 @@ $("deletedTodosList").addEventListener("click", (event) => {
 $("workersMenuBtn").addEventListener("click", () => openWorkersDialog().catch((error) => showNotice(error.message)));
 $("closeWorkers").addEventListener("click", () => $("workersDialog").close());
 $("cancelWorkers").addEventListener("click", () => $("workersDialog").close());
+$("saveAllWorkers").addEventListener("click", () => saveAllManagedWorkers().catch(error => showNotice(error.message)));
 $("workersDialog").addEventListener("close", () => {
       $("workerManagementList").querySelectorAll('input[type="password"]').forEach(input => { input.value = ""; });
     });
@@ -14570,15 +14629,14 @@ $("workerManagementList").addEventListener("keydown", (event) => {
         setManagedLanPassword(event.target.closest("[data-worker-id]")).catch(error => showNotice(error.message));
       } else if (event.key === "Enter" && event.target.matches("input:not([type=checkbox]), select")) {
         event.preventDefault();
-        saveManagedWorker(event.target.closest("[data-worker-id]")).catch(error => showNotice(error.message));
+        saveAllManagedWorkers().catch(error => showNotice(error.message));
       }
     });
 $("workersForm").addEventListener("submit", (event) => { event.preventDefault(); createWorkerFromForm().catch((error) => showNotice(error.message)); });
 $("workerManagementList").addEventListener("click", (event) => {
       const card = event.target.closest("[data-worker-id]");
       if (!card) return;
-      if (event.target.closest("[data-save-worker]")) saveManagedWorker(card).catch((error) => showNotice(error.message));
-      if (event.target.closest("[data-reactivate-worker]")) saveManagedWorker(card, { activate: true }).catch((error) => showNotice(error.message));
+      if (event.target.closest("[data-reactivate-worker]")) reactivateManagedWorker(card).catch((error) => showNotice(error.message));
       if (event.target.closest("[data-remove-worker]")) removeManagedWorker(card).catch((error) => showNotice(error.message));
       if (event.target.closest("[data-set-lan-password]")) setManagedLanPassword(card).catch((error) => showNotice(error.message));
       if (event.target.closest("[data-disable-lan-password]")) setManagedLanPassword(card, true).catch((error) => showNotice(error.message));
@@ -14724,7 +14782,7 @@ $("calendarViewBtn").addEventListener("click", () => {
     });
 $("showInactiveWorkers").addEventListener("change", event => {
       state.showInactiveWorkers = event.target.checked;
-      renderWorkerManagement();
+      for (const card of $("workerManagementList").querySelectorAll(".inactive")) card.hidden = !state.showInactiveWorkers;
     });
 $("todosViewBtn").addEventListener("click", () => setView("todos"));
 installWorkerBillingBindings1();

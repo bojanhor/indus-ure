@@ -244,6 +244,33 @@ objekt, da bi obšel revizijo. Ne uporabljaj knjižnice iz stare izdaje ali
 neposrednih `UPDATE/DELETE` na poslovnih tabelah med uporabo aplikacije.
 Revizijska zaščita ne more zaščititi pred administratorjem, ki jo obide.
 
+## Ure – opravila, povezave, koledar in delavci (4. 11. 2026)
+
+Delavci se odprejo strnjeno. Skupni Shrani pošlje samo spremenjene profile;
+strežnik preveri vlogo šefa, izhodiščne profile in vsa polja ter shrani en
+posnetek. Konflikt ali neveljavna druga vrstica ne shrani prve. Zavrzi/X
+ne pišeta. Ustvarjanje, odstranitev, ponovna aktivacija in LAN-geslo ostajajo
+ločena izrecna dejanja; neshranjene spremembe jih ustavijo, da se ne izgubijo.
+
+Ročno – brez datuma ohranja kategorije in vrstni red ročnega seznama.
+Ločena kljukica v iskalniku se ob koncu iskanja ponastavi. Mesečne pasice
+se poravnajo samo čez dneve istega segmenta; dnevi brez takega dogodka nimajo
+praznih stez. Krajše pasice ostanejo zgoraj. Komentar odsotnosti je neobvezen
+in viden dovoljenim osebam v internem koledarju; v zunanji izvoz ne gre.
+
+Deli dogodek ponudi obstoječi PDF ali navadno povezavo brez skrivnosti.
+Pri odpiranju strežnik preveri sejo, koš in vlogo/avtorstvo/dodelitev. Za
+udeleženca vrne dostopno dodelitev istega dogodka, za nepovezanega uporabnika
+pa napako brez razkritja vsebine. PostgreSQL pri zahtevku za dopolnitev išče
+zgoščeni žeton pri skupnem opravilu, z združljivostjo za stare dodelitve.
+Rok veljavnosti ostane obvezen; komentar zahtevka je samo za naslovnika.
+Prava povezava iz TODO ni vključena v Git, testne podatke ali posnetke.
+
+Ni migracije ali popravkov obstoječih poslovnih zapisov. Povrnitev na
+`4d269ce` vrne prejšnji UI in prejšnjo napako povezav; stara koda novega
+komentarja odsotnosti ne prikazuje. Poseg ne spreminja Faktur, Nginxa ali
+pravil za kopije.
+
 ## Obvezni postopek objave Ure
 
 1. Čisto commitano stanje, pregled diff-a in brez sprememb tujih projektov.

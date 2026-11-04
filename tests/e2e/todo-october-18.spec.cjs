@@ -18,12 +18,13 @@ test('worker card atomically saves billing; preview matches confirmation and his
   const original = await page.evaluate(async () => (await api('/api/workers/billing')).workers);
   await page.evaluate(() => openWorkersDialog());
   const card = page.locator('[data-worker-id="ibro"]');
+  await card.locator('summary').click();
   await card.locator('[data-worker-hourly-rate]').fill('25');
   await card.locator('[data-worker-commute-km]').fill('7');
   await card.locator('[data-worker-km-rate]').fill('0.49');
   await card.locator('[data-worker-commute-rate]').fill('0.22');
   await card.locator('[data-worker-export-title]').fill('Monter QA');
-  await card.locator('[data-save-worker]').click();
+  await page.locator('#saveAllWorkers').click();
   await expect(card.locator('[data-worker-km-rate]')).toHaveValue('0.49');
   await page.waitForLoadState('networkidle');
   const saved = await page.evaluate(async () => (await api('/api/workers/billing')).workers);

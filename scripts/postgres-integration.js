@@ -337,6 +337,31 @@ async function main() {
       }
     }
     check("http.full_and_initial_bootstrap_keep_complete_assignees_without_private_rows");
+    {
+      const snap = await store.load();
+      const token = crypto.randomBytes(32).toString("base64url"), expired = crypto.randomUUID();
+      const delegated = snap.todos.find(t => t.id === ids[2]);
+      delegated.createdBy = "ibro"; // Sole assignee is Bojan; requester selects the original creator.
+      const reqSeed = {id:crypto.randomUUID(),tokenHash:sessionTokenHash(token),recipientUserIds:["ibro"],recipientEmails:["ibro@example.test"],
+        requestedBy:"bojan",comment:"Only for recipient",expiresAt:Date.now()+3600000};
+      delegated.completionRequests = [reqSeed,{...reqSeed,id:crypto.randomUUID(),tokenHash:sessionTokenHash(expired),expiresAt:Date.now()-1000}];
+      await store.save(snap);
+      const plain = await request(`/api/todos/${sharedBojanId}?shared=1`, {headers:worker});
+      assert.equal(plain.status,200); assert.equal((await plain.json()).todo.id,ids[1]);
+      assert.equal((await request(`/api/todos/${ids[0]}?shared=1`,{headers:worker})).status,404);
+      assert.equal((await request(`/api/todos/${ids[2]}?shared=1`,{headers:worker})).status,200);
+      const link = `/api/todos/${ids[2]}/completion-request?token=`;
+      const result = await request(link+token,{headers:worker});
+      assert.equal(result.status,200); const resolved = await result.json();
+      assert.equal(resolved.todo.id,delegated.id); assert.equal(resolved.request.comment,reqSeed.comment);
+      assert.equal(resolved.todo.history,undefined); assert.equal(resolved.todo.completionRequests,undefined);
+      assert.equal((await request(link+expired,{headers:worker})).status,403);
+      assert.equal((await request(link+crypto.randomUUID(),{headers:worker})).status,403);
+      assert.equal((await request(link+token,{headers:{}})).status,401);
+      const cleanup = await store.load(), restored = cleanup.todos.find(t=>t.id===delegated.id);
+      restored.createdBy="bojan"; delete restored.completionRequests; await store.save(cleanup);
+      check("http.shared_links_author_assignee_outsider_and_active_stored_completion_token");
+    }
     for (const route of ["/api/me", "/api/bootstrap?initial=1", "/api/bootstrap"]) {
       const profile = await (await request(route, { headers: worker })).json();
       assert.equal(profile.user.timeEntryPermissionsConfigured, true, route);
@@ -348,6 +373,15 @@ async function main() {
       const profile = result.workers.find(item => item.id === "ibro");
       assert.equal(profile.commuteKmRate, 0.22, route);
       assert.equal(profile.workerOwnVehicleKmRate, 0.49, route);
+    }
+    {
+      const original = (await (await request('/api/workers')).json()).workers;
+      const make = (w,name) => ({id:w.id,base:w,changes:{...w,name}});
+      const batch = {workers:[make(original[0],'Must roll back'),make(original[1],'')]};
+      assert.equal((await request('/api/workers',{method:'PUT',headers:worker,body:JSON.stringify(batch)})).status,403);
+      assert.equal((await request('/api/workers',{method:'PUT',body:JSON.stringify(batch)})).status,400);
+      assert.deepEqual((await (await request('/api/workers')).json()).workers,original);
+      check("http.worker_batch_rejects_nonboss_and_rolls_back_every_profile_on_validation_error");
     }
     const billingWorker = (await (await request('/api/workers')).json()).workers.find(w => w.id === 'ibro');
     const billingSave = await request('/api/workers/ibro', { method: 'PUT', body: JSON.stringify({ ...billingWorker, billing: { ...billingWorker.billing, commuteKmOneWay: 7 } }) });

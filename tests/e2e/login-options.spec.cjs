@@ -38,6 +38,7 @@ test('LAN shows both login choices, email/password works, boss configures separa
     await boss.locator('#toolsMenu > summary').click();
     await boss.getByRole('button', { name: 'Delavci', exact: true }).click();
     const card = boss.locator('[data-worker-id="ibro"]');
+    await card.locator('summary').click();
     await card.locator('[data-worker-lan-password]').fill('Ibro-QA-geslo-2026');
     await card.locator('[data-worker-lan-password-repeat]').fill('Ibro-QA-geslo-2026');
     await card.locator('[data-set-lan-password]').click();

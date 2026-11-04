@@ -671,27 +671,39 @@ class PostgresStore {
   // current assignment.  This is intentionally a narrow lookup: loading the
   // full application state here would make the link feel broken on a large
   // calendar history.
+  async sharedAssignmentId(id, user) {
+    const result = await this.pool.query(
+      `select a.id from indus_task_assignments a join indus_tasks t on t.id=a.task_id
+       where a.task_id=coalesce((select task_id from indus_task_assignments where id=$1), $1)
+         and coalesce(t.data->>'trashedAt','')=''
+         and ($3::boolean or t.data->>'createdBy'=$2 or a.worker_id=$2)
+       order by (a.worker_id=$2) desc,(a.id=$1) desc,a.id limit 1`,
+      [id, user.id, user.role === "boss"]);
+    return result.rows[0]?.id || null;
+  }
+
   async completionRequestGroup(requestedAssignmentId, tokenHash) {
     const assignmentId = String(requestedAssignmentId || "");
     const hash = String(tokenHash || "").toLowerCase();
     if (!assignmentId || !/^[a-f0-9]{64}$/.test(hash)) return null;
     const tokenMatch = (parameter) => `exists (
       select 1
-      from jsonb_array_elements(coalesce(a.data -> 'completionRequests', '[]'::jsonb)) as request(value)
+      from jsonb_array_elements(coalesce(t.data -> 'completionRequests', '[]'::jsonb) || coalesce(a.data -> 'completionRequests', '[]'::jsonb)) as request(value)
       where lower(coalesce(request.value ->> 'tokenHash', '')) = $${parameter}
     )`;
     // Most links still point at their original assignment; avoid even a
     // group-wide lookup in that common case.  The fallback retains the older
     // promise that a link survives a later assignment-copy change.
     const direct = await this.pool.query(
-      `select a.task_id from indus_task_assignments a where a.id = $1 and ${tokenMatch(2)}`,
+      `select a.task_id,t.data->>'createdBy' as creator,t.data->'completionRequests' as requests from indus_task_assignments a join indus_tasks t on t.id=a.task_id where a.id = $1 and ${tokenMatch(2)}`,
       [assignmentId, hash]
     );
     const relocated = direct.rowCount ? null : await this.pool.query(
-      `select a.task_id from indus_task_assignments a where ${tokenMatch(1)} limit 1`,
+      `select a.task_id,t.data->>'createdBy' as creator,t.data->'completionRequests' as requests from indus_task_assignments a join indus_tasks t on t.id=a.task_id where ${tokenMatch(1)} limit 1`,
       [hash]
     );
-    const taskId = direct.rows[0]?.task_id || relocated?.rows[0]?.task_id;
+    const match = direct.rows[0] || relocated?.rows[0];
+    const taskId = match?.task_id;
     if (!taskId) return null;
     const assignments = await this.pool.query(
       "select id, worker_id, data from indus_task_assignments where task_id = $1",
@@ -704,9 +716,8 @@ class PostgresStore {
         workerId: String(row.worker_id || ""),
         data: row.data || {}
       })),
-      completionRequests: assignments.rows.flatMap((row) => Array.isArray(row.data?.completionRequests)
-        ? row.data.completionRequests
-        : [])
+      createdBy: match.creator,
+      completionRequests: [...(match.requests || []), ...assignments.rows.flatMap(row => row.data?.completionRequests || [])]
     };
   }
 
