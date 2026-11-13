@@ -1,5 +1,8 @@
 # INDUS Ure – obratovanje, varna objava in obnova
 
+Za prvo obravnavo incidenta glej [razvijalski priročnik](docs/RAZVIJALSKI-PRIROCNIK.md).
+Datirani razdelki spodaj beležijo posamezne izdaje; dejansko aktivno izdajo pokaže `readlink -f /opt/indus-ure/current` na strežniku.
+
 ## Meje aplikacij in odgovornost
 
 INDUS Ure in INDUS Fakture sta ločeni aplikaciji istega poslovnega lastnika
@@ -290,6 +293,8 @@ prave e-pošte. Po preverjanju iz TODO odstranjenih osem točk in pripadajoče
 slike; ponovno branje je potrdilo prazen seznam.
 
 ## Obvezni postopek objave Ure
+
+**Obseg objave:** celotni [deploy.ps1](scripts/deploy.ps1) poleg kode Ure namesti tudi konfiguracijo skupnega Nginxa, ga znova naloži, namesti časovnik za povzetke in redči stare izdaje. Če je dovoljena samo objava kode Ure, ne zaženi celotne skripte: pripravi preverjenega kandidata ter uporabi obstoječa strežniška koraka QA in preklopa iz točk 4–5, brez nameščanja skupne infrastrukture. Sprememba zgolj dokumentacije ne zahteva produkcijske objave.
 
 1. Čisto commitano stanje, pregled diff-a in brez sprememb tujih projektov.
 2. `npm test`, izolirani `npm run test:e2e` in `npm run test:e2e:firefox`.

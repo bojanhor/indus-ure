@@ -4,7 +4,7 @@ Testna aplikacija je ločena od produkcije in je namenjena dejanskim pregledom v
 
 Uporablja svojo PostgreSQL bazo `indus_ure_test`, svojega sistemskega uporabnika `indus-ure-test`, svojo mapo prilog `/var/lib/indus-ure-test/media` in sistemsko storitev `indus-ure-test.service`. Dostopna je samo iz omrežja `192.168.50.0/24`; port 8124 se ne odpira v routerju.
 
-Google prijava za IP naslov ni uporabna, zato je lokalna prijava na voljo samo v testnem načinu in samo iz tega omrežja. Produkcija te prijavne poti ne vsebuje. Testna uporabnika sta Bojan (šef) in Ibro (delavec); geslo je shranjeno izključno v `/etc/indus-ure-test.env`.
+Google prijava za IP naslov ni uporabna, zato ta LAN instanca uporablja testno prijavo in lastno geslo v `/etc/indus-ure-test.env`. Testna uporabnika sta Bojan (šef) in Ibro (delavec). Produkcija ne uporablja tega testnega načina ali testnega gesla; ima ločeno, izrecno omogočeno osebno in podporno LAN-prijavo ([pogoji](OPERATIONS.md)). Za običajen razvoj oddaljena instanca ni potrebna.
 
 ## Prva vzpostavitev
 
@@ -25,7 +25,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\deploy-test.ps1 -IdentityFile
 1. Lokalni `npm test`.
 2. Objavi v testno instanco z `deploy-test.ps1`.
 3. V Firefoxu preveri prijavo šefa in delavca, dodajanje/urejanje/vpis ur, koledar, priloge, drag-and-drop in ozek prikaz.
-4. Šele nato objavi običajno produkcijsko izdajo z `deploy.ps1`.
+4. Če je odobrena tudi produkcijska objava, sledi [operativnemu postopku](OPERATIONS.md#obvezni-postopek-objave-ure). Objava v LAN testno instanco ni dovoljenje za produkcijo.
 
 ## Avtomatiziran klik-test
 
@@ -38,10 +38,10 @@ npm.cmd run test:e2e
 Prvič je treba namestiti brskalnik, ki ga uporablja Playwright:
 
 ```powershell
-npx.cmd playwright install chromium
+npx.cmd playwright install chromium firefox
 ```
 
-Trenutno avtomatsko preveri Ibrov vpis ur prek prave forme ter Bojanov prikaz in potrditev obračuna za iste ure. Za pregled z odprtim oknom uporabi `npm.cmd run test:e2e:headed`.
+Chromiumov nabor vključuje tudi opravila, obračune, koledar in osnutke. Za pregled z odprtim oknom uporabi `npm.cmd run test:e2e:headed`; ločeni `npm.cmd run test:e2e:firefox` izvede izbrane regresije. Za ročni ogled brez oddaljene instance glej [hiter lokalni zagon](docs/RAZVIJALSKI-PRIROCNIK.md#lokalna-ponovitev).
 
 Za pregled stanja na strežniku:
 

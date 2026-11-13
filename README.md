@@ -3,19 +3,22 @@
 INDUS URE je skupna spletna aplikacija za opravila, ure, obračune, stranke,
 kilometrino, material in priloge za Bojana in delavce.
 
+**Za razvijalca ob prevzemu ali težavi:** začni s [priročnikom za diagnostiko](docs/RAZVIJALSKI-PRIROCNIK.md).
+V njem so zemljevid kode, varen lokalni preizkus in prvi koraki pri težavah s portalom, obračuni, prilogami ali kopijami.
+Za objavo ali obnovo uporabi [operativna navodila](OPERATIONS.md).
+
 ## Trenutna zasnova
 
 - **PostgreSQL** je glavna baza. Stranke, opravila, dodelitve, vnosi ur,
   obračuni in seje so shranjeni v relacijskih tabelah.
 - **Priloge** so datoteke na strežniku v `/var/lib/indus-ure/media`; v bazi so
   le metapodatki in varnostni hash.
-- **Google** omogoča prijavo, ustvarjanje Dokumentov/Preglednic v Bojanovi mapi,
-  Gmail poročila/osnutke in Drive recovery kopije. Sinhronizacije evidence ur
-  z Google Sheets in Google Calendar ni več.
-- **LAN prijava** je ločena, izrecno omogočena servisna možnost; pogoji in
-  omejitve so opisani v [OPERATIONS.md](OPERATIONS.md).
-- **ICS** ostane bralna povezava za telefone; aplikacija nikoli ne ureja
-  dogodkov v uporabnikovem Google koledarju.
+- **Google** omogoča prijavo, dokumente/preglednice, Gmail poročila/osnutke in
+  Drive recovery kopije. [Google Koledar za planiranje](GOOGLE-PLANNING-CALENDAR.md)
+  enosmerno prikazuje planirane dogodke v namenskih koledarjih. Vpisi opravljenih ur se ne prenašajo;
+  urejanje v Googlu ne spreminja evidence v Urah. **ICS** je ločen bralni vir.
+- **Prijava znotraj LAN** lahko poleg Googla ponudi osebno geslo INDUS.
+  Ločena podporna prijava ni običajna prijava delavca. Pogoji so v [OPERATIONS.md](OPERATIONS.md).
 - Prijava uporablja **HttpOnly/Secure cookie**, zaščito CSRF in strogi CSP.
 - Aplikacija je namestljiva kot **PWA**. Brez povezave pokaže zadnji varen
   prikaz do izteka seje (največ sedem dni) in v vrsti obdrži spremembe
@@ -35,7 +38,7 @@ Aktualni postopek objave, CAS zaščita, ločitev Ure/Fakture in obnova so v
 ## Lokalni zagon
 
 ```bash
-npm install
+npm ci
 npm start
 ```
 
@@ -54,9 +57,8 @@ Pred prvim brskalniškim testom namesti pogona z `npx playwright install chromiu
 Objava zahteva tudi Firefoxov regresijski preizkus odpiranja dnevnega koledarja
 (dotik, miška, Nazaj in ohranitev položaja); testni podatki so izolirani od produkcije.
 
-Testi preverijo sintakso, dostopne vloge, lokalno identiteto strank, odstranitev
-Sheets/Calendar poti, varne seje, PWA in backup poti.
-- Video priloge se pretočno shranijo zasebno na strežnik, skupaj z drugimi prilogami. Drive se za priloge ne uporablja.
+Testi med drugim pokrivajo dostopne vloge, stranke, planiranje, obračune,
+priloge, varne seje, PWA in varnostne kopije.
 
 Vsaka upravljana objava zahteva tudi izoliran PostgreSQL prehod: sočasni seji,
 konflikt zunanje skripte, ciljne zapise, dostop do prilog, dejansko obnovo
