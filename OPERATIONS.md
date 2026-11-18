@@ -324,6 +324,35 @@ Ni razloga za obnovo stare baze. Regresije so v
 `scripts/postgres-integration.js`; primerjajo celotne potrjene posnetke
 pred in po dovoljenem popravku ter preverijo Undo in zavrnjene zahteve.
 
+Objavljeno kot `43e67a0`, prejšnja produkcijska izdaja `b8c8fc6`.
+Celotni Chromium prehod: 137 uspešnih; Firefox: 43 uspešnih in 3 namensko
+preskočeni testi dotika. Strežniški `npm test` je uspešen; PostgreSQL:
+38 fresh + 1 restore + 2 recovery/CSV + 4 production-clone/rollback.
+Prvotno zastarelo preverjanje besedila opozorila je usklajeno z novim
+zaklepom; končni obvezni prehod na točnem kandidatu je uspešen.
+
+Pred preklopom preverjena kopija
+`indus-ure-recovery-20261118T124613Z.tar.gz` (210527216 B), SHA-256
+`6cb645221a160c7ab9cb8d3575e9729f07df46fc40c88aeb063862103e086a4f`.
+Potrjeni lokalni arhiv, Drive velikost/MD5/sveže branje, navodila ter oba
+berljiva CSV (598 dogodkov, 415 vpisov ur). Kopija je označena kot točka
+pred objavo. Obstoječa retencija in čiščenje nepripetih prilog sta uspešna;
+pravila hrambe niso spremenjena.
+
+Produkcijski Chromium je pri Štajerčevem vpisu »Razvodna omara« 3. 11.
+potrdil urejljivo postavko in kilometre delavca, zaklenjene strankine in
+skupne podatke ter zapiranje brez spremembe zapisa. Vizualno preverjen
+mobilni prikaz, brez poslovnih zapisov ali JS napak; to ni test na fizičnem
+telefonu. Dejansko shranjevanje obeh smeri je preverjeno v izolirani JSON
+in PostgreSQL bazi. Vseh 115 potrjenih obračunskih zapisov (stranke ter
+delavci v stanju archiving/confirmed/paid) je pred/po povsem enakih:
+kontrolni odtis celotnih JSON zapisov `b7073784cf86b8d84de86518b5c524a1`.
+Javni in lokalni health sta uspešna, storitev ter backup timer aktivna,
+po ponovnem zagonu v pregledanem dnevniku ni opozoril Ure. Fakture in skupni
+Nginx nista bila spreminjana. Koda in navodila so na `origin/main`.
+Namestitev nespremenjenih odvisnosti je izpisala 9 moderate opozoril;
+posodabljanje knjižnic ni del te objave.
+
 ### Postopek
 
 **Obseg objave:** celotni [deploy.ps1](scripts/deploy.ps1) poleg kode Ure namesti tudi konfiguracijo skupnega Nginxa, ga znova naloži, namesti časovnik za povzetke in redči stare izdaje. Če je dovoljena samo objava kode Ure, ne zaženi celotne skripte: pripravi preverjenega kandidata ter uporabi obstoječa strežniška koraka QA in preklopa iz točk 4–5, brez nameščanja skupne infrastrukture. Sprememba zgolj dokumentacije ne zahteva produkcijske objave.
