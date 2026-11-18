@@ -399,6 +399,51 @@ async function main() {
     assert.equal(persistedPayroll.lines[0].commuteKmRate, 0.22);
     assert.equal(persistedPayroll.lines[0].kmAmount, 4.55);
     check('http.postgres_independent_travel_rates_roundtrip_and_payroll');
+    {
+      const before = await store.load();
+      const lockedTodo = before.todos.find(t => t.title === travelTodo.title);
+      const detail = await (await request('/api/todos/' + lockedTodo.id)).json();
+      assert.equal(detail.todo.settlementEdit.workerLocked, true);
+      assert.equal(detail.todo.settlementEdit.clientLocked, false);
+      const update = (t, changes, headers = boss) => request('/api/todos/' + t.id + '/settlement-fields',
+        { method: 'POST', headers, body: JSON.stringify({ baseUpdatedAt: t.updatedAt, changes }) });
+      assert.equal((await update(lockedTodo, { clientKm: 42, clientBillableMinutes: 120 })).status, 200);
+      assert.deepEqual((await store.load()).payrolls, before.payrolls);
+      assert.equal((await update(lockedTodo, { billingKm: 9 })).status, 403);
+      const freshLocked = (await store.load()).todos.find(t => t.id === lockedTodo.id);
+      assert.equal((await request('/api/todos/' + lockedTodo.id, { method: 'PUT', body: JSON.stringify({ ...freshLocked, billingKm: 9 }) })).status, 403);
+      assert.equal((await request('/api/todos/' + lockedTodo.id, { method: 'DELETE', body: JSON.stringify({}) })).status, 403);
+      assert.deepEqual((await store.load()).payrolls, before.payrolls);
+      check('http.pg_worker_lock_allows_client_fields_and_preserves_entire_payroll_snapshot');
+
+      assert.equal((await request('/api/todos', { method:'POST', body:JSON.stringify({...travelTodo,
+        title:'PG client locked only', date:'2026-01-03'}) })).status, 200);
+      let editable = (await store.load()).todos.find(t => t.title === 'PG client locked only');
+      assert.equal((await request('/api/client-bills', { method:'POST',
+        body:JSON.stringify({clientId, eventIds:[editable.assignmentGroupId]}) })).status, 201);
+      const confirmed = await store.load();
+      editable = confirmed.todos.find(t => t.id === editable.id);
+      const clientDetail = await (await request('/api/todos/' + editable.id)).json();
+      assert.equal(clientDetail.todo.settlementEdit.clientLocked, true);
+      assert.equal(clientDetail.todo.settlementEdit.workerLocked, false);
+      assert.equal((await update(editable, {billingKm:0,billingHourlyRate:17.5,workFromHome:true})).status, 200);
+      const changed = await store.load();
+      assert.deepEqual(changed.clientBills, confirmed.clientBills);
+      assert.deepEqual(changed.payrolls, confirmed.payrolls);
+      assert.deepEqual(changed.settlementCorrections, confirmed.settlementCorrections);
+      let current = changed.todos.find(t => t.id === editable.id);
+      assert.equal(current.billingKm,0);
+      assert.equal((await update(current,{billingKm:1,clientKm:1})).status,403);
+      assert.equal((await update(current,{billingKm:1},worker)).status,403);
+      assert.equal((await update({...current,updatedAt:'stale'},{billingKm:1})).status,409);
+      assert.deepEqual((await store.load()).todos.find(t=>t.id===current.id),current);
+      const journal=await (await request('/api/undo-journal')).json();
+      assert.equal((await request('/api/undo-journal/'+journal.actions.find(a=>a.canUndo).id,
+        {method:'POST',body:JSON.stringify({confirm:true})})).status,200);
+      assert.equal((await store.load()).todos.find(t=>t.id===editable.id).billingKm,3);
+      assert.deepEqual((await store.load()).clientBills,confirmed.clientBills);
+      check('http.pg_client_lock_scoped_worker_edit_undo_and_rejected_mutations_preserve_confirmed_snapshots');
+    }
     const privateId = (await store.load()).absences[0].id;
     assert.equal((await request(`/api/absences/${privateId}`, { headers: worker })).status, 404);
     check("http.absence_privacy_in_full_initial_and_detail_routes");

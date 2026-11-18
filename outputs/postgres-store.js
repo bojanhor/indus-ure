@@ -657,6 +657,15 @@ class PostgresStore {
     return result.rows[0]?.data || null;
   }
 
+  async hasConfirmedPayrollForTodo(todoId, workerId) {
+    const result = await this.pool.query(
+      `select 1 from indus_payrolls
+       where worker_id = $2 and data->>'status' in ('archiving','confirmed','paid')
+       and coalesce(data->'lines', '[]'::jsonb) @> jsonb_build_array(jsonb_build_object('todoId', $1::text))
+       limit 1`, [String(todoId), String(workerId)]);
+    return result.rowCount > 0;
+  }
+
   // Acquiring an edit lock needs only the task and all of its assignment IDs.
   // In particular, never hydrate image/video attachment metadata here: doing
   // so makes every calendar click wait for unrelated, potentially very large

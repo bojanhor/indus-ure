@@ -259,6 +259,7 @@ async function openTodoDialog(todo = {}, { reportNavigationIds = null } = {}) {
       state.todoMaterialEntry = Boolean(todo._materialEntry || requestedStatus === "material");
       state.todoNoteEntry = Boolean(todo._noteEntry || requestedStatus === "note");
       state.todoDialogClientSettlement = todo.clientSettlement || { confirmed: false };
+      state.todoDialogSettlementEdit = todo.settlementEdit || null;
       $("todoFormDirectClientSettled").checked = false;
       $("todoFormDirectClientSettled").disabled = false;
       $("todoFormDirectClientAmount").value = "";
@@ -611,24 +612,40 @@ function setTodoFormClientBillingLock(todo = {}) {
       const form = $("todoForm");
       const notice = $("todoFormClientBillingLock");
       const settlement = todo?.clientSettlement || state.todoDialogClientSettlement || {};
-      const locked = Boolean(todo?.id && settlement.confirmed);
+      const policy = todo.settlementEdit || state.todoDialogSettlementEdit || { clientLocked: Boolean(settlement.confirmed), workerLocked: false, fields: [] };
+      state.todoDialogSettlementEdit = policy;
+      const locked = Boolean(todo?.id && (policy.clientLocked || policy.workerLocked));
+      const fieldControls = {
+        billingHourlyRate: "todoFormHourlyRate", billingKm: "todoFormBillingKm", workFromHome: "todoFormWorkFromHome",
+        clientBillableMinutes: "todoFormClientBillableHours", clientKm: "todoFormClientKm", clientVehicle: "todoFormClientVehicle",
+        warranty: "todoFormWarranty", notes: "todoFormNotes", material: "todoFormMaterial"
+      };
+      const editableControls = new Set(isAdminView() ? (policy.fields || []).map(key => fieldControls[key]).filter(Boolean) : []);
+      if (editableControls.size) {
+        ["saveTodoDialog", "saveTodoWithoutClosing", "todoFooterSave"].forEach(id => editableControls.add(id));
+        if (editableControls.has("todoFormClientBillableHours")) editableControls.add("todoFormClientBillableHoursReset");
+      }
       form.classList.toggle("is-client-billing-locked", locked);
       notice.classList.toggle("hidden", !locked);
       notice.textContent = locked
-        ? `Dogodek je že poračunan s stranko ${todo.client || ""}. Zaklenjen je za spremembe. Za dodatno delo ali popravek uporabi »Podvoji opravilo« in ustvari nov dogodek.`
+        ? policy.clientLocked && policy.workerLocked
+          ? "Potrjena sta obračun stranke in delavca. Obračunski in skupni podatki so zaklenjeni."
+          : policy.clientLocked
+            ? "Obračun stranke je potrjen. Podatki za stranko in skupni podatki so zaklenjeni; šef lahko popravi še neobračunane podatke za delavca."
+            : "Obračun delavca je potrjen. Podatki za delavca in skupni podatki so zaklenjeni; šef lahko popravi še neobračunane podatke za stranko."
         : "";
       const readableControls = new Set([
         "closeTodoDialog", "todoFooterClose", "duplicateTodoFromDialog", "todoFooterDuplicate",
         "shareTodoPdf", "previousReportTodo", "nextReportTodo"
       ]);
       form.querySelectorAll("input, textarea, select, button").forEach((control) => {
-        const canRead = readableControls.has(control.id)
+        const canRead = readableControls.has(control.id) || editableControls.has(control.id)
           || control.classList.contains("todo-form-attachment-preview")
           || control.classList.contains("share-todo-form-photo");
         if (locked && !canRead && !control.disabled) {
           control.disabled = true;
           control.dataset.clientBillingLockDisabled = "true";
-        } else if (!locked && control.dataset.clientBillingLockDisabled === "true") {
+        } else if ((!locked || canRead) && control.dataset.clientBillingLockDisabled === "true") {
           control.disabled = false;
           delete control.dataset.clientBillingLockDisabled;
         }

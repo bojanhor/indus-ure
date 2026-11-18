@@ -15,6 +15,7 @@ function createSettlementService({
   normalizePayroll,
   payrollForUser,
   payrollLineForTodo,
+  payrollLockForTodos,
   payrollPeriodEnded,
   payrollRange,
   payrollSequenceError,
@@ -326,7 +327,7 @@ function clientBillLockForTodos(db, todos = []) {
 
 function clientBillEditLockMessage(bill) {
   const clientName = String(bill?.clientName || bill?.client || "stranko").trim() || "stranko";
-  return `Dogodek je že v potrjenem obračunu stranki ${clientName} in je zaklenjen. Za dodatno delo ali popravek ustvari nov dogodek.`;
+  return `Dogodek je že v potrjenem obračunu stranki ${clientName}. Podatki stranke in skupni podatki so zaklenjeni. Šef lahko v urejevalniku popravi še neobračunane podatke delavca.`;
 }
 
 function clientBillCandidates(db, input = {}) {
@@ -1150,6 +1151,10 @@ async function handleClientBillingFields(req, res, url) {
         return true;
       }
       const assignmentItems = todoAssignmentItems(db, previousTodo);
+      if (field === "title" && payrollLockForTodos(db, assignmentItems)) {
+        sendJson(res, 403, { error: "Naslov je skupen podatek potrjenega obračuna delavca in je zaklenjen." });
+        return true;
+      }
       const clientBillLock = clientBillLockForTodos(db, assignmentItems);
       if (clientBillLock) {
         sendJson(res, 403, { error: clientBillEditLockMessage(clientBillLock) });

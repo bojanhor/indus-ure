@@ -2734,6 +2734,27 @@ function visibleTrashedTodosForUser(db, user) {
     });
 }
 
+const WORKER_SETTLEMENT_FIELDS = ["billingHourlyRate", "billingKm", "workFromHome"];
+const CLIENT_SETTLEMENT_FIELDS = ["clientBillableMinutes", "clientKm", "clientVehicle", "warranty", "notes", "material"];
+function settlementEditPolicy(todo, user, clientLocked, workerLocked) {
+  return {
+    clientLocked, workerLocked,
+    fields: user.role === "boss" && (clientLocked || workerLocked)
+      ? [...(!workerLocked && TIME_ENTRY_TODO_STATUSES.has(todo.status) ? WORKER_SETTLEMENT_FIELDS : []),
+        ...(!clientLocked ? CLIENT_SETTLEMENT_FIELDS : [])] : []
+  };
+}
+function todoSettlementEdit(db, todo, user) {
+  const clientLocked = Boolean(clientBillLockForTodos(db, [todo]));
+  const workerLocked = Boolean(payrollLockForTodos(db, [todo]));
+  return settlementEditPolicy(todo, user, clientLocked, workerLocked);
+}
+function rejectPayrollTodoChange(db, todos, res) {
+  if (!payrollLockForTodos(db, todos)) return false;
+  sendJson(res, 403, { error: "Podatki delavca in skupni podatki so zaklenjeni s potrjenim obračunom delavca. Urejaš lahko samo še odprte podatke za stranko." });
+  return true;
+}
+
 function visibleTodosForUser(db, user) {
   const todos = (db.todos || []).filter((todo) => !isTrashedTodo(todo));
   const visible = user.role === "boss"
@@ -2758,6 +2779,7 @@ function visibleTodosForUser(db, user) {
         : {}),
       ...(user.role === "boss" ? { history, revisionHistory } : {}),
       clientSettlement: clientSettlementForTodo(db, todo),
+      settlementEdit: todoSettlementEdit(db, todo, user),
       settlement: corrections.length ? {
         pending: true,
         worker: corrections.filter((item) => item.type === "worker").map((item) => ({ id: item.id, delta: item.delta, effectiveDate: item.effectiveDate })),
@@ -2788,6 +2810,7 @@ function visibleTodoForUser(db, user, id) {
       : {}),
     ...(user.role === "boss" ? { history, revisionHistory } : {}),
     clientSettlement: clientSettlementForTodo(db, todo),
+    settlementEdit: todoSettlementEdit(db, todo, user),
     settlement: corrections.length ? { pending: true, worker: corrections.filter((item) => item.type === "worker").map((item) => ({ id: item.id, delta: item.delta, effectiveDate: item.effectiveDate })), client: corrections.filter((item) => item.type === "client").map((item) => ({ id: item.id, delta: item.delta, effectiveDate: item.effectiveDate })) } : { pending: false, worker: [], client: [] }
   };
 }
@@ -6134,6 +6157,7 @@ async function handleApi(req, res) {
         return;
       }
       for (const todos of groups.values()) {
+        if (rejectPayrollTodoChange(db, todos, res)) return;
         const lock = todoAssignmentEditLockConflict(db, todos[0], user);
         if (lock) {
           sendJson(res, 409, { error: `Opravilo trenutno ureja ${lock.lockedByName || lock.lockedById}.`, lock });
@@ -7094,8 +7118,11 @@ async function handleApi(req, res) {
           assigneeIds: focused.assigneeIds
         });
         const { completionRequests, history, revisionHistory, changeNotices, ...publicTodo } = hydrated;
+        const clientBill = await getPgStore().confirmedClientBillForEvent(todoBillingEventId(source));
+        const workerLocked = await getPgStore().hasConfirmedPayrollForTodo(source.id, source.syncUser || source.createdBy);
         const todo = { ...publicTodo, ...(user.role === "boss" ? { history, revisionHistory } : {}),
-          clientSettlement: clientSettlementFromBill(await getPgStore().confirmedClientBillForEvent(todoBillingEventId(source))) };
+          clientSettlement: clientSettlementFromBill(clientBill),
+          settlementEdit: settlementEditPolicy(source, user, Boolean(clientBill), workerLocked) };
         sendJson(res, 200, {
           todo,
           request: addressed ? {
@@ -7255,6 +7282,61 @@ async function handleApi(req, res) {
       }
 
       sendJson(res, 405, { error: "Ta metoda ni podprta." });
+      return;
+    }
+
+    const settlementFieldsMatch = /^\/api\/todos\/([^/]+)\/settlement-fields$/.exec(url.pathname);
+    if (settlementFieldsMatch && req.method === "POST") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      if (user.role !== "boss") { sendJson(res, 403, { error: "Delno zaklenjen vpis lahko ureja samo šef." }); return; }
+      const body = await readBody(req);
+      const db = await readRequestDb(req);
+      const previous = db.todos.find(t => t.id === decodeURIComponent(settlementFieldsMatch[1]));
+      if (!previous || isTrashedTodo(previous)) { sendJson(res, 404, { error: "Vpis ni na voljo." }); return; }
+      const policy = todoSettlementEdit(db, previous, user);
+      const changes = body.changes;
+      const keys = changes && typeof changes === "object" && !Array.isArray(changes) ? Object.keys(changes) : [];
+      if (!keys.length || keys.some(key => !policy.fields.includes(key))) {
+        sendJson(res, 403, { error: "Enega od izbranih podatkov ni dovoljeno spreminjati. Obračun se je morda medtem potrdil; ponovno odpri vpis." }); return;
+      }
+      if (keys.includes("workFromHome") && payrollLockForTodos(db, todoAssignmentItems(db, previous))) {
+        sendJson(res, 403, { error: "Delo od doma je povezano s potrjenim obračunom delavca." }); return;
+      }
+      // Always check the original revision, even if this user owns the edit lock.
+      if (!body.baseUpdatedAt || body.baseUpdatedAt !== previous.updatedAt) {
+        sendJson(res, 409, { error: "Vpis se je medtem spremenil. Ponovno ga odpri." }); return;
+      }
+      const lock = todoAssignmentEditLockConflict(db, previous, user, String(body.editLockToken || ""));
+      if (lock) { sendJson(res, 409, { error: "Vpis trenutno ureja drug uporabnik.", lock }); return; }
+      for (const key of keys) {
+        const value = changes[key];
+        const max = key === "billingHourlyRate" ? 10000 : 1000000;
+        const valid = ["notes", "material"].includes(key) ? typeof value === "string" && value.length <= 10000
+          : ["workFromHome", "warranty"].includes(key) ? typeof value === "boolean"
+          : key === "clientVehicle" ? ["personal", "van"].includes(value)
+          : key === "clientBillableMinutes" && value === null ? true
+          : typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= max
+            && (key !== "clientBillableMinutes" || value % 15 === 0);
+        if (!valid) { sendJson(res, 400, { error: "Neveljavna vrednost polja: " + key }); return; }
+      }
+      const now = new Date().toISOString();
+      const action = policy.clientLocked ? "popravljeni podatki za delavca (obračun stranke nespremenjen)" : "popravljeni podatki za stranko (obračun delavca nespremenjen)";
+      const sharedKeys = keys.filter(key => CLIENT_SETTLEMENT_FIELDS.includes(key) || key === "workFromHome");
+      const groupIds = new Set(todoAssignmentItems(db, previous).map(t => t.id));
+      db.todos = db.todos.map(item => {
+        if (!groupIds.has(item.id)) return item;
+        const applicable = Object.fromEntries(keys.filter(key => item.id === previous.id || sharedKeys.includes(key)).map(key => [key, changes[key]]));
+        if (!Object.keys(applicable).some(key => JSON.stringify(item[key]) !== JSON.stringify(applicable[key]))) return item;
+        const next = { ...item, ...applicable, updatedAt: now, updatedBy: user.id, updatedByName: user.name,
+          history: [...(item.history || []), audit(user, action)] };
+        next.revisionHistory = appendTodoRevision(item, next, user, action, now);
+        return next;
+      });
+      // Deliberately do not touch payroll/client-bill snapshots, receipts,
+      // archive markers or legacy settlement corrections.
+      await writeDbAsync(db);
+      sendJson(res, 200, { todos: visibleTodosForUser(db, user) });
       return;
     }
 
@@ -7430,6 +7512,7 @@ async function handleApi(req, res) {
         return;
       }
       const assignmentItems = todoAssignmentItems(db, previousTodo);
+      if (rejectPayrollTodoChange(db, assignmentItems, res)) return;
       const clientBillLock = clientBillLockForTodos(db, assignmentItems);
       if (clientBillLock) {
         sendJson(res, 403, { error: clientBillEditLockMessage(clientBillLock) });
@@ -7565,6 +7648,7 @@ async function handleApi(req, res) {
           return;
         }
         const clientBill = await getPgStore().confirmedClientBillForEvent(todoBillingEventId(source));
+        const workerLocked = await getPgStore().hasConfirmedPayrollForTodo(source.id, source.syncUser || source.createdBy);
         const hydrated = hydrateTodoAttachments({ attachments: focused.attachments }, {
           ...source,
           assigneeIds: focused.assigneeIds
@@ -7574,6 +7658,7 @@ async function handleApi(req, res) {
           ...publicTodo,
           changeNotice: todoChangeNoticeForUser(source, user),
           clientSettlement: clientSettlementFromBill(clientBill),
+          settlementEdit: settlementEditPolicy(source, user, Boolean(clientBill), workerLocked),
           ...(user.role === "boss" ? { history, revisionHistory } : {})
         };
         sendJson(res, 200, { todo });
@@ -7627,6 +7712,7 @@ async function handleApi(req, res) {
         return;
       }
       const clientBillLock = clientBillLockForTodos(db, todoAssignmentItems(db, previousTodo));
+      if (rejectPayrollTodoChange(db, todoAssignmentItems(db, previousTodo), res)) return;
       if (todoAssignmentItems(db, previousTodo).some(item => TIME_ENTRY_TODO_STATUSES.has(item.status) && !canRecordHoursFor(db, user, item.syncUser))) {
         sendJson(res, 403, { error: "Za tega delavca nimaš dovoljenja za vpis ur." }); return;
       }
@@ -7886,6 +7972,7 @@ releaseTodoAssignmentEditLock(db, previousTodo, user, editLockToken);
         return;
       }
       const assignmentItems = todoAssignmentItems(db, todo);
+      if (rejectPayrollTodoChange(db, assignmentItems, res)) return;
       const clientBillLock = clientBillLockForTodos(db, assignmentItems);
       if (clientBillLock) {
         sendJson(res, 403, { error: clientBillEditLockMessage(clientBillLock) });
@@ -8201,6 +8288,7 @@ const {
     normalizePayroll: (...args) => normalizePayroll(...args),
     payrollForUser: (...args) => payrollForUser(...args),
     payrollLineForTodo: (...args) => payrollLineForTodo(...args),
+    payrollLockForTodos: (...args) => payrollLockForTodos(...args),
     payrollPeriodEnded: (...args) => payrollPeriodEnded(...args),
     payrollRange: (...args) => payrollRange(...args),
     payrollSequenceError: (...args) => payrollSequenceError(...args),

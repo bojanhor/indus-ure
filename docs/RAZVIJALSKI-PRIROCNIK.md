@@ -49,6 +49,13 @@ Koda, ki se izvaja, je v **`outputs/`**. Strežnik sestavi HTML in vključi loka
 
 ## Kako preveriti obračun in Undo
 
+Od ločitve zaklepov 18. 11. 2026 je potrjen obračun stranke združljiv z
+urejanjem delavčevih še neobračunanih kilometrov in postavke. Nasprotno,
+potrjen obračun delavca ne zaklene ločenih ur/kilometrov za stranko.
+Skupni podatki ostanejo zaklenjeni. Preveri `todo.settlementEdit` v svežem
+odgovoru API in [pravila delnega zapisa](../OPERATIONS.md#ločeni-obračunski-zaklepi-18-11-2026);
+ne odklepaj celotnega obrazca ali popravljaj že potrjenih posnetkov.
+
 - **Loči dogodek od dodelitve.** `indus_tasks.id` je skupen dogodek; `indus_task_assignments.id` pripada posamezni dodelitvi, `task_id` jo poveže z dogodkom. V API je `todo.id` ID dodelitve, obračun za stranko pa uporablja `assignmentGroupId || id`. Ne združuj dveh vpisov samo zato, ker imata isti naslov.
 - **Kljukica »Potrdi samo ta vpis«** in skupinski gumb oba pošljeta `POST /api/client-bills`. Posamična kljukica pošlje en ID dogodka. Potrditev ustvari obračun stranke, ne obračuna delavca. V meniju Undo je besedilo potrditve poimenovano po **stranki**, ne po opravilu ali izvajalcu. Dve enaki vrstici v kratkem času zato nista dokaz podvojitve ali manjkajočega zapisa.
 - **Če uporabnik meni, da potrditve ni:** v šefovskem pogledu ponovno odpri Undo (svež `GET /api/undo-journal`). Primerjaj čas potrditve in čas vpisa ločeno. Za bralno preverbo v bazi primerjaj `indus_client_bills.id`, `data.eventIds` in `data.lines` z ID-jem v `indus_meta` → ključ `application` → `undoJournal[].patch.arrays.clientBills.changes[].id`. Ne izvažaj celotnega zapisa `application`. Zgodovina je omejena (`history.undoActions`, privzeto 20); po njej se razveljavlja od zadnjega dejanja nazaj.

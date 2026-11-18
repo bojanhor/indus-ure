@@ -294,6 +294,38 @@ slike; ponovno branje je potrdilo prazen seznam.
 
 ## Obvezni postopek objave Ure
 
+### Ločeni obračunski zaklepi (18. 11. 2026)
+
+Potrditev stranki varuje strankine in skupne podatke, ne še odprtega
+obračuna delavca. Potrditev delavcu varuje njegove in skupne podatke.
+Šef v delno zaklenjenem urejevalniku spreminja samo dovoljeno stran:
+
+- ob potrjeni stranki: `billingHourlyRate`, `billingKm`, `workFromHome`;
+- ob potrjenem delavcu: `clientBillableMinutes`, `clientKm`, `clientVehicle`,
+  `warranty`, `notes`, `material`;
+- datum, čas, izvajalec, stranka, naslov, status, priloge in brisanje ostanejo
+  zaklenjeni ob katerem koli potrjenem obračunu. Pri dveh potrjenih straneh
+  je obrazec samo za branje. Običajni delavec te izjeme nima.
+
+`POST /api/todos/:id/settlement-fields` sprejme samo izrecno spremenjena
+polja. Strežnik preveri sveže stanje obeh obračunov, vlogo, dovoljene ključe,
+vrednosti, revizijo in urejevalni zaklep. Potrditev med odprtim obrazcem
+zavrne poznejši zapis. Sprememba ima zgodovino in poslovni Undo; ne ustvarja
+novih poračunov in ne spreminja potrjenih posnetkov, plačil ali arhivskih oznak.
+Ta omejena pot ne shranjuje spremembe kot navidezno uspešne brez povezave.
+Stare polne PUT-zahteve, brisanje in premiki časa ne morejo obiti zaklepa.
+Hitri popravek naslova v poročilu in paketna menjava stranke prav tako
+spoštujeta delavčev potrjeni obračun.
+
+Ni migracije podatkov. Kodni rollback na prejšnjo izdajo ponovno uvede
+preširok zaklep stranke; že shranjene veljavne delne popravke ohrani.
+Ni razloga za obnovo stare baze. Regresije so v
+`tests/e2e/settlement-field-locks.spec.cjs` (Chromium in Firefox) in
+`scripts/postgres-integration.js`; primerjajo celotne potrjene posnetke
+pred in po dovoljenem popravku ter preverijo Undo in zavrnjene zahteve.
+
+### Postopek
+
 **Obseg objave:** celotni [deploy.ps1](scripts/deploy.ps1) poleg kode Ure namesti tudi konfiguracijo skupnega Nginxa, ga znova naloži, namesti časovnik za povzetke in redči stare izdaje. Če je dovoljena samo objava kode Ure, ne zaženi celotne skripte: pripravi preverjenega kandidata ter uporabi obstoječa strežniška koraka QA in preklopa iz točk 4–5, brez nameščanja skupne infrastrukture. Sprememba zgolj dokumentacije ne zahteva produkcijske objave.
 
 1. Čisto commitano stanje, pregled diff-a in brez sprememb tujih projektov.

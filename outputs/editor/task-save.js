@@ -254,6 +254,43 @@ async function saveTodoFromDialog({ closeAfterSave = true, handover = false } = 
       syncTodoFormEndDate();
       const id = $("todoFormId").value;
       const existing = id ? state.todos.find((todo) => todo.id === id) : null;
+      const settlementPolicy = state.todoDialogSettlementEdit;
+      if (existing && (settlementPolicy?.clientLocked || settlementPolicy?.workerLocked)) {
+        if (state.todoSettlementSavePending) return;
+        const controls = { billingHourlyRate: "todoFormHourlyRate", billingKm: "todoFormBillingKm", workFromHome: "todoFormWorkFromHome",
+          clientBillableMinutes: "todoFormClientBillableHours", clientKm: "todoFormClientKm", clientVehicle: "todoFormClientVehicle",
+          warranty: "todoFormWarranty", notes: "todoFormNotes", material: "todoFormMaterial" };
+        const changes = {};
+        for (const key of settlementPolicy.fields || []) {
+          const control = $(controls[key]);
+          // The submit handler temporarily disables controls while saving.
+          // Permissions come from the server policy, not that busy state.
+          if (!control) continue;
+          const value = ["workFromHome", "warranty"].includes(key) ? control.checked
+            : ["notes", "material", "clientVehicle"].includes(key) ? control.value
+            : key === "clientBillableMinutes" ? todoFormClientBillableMinutes()
+            : parseBillingNumber(control.value, key === "billingHourlyRate" ? 10000 : 1000000);
+          if (key !== "clientBillableMinutes" && value === null) return invalidTodoForm("Vpiši veljavno vrednost ali izrecno 0.", control);
+          if (JSON.stringify(existing[key] ?? (key === "clientBillableMinutes" ? null : "")) !== JSON.stringify(value)) changes[key] = value;
+        }
+        if (!Object.keys(changes).length) {
+          if (closeAfterSave) $("todoDialog").close();
+          else showNotice("Ni sprememb.");
+          return;
+        }
+        state.todoSettlementSavePending = true;
+        try {
+          const data = await api("/api/todos/" + encodeURIComponent(id) + "/settlement-fields", {
+            method: "POST", body: JSON.stringify({ changes, baseUpdatedAt: existing.updatedAt,
+              editLockToken: state.todoEditLock?.todoId === id ? state.todoEditLock.token : "" })
+          });
+          state.todos = data.todos;
+          refreshClientList(); render();
+          if (closeAfterSave) $("todoDialog").close();
+          else if ($("todoFormId").value === id && $("todoDialog").open) await keepTodoDialogOpenAfterSave(data, existing, false);
+        } finally { state.todoSettlementSavePending = false; }
+        return;
+      }
       const client = findTodoClient($("todoFormClient").value);
       const meal = $("todoFormStatus").value === "meal";
       const materialEntry = $("todoFormStatus").value === "material";
