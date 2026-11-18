@@ -475,7 +475,8 @@ test("client billing supports bulk selection and safe client reassignment", asyn
   assert.match(server, /url\.pathname === "\/api\/todos\/bulk-client"/);
   assert.match(server, /confirmedClientBillByEvent\(db\)/);
   assert.match(server, /function clientBillEditLockMessage\(bill\)/);
-  assert.match(server, /Za dodatno delo ali popravek ustvari nov dogodek/);
+  assert.match(server, /Podatki stranke in skupni podatki so zaklenjeni/);
+  assert.match(server, /Šef lahko v urejevalniku popravi še neobračunane podatke delavca/);
   assert.match(server, /todoAssignmentEditLockConflict\(db, todos\[0\], user\)/);
   assert.match(server, /clientContactIds: \[\],[\s\S]*?clientContacts: \[\]/);
   assert.match(server, /pruneUnusedAdHocClients\(db\)/);
