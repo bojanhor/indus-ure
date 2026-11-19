@@ -436,7 +436,7 @@ test("večdnevno opravilo dobi povezani mesečni trak in varne kontrole vnosa", 
   assert.match(html, /day-multiday-event-title/);
   assert.match(html, /is-span-continuation/);
   assert.match(html, /const startsNewWeek = parseDate\(key\)\?\.getDay\(\) === 1/);
-  assert.match(html, /if \(actualStart \|\| \(startsNewWeek && !actualEnd\)\)/);
+  assert.match(html, /if \(actualStart \|\| startsNewWeek\)/);
   assert.match(html, /!multiDayLayout\.todoIds\.has\(todo\.id\)/);
   assert.match(html, /function syncTodoFormDateRangeControls\(\)/);
   assert.match(html, /field\.disabled = multiDay \|\| isMaterialEntry;/);
