@@ -345,6 +345,49 @@ točke so odstranjene iz Google TODO s preverjanjem revizije dokumenta.
 Namestitev nespremenjenih odvisnosti je izpisala 9 moderate opozoril;
 posodabljanje knjižnic ni del tega posega.
 
+## Večdnevna pasica na zadnji ponedeljek
+
+Primer »Izdelava omare lupilec« (21.–23. 11. 2026) je bil v šefovskem
+koledarju prisoten, vendar brez vidnih podatkov na ponedeljkovem delu.
+`appendMonthMultiDayLanes()` je ponavljanje naslova in izvajalcev izrecno
+izključil, kadar je bil ponedeljek zadnji dan dogodka. Pogoj je zdaj
+`actualStart || startsNewWeek`: naslov, imena in avatarji se ponovijo na
+vsakem začetku tedenske vrstice, tudi na zadnjem dnevu ali pri dogodku,
+ki se je začel v prejšnjem mesecu. Vmesni dnevi ostanejo povezane pasice.
+Filtri, pravice, datum, dodelitve in poslovni podatki se ne spreminjajo.
+
+Regresija `calendar-order.spec.cjs` je pred popravkom ponovila manjkajoč
+ponedeljkov naslov. Pokriva sobota–ponedeljek, nedelja–torek in daljši
+razpon iz prejšnjega meseca, šefovski/delavski pogled, računalniško in
+telefonsko širino ter odpiranje brez spremembe datuma. Statična regresija
+v `http-shell.test.js` je usklajena z novim pravilom. Povrnitev kode na
+`a0fb1b8` ponovno uvede prazni zadnji ponedeljek; obnovitev baze ni potrebna.
+
+Objavljeno 19. 11. 2026 kot `ecd840b` (izvedba `66478c9`, uskladitev
+statičnega testa `ecd840b`). Celotni Chromium: 140 uspešnih; Firefox:
+49 uspešnih in 3 namenski preskoki dotika. Lokalni `npm test`: 357 uspešnih
+in en Windows skip; končni strežniški kandidat: 358 uspešnih. PostgreSQL
+QA/restore/upgrade: 38 + 1 + 2 + 4 uspešna preverjanja, rollback na `a0fb1b8`.
+
+Preverjena predobjavna kopija `indus-ure-recovery-20261119T162508Z.tar.gz`
+(209137693 B), SHA-256
+`e310e684c75e74f8a2cc8a2175849a27a727749a320dc675f3c41c050b3d5842`.
+Potrjeni lokalni arhiv, Drive velikost/MD5/sveže branje ter berljiva izvoza
+(603 dogodki, 420 vpisov ur). Aktivna storitev in backup timer, oba health
+odgovora uspešna, po preklopu v pregledanem dnevniku ni opozoril.
+
+Pred/po preklopu je 117 potrjenih obračunov nespremenjenih (odtis celotnih
+zapisov `9838f7a83254644b7cba761ef2185d92`), enako dogodek z dodelitvami
+(`18fb0f65e3e17ab1ad2df1ac0c0e1f32`). Med predhodnim testiranjem, pred
+zajemom teh odtisov, je uporabnik Bojan ob 17.16 po lokalnem času premaknil
+dogodek na 20.–22. november. Produkcijski smoke je zato prilagojen svežemu
+razponu: na 20. novembru so vidni avatar, Ibro in naslov; ponedeljkov zaključek
+je preverjen na izoliranih podatkih, ne s prestavljanjem poslovnega dogodka
+nazaj. Produkcijski brskalnik je blokiral poslovne zapise, ni JS napak;
+vizualno preverjeni računalniška in telefonska širina (ne fizični telefon).
+Fakture in skupni Nginx nista spremenjena. Devet moderate opozoril ob
+namestitvi nespremenjenih odvisnosti ostaja zunaj tega prikaznega popravka.
+
 ## Obvezni postopek objave Ure
 
 ### Ločeni obračunski zaklepi (18. 11. 2026)
