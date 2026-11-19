@@ -319,6 +319,32 @@ Stare regresije povezanih vpisov preverjajo združljivost obstoječih
 osnutkov brez odstranjene UI bližnjice. SQL shema in poslovni podatki se
 ne spreminjajo; povrnitev kode na `43e67a0` zadošča, brez obnove baze.
 
+Objavljeno kot `a0fb1b8`. Lokalni strežniški prehod: 357 uspešnih in en
+namenski Windows skip; celotni Chromium: 139 uspešnih; Firefox: 48 uspešnih
+in 3 namensko preskočeni testi dotika. Obvezni strežniški prehod na točnem
+kandidatu je uspešen, vključno s PostgreSQL: 38 fresh + 1 restore +
+2 recovery/CSV + 4 production-clone/rollback. Vizualno preverjena oba
+dejanska PDF (vse vključeno ter samo točen čas brez imen, ur in seštevkov).
+
+Pred preklopom preverjena kopija
+`indus-ure-recovery-20261119T100511Z.tar.gz` (209129140 B), SHA-256
+`7943caa78053eda8a3e748a026a6d3dd0fb74cd59eb5f951fe412bbc438e6567`.
+Potrjeni lokalni arhiv, Drive velikost/MD5/sveže branje, navodila in oba
+berljiva CSV (607 dogodkov, 420 vpisov ur); označena točka pred objavo.
+
+Produkcijski Chromium je brez poslovnih zapisov preveril odstranjeno
+bližnjico, obe obračunski ikoni v iskanju, panel pred prenosom PDF in
+preklic brez zahteve za prenos. Mobilni prikaz panela in iskanja je
+vizualno preverjen; to ni test na fizičnem telefonu. Ni JS napak, odprto
+opravilo je po zaprtju nespremenjeno. Vseh 116 potrjenih obračunskih
+zapisov je pred/po povsem enakih: kontrolni odtis celotnih JSON zapisov
+`71ab31cde6d7657bafefc453e34bbd5d`. Javni/lokalni health sta uspešna,
+storitev in backup timer aktivna, po objavi v pregledanem dnevniku ni
+opozoril. Fakture in skupni Nginx nista bila spreminjana. Tri objavljene
+točke so odstranjene iz Google TODO s preverjanjem revizije dokumenta.
+Namestitev nespremenjenih odvisnosti je izpisala 9 moderate opozoril;
+posodabljanje knjižnic ni del tega posega.
+
 ## Obvezni postopek objave Ure
 
 ### Ločeni obračunski zaklepi (18. 11. 2026)
