@@ -2816,7 +2816,7 @@
     }
 
     /* Večdnevni dogodki dobijo skupno, po vrsticah poravnano stezo. Posamezna
-       nadaljevanja se stikajo čez rob dneva, naslov pa ostane le na začetku. */
+       nadaljevanja se stikajo čez rob dneva, podatki pa se ponovijo vsak ponedeljek. */
     .day-single-untimed { display: flex; flex-direction: column; gap: 7px; flex-shrink: 0; }
     .day-single-untimed:empty:not([style]) { display: none; }
     .day-multiday-lanes {
@@ -10820,9 +10820,10 @@ function appendMonthMultiDayLanes(day, key, weekIndex, layout) {
           const title = todo.title || 'Brez naslova';
           item.setAttribute('aria-label', `${todo.urgent ? 'Nujno opravilo; ' : ''}${todoAssigneeNames(todo)}; ${title}; ${todoDateTimeLabel(todo)}`);
           // A span crosses the grid's weekly rows on Monday. Repeat its title
-          // there so the pale continuation has meaning on its own.
+          // there even when Monday is its final day, so the continuation
+          // never becomes an anonymous empty bar at the start of a row.
           const startsNewWeek = parseDate(key)?.getDay() === 1;
-          if (actualStart || (startsNewWeek && !actualEnd)) {
+          if (actualStart || startsNewWeek) {
             item.appendChild(calendarTodoWorkers(todo));
             const titleElement = document.createElement('span');
             titleElement.className = 'day-multiday-event-title';
