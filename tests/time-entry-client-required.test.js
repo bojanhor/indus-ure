@@ -95,8 +95,8 @@ test("customer PDF always uses billable hours; event sharing retains actual time
     const download = await pdfText(await call((await ticketResponse.json()).downloadUrl));
     assert.match(download, /Za obračun\s*:?\s*4 h/);
     assert.doesNotMatch(download, /Čas izvajalcev|3 h/);
-    for (let mask = 0; mask < 16; mask++) {
-      const options = { showWorkerTitle: Boolean(mask & 1), showWorkerName: Boolean(mask & 2), showHours: Boolean(mask & 4), showDates: Boolean(mask & 8) };
+    for (let mask = 0; mask < 32; mask++) {
+      const options = { showWorkerTitle: Boolean(mask & 1), showWorkerName: Boolean(mask & 2), showHours: Boolean(mask & 4), showDates: Boolean(mask & 8), showTimes: Boolean(mask & 16) };
       const body = { ...payload, exportOptions: { ...options, hoursMode: "worker_time" } };
       const response = mask % 2 ? await call("/api/client-report/pdf", "POST", body)
         : await call((await (await call("/api/client-report/pdf-ticket", "POST", body)).json()).downloadUrl);
@@ -106,7 +106,8 @@ test("customer PDF always uses billable hours; event sharing retains actual time
       assert.equal(/Za obračun\s*:?\s*4 h/.test(text), options.showHours, `hours mask ${mask}`);
       assert.equal(/Skupaj\s*:?\s*4 h/.test(text), options.showHours, `total mask ${mask}`);
       assert.equal(text.includes("02. 06. 2032"), options.showDates, `date mask ${mask}`);
-      assert.doesNotMatch(text, /08:00|11:00|3 h/);
+      assert.equal(text.includes('08:00-11:00'), options.showTimes, `exact time mask ${mask}`);
+      assert.doesNotMatch(text, /3 h/);
     }
     for (const [field, value] of [['reportWorkerTitle', 'Monter QA'], ['reportWorkerName', 'Izvajalec QA']]) {
       const current = (await (await call(`/api/todos/${todo.id}`)).json()).todo;

@@ -8,7 +8,7 @@ test.beforeAll(async () => { app = await startIsolatedTestApp(); });
 test.afterAll(async () => { await app?.stop(); });
 
 for (const viewport of [{ width: 390, height: 844 }, { width: 1280, height: 900 }]) {
-  test(`project hours: every working status saves a separate entry and keeps the source (${viewport.width}px)`, async ({ browser }) => {
+  test(`legacy linked draft: working statuses keep source; removed shortcut stays absent (${viewport.width}px)`, async ({ browser }) => {
     test.setTimeout(120_000);
     const context = await browser.newContext({ viewport });
     const page = await context.newPage();
@@ -30,11 +30,11 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 1280, height: 900 
           return result.todos.find(todo => todo.title === title);
         }, { title, status, index, width: viewport.width });
         await page.locator(".todo-item").filter({ hasText: title }).locator(".edit-todo").click();
-        await expect(page.locator("#writeHoursFromTodo")).toBeVisible();
-        await expect(page.locator("#todoFooterWriteHours")).toBeVisible();
-        if (status === "order") await page.screenshot({ path: test.info().outputPath("project-order-hours-button.png") });
-        // Exercise both the toolbar icon and the mirrored footer button.
-        await page.locator(index % 2 ? "#todoFooterWriteHours" : "#writeHoursFromTodo").click();
+        await expect(page.locator("#writeHoursFromTodo")).toHaveCount(0);
+        await expect(page.locator("#todoFooterWriteHours")).toHaveCount(0);
+        if (status === "order") await page.screenshot({ path: test.info().outputPath("project-without-hours-shortcut.png") });
+        // Existing linked drafts still need safe source handling after removal of the UI shortcut.
+        await page.evaluate(() => { void openHoursTodoFromCurrent(); });
         await expect(page.locator("#todoFormStatus")).toHaveValue("execution");
         await expect(page.locator("#todoFormId")).toHaveValue("");
         await expect(page.locator("#todoFormTask")).toHaveValue(title);

@@ -1735,6 +1735,7 @@
     .report-client-transfer input { display: block; width: 100%; min-height: 42px; padding: 9px 11px; border: 1px solid var(--line); border-radius: 8px; font: inherit; }
     .report-export-settings { display: grid; gap: 16px; padding: 16px 20px; }
     #reportExportSettingsDialog .todo-meta { margin: 0 20px 18px; }
+    #confirmReportPdfExport { margin: 0 20px 20px; min-height: 44px; }
     .client-billing-inline-fields.report-worker-labels { display: flex; flex-wrap: wrap; gap: 10px; width: auto; max-width: 100%; background: transparent; padding: 0; }
     .report-worker-labels > label { flex: 0 1 190px; min-width: 0; max-width: 100%; }
     .report-worker-labels > label:last-child { flex-basis: 240px; }
@@ -3433,6 +3434,8 @@
 
     .search-result-open:hover strong,
     .search-result-open:focus-visible strong { color: var(--accent-dark); }
+    .search-result-status { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
+    .search-result-status .day-todo-settlements { position: static; color: var(--ink); }
     .search-result-calendar-drag { touch-action: none; user-select: none; -webkit-user-select: none; }
     .search-result-calendar-drag.month-dragging { opacity: .42; outline: 2px dashed var(--accent); }
     .search-result-calendar-drag.month-todo-drag-ghost { display: grid; grid-template-columns: 1fr; padding: 10px; border-radius: 8px; background: var(--panel); }
@@ -6198,12 +6201,14 @@
     <form method="dialog">
       <div class="modal-head"><h3>Nastavitve PDF poročila</h3><button type="button" class="icon-btn" id="closeReportExportSettings" aria-label="Zapri nastavitve PDF">&times;</button></div>
       <div class="report-export-settings">
+        <label><input type="checkbox" data-report-option="showWorkerName">Prikaži ime / vzdevek izvajalca</label>
+        <label><input type="checkbox" data-report-option="showTimes">Prikaži točen čas (od–do)</label>
+        <label><input type="checkbox" data-report-option="showHours">Prikaži št. ur za vsak dogodek in seštevek</label>
         <label><input type="checkbox" data-report-option="showWorkerTitle">Prikaži naziv izvajalca</label>
-        <label><input type="checkbox" data-report-option="showWorkerName">Prikaži vzdevek izvajalca</label>
-        <label><input type="checkbox" data-report-option="showHours">Prikaži št. delovnih ur</label>
         <label><input type="checkbox" data-report-option="showDates">Prikaži datume vpisov</label>
       </div>
-      <p class="todo-meta">Ure v PDF so obračunske ure za stranko. Izbor se samodejno shrani za trenutni kontekst; podatkov vpisov ne spreminja.</p>
+      <p class="todo-meta">Ure v PDF so obračunske ure za stranko; točen čas prikazuje dejansko vpisan interval. Izbor se samodejno shrani za trenutni kontekst; podatkov vpisov ne spreminja.</p>
+      <button type="button" id="confirmReportPdfExport" class="primary hidden">Prenesi PDF</button>
     </form>
   </dialog>
 
@@ -6304,7 +6309,6 @@
           <button class="todo-modal-action secondary hidden" id="nextReportTodo" type="button" title="Naslednji vpis v poro&#269;ilu" aria-label="Naslednji vpis v poro&#269;ilu">&rsaquo;</button>
           <button class="todo-modal-action danger hidden" id="deleteTodoFromDialog" type="button" title="Izbriši opravilo" aria-label="Izbriši opravilo">&#128465;</button>
           <button class="todo-modal-action secondary hidden" id="duplicateTodoFromDialog" type="button" title="Podvoji opravilo" aria-label="Podvoji opravilo">&#10697;</button>
-          <button class="todo-modal-action secondary hidden" id="writeHoursFromTodo" type="button" title="Piši ure na ta projekt" aria-label="Piši ure na ta projekt">&#9201;</button>
           <button class="todo-modal-action secondary hidden" id="shareTodoPdf" type="button" title="Deli dogodek" aria-label="Deli dogodek"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m8 11 8-5M8 13l8 5"/><circle cx="5" cy="12" r="3"/><circle cx="18" cy="5" r="3"/><circle cx="18" cy="19" r="3"/></svg></button>
           <button class="todo-modal-action secondary" id="saveTodoWithoutClosing" type="button" title="Shrani brez zapiranja" aria-label="Shrani brez zapiranja">&#128190;</button>
           <button class="todo-modal-action primary" id="saveTodoDialog" type="submit" title="Shrani in zapri" aria-label="Shrani in zapri">&#10003;</button>
@@ -6525,7 +6529,6 @@
         <div class="todo-form-footer-actions" id="todoFormFooterActions" aria-label="Dejanja opravila">
           <button class="danger hidden" id="todoFooterDelete" type="button">Izbri&#353;i opravilo</button>
           <button class="secondary hidden" id="todoFooterDuplicate" type="button">Podvoji opravilo</button>
-          <button class="secondary hidden" id="todoFooterWriteHours" type="button">Vpis ur</button>
           <button class="secondary hidden" id="requestTodoCompletion" type="button">Zahtevaj dopolnitev</button>
           <button class="secondary" id="todoFooterClose" type="button">Zapri brez shranjevanja</button>
           <button class="primary" id="todoFooterSave" type="submit">Shrani</button>
@@ -13777,7 +13780,7 @@ function renderSearchContent() {
             <strong>${todo.date ? formatDate(todo.date) : "Brez datuma"}</strong>
             <span>${escapeHtml(todo.client || "Brez stranke")}</span>
             <span>${escapeHtml(todo.title)}${todo.notes ? `<br><small>${escapeHtml(todo.notes)}</small>` : ""}</span>
-            <span class="todo-chip todo-status-color ${todoStatusClass(todo.status)}">${todoStatus(todo.status).label}</span>
+            <span class="search-result-status"><span class="todo-chip todo-status-color ${todoStatusClass(todo.status)}">${todoStatus(todo.status).label}</span>${dayTodoSettlementIndicators(todo)}</span>
           </button>
           <button class="search-result-locate icon-btn" type="button" title="Pokaži v seznamu" aria-label="Pokaži v seznamu: ${escapeHtml(todo.title || "Brez naslova")}">
             <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8.5" cy="8.5" r="4.75"></circle><path d="m12 12 4.25 4.25"></path><path d="M8.5 6.5v4M6.5 8.5h4"></path></svg>
@@ -14833,7 +14836,6 @@ installReportFilterBindings1();
 const modalActionMirrors = [
       ["todoFooterDelete", "deleteTodoFromDialog"],
       ["todoFooterDuplicate", "duplicateTodoFromDialog"],
-      ["todoFooterWriteHours", "writeHoursFromTodo"],
       ["todoFooterClose", "closeTodoDialog"],
       ["photoEditorFooterClose", "photoEditorClose"],
       ["photoEditorFooterSave", "photoEditorSave"]

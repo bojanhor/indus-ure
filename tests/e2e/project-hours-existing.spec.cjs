@@ -38,7 +38,8 @@ async function countHours(page, sourceId) {
 
 test("existing hours: cancel, select a particular entry for editing, or explicitly create a new entry", async ({ page }) => {
   const { source, ids } = await seed(page);
-  await page.locator("#writeHoursFromTodo").tap();
+  // Legacy linked drafts retain duplicate protection; the creation shortcut is removed.
+  await page.evaluate(() => { void openHoursTodoFromCurrent(); });
   await expect(page.locator("#projectHoursExistsDialog")).toBeVisible();
   await expect(page.locator("#projectHoursExistsList")).toContainText("16:15–17:15");
   await expect(page.locator("#projectHoursExistsList")).toContainText("17:15–18:15");
@@ -46,7 +47,7 @@ test("existing hours: cancel, select a particular entry for editing, or explicit
   await page.locator("#projectHoursExistsClose").tap();
   await expect(page.locator("#todoFormId")).toHaveValue(source.id);
   expect(await countHours(page, source.id)).toBe(2);
-  await page.locator("#writeHoursFromTodo").tap();
+  await page.evaluate(() => { void openHoursTodoFromCurrent(); });
   await page.locator(`#projectHoursExistsList input[value='${ids[1]}']`).check();
   await page.locator("#projectHoursExistsEdit").tap();
   await expect(page.locator("#todoFormId")).toHaveValue(ids[1]);
@@ -56,7 +57,7 @@ test("existing hours: cancel, select a particular entry for editing, or explicit
   await page.locator("#closeTodoDialog").tap();
   await expect(page.locator("#todoDialog")).toBeHidden();
   await page.evaluate(async sourceId => openTodoDialog(state.todos.find(todo => todo.id === sourceId)), source.id);
-  await page.locator("#todoFooterWriteHours").tap();
+  await page.evaluate(() => { void openHoursTodoFromCurrent(); });
   await page.locator("#projectHoursExistsCreate").tap();
   await expect(page.locator("#todoFormId")).toHaveValue("");
   await expect(page.locator("#todoFormStart")).toHaveValue("18:15");
@@ -98,7 +99,7 @@ test("closing during lookup never opens a late warning or another editor", async
   const gate = new Promise(resolve => { release = resolve; });
   await page.route("**/project-hours?**", async route => { await gate; await route.continue(); });
   const request = page.waitForRequest("**/project-hours?**");
-  await page.locator("#writeHoursFromTodo").tap();
+  await page.evaluate(() => { void openHoursTodoFromCurrent(); });
   await request;
   await page.locator("#closeTodoDialog").tap();
   await expect(page.locator("#todoDialog")).toBeHidden();
@@ -113,7 +114,7 @@ test("closing during lookup never opens a late warning or another editor", async
 test("offline warning identifies cached entries and allows editing without creating new hours", async ({ page, context }) => {
   const { source, ids } = await seed(page);
   await context.setOffline(true);
-  await page.locator("#writeHoursFromTodo").tap();
+  await page.evaluate(() => { void openHoursTodoFromCurrent(); });
   await expect(page.locator("#projectHoursExistsMessage")).toContainText("Brez povezave");
   await expect(page.locator("#projectHoursExistsList")).toContainText("16:15–17:15");
   await page.locator("#projectHoursExistsEdit").tap();
@@ -125,7 +126,7 @@ test("offline warning identifies cached entries and allows editing without creat
 
 test("first entry has no warning; another device creating hours while the form is open triggers it at save", async ({ page }) => {
   const { source } = await seed(page, { existing: false });
-  await page.locator("#writeHoursFromTodo").tap();
+  await page.evaluate(() => { void openHoursTodoFromCurrent(); });
   await expect(page.locator("#todoFormId")).toHaveValue("");
   await expect(page.locator("#projectHoursExistsDialog")).toBeHidden();
   await page.evaluate(async source => {

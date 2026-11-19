@@ -187,16 +187,18 @@ function reportAssigneeLabel(todo) {
 function reportExportOptions() {
       let saved = {};
       try { saved = JSON.parse(window.localStorage.getItem(reportExportOptionsKey()) || "{}"); } catch {}
-      return { hoursMode: "client_billable", ...Object.fromEntries(["showWorkerTitle", "showWorkerName", "showHours", "showDates"].map(key => [key, saved?.[key] !== false])) };
+      return { hoursMode: "client_billable", ...Object.fromEntries(["showWorkerTitle", "showWorkerName", "showHours", "showDates"].map(key => [key, saved?.[key] !== false])), showTimes: saved?.showTimes === true };
     }
 
 function reportExportOptionsKey() {
       return `indus-ure-report-options:${state.user?.id || "anonymous"}:${state.workContext || "admin"}`;
     }
 
-function openReportExportOptions() {
+function openReportExportOptions(forDownload = false) {
+      if (forDownload === true) reportExportPayload();
       const options = reportExportOptions();
       $("reportExportSettingsDialog").querySelectorAll("[data-report-option]").forEach(input => { input.checked = options[input.dataset.reportOption]; });
+      $("confirmReportPdfExport").classList.toggle("hidden", forDownload !== true);
       $("reportExportSettingsDialog").showModal();
     }
 
@@ -1097,7 +1099,20 @@ function installClientBillingBindings1() {
       catch { showNotice("Nastavitev PDF v tem brskalniku ni mogoče shraniti. Preveri dovoljeno lokalno shranjevanje."); }
     });
     $("confirmClientBill").addEventListener("click", () => confirmClientBillFromReport().catch((error) => showNotice(error.message)));
-    $("exportReportPdf").addEventListener("click", () => downloadClientReportPdf().catch((error) => showNotice(error.message)));
+    $("exportReportPdf").addEventListener("click", () => {
+      try { openReportExportOptions(true); } catch (error) { showNotice(error.message); }
+    });
+    $("confirmReportPdfExport").addEventListener("click", async () => {
+      const button = $("confirmReportPdfExport");
+      if (button.disabled) return;
+      button.disabled = true; button.textContent = "Pripravljam PDF …";
+      try {
+        // Start from this explicit click so mobile download retains its user gesture.
+        await downloadClientReportPdf();
+        $("reportExportSettingsDialog").close();
+      } catch (error) { showNotice(error.message); }
+      finally { button.disabled = false; button.textContent = "Prenesi PDF"; }
+    });
     $("createReportGmailDraft").addEventListener("click", () => createClientReportGmailDraft().catch((error) => showNotice(error.message)));
 }
 

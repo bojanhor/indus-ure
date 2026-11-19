@@ -76,10 +76,14 @@ test('PDF options persist per user context and are sent unchanged to PDF/Gmail; 
   });
   await page.locator('#reportExportSettings').click();
   const options = page.locator('#reportExportSettingsDialog [data-report-option]');
-  await expect(options).toHaveCount(4);
-  for (const input of await options.all()) await expect(input).toBeChecked();
+  await expect(options).toHaveCount(5);
+  for (const input of await options.all()) {
+    if (await input.getAttribute('data-report-option') === 'showTimes') await expect(input).not.toBeChecked();
+    else await expect(input).toBeChecked();
+  }
   await page.locator('[data-report-option="showWorkerName"]').uncheck();
   await page.locator('[data-report-option="showDates"]').uncheck();
+  await page.locator('[data-report-option="showTimes"]').check();
   await page.screenshot({ path: info.outputPath('pdf-settings.png') });
   await page.locator('#closeReportExportSettings').click();
   // Closing a modal traverses its same-document history entry asynchronously.
@@ -90,6 +94,7 @@ test('PDF options persist per user context and are sent unchanged to PDF/Gmail; 
   await expect(page.locator('[data-report-option="showWorkerName"]')).not.toBeChecked();
   await expect(page.locator('[data-report-option="showDates"]')).not.toBeChecked();
   await expect(page.locator('[data-report-option="showHours"]')).toBeChecked();
+  await expect(page.locator('[data-report-option="showTimes"]')).toBeChecked();
   await page.locator('#closeReportExportSettings').click();
   await page.evaluate(client => openClientReport(client.name, client.id), client);
   for (const [endpoint, button] of [['pdf-ticket', 'exportReportPdf'], ['gmail-draft', 'createReportGmailDraft']]) {
@@ -99,8 +104,17 @@ test('PDF options persist per user context and are sent unchanged to PDF/Gmail; 
       return route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ error: 'QA: prestrežen izvoz, brez pošiljanja' }) });
     });
     await page.locator(`#${button}`).click();
-    await expect.poll(() => payload?.exportOptions).toEqual({ hoursMode: 'client_billable', showWorkerTitle: true, showWorkerName: false, showHours: true, showDates: false });
-    await page.locator('#closeAppNotice').click();
+    if (endpoint === 'pdf-ticket') {
+      await expect(page.locator('#reportExportSettingsDialog')).toBeVisible();
+      expect(payload).toBeUndefined();
+      await page.locator('#confirmReportPdfExport').click();
+    }
+    await expect.poll(() => payload?.exportOptions).toEqual({ hoursMode: 'client_billable', showWorkerTitle: true, showWorkerName: false, showHours: true, showDates: false, showTimes: true });
+    if (endpoint === 'pdf-ticket') {
+      await expect(page.locator('#reportExportSettingsDialog .modal-global-notice')).toContainText('QA: prestrežen izvoz');
+      await expect(page.locator('#confirmReportPdfExport')).toBeEnabled();
+      await page.locator('#closeReportExportSettings').click();
+    } else await page.locator('#closeAppNotice').click();
   }
   await page.evaluate(() => { setWorkContext('worker:ibro'); });
   // The same controls deliberately have independent preferences in another context.

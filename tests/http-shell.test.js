@@ -1157,7 +1157,7 @@ test("vpis ur uporablja enak seznam izvornih statusov v brskalniku in strežniku
   const serverStatuses = JSON.parse(server.match(/const PROJECT_HOURS_SOURCE_STATUSES = new Set\((\[[^;]+?\])\);/)[1]);
   assert.deepEqual(browserStatuses, serverStatuses);
   assert.match(html, /projectHoursSourceStatuses\.has\(source\.status\)/);
-  assert.match(html, /projectHoursSourceStatuses\.has\(todo\.status\)/);
+  assert.doesNotMatch(html, /id="(?:writeHoursFromTodo|todoFooterWriteHours)"/);
   assert.match(server, /!PROJECT_HOURS_SOURCE_STATUSES\.has\(source\.status\)/);
 });
 

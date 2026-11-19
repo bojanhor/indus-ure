@@ -358,7 +358,7 @@ function clientReportExportOptions(input = {}) {
     ? String(input.hoursMode)
     : "client_billable";
   const heading = String(input?.heading || "").trim().slice(0, 120);
-  return { hoursMode, heading, showWorkerTitle: input?.showWorkerTitle !== false, showWorkerName: input?.showWorkerName !== false, showHours: input?.showHours !== false, showDates: input?.showDates !== false };
+  return { hoursMode, heading, showWorkerTitle: input?.showWorkerTitle !== false, showWorkerName: input?.showWorkerName !== false, showHours: input?.showHours !== false, showDates: input?.showDates !== false, showTimes: input?.showTimes === true };
 }
 
 function reportPdfAssigneeTitle(db, todo, options = {}) {
@@ -503,15 +503,18 @@ function buildClientReportPdf(db, report, attachments = [], exportOptions = {}) 
         doc.font(reportPdfFontPath('bold')).fontSize(12).fillColor('#161f20').text(String(todo.title || 'Brez naziva'));
         doc.font(reportPdfFontPath()).fontSize(10).fillColor('#263634');
         if (!materialEntry && !noteEntry && (options.showWorkerTitle || options.showWorkerName)) reportPdfLine(doc, 'Izvajalec', reportPdfAssignees(db, group.todos, options));
-        if (options.hoursMode === "worker_time" && !materialEntry && !noteEntry) {
+        if ((options.showTimes || options.hoursMode === "worker_time") && !materialEntry && !noteEntry) {
           const workerTimes = (group.todos || []).filter((item) => item.start && item.end)
-            .map((item) => reportPdfAssigneeTitle(db, item) + ': ' + item.start + '-' + item.end).join(', ');
+            .map((item) => {
+              const label = reportPdfAssigneeTitle(db, item, options);
+              return (label ? label + ': ' : '') + item.start + '-' + item.end;
+            }).join(', ');
           if (workerTimes) reportPdfLine(doc, '\u010cas izvajalcev', workerTimes);
         }
         if (materialEntry) reportPdfLine(doc, todo.externalDelivery ? 'Dostava' : 'Vrsta vpisa', todo.externalDelivery ? 'Material je neposredno dostavil zunanji dobavitelj.' : 'Material brez izvajalca.');
         if (noteEntry) reportPdfLine(doc, 'Vrsta vpisa', 'Zapisek brez obračuna ur in kilometrine.');
         if (warranty) reportPdfLine(doc, 'Garancija', 'Storitev se ne obra\u010dunava stranki.');
-        if (options.showHours && hours) reportPdfLine(doc, options.hoursMode === "client_billable" ? 'Za obra\u010dun' : 'Ure izvajalcev', hours.toLocaleString('sl-SI', { maximumFractionDigits: 2 }) + ' h');
+        if (options.showHours && !materialEntry && !noteEntry) reportPdfLine(doc, options.hoursMode === "client_billable" ? 'Za obra\u010dun' : 'Ure izvajalcev', hours.toLocaleString('sl-SI', { maximumFractionDigits: 2 }) + ' h');
         if (clientKm) reportPdfLine(doc, 'Stro\u0161ki prevoza (obe smeri)', `${reportPdfVehicleLabel(todo.clientVehicle)} - ${clientKm.toLocaleString('sl-SI', { maximumFractionDigits: 1 })} km`);
         if (todo.notes) reportPdfLine(doc, 'Opis del', todo.notes);
         if (todo.material) reportPdfLine(doc, 'Material', todo.material);

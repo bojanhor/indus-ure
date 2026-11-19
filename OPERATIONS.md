@@ -292,6 +292,33 @@ Dostop avtorja pri dodelitvi izključno drugemu in zahtevek s preizkusnim
 prave e-pošte. Po preverjanju iz TODO odstranjenih osem točk in pripadajoče
 slike; ponovno branje je potrdilo prazen seznam.
 
+## Iskanje in PDF nastavitve (19. 11. 2026)
+
+Iz urejevalnika planiranega opravila sta odstranjeni zgornja bližnjica za
+vpis ur in njena kopija v nogi obrazca. Samostojni »Vpis ur«, obstoječi
+povezani vpisi/osnutki ter zaščita pred podvojenim vpisom ostanejo.
+Iskalnik ob zelenem statusu zaključenega vpisa uporablja isti ločeni ikoni
+potrjenega obračuna izvajalca in stranke kot dnevni koledar. Oznaki sta
+samo informativni in ne potrjujeta ničesar.
+
+»Prenesi PDF« v obračunu strank najprej odpre nastavitve. Prve tri izbire
+so ime/vzdevek, točen čas od–do in ure dogodkov s skupnim seštevkom.
+Obstoječi izbiri naziva izvajalca in datumov ostaneta za njimi. Izklop ur
+skrije tudi seštevke (izrecen dogovor uporabnika). Novi `showTimes` je
+privzeto false; izrecno vključen pokaže dejanski vpisani interval, medtem
+ko so količine ur še vedno obračunske ure stranke. Te se zato lahko
+razlikujejo od dolžine prikazanega intervala. Noben obračun se ne preračuna.
+Nastavitve ostanejo lokalne za uporabnika/kontekst in veljajo tudi za PDF
+v Gmail osnutku; pošiljanje e-pošte ni del tega posega. Preklic panela ne
+ustvari prenosa. Izvoz se začne šele ob izrecnem kliku v panelu, kar ohrani
+uporabniško potezo za mobilni prenos.
+
+Regresije: `todo-november-19.spec.cjs`, razširjeni `todo-report-options`
+in 32 kombinacij PDF prikaza v `time-entry-client-required.test.js`.
+Stare regresije povezanih vpisov preverjajo združljivost obstoječih
+osnutkov brez odstranjene UI bližnjice. SQL shema in poslovni podatki se
+ne spreminjajo; povrnitev kode na `43e67a0` zadošča, brez obnove baze.
+
 ## Obvezni postopek objave Ure
 
 ### Ločeni obračunski zaklepi (18. 11. 2026)

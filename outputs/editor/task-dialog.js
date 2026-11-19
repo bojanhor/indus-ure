@@ -170,7 +170,6 @@ function syncTodoFormFooterActions() {
       const pairs = [
         ["deleteTodoFromDialog", "todoFooterDelete"],
         ["duplicateTodoFromDialog", "todoFooterDuplicate"],
-        ["writeHoursFromTodo", "todoFooterWriteHours"],
         ["saveTodoDialog", "todoFooterSave"],
         ["closeTodoDialog", "todoFooterClose"]
       ];
@@ -597,7 +596,6 @@ async function openMaterialEntryDialog(date = dateKey(new Date()), { draft = {} 
 function syncTodoDialogEditActions(todo, editing = Boolean(todo?.id)) {
       $("deleteTodoFromDialog").classList.toggle("hidden", !editing);
       $("duplicateTodoFromDialog").classList.toggle("hidden", !editing || Boolean(state.todoHoursSourceId));
-      $("writeHoursFromTodo").classList.toggle("hidden", !editing || Boolean(state.todoHoursSourceId) || !moduleValues.projectHoursSourceStatuses.has(todo.status));
       $("todoFormChangeActions").classList.toggle("hidden", !editing || !todoCanMarkChangedForOthers(todo));
       $("shareTodoPdf").classList.toggle("hidden", !editing);
       const isExistingTimeEntry = editing && moduleValues.timeEntryStatusIds.has(todoStatus(todo.status).id);

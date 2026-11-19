@@ -655,7 +655,6 @@ function installTaskSaveBindings1() {
       await new Promise((resolve) => setTimeout(resolve, 0));
       await openTodoDialog(source);
     });
-    $("writeHoursFromTodo").addEventListener("click", () => openHoursTodoFromCurrent().catch((error) => showNotice(error.message)));
     $("shareTodoPdf").addEventListener("click", () => {
       const todo = state.todos.find(t => t.id === $("todoFormId").value);
       if (!todo) return;
