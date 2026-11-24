@@ -65,7 +65,6 @@ function createTaskGroupUi() {
     const body = document.createElement("div");
     body.className = "task-group-body";
     body.hidden = folded;
-    if (!children.length) body.textContent = "Povleci opravilo v skupino.";
     const toggle = head.querySelector(".task-group-toggle");
     toggle.addEventListener("click", () => {
       const saved = collapsed();

@@ -225,3 +225,84 @@ test('themed group form, new group location and searchable headings with matchin
     await expect(worker.locator('#searchPanel .result')).toHaveCount(0);
   } finally { await worker.close(); }
 });
+
+for (const pointer of ['mouse', 'touch']) test(`${pointer}: search drag joins a group or reorders a task without changing dates, while click still opens`, async ({ page, browserName }, info) => {
+  test.skip(pointer === 'touch' && browserName !== 'chromium', 'Trusted touch dispatcher requires Chromium.');
+  await page.setViewportSize({ width: pointer === 'touch' ? 390 : 1280, height: 950 });
+  await login(page);
+  const todos = await seed(page);
+  const sourceId = todos['Samo Ibro'].id;
+  const { result: group } = await api(page, '/api/task-groups', 'POST', { title: 'Ciljna mapa' });
+  await reload(page);
+  await page.locator('#todoSortMode').selectOption('client');
+  const search = page.locator('#clientSearch');
+  const panel = page.locator('#searchPanel');
+  await search.fill('Samo Ibro');
+  const result = panel.getByRole('button', { name: 'Odpri opravilo: Samo Ibro' });
+  await expect(result).toHaveClass(/search-result-board-drag/);
+  if (pointer === 'touch') await result.tap(); else await result.click();
+  await expect(page.locator('#todoFormTask')).toHaveValue('Samo Ibro');
+  await page.locator('#closeTodoDialog').click();
+  await expect(page.locator('#todoDialog')).toBeHidden();
+  await search.fill('Samo Ibro');
+  const goal = page.locator(`.task-group-card[data-task-group-id="${group.id}"]`);
+  const section = page.locator('#todoItems > .todo-item').filter({ has: page.getByRole('button', { name: 'Uredi opravilo: Samostojno', exact: true }) });
+  const touch = pointer === 'touch' ? await page.context().newCDPSession(page) : null;
+  let requests = 0;
+  page.on('request', request => { if (request.method() === 'POST' && request.url().endsWith('/api/todos/reorder')) requests++; });
+  async function startDrag() {
+    await result.scrollIntoViewIfNeeded();
+    const box = await result.boundingBox();
+    const from = { x: box.x + 30, y: box.y + Math.min(20, box.height / 2) };
+    if (touch) await touch.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [from] });
+    else { await page.mouse.move(from.x, from.y); await page.mouse.down(); }
+    await expect(panel).toHaveClass(/search-board-drag-active/);
+    return from;
+  }
+  async function drop(loc, placement = 'middle') {
+    await loc.evaluate(el => el.scrollIntoView({ block: 'center' }));
+    const box = await loc.boundingBox();
+    const to = { x: box.x + box.width / 2, y: box.y + (placement === 'before' ? 8 : box.height / 2) };
+    const response = page.waitForResponse(r => r.request().method() === 'POST' && r.url().endsWith('/api/todos/reorder'));
+    if (touch) {
+      await touch.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [to] });
+      await touch.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    } else {
+      await page.mouse.move(to.x, to.y, { steps: 5 }); await page.mouse.up();
+    }
+    const received = await response;
+    expect(received.ok(), await received.text()).toBe(true);
+    await expect(panel).not.toHaveClass(/search-board-drag-active/);
+    await expect(page.locator('#todoDialog')).toBeHidden();
+    return received.request().postDataJSON();
+  }
+  try {
+    // Touch panning before the hold must not start a write or open the task.
+    if (touch) {
+      const box = await result.boundingBox();
+      const from = { x: box.x + 30, y: box.y + 25 };
+      await touch.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [from] });
+      await touch.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: from.x, y: from.y - 66 }] });
+      await touch.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+      await expect(panel).not.toHaveClass(/search-board-drag-active/);
+      await expect(page.locator('#todoDialog')).toBeHidden();
+      expect(requests).toBe(0);
+    }
+    await startDrag();
+    await expect(page.locator('#todoSortMode')).toHaveValue('manual');
+    await expect(goal).not.toContainText('Povleci opravilo v skupino.');
+    const joined = await drop(goal.locator('.task-group-head'));
+    expect(joined).toMatchObject({ sourceId, targetGroupId: group.id, fromGroupId: '' });
+    await expect(goal.locator('.task-group-body')).toContainText('Samo Ibro');
+    await expect(panel.locator('.search-task-group-members')).toContainText('Samo Ibro');
+    await page.screenshot({ path: info.outputPath('search-drag-into-group.png') });
+    await startDrag();
+    const reordered = await drop(section, 'before');
+    expect(reordered).toMatchObject({ sourceId, targetId: todos.Samostojno.id, targetGroupId: '', fromGroupId: group.id, placement: 'before' });
+    await expect(goal.locator('.task-group-body')).not.toContainText('Samo Ibro');
+    const apiTodo = (await api(page, '/api/todos/' + sourceId)).result.todo;
+    for (const k of ['date', 'endDate', 'start', 'end', 'assigneeIds', 'urgent', 'status', 'clientId']) expect(apiTodo[k]).toEqual(todos['Samo Ibro'][k]);
+    expect(apiTodo.sharedManualOrder).toBeLessThan((await api(page, '/api/todos/' + todos.Samostojno.id)).result.todo.sharedManualOrder);
+    expect(requests).toBe(2);
+  } finally { await touch?.detach(); }
+});

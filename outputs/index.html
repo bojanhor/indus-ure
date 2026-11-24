@@ -1508,6 +1508,14 @@
       pointer-events: none;
       opacity: 0.88;
     }
+    .todo-search-drag-preview {
+      padding: 9px 11px;
+      color: var(--ink);
+      background: var(--panel);
+      font-weight: 700;
+      overflow: hidden;
+      overflow-wrap: anywhere;
+    }
 
     .todo-drop-indicator {
       position: fixed;
@@ -1752,6 +1760,7 @@
     .task-group-toggle small { display: block; }
     .task-group-toggle svg { width: 16px; height: 16px; vertical-align: text-bottom; }
     .task-group-body { padding: 5px 6px 5px 14px; }
+    .task-group-body:empty { display: none; }
     .task-group-body .todo-item { margin-block: 3px; }
     .task-group-card.todo-drop-target, .task-group-outside.todo-drop-target { outline: 3px solid var(--accent); outline-offset: -2px; }
     .task-group-outside { border: 1px dashed #8da2b4; padding: 6px; border-radius: 7px; margin-block: 5px; color: var(--muted); font-size: .8rem; }
@@ -3462,6 +3471,9 @@
     .search-task-group-members { margin-inline: 12px 6px; padding-inline-start: 8px; border-inline-start: 2px solid var(--line); }
     .search-task-group-members .result:last-child { border-bottom: 0; }
     .search-result-calendar-drag { touch-action: none; user-select: none; -webkit-user-select: none; }
+    .search-result-board-drag { touch-action: none; user-select: none; -webkit-user-select: none; }
+    .search-panel.active.search-board-drag-active { position: relative; top: auto; pointer-events: none; }
+    .search-result-board-drag.dragging { opacity: .5; }
     .search-result-calendar-drag.month-dragging { opacity: .42; outline: 2px dashed var(--accent); }
     .search-result-calendar-drag.month-todo-drag-ghost { display: grid; grid-template-columns: 1fr; padding: 10px; border-radius: 8px; background: var(--panel); }
 
@@ -13375,10 +13387,10 @@ function todoCanManualReorder(todo) {
       return Boolean(todoManualOrderDomain(todo));
     }
 
-function bindTodoDragHandle(item, id) {
-      const handle = item.querySelector(".drag-handle");
+function bindTodoDragHandle(item, id, searchResult = null) {
+      const handle = searchResult || item.querySelector(".drag-handle");
       const passive = { passive: false };
-      handle.addEventListener("pointerdown", event => beginTodoPointerDrag(event, item, id), passive);
+      handle.addEventListener("pointerdown", event => beginTodoPointerDrag(event, item, id, Boolean(searchResult)), passive);
       handle.addEventListener("pointermove", updateTodoPointerDrag, passive);
       handle.addEventListener("pointerup", finishTodoPointerDrag, passive);
       handle.addEventListener("pointercancel", cancelTodoPointerDrag, passive);
@@ -13404,6 +13416,7 @@ const TODO_TOUCH_DRAG_HOLD_MS = appConfig.editor.dragHoldMs;
 const TODO_DRAG_AUTOSCROLL_SLOW_PX_PER_SECOND = 168;
 const TODO_DRAG_AUTOSCROLL_FAST_PX_PER_SECOND = 560;
 let todoPointerDrag = null;
+let lastSearchBoardDragAt = 0;
 
 function clearTodoDragVisuals() {
       document.querySelectorAll(".todo-item.dragging").forEach((item) => item.classList.remove("dragging"));
@@ -13437,9 +13450,11 @@ function updateTodoPointerDragIndicator(drag) {
 function updateTodoPointerDragTarget(clientX, clientY) {
       const drag = todoPointerDrag;
       if (!drag) return;
-      const atPoint = document.elementFromPoint(clientX, clientY);
+      const hit = document.elementFromPoint(clientX, clientY);
+      const atPoint = drag.searchPanel && !hit?.closest("#todoItems") ? null : hit;
       const target = atPoint?.closest(".todo-item");
-      const section = atPoint?.closest("[data-todo-drop-bucket]") || todoTailDropZoneAtPoint(clientX, clientY);
+      const section = atPoint?.closest("[data-todo-drop-bucket]")
+        || ((!drag.searchPanel || atPoint) && todoTailDropZoneAtPoint(clientX, clientY));
       const source = findTodoOrderItem(drag.sourceId);
       const group = atPoint?.closest(".task-group-card");
       const outside = atPoint?.closest(".task-group-outside");
@@ -13552,6 +13567,8 @@ function clearTodoPointerDrag() {
       todoPointerDrag = null;
       if (drag.handle.hasPointerCapture?.(drag.pointerId)) drag.handle.releasePointerCapture(drag.pointerId);
       drag.handle.classList.remove("drag-armed");
+      drag.searchPanel?.classList.remove("search-board-drag-active");
+      drag.handle.classList.remove("dragging");
       document.documentElement.classList.remove("todo-drag-active");
       clearTodoDragVisuals();
       return drag;
@@ -13563,6 +13580,16 @@ function activateTodoPointerDrag() {
       drag.holdTimer = 0; drag.active = true;
       drag.handle.classList.remove("drag-armed");
       drag.item.classList.add("dragging");
+      if (drag.searchPanel) {
+        // Keep the pointer capture on the search result. Only redraw the
+        // board, and let the results scroll away from the drop targets.
+        if (state.todoSortMode !== "manual") {
+          $("todoSortMode").value = "manual";
+          $("todoSortMode").dispatchEvent(new Event("change", { bubbles: true }));
+        }
+        drag.searchPanel.classList.add("search-board-drag-active");
+        drag.handle.classList.add("dragging");
+      }
       document.documentElement.classList.add("todo-drag-active");
       const sourceRect = drag.item.getBoundingClientRect();
       drag.ghostElement = document.createElement("div");
@@ -13574,6 +13601,10 @@ function activateTodoPointerDrag() {
       drag.ghostAnchorY = Math.max(0, Math.min(ghostHeight, drag.grabOffsetY));
       drag.ghostElement.style.width = `${ghostWidth}px`;
       drag.ghostElement.style.height = `${ghostHeight}px`;
+      if (drag.searchPanel) {
+        drag.ghostElement.textContent = findTodoOrderItem(drag.sourceId)?.title || "Opravilo";
+        drag.ghostElement.classList.add("todo-search-drag-preview");
+      }
       drag.indicatorElement = document.createElement("div");
       drag.indicatorElement.className = "todo-drop-indicator";
       drag.indicatorElement.setAttribute("aria-hidden", "true");
@@ -13584,9 +13615,10 @@ function activateTodoPointerDrag() {
       if (drag.pointerType === "touch") navigator.vibrate?.(12);
     }
 
-function beginTodoPointerDrag(event, item, todoId) {
+function beginTodoPointerDrag(event, item, todoId, fromSearch = false) {
       if (event.pointerType === "mouse" && event.button !== 0) return;
-      event.preventDefault();
+      if (fromSearch && (!event.isPrimary || state.view !== "todos")) return;
+      if (!fromSearch) event.preventDefault();
       clearTodoPointerDrag();
       const isTouch = event.pointerType === "touch";
       const itemRect = item.getBoundingClientRect();
@@ -13597,8 +13629,12 @@ function beginTodoPointerDrag(event, item, todoId) {
         clientX: event.clientX, clientY: event.clientY, autoScrollFrame: 0, autoScrollAt: performance.now(), holdTimer: 0,
         ghostElement: null, indicatorElement: null, hasDropTarget: false
       };
+      if (fromSearch) {
+        todoPointerDrag.searchPanel = item.closest("#searchPanel");
+        todoPointerDrag.lastPanY = event.clientY;
+      }
       try { event.currentTarget.setPointerCapture?.(event.pointerId); } catch {}
-      if (isTouch) {
+      if (isTouch || fromSearch) {
         event.currentTarget.classList.add("drag-armed");
         todoPointerDrag.holdTimer = window.setTimeout(() => activateTodoPointerDrag(), TODO_TOUCH_DRAG_HOLD_MS);
         return;
@@ -13609,13 +13645,43 @@ function beginTodoPointerDrag(event, item, todoId) {
 function updateTodoPointerDrag(event) {
       const drag = todoPointerDrag;
       if (!drag || drag.pointerId !== event.pointerId) return;
-      event.preventDefault();
       drag.clientX = event.clientX; drag.clientY = event.clientY;
+      if (drag.searchPanel && !drag.active) {
+        if (!drag.panning && Math.hypot(drag.clientX - drag.startX, drag.clientY - drag.startY) <= 12) return;
+        if (drag.pointerType !== "touch") activateTodoPointerDrag();
+        else {
+          // A swipe before the hold still scrolls, first the results and
+          // then the page when the results reach their scroll boundary.
+          event.preventDefault();
+          clearTimeout(drag.holdTimer);
+          drag.holdTimer = 0;
+          drag.panning = true;
+          drag.handle.classList.remove("drag-armed");
+          const delta = drag.lastPanY - event.clientY;
+          const before = drag.searchPanel.scrollTop;
+          drag.searchPanel.scrollTop += delta;
+          const remainder = delta - (drag.searchPanel.scrollTop - before);
+          if (remainder) window.scrollBy(0, remainder);
+          drag.lastPanY = event.clientY;
+          return;
+        }
+      }
+      event.preventDefault();
       if (drag.active) updateTodoPointerDragTarget(event.clientX, event.clientY);
     }
 
 function finishTodoPointerDrag(event) {
       if (!todoPointerDrag || todoPointerDrag.pointerId !== event.pointerId) return;
+      const drag = todoPointerDrag;
+      if (drag.searchPanel) {
+        if (!drag.active && !drag.panning) { clearTodoPointerDrag(); return; }
+        lastSearchBoardDragAt = Date.now();
+        if (!drag.active || Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) <= 12) {
+          event.preventDefault(); clearTodoPointerDrag(); return;
+        }
+        drag.clientX = event.clientX; drag.clientY = event.clientY;
+        updateTodoPointerDragTarget(event.clientX, event.clientY);
+      }
       event.preventDefault();
       const { sourceId, targetId, targetPlacement, targetBucket, targetGroupId, fromGroupId, active, hasDropTarget } = clearTodoPointerDrag();
       if (!active || !hasDropTarget) return;
@@ -13624,6 +13690,7 @@ function finishTodoPointerDrag(event) {
 
 function cancelTodoPointerDrag(event) {
       if (!todoPointerDrag || todoPointerDrag.pointerId !== event.pointerId) return;
+      if (todoPointerDrag.searchPanel && (todoPointerDrag.active || todoPointerDrag.panning)) lastSearchBoardDragAt = Date.now();
       clearTodoPointerDrag();
     }
 
@@ -13889,6 +13956,10 @@ function renderSearch() {
     }
 
 function renderSearchContent() {
+      if (todoPointerDrag?.searchPanel) {
+        if (todoPointerDrag.active || todoPointerDrag.panning) lastSearchBoardDragAt = Date.now();
+        clearTodoPointerDrag();
+      }
       const panel = $("searchPanel");
       const query = $("clientSearch").value.trim();
       panel.innerHTML = "";
@@ -13981,6 +14052,10 @@ function renderSearchContent() {
           openButton.addEventListener("pointerdown", event => beginMonthTodoPointerDrag(event, openButton, todo));
           openButton.addEventListener("lostpointercapture", cancelMonthTodoPointerDrag);
           openButton.addEventListener("contextmenu", event => event.preventDefault());
+        } else if (state.view === "todos" && TaskGroups.active(todo) && !todo.calendarOnly && todoCanManualReorder(todo)) {
+          openButton.classList.add("search-result-board-drag");
+          openButton.title = "Klikni za urejanje; povleci v skupino ali na mesto v seznamu. Na telefonu najprej pridrži.";
+          bindTodoDragHandle(openButton, todo.id, openButton);
         }
         openButton.addEventListener("click", event => {
           if (Date.now() - lastMonthTodoDragAt < 450) { event.preventDefault(); event.stopPropagation(); return; }
@@ -15238,6 +15313,9 @@ $("clearClientSearch").addEventListener("click", clearClientSearchAndRestoreView
 document.addEventListener("click", (event) => {
       if (!$("clientSearch").value.trim()) return;
       if (Date.now() - lastMonthTodoDragAt < 450) { event.preventDefault(); event.stopPropagation(); return; }
+      if (event.detail && Date.now() - lastSearchBoardDragAt < 450 && event.target.closest("#searchPanel, #todoItems")) {
+        event.preventDefault(); event.stopPropagation(); return;
+      }
       if (event.target.closest('#searchPanel .result, #searchPanel .search-filter-bar label, #searchPanel .search-filter-bar button, #clientSearch, #clearClientSearch')) return;
       clearClientSearchAndRestoreView();
     }, true);
