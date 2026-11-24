@@ -399,7 +399,7 @@ vpis ur odstrani članstvo. Koš ga ne razkrije; obnovitev vrne članstvo, če
 skupina še obstaja. Razpustitev ne izbriše ali odklene dogodkov.
 
 Šef, lastnik in delavec z vsaj enim aktivnim dodeljenim dogodkom lahko
-urejajo vidno skupino. Oglasi API in koledarska povezava vrnejo samo
+urejajo vidno skupino. Odgovori API in koledarska povezava vrnejo samo
 dovoljene dogodke. Relacije in metapodatki se shranijo v obstoječi
 PostgreSQL `indus_meta` posnetek (ločeni zbirki `taskGroups` in
 `taskGroupMembers`), brez spremembe SQL sheme. Revizijsko varovalo in
@@ -414,6 +414,22 @@ dogodkov. Google/ICS izvoz vključi lastni termin ter naslove in varovane
 povezave za dovoljene člane (brez opisa skupine ali tujih dogodkov).
 Ne vstopa v izračun dnevnih ur, obračunov ali v CSV vpisov ur. Celotni
 recovery in brskalniški backup vključita skupinske metapodatke in povezave.
+
+Objavljeno 24. 11. 2026 kot `3cf1105`, prejšnja izdaja `ecd840b`.
+Chromium 143/143; Firefox 51 uspešnih in 4 namensko preskočeni testi
+dotika; končni ciljni Chromium 3/3. Strežniški `npm test` 359/359;
+PostgreSQL 39 fresh + 1 restore + 2 recovery/CSV + 4 upgrade/rollback.
+Zasebnost Google opisov in neposredne povezave so preverjene z izoliranimi
+podatki, brez ustvarjanja testne skupine v produkciji.
+
+Preverjena predobjavna kopija `indus-ure-recovery-20261124T084039Z.tar.gz`
+(209052497 B), SHA-256 `6fe5baa75fc8fde3ac77b4b5b08e22cf5ff71419922e298e4922d509def6a0d3`.
+Lokalni arhiv, Drive velikost/MD5/sveže branje, navodila in berljiva izvoza
+so potrjeni. V produkciji sta Bojan in Ibro odprla obrazec ter koledar
+brez poslovnih zapisov in JS napak; Google planiranje povezano in vključeno.
+Vseh 118 potrjenih obračunov je ostalo nespremenjenih (`946f1a61c4f1a7f544e34ae5d1d1799a`).
+Storitev, backup timer in oba health odziva so uspešni. Fakture in skupni
+Nginx nista bila spreminjana.
 
 ## Obvezni postopek objave Ure
 
