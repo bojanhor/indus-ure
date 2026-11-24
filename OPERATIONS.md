@@ -537,6 +537,26 @@ Nginx nista bila spreminjana. Koda in navodila so na `origin/main`.
 Namestitev nespremenjenih odvisnosti je izpisala 9 moderate opozoril;
 posodabljanje knjižnic ni del te objave.
 
+### Obračun, hitri vpis in mesečni pogled (24. 11. 2026)
+
+Izdaja `774ae5f` je samo kodna; povrnitev je na `9f18d17`, brez migracije
+ali prepisovanja potrjenih obračunov. Predogled obračuna delavca ohrani
+negativni saldo, »Vse odprto do danes« vključuje današnji datum. Bližnjica
+»Vpiši ure za danes« iz opravila prenese stranko in povezavo z izvornim
+projektom, ne pa časov, cen ali prilog. Preverjanje podvojenih vpisov ostane.
+»Danes« v mesečnem pogledu postavi trenutni teden v tretjo od šestih vrstic;
+ročno listanje ohrani klasični pregled celotnega izbranega meseca.
+
+Pred objavo je bila preverjena kopija `indus-ure-recovery-20261124T130040Z.tar.gz`.
+PostgreSQL: 39 preizkusov sveže baze, 1 obnove, 2 recovery/CSV in 4
+nadgradnje/povrnitve. Brskalniški regresiji v Chromiumu in Firefoxu sta
+vključevali ciljne ponovitve po uskladitvi testov z novim prikazom.
+Produkcijski Chromium na širini 390 px je potrdil koledar, vidnost strank
+na večdnevnih pasicah, hitri vpis in novi izbor obračuna; brez poslovnih
+zapisov ali napak JS. Javni in lokalni health sta uspešna. Vseh 118
+potrjenih obračunskih zapisov je imelo pred in po objavi enak kontrolni
+odtis `946f1a61c4f1a7f544e34ae5d1d1799a`. Fakture niso bile spremenjene.
+
 ### Postopek
 
 **Obseg objave:** celotni [deploy.ps1](scripts/deploy.ps1) poleg kode Ure namesti tudi konfiguracijo skupnega Nginxa, ga znova naloži, namesti časovnik za povzetke in redči stare izdaje. Če je dovoljena samo objava kode Ure, ne zaženi celotne skripte: pripravi preverjenega kandidata ter uporabi obstoječa strežniška koraka QA in preklopa iz točk 4–5, brez nameščanja skupne infrastrukture. Sprememba zgolj dokumentacije ne zahteva produkcijske objave.
