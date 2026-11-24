@@ -23,8 +23,8 @@ test("duration follows start, midnight persists, manual customer hours stay inde
   });
   if (!await page.locator("#todoFormQuickTimeStart").isVisible()) await page.locator("#todoFormDateTimeSection > summary").click();
   await page.locator("#todoFormQuickTimeStart").click();
-  await page.locator('[data-time-picker-hour="23"]').click();
-  await page.locator('[data-time-picker-minute="0"]').click();
+  await page.locator('#todoFormQuickTimePicker').locator('[data-time-picker-hour="23"]').click();
+  await page.locator('#todoFormQuickTimePicker').locator('[data-time-picker-minute="0"]').click();
   await expect(page.locator("#todoFormQuickTimeEnd")).toHaveText("Do 24:00");
   await expect(page.locator("#todoFormQuickTimeDuration")).toHaveText("Skupaj 1 h");
   await expect(page.locator("#todoFormClientBillableHours")).toHaveValue("4");

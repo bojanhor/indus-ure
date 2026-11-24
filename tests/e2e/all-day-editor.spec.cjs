@@ -37,7 +37,7 @@ for (const target of ["start", "end"]) {
     await expect(page.locator("#todoFormQuickTimeStart")).toHaveText("Od 10:15");
     await expect(page.locator("#todoFormQuickTimeEnd")).toHaveText("Do 12:45");
     await expect(page.getByRole("button", { name: "Cel dan", exact: true })).toBeHidden();
-    await page.locator(`[data-time-picker-target="${target}"]`).click();
+    await page.locator('#todoFormQuickTimePicker').locator(`[data-time-picker-target="${target}"]`).click();
     const allDay = page.getByRole("button", { name: "Cel dan", exact: true });
     await expect(allDay).toBeVisible();
     await page.locator("#todoFormQuickTimePicker").screenshot({ path: testInfo.outputPath(`picker-${target}.png`) });
@@ -66,10 +66,10 @@ for (const target of ["start", "end"]) {
     await page.locator("#todoFormQuickTimePicker").screenshot({ path: testInfo.outputPath(`all-day-${target}.png`) });
     // The untimed task can still be assigned a time using the existing picker.
     await page.locator("#todoFormQuickTimeStart").click();
-    await page.locator('[data-time-picker-hour="8"]').click();
-    await page.locator('[data-time-picker-minute="0"]').click();
-    await page.locator('[data-time-picker-hour="9"]').click();
-    await page.locator('[data-time-picker-minute="0"]').click();
+    await page.locator('#todoFormQuickTimePicker').locator('[data-time-picker-hour="8"]').click();
+    await page.locator('#todoFormQuickTimePicker').locator('[data-time-picker-minute="0"]').click();
+    await page.locator('#todoFormQuickTimePicker').locator('[data-time-picker-hour="9"]').click();
+    await page.locator('#todoFormQuickTimePicker').locator('[data-time-picker-minute="0"]').click();
     await expect(page.locator("#todoFormQuickTimeStart")).toHaveText("Od 08:00");
     await expect(page.locator("#todoFormQuickTimeEnd")).toHaveText("Do 09:00");
     await expect(page.locator("#todoFormQuickTimeDuration")).toHaveText("Skupaj 1 h");

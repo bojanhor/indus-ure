@@ -19,7 +19,7 @@ async function localLogin(page, userId, path = "/", { expectApp = true } = {}) {
 }
 
 async function chooseQuickTime(page, selector) {
-  const choice = page.locator(selector);
+  const choice = page.locator('#todoFormQuickTimePicker').locator(selector);
   await choice.evaluate((element) => {
     element.scrollIntoView({ block: "center", inline: "nearest" });
     element.click();
@@ -599,8 +599,8 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
       await expect(page.locator("#todoFormQuickTimeDial")).toBeVisible();
       await chooseQuickTime(page, '[data-time-picker-hour="8"]');
       await chooseQuickTime(page, '[data-time-picker-minute="0"]');
-      await expect(page.locator('[data-time-picker-target="end"]')).toHaveClass(/active/);
-      await expect(page.locator('[data-time-picker-target="end"]')).toHaveText('Do 09:00');
+      await expect(page.locator('#todoFormQuickTimePicker').locator('[data-time-picker-target="end"]')).toHaveClass(/active/);
+      await expect(page.locator('#todoFormQuickTimePicker').locator('[data-time-picker-target="end"]')).toHaveText('Do 09:00');
       await chooseQuickTime(page, '[data-time-picker-hour="10"]');
       await chooseQuickTime(page, '[data-time-picker-minute="0"]');
       await expect(page.locator("#todoFormQuickTimeDial")).toBeHidden();

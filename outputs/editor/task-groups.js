@@ -4,6 +4,69 @@ function createTaskGroupUi() {
   const dialog = $("taskGroupDialog");
   const form = $("taskGroupForm");
   const list = $("taskGroupEvents");
+  const schedule = $("taskGroupSchedule");
+  const groupControlId = id => id.replace(/^todoForm/, "taskGroup").replace("TodoForm", "TaskGroup");
+  const scheduleControl = id => id === "todoForm" ? form : $(groupControlId(id));
+  // Share the task editor's controls and picker without sharing its form state.
+  function copySchedulePart(source) {
+    const copy = source.cloneNode(true);
+    for (const node of [copy, ...copy.querySelectorAll("[id]")]) {
+      if (node.id) node.id = groupControlId(node.id);
+    }
+    return copy;
+  }
+  schedule.prepend(copySchedulePart($("todoFormDate").closest(".todo-date-range-field")));
+  schedule.append(copySchedulePart($("todoFormQuickTimePicker")));
+  const dateFrom = $("taskGroupDate");
+  const dateTo = $("taskGroupEndDate");
+  dateFrom.name = "date";
+  dateTo.name = "endDate";
+  const timeState = { get user() { return state.user; }, todoTimePickerOpen: false };
+  const timePicker = createTimeEntryEditor({
+    $: scheduleControl, state: timeState, config: appConfig.editor, localStorage,
+    clearFormValidationError, onTimeChanged: () => {},
+    storageKeyPrefix: "indus-ure-last-group-time-", canSetAllDay: () => true
+  });
+  timePicker.bindTodoFormQuickTimePicker();
+  function syncSchedule({ startChanged = false, clearTimes = false, resetPicker = false } = {}) {
+    if (!dateFrom.value) dateTo.value = "";
+    else if (!dateTo.value || dateTo.value < dateFrom.value || (startChanged && dateTo.dataset.auto === "true")) dateTo.value = dateFrom.value;
+    dateTo.dataset.auto = String(dateFrom.value === dateTo.value);
+    for (const [input, label] of [[dateFrom, $("taskGroupDateWeekday")], [dateTo, $("taskGroupEndDateWeekday")]]) {
+      const day = input.value ? new Date(input.value + "T12:00:00").getDay() : NaN;
+      label.textContent = Number.isInteger(day) ? "(" + ["ned", "pon", "tor", "sre", "čet", "pet", "sob"][day] + ")" : "";
+    }
+    const multiDay = Boolean(dateFrom.value && dateTo.value > dateFrom.value);
+    for (const field of [form.elements.start, form.elements.end]) {
+      field.disabled = multiDay;
+      if (multiDay || clearTimes) field.value = "";
+    }
+    if (multiDay || clearTimes || resetPicker) {
+      timeState.todoTimePickerOpen = false;
+      timeState.todoTimePickerTarget = "start";
+      timeState.todoTimePickerMode = "hour";
+      timeState.todoTimeShiftDuration = null;
+    }
+    timePicker.renderTodoFormQuickTimePicker();
+  }
+  dateFrom.addEventListener("change", () => syncSchedule({ startChanged: true }));
+  dateTo.addEventListener("change", () => syncSchedule());
+  function setStartDate(value, options) {
+    dateFrom.value = value;
+    syncSchedule({ ...options, startChanged: true });
+    dateFrom.focus();
+  }
+  $("setTaskGroupDateToday").onclick = () => setStartDate(dateKey(new Date()));
+  $("advanceTaskGroupDate").onclick = () => setStartDate(shiftDateKey(dateFrom.value || dateKey(new Date()), 1));
+  $("clearTaskGroupDate").onclick = () => setStartDate("", { clearTimes: true });
+  function shiftEndDate(fromEnd) {
+    if (!dateFrom.value) dateFrom.value = dateKey(new Date());
+    dateTo.value = shiftDateKey((fromEnd && dateTo.value) || dateFrom.value, 1);
+    syncSchedule();
+    dateTo.focus();
+  }
+  $("setTaskGroupEndDateTomorrow").onclick = () => shiftEndDate(false);
+  $("advanceTaskGroupEndDate").onclick = () => shiftEndDate(true);
   $("editTaskGroup").innerHTML = taskActionIcons.edit;
   $("deleteTaskGroup").innerHTML = taskActionIcons.remove;
   let editing = null, dayReturn = null, suspended = false, saving = false, scrollTop = 0;
@@ -93,8 +156,29 @@ function createTaskGroupUi() {
     for (const todo of [...preferred, ...todos.filter(todo => !chosen.has(todo.id))]) {
       const row = document.createElement("button");
       row.type = "button";
-      row.className = "secondary task-group-event-link";
-      row.textContent = [todo.urgent ? "Nujno" : "", todo.title, todoDateTimeLabel(todo)].filter(Boolean).join(" · ");
+      row.className = `task-group-event-link day-all-day-item todo-status-color ${todoStatusClass(todo.status)}${todo.urgent ? " urgent" : ""}`;
+      const heading = document.createElement("span");
+      heading.className = "day-event-heading task-group-event-heading";
+      const title = document.createElement("strong");
+      title.className = "day-timeline-event-title";
+      title.textContent = todo.title;
+      heading.append(calendarTodoWorkers(todo), title);
+      row.appendChild(heading);
+      const when = todoDateTimeLabel(todo);
+      const client = todoClientCalendarName(todo);
+      if (when || client) {
+        const meta = document.createElement("span");
+        meta.className = "day-timeline-event-meta task-group-event-meta";
+        for (const [name, value] of [["when", when], ["client", client]]) {
+          if (!value) continue;
+          const item = document.createElement("span");
+          item.className = "task-group-event-" + name;
+          item.textContent = value;
+          meta.appendChild(item);
+        }
+        row.appendChild(meta);
+      }
+      if (todo.urgent) row.setAttribute("aria-label", ["Nujno", todoAssigneeNames(todo), todo.title, when, client].filter(Boolean).join(", "));
       row.onclick = () => run(async () => {
         scrollTop = list.scrollTop;
         suspended = true;
@@ -148,6 +232,7 @@ function createTaskGroupUi() {
     showFields(!group || edit);
     for (const key of ["title", "description", "date", "endDate", "start", "end"]) form.elements[key].value = group?.[key] || "";
     form.elements.urgent.checked = Boolean(group?.urgent);
+    syncSchedule({ resetPicker: true });
     refreshList();
     if (!dialog.open) dialog.showModal();
     list.scrollTop = resume ? scrollTop : 0;
@@ -178,7 +263,6 @@ function createTaskGroupUi() {
   $("deleteTaskGroup").onclick = () => run(async () => {
     if (await showAppConfirm("Razpustim skupino? Dogodki ostanejo med samostojnimi opravili.")) await change("DELETE");
   });
-  $("taskGroupAllDay").onclick = () => { form.elements.start.value = form.elements.end.value = ""; };
   form.onsubmit = event => {
     event.preventDefault();
     const values = Object.fromEntries(new FormData(form));

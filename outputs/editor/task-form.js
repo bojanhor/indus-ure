@@ -37,8 +37,7 @@ function createTaskForm({
   renderTodos,
   renderTodoStatusChoices,
   setTodoClientSuggestionIndex,
-  setTodoFormAllDay,
-  setTodoFormQuickTime,
+  bindTodoFormQuickTimePicker,
   shiftDateKey,
   showFormValidationError,
   suggestedNoteTimeRange,
@@ -667,48 +666,7 @@ function installTaskFormBindings1() {
         if (id === "todoFormStart" && $("todoFormStart").value && event.isTrusted) $("todoFormEnd").focus();
       });
     });
-    $("todoFormQuickTimePicker").addEventListener("click", (event) => {
-      if (event.target.closest("#todoFormQuickTimeAllDay")) {
-        if (setTodoFormAllDay()) {
-          $(state.todoTimePickerTarget === "end" ? "todoFormQuickTimeEnd" : "todoFormQuickTimeStart").focus();
-        }
-        return;
-      }
-      const targetButton = event.target.closest("[data-time-picker-target]");
-      if (targetButton) {
-        state.todoTimeShiftDuration = null;
-        state.todoTimePickerTarget = targetButton.dataset.timePickerTarget === "end" ? "end" : "start";
-        state.todoTimePickerMode = "hour";
-        state.todoTimePickerOpen = true;
-      renderTodoFormQuickTimePicker();
-        return;
-      }
-      const modeButton = event.target.closest("[data-time-picker-mode]");
-      if (modeButton) {
-        state.todoTimePickerMode = modeButton.dataset.timePickerMode === "minute" ? "minute" : "hour";
-      renderTodoFormQuickTimePicker();
-        return;
-      }
-      const hourButton = event.target.closest("[data-time-picker-hour]");
-      if (hourButton) {
-        state.todoTimePickerMode = "minute";
-        setTodoFormQuickTime(state.todoTimePickerTarget, { hour: Number(hourButton.dataset.timePickerHour) });
-        return;
-      }
-      const minuteButton = event.target.closest("[data-time-picker-minute]");
-      if (minuteButton) {
-        const target = state.todoTimePickerTarget;
-        setTodoFormQuickTime(target, { minute: Number(minuteButton.dataset.timePickerMinute) });
-        if (target === "start") {
-          state.todoTimePickerTarget = "end";
-          state.todoTimePickerMode = "hour";
-          state.todoTimePickerOpen = true;
-        } else {
-          state.todoTimePickerOpen = false;
-        }
-        renderTodoFormQuickTimePicker();
-      }
-    });
+    bindTodoFormQuickTimePicker();
     $("todoFormDate").addEventListener("change", () => {
       syncTodoFormEndDate();
       updateTodoFormLateTimeEntryNotice();

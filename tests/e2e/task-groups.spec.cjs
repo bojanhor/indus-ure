@@ -37,6 +37,11 @@ async function reload(page) {
   const snapshot = (await api(page, '/api/bootstrap')).result;
   await page.evaluate(snapshot => { applyBootstrapSnapshot(snapshot); render(); }, snapshot);
 }
+async function chooseGroupTime(page, hour, minute) {
+  const picker = page.locator('#taskGroupQuickTimePicker');
+  await picker.locator(`[data-time-picker-hour="${hour}"]`).click();
+  await picker.locator(`[data-time-picker-minute="${minute}"]`).click();
+}
 async function drag(page, source, target, pointer) {
   // A read-only sync can replace rows before the gesture has even begun.
   await expect(async () => {
@@ -67,8 +72,9 @@ for (const pointer of ['mouse', 'touch']) test(`${pointer}: drag into and out of
   await page.locator('#newTaskGroup').click();
   await page.locator('#taskGroupForm [name="title"]').fill('Nepomembno');
   await page.locator('#taskGroupForm [name="date"]').fill('2026-11-20');
-  await page.locator('#taskGroupForm [name="start"]').fill('10:00');
-  await page.locator('#taskGroupForm [name="end"]').fill('11:30');
+  await page.locator('#taskGroupQuickTimeStart').click();
+  await chooseGroupTime(page, 10, 0);
+  await chooseGroupTime(page, 11, 30);
   await page.locator('#saveTaskGroup').click();
   await expect(page.locator('#taskGroupDialog')).toBeHidden();
   const group = page.locator('.task-group-card').filter({ hasText: 'Nepomembno' });
@@ -87,8 +93,10 @@ for (const pointer of ['mouse', 'touch']) test(`${pointer}: drag into and out of
   await page.evaluate(() => { state.current = parseDate('2026-11-20'); setView('calendar'); });
   const day = page.locator('.day[data-date="2026-11-20"]');
   await expect(day.locator('.day-todo').filter({ hasText: 'Samo Ibro' })).toHaveCount(1);
+  await expect(day.locator('.task-group-cal')).toHaveCSS('border-left-color', 'rgb(31, 111, 139)');
   await day.locator('.task-group-cal').click();
   await expect(page.locator('#taskGroupEvents')).toContainText('Samo Ibro');
+  await expect(page.locator('#taskGroupEvents .day-todo-worker-name')).toHaveText('Ibro');
   await page.screenshot({ path: info.outputPath('task-group-calendar.png') });
   await page.locator('#taskGroupEvents button').click();
   await expect(page.locator('#todoFormTask')).toHaveValue('Samo Ibro');
@@ -97,10 +105,90 @@ for (const pointer of ['mouse', 'touch']) test(`${pointer}: drag into and out of
   await page.locator('#closeTaskGroup').click();
   await page.evaluate(() => openDayTimeline('2026-11-20'));
   await expect(page.locator('.day-timeline-event.task-group-cal .day-resize-handle')).toHaveCount(0);
+  await expect(page.locator('.day-timeline-event.task-group-cal')).toHaveCSS('border-left-color', 'rgb(31, 111, 139)');
   await page.locator('.day-timeline-event.task-group-cal').click();
   await expect(page.locator('#taskGroupEvents')).toContainText('Samo Ibro');
   await page.locator('#closeTaskGroup').click();
   await expect(page.locator('#dayTimelineDialog')).toBeVisible();
+});
+
+test('group editor reuses date shortcuts and clock; multi-day and all-day clear time only', async ({ page }, info) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await login(page);
+  await page.locator('#newTaskGroup').click();
+  await page.locator('#taskGroupForm [name="title"]').fill('Termin QA');
+  await page.locator('#setTaskGroupDateToday').click();
+  const today = await page.evaluate(() => dateKey(new Date()));
+  const next = await page.evaluate(today => shiftDateKey(today, 1), today);
+  await expect(page.locator('#taskGroupDate')).toHaveValue(today);
+  await expect(page.locator('#taskGroupEndDate')).toHaveValue(today);
+  await expect(page.locator('#taskGroupDateWeekday')).not.toBeEmpty();
+  await page.locator('#advanceTaskGroupDate').click();
+  await expect(page.locator('#taskGroupDate')).toHaveValue(next);
+  await expect(page.locator('#taskGroupEndDate')).toHaveValue(next);
+  await page.locator('#taskGroupQuickTimeStart').click();
+  await page.screenshot({ path: info.outputPath('group-clock-mobile.png') });
+  await chooseGroupTime(page, 22, 45);
+  await chooseGroupTime(page, 23, 15);
+  await expect(page.locator('#taskGroupQuickTimeDuration')).toHaveText('Skupaj 30 min');
+  await page.locator('#taskGroupQuickTimeEnd').click();
+  await page.locator('#taskGroupQuickTimeAllDay').click();
+  await expect(page.locator('#taskGroupQuickTimeStart')).toHaveText('Od ---');
+  await expect(page.locator('#taskGroupQuickTimeEnd')).toHaveText('Do ---');
+  await expect(page.locator('#taskGroupDate')).toHaveValue(next);
+  await expect(page.locator('#taskGroupEndDate')).toHaveValue(next);
+  await page.locator('#taskGroupQuickTimeStart').click();
+  await chooseGroupTime(page, 10, 0);
+  await chooseGroupTime(page, 11, 15);
+  await page.locator('#setTaskGroupEndDateTomorrow').click();
+  const after = await page.evaluate(next => shiftDateKey(next, 1), next);
+  await expect(page.locator('#taskGroupEndDate')).toHaveValue(after);
+  await expect(page.locator('#taskGroupQuickTimePicker')).toBeHidden();
+  await expect(page.locator('#taskGroupStart')).toHaveValue('');
+  await expect(page.locator('#taskGroupEnd')).toHaveValue('');
+  await page.locator('#saveTaskGroup').click();
+  await expect(page.locator('#taskGroupDialog')).toBeHidden();
+  const group = (await api(page, '/api/task-groups')).result.taskGroups.find(item => item.title === 'Termin QA');
+  expect(group).toMatchObject({ date: next, endDate: after, start: '', end: '' });
+  await page.locator(`.task-group-card[data-task-group-id="${group.id}"] .task-group-edit`).click();
+  await page.locator('#clearTaskGroupDate').click();
+  await expect(page.locator('#taskGroupDate')).toHaveValue('');
+  await expect(page.locator('#taskGroupEndDate')).toHaveValue('');
+  await expect(page.locator('#taskGroupQuickTimeStart')).toHaveText('Od ---');
+});
+
+test('group uses daily cards with real coworkers and aligned date columns', async ({ page }, info) => {
+  await login(page);
+  const todos = await seed(page);
+  const shared = (await api(page, '/api/todos', 'POST', {
+    title: 'Skupno popravilo zelo dolgega naziva <QA>', status: 'open',
+    assigneeIds: ['bojan', 'ibro'], date: '2026-11-22', endDate: '2026-11-24'
+  })).result.todos.find(todo => todo.title.startsWith('Skupno popravilo'));
+  const group = (await api(page, '/api/task-groups', 'POST', { title: 'Tabela QA' })).result;
+  for (const item of [todos['Samo Ibro'], shared, todos.Samostojno]) {
+    expect((await move(page, item.id, group.id)).status).toBe(200);
+  }
+  await page.goto(app.baseUrl + '/?group=' + group.id);
+  const list = page.locator('#taskGroupEvents');
+  const rows = list.locator('.task-group-event-link.day-all-day-item');
+  await expect(rows).toHaveCount(3);
+  const together = rows.filter({ hasText: 'Skupno popravilo' });
+  await expect(together.locator('.day-todo-worker-name')).toHaveText(['Bojan', 'Ibro']);
+  await expect(together.locator('.avatar')).toHaveCount(2);
+  await expect(together.locator('.task-group-event-when')).toHaveText('22. 11. 2026 – 24. 11. 2026');
+  await expect(rows.filter({ hasText: 'Samostojno' }).locator('.task-group-event-when')).toHaveCount(0);
+  const dates = list.locator('.task-group-event-when');
+  await expect(dates).toHaveCount(2);
+  expect(Math.abs((await dates.nth(0).boundingBox()).x - (await dates.nth(1).boundingBox()).x)).toBeLessThan(1);
+  await page.screenshot({ path: info.outputPath('group-daily-rows-desktop.png') });
+  await page.setViewportSize({ width: 390, height: 844 });
+  const title = await together.locator('.day-event-heading').boundingBox();
+  const timing = await together.locator('.task-group-event-when').boundingBox();
+  expect(timing.y).toBeGreaterThanOrEqual(title.y + title.height);
+  expect(timing.x + timing.width).toBeLessThanOrEqual(390);
+  await page.screenshot({ path: info.outputPath('group-daily-rows-mobile.png') });
+  await together.press('Enter');
+  await expect(page.locator('#todoFormTask')).toHaveValue('Skupno popravilo zelo dolgega naziva <QA>');
 });
 
 test('shared group rights, stale moves, task completion, Google deep links and dissolve/Undo', async ({ page, browser }) => {

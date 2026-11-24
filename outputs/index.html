@@ -1765,7 +1765,7 @@
     .task-group-card.todo-drop-target, .task-group-outside.todo-drop-target { outline: 3px solid var(--accent); outline-offset: -2px; }
     .task-group-outside { border: 1px dashed #8da2b4; padding: 6px; border-radius: 7px; margin-block: 5px; color: var(--muted); font-size: .8rem; }
     .todo-drag-active .task-group-outside { background: #eef2f7; }
-    .task-group-cal.todo-status-color { background: #e5edf7; color: #243b55; }
+    .task-group-cal.todo-status-color { border-left-color: var(--accent) !important; }
     .task-group-cal .task-group-folder { width: 1.2em; height: 1.2em; vertical-align: text-bottom; margin-inline-end: 3px; }
     #taskGroupDialog [hidden], #taskGroupEvents:empty { display: none; }
     #taskGroupForm .modal-grid > *, #taskGroupForm .modal-grid input { min-width: 0; }
@@ -1773,7 +1773,24 @@
     #taskGroupForm .todo-form-option { margin: 0; }
     #taskGroupDialog .modal-head-actions svg { width: 19px; height: 19px; }
     #taskGroupEvents { display: grid; gap: 5px; max-height: 35vh; overflow: auto; padding: 14px 20px; }
-    .task-group-event-link { text-align: left; overflow-wrap: anywhere; }
+    #taskGroupEvents .task-group-event-link {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) min(44%, 13rem);
+      align-items: start;
+      column-gap: 18px;
+      padding: 9px 12px;
+      min-height: 42px;
+      cursor: pointer;
+    }
+    #taskGroupEvents .task-group-event-link.urgent { border-left-color: #d93025 !important; }
+    .task-group-event-heading:only-child { grid-column: 1 / -1; }
+    #taskGroupEvents .task-group-event-meta { margin: 0; }
+    .task-group-event-when { display: block; font-variant-numeric: tabular-nums; }
+    .task-group-event-client { display: block; }
+    @media (max-width: 400px) {
+      #taskGroupEvents { padding-inline: 12px; }
+      #taskGroupEvents .task-group-event-link { grid-template-columns: minmax(0, 1fr); row-gap: 3px; }
+    }
     .todo-urgent-chip { background: #d93025; color: #fff; white-space: nowrap; }
     .todo-item.has-change-notice {
       border-left: 4px solid #2f9a57;
@@ -4007,6 +4024,7 @@
     .todo-time-picker-choice.minute-30 { left: 50%; top: 89%; }
     .todo-time-picker-choice.minute-45 { left: 11%; top: 50%; }
     .todo-time-picker-choice.active { color: #fff; border-color: var(--accent-dark); background: var(--accent); box-shadow: 0 2px 7px rgba(19, 83, 104, .28); }
+    #taskGroupDialog .todo-time-picker-choice:not(:disabled):active,
     #todoDialog .todo-time-picker-choice:not(:disabled):active { transform: translate(-50%, -50%) scale(.94); }
     .todo-time-picker-choice:focus-visible,
     .todo-time-picker-target:focus-visible,
@@ -5607,9 +5625,13 @@
         grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 8px;
       }
+      #taskGroupForm .date-input-with-clear,
       #todoDialog .date-input-with-clear { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      #taskGroupEndDateField .date-input-with-clear,
       #todoDialog #todoFormEndDateField .date-input-with-clear { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      #taskGroupForm .date-input-with-clear > input,
       #todoDialog .date-input-with-clear > input { grid-column: 1 / -1; }
+      #taskGroupForm .date-input-with-clear > button,
       #todoDialog .date-input-with-clear > button { width: auto; min-width: 0; }
       .todo-time-picker { padding: 10px; }
       .todo-time-picker-target { min-width: 0; padding-inline: 6px; font-size: 14px; }
@@ -6292,11 +6314,9 @@
         <label>Ime skupine<input name="title" type="text" required maxlength="160" placeholder="Ime skupine"></label>
         <label>Opis<textarea name="description" rows="2" maxlength="1000" placeholder="Neobvezno"></textarea></label>
         <label class="todo-form-option todo-form-urgent"><input type="checkbox" name="urgent"><span>NUJNO</span></label>
-        <div class="modal-grid">
-          <label>Od dne<input name="date" type="date"></label><label>Do dne<input name="endDate" type="date"></label>
-          <label>Od ure<input name="start" type="time"></label><label>Do ure<input name="end" type="time"></label>
+        <div class="todo-form-date-time-fields" id="taskGroupSchedule" role="group" aria-label="Datum in ura">
+          <div id="taskGroupTimeFields" hidden><input id="taskGroupStart" type="hidden" name="start"><input id="taskGroupEnd" type="hidden" name="end"></div>
         </div>
-        <div class="actions"><button class="secondary" id="taskGroupAllDay" type="button">Cel dan</button></div>
       </div>
     </form>
     <div id="taskGroupEvents"></div>
@@ -7608,8 +7628,7 @@ const {
     renderTodos: (...args) => renderTodos(...args),
     renderTodoStatusChoices: (...args) => renderTodoStatusChoices(...args),
     setTodoClientSuggestionIndex: (...args) => setTodoClientSuggestionIndex(...args),
-    setTodoFormAllDay: (...args) => setTodoFormAllDay(...args),
-    setTodoFormQuickTime: (...args) => setTodoFormQuickTime(...args),
+    bindTodoFormQuickTimePicker: (...args) => bindTodoFormQuickTimePicker(...args),
     shiftDateKey: (...args) => shiftDateKey(...args),
     showFormValidationError: (...args) => showFormValidationError(...args),
     suggestedNoteTimeRange: (...args) => suggestedNoteTimeRange(...args),
@@ -11345,7 +11364,7 @@ const {
       todoTimePickerDefault,
       renderTodoFormQuickTimePicker,
       setTodoFormAllDay,
-      setTodoFormQuickTime
+      bindTodoFormQuickTimePicker
     } = createTimeEntryEditor({
       $,
       state,

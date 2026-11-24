@@ -1,5 +1,9 @@
 // Time picker and independent client-billable hours. No HTTP/server dependency.
-function createTimeEntryEditor({ $, state, parseBillingNumber, clearFormValidationError, updateTodoFormLateTimeEntryNotice, localStorage, canSetAllDay = () => false, config = { defaultStart: "08:00", defaultDurationMinutes: 60 } }) {
+function createTimeEntryEditor({ $, state, parseBillingNumber, clearFormValidationError, updateTodoFormLateTimeEntryNotice, localStorage, onTimeChanged, storageKeyPrefix = "indus-ure-last-time-", canSetAllDay = () => false, config = { defaultStart: "08:00", defaultDurationMinutes: 60 } }) {
+    const notifyTimeChanged = onTimeChanged || (() => {
+      updateTodoFormLateTimeEntryNotice();
+      syncTodoFormClientBillableHours();
+    });
 // BEGIN preserved time-entry editor
     function dayTimelineMinutes(value) {
       const match = /^(\d{2}):(\d{2})$/.exec(String(value || ""));
@@ -71,7 +75,7 @@ function createTimeEntryEditor({ $, state, parseBillingNumber, clearFormValidati
     }
 
     function todoTimePickerStorageKey() {
-      return `indus-ure-last-time-${state.user?.id || "anonymous"}`;
+      return storageKeyPrefix + (state.user?.id || "anonymous");
     }
 
     function rememberedTodoStartTime() {
@@ -159,8 +163,7 @@ function createTimeEntryEditor({ $, state, parseBillingNumber, clearFormValidati
       state.todoTimeShiftDuration = null;
       state.todoTimePickerMode = "hour";
       state.todoTimePickerOpen = false;
-      updateTodoFormLateTimeEntryNotice();
-      syncTodoFormClientBillableHours();
+      notifyTimeChanged();
       renderTodoFormQuickTimePicker();
       return true;
     }
@@ -191,10 +194,53 @@ function createTimeEntryEditor({ $, state, parseBillingNumber, clearFormValidati
         state.todoTimeShiftDuration = null;
         $("todoFormEnd").dataset.autoSuggested = "false";
       }
-      updateTodoFormLateTimeEntryNotice();
-      syncTodoFormClientBillableHours();
+      notifyTimeChanged();
       renderTodoFormQuickTimePicker();
     }
 // END preserved time-entry editor
-  return { dayTimelineMinutes, dayTimelineTime, roundTimeToQuarter, normalizeTodoFormTimes, todoFormWorkerMinutes, todoTimePickerDurationLabel, formatClientBillableHours, todoFormClientBillableHoursIsManual, syncTodoFormClientBillableHours, todoFormClientBillableMinutes, todoTimePickerStorageKey, rememberedTodoStartTime, rememberTodoStartTime, todoTimePickerParts, todoTimePickerDefault, renderTodoFormQuickTimePicker, setTodoFormAllDay, setTodoFormQuickTime };
+    function bindTodoFormQuickTimePicker() {
+      $("todoFormQuickTimePicker").addEventListener("click", (event) => {
+        if (event.target.closest(".todo-time-picker-all-day")) {
+          if (setTodoFormAllDay()) {
+            $(state.todoTimePickerTarget === "end" ? "todoFormQuickTimeEnd" : "todoFormQuickTimeStart").focus();
+          }
+          return;
+        }
+        const targetButton = event.target.closest("[data-time-picker-target]");
+        if (targetButton) {
+          state.todoTimeShiftDuration = null;
+          state.todoTimePickerTarget = targetButton.dataset.timePickerTarget === "end" ? "end" : "start";
+          state.todoTimePickerMode = "hour";
+          state.todoTimePickerOpen = true;
+        renderTodoFormQuickTimePicker();
+          return;
+        }
+        const modeButton = event.target.closest("[data-time-picker-mode]");
+        if (modeButton) {
+          state.todoTimePickerMode = modeButton.dataset.timePickerMode === "minute" ? "minute" : "hour";
+        renderTodoFormQuickTimePicker();
+          return;
+        }
+        const hourButton = event.target.closest("[data-time-picker-hour]");
+        if (hourButton) {
+          state.todoTimePickerMode = "minute";
+          setTodoFormQuickTime(state.todoTimePickerTarget, { hour: Number(hourButton.dataset.timePickerHour) });
+          return;
+        }
+        const minuteButton = event.target.closest("[data-time-picker-minute]");
+        if (minuteButton) {
+          const target = state.todoTimePickerTarget;
+          setTodoFormQuickTime(target, { minute: Number(minuteButton.dataset.timePickerMinute) });
+          if (target === "start") {
+            state.todoTimePickerTarget = "end";
+            state.todoTimePickerMode = "hour";
+            state.todoTimePickerOpen = true;
+          } else {
+            state.todoTimePickerOpen = false;
+          }
+          renderTodoFormQuickTimePicker();
+        }
+      });
+    }
+  return { dayTimelineMinutes, dayTimelineTime, roundTimeToQuarter, normalizeTodoFormTimes, todoFormWorkerMinutes, todoTimePickerDurationLabel, formatClientBillableHours, todoFormClientBillableHoursIsManual, syncTodoFormClientBillableHours, todoFormClientBillableMinutes, todoTimePickerStorageKey, rememberedTodoStartTime, rememberTodoStartTime, todoTimePickerParts, todoTimePickerDefault, renderTodoFormQuickTimePicker, setTodoFormAllDay, setTodoFormQuickTime, bindTodoFormQuickTimePicker };
 }

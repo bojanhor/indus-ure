@@ -152,10 +152,10 @@ for (const userId of ["ibro", "bojan"]) {
 
       await page.setViewportSize({ width: 390, height: 844 });
       await page.locator("#todoFormQuickTimeStart").click();
-      await page.locator('[data-time-picker-hour="8"]').click();
-      await page.locator('[data-time-picker-minute="15"]').click();
-      await page.locator('[data-time-picker-hour="10"]').click();
-      await page.locator('[data-time-picker-minute="30"]').click();
+      await page.locator('#todoFormQuickTimePicker').locator('[data-time-picker-hour="8"]').click();
+      await page.locator('#todoFormQuickTimePicker').locator('[data-time-picker-minute="15"]').click();
+      await page.locator('#todoFormQuickTimePicker').locator('[data-time-picker-hour="10"]').click();
+      await page.locator('#todoFormQuickTimePicker').locator('[data-time-picker-minute="30"]').click();
       await expect(page.locator("#todoFormQuickTimeDuration")).toHaveText("Skupaj 2 h 15 min");
       await expect(page.locator("#todoFormQuickTimePicker")).toHaveClass(/is-closed/);
       await page.locator("#todoFormQuickTimeStart").scrollIntoViewIfNeeded();
