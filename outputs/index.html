@@ -1768,6 +1768,40 @@
     .task-group-cal.todo-status-color { border-left-color: var(--accent) !important; }
     .task-group-cal .task-group-folder { width: 1.2em; height: 1.2em; vertical-align: text-bottom; margin-inline-end: 3px; }
     #taskGroupDialog [hidden], #taskGroupEvents:empty { display: none; }
+    #todoDragActions {
+      position: fixed;
+      right: max(12px, env(safe-area-inset-right));
+      top: max(12px, env(safe-area-inset-top));
+      z-index: 2600;
+      display: flex;
+      width: max-content;
+      max-width: calc(100% - 24px);
+      gap: 8px;
+      padding: 6px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: #fff;
+      box-shadow: 0 8px 25px #16262e44;
+    }
+    #todoDragActions[hidden], #todoDragActions [hidden], #todoGroupDropDialog [hidden] { display: none; }
+    #dayTimelineDialog > #todoDragActions { position: absolute; top: 70px; }
+    [data-todo-drag-action] {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      min-height: 54px;
+      padding: 8px 14px;
+      border-radius: 9px;
+      background: #e7eff8;
+      color: var(--accent-dark);
+      font-size: 13px;
+      font-weight: 800;
+    }
+    [data-todo-drag-action="trash"] { background: #fff0ef; color: #963a3a; }
+    [data-todo-drag-action].is-drop-target { outline: 2px solid currentColor; outline-offset: -2px; }
+    [data-todo-drag-action] svg { width: 22px; height: 22px; flex: 0 0 22px; pointer-events: none; }
+    #todoGroupDropEvent { overflow-wrap: anywhere; }
     #taskGroupForm .modal-grid > *, #taskGroupForm .modal-grid input { min-width: 0; }
     #taskGroupForm input:not([type="checkbox"]) { min-height: 42px; }
     #taskGroupForm .todo-form-option { margin: 0; }
@@ -2942,6 +2976,7 @@
     .day-todo.month-dragging,
     .day-multiday-event.month-dragging { opacity: 0.42; outline: 2px dashed var(--accent); outline-offset: 2px; }
     .day.month-drag-target { box-shadow: inset 0 0 0 3px var(--accent); background: #edf8f3; }
+    [data-calendar-group-id].month-drag-target { outline: 3px solid var(--accent); outline-offset: -3px; }
     .month-todo-drag-ghost {
       position: fixed;
       z-index: 120;
@@ -6320,6 +6355,21 @@
       </div>
     </form>
     <div id="taskGroupEvents"></div>
+  </dialog>
+  <div id="todoDragActions" aria-hidden="true" hidden>
+    <div data-todo-drag-action="trash">V koš</div>
+    <div data-todo-drag-action="group">V skupino</div>
+  </div>
+  <dialog id="todoGroupDropDialog" aria-labelledby="todoGroupDropTitle">
+    <div class="modal-head"><h3 id="todoGroupDropTitle">Dodaj v skupino</h3><button class="icon-btn" type="button" id="todoGroupDropClose" aria-label="Zapri izbiro skupine">&times;</button></div>
+    <form id="todoGroupDropForm">
+      <div class="modal-body">
+        <strong id="todoGroupDropEvent"></strong>
+        <label>Skupina<select id="todoGroupDropChoice" required></select></label>
+        <label hidden>Ime nove skupine<input id="todoGroupDropName" type="text" maxlength="160"></label>
+        <div class="actions"><button class="primary" type="submit" id="todoGroupDropSave">Dodaj</button></div>
+      </div>
+    </form>
   </dialog>
   <dialog id="dayTimelineDialog">
     <form method="dialog">
@@ -10211,6 +10261,8 @@ const taskActionIcons = {
 };
 /* @indus-module:editor/task-groups */
 const taskGroupUi = createTaskGroupUi();
+/* @indus-module:editor/task-drag-actions */
+const taskDragActions = createTaskDragActions();
 /* @indus-module:calendar-order */
 /* @indus-module:calendar-dates */
 /* @indus-module:editor/absences */
@@ -10922,6 +10974,7 @@ function appendMonthMultiDayLanes(day, key, weekIndex, layout) {
           const item = document.createElement('button');
           item.type = 'button';
           item.className = `day-multiday-event todo-status-color ${todoStatusClass(todo.status)} ${todo._taskGroup ? "task-group-cal" : ""} ${todoAssigneeIds(todo).length > 1 ? 'multi-assignee' : ''} ${todo.urgent ? 'urgent' : ''} ${todoChangeNotice(todo) ? 'has-change-notice' : ''} ${actualStart ? 'is-span-start' : 'is-span-continuation'} ${actualEnd ? 'is-span-end' : ''}`;
+          if (todo._taskGroup) item.dataset.calendarGroupId = todo.groupId;
           const title = todo.title || 'Brez naslova';
           const client = todo._absence || todo._taskGroup ? "" : todoClientCalendarName(todo);
           item.title = client ? client + " – " + title : title;
@@ -10977,6 +11030,7 @@ function clearMonthTodoPointerDrag() {
       if (drag.holdTimer) clearTimeout(drag.holdTimer);
       if (drag.autoScrollFrame) cancelAnimationFrame(drag.autoScrollFrame);
       drag.item.classList.remove("month-drag-armed", "month-dragging");
+      taskDragActions.clear(drag);
       drag.targetElement?.classList.remove("month-drag-target");
       drag.ghostElement?.remove();
       try {
@@ -11010,15 +11064,19 @@ function tickMonthTodoPointerDragAutoScroll(timestamp) {
       if (!drag?.active) return;
       const elapsed = Math.min(50, Math.max(0, timestamp - (drag.autoScrollAt || timestamp)));
       drag.autoScrollAt = timestamp;
-      const dx = monthTodoAutoScrollSpeed(drag.clientX, window.innerWidth) * elapsed;
-      const dy = monthTodoAutoScrollSpeed(drag.clientY, window.innerHeight) * elapsed;
+      const dx = drag.action || drag.actionsOnly ? 0 : monthTodoAutoScrollSpeed(drag.clientX, window.innerWidth) * elapsed;
+      const dy = drag.action || drag.actionsOnly ? 0 : monthTodoAutoScrollSpeed(drag.clientY, window.innerHeight) * elapsed;
       if (dx && drag.scrollHost) drag.scrollHost.scrollLeft += dx;
       if (dy) window.scrollBy(0, dy);
       if (dx || dy) updateMonthTodoPointerDragTarget(drag, drag.clientX, drag.clientY);
       drag.autoScrollFrame = requestAnimationFrame(tickMonthTodoPointerDragAutoScroll);
     }
 function updateMonthTodoPointerDragTarget(drag, clientX, clientY) {
-      const target = document.elementFromPoint(clientX, clientY)?.closest(".day");
+      drag.action = taskDragActions.hit(drag, clientX, clientY);
+      const hit = drag.action || drag.actionsOnly ? null : document.elementFromPoint(clientX, clientY);
+      const group = hit?.closest("[data-calendar-group-id]");
+      drag.targetGroupId = group && taskDragActions.canGroup(drag.todo) ? group.dataset.calendarGroupId : "";
+      const target = group ? (drag.targetGroupId ? group : null) : hit?.closest(".day");
       const targetDate = String(target?.dataset.date || "");
       if (drag.targetElement !== target) {
         drag.targetElement?.classList.remove("month-drag-target");
@@ -11047,6 +11105,7 @@ function activateMonthTodoPointerDrag() {
       if (drag.searchScrollHost) drag.grabOffsetX = Math.min(drag.grabOffsetX, 140);
       drag.ghostElement = ghost;
       document.body.append(ghost);
+      taskDragActions.show(drag, drag.todo);
       try {
         drag.item.setPointerCapture?.(drag.pointerId);
       } catch {
@@ -11064,7 +11123,7 @@ function beginMonthTodoPointerDrag(event, item, todo, originDate = todo.date) {
       clearMonthTodoPointerDrag();
       const rect = item.getBoundingClientRect();
       const searchScrollHost = item.closest("#searchPanel");
-      if (searchScrollHost && state.view !== "calendar") return;
+      const actionsOnly = Boolean(searchScrollHost && state.view !== "calendar");
       const scrollHost = item.closest(".calendar-shell") || (searchScrollHost ? document.querySelector(".calendar-shell") : null);
       const drag = {
         pointerId: event.pointerId,
@@ -11087,6 +11146,7 @@ function beginMonthTodoPointerDrag(event, item, todo, originDate = todo.date) {
         ghostElement: null,
         scrollHost,
         searchScrollHost,
+        actionsOnly,
         searchScrollTop: searchScrollHost?.scrollTop || 0,
         scrollLeft: scrollHost?.scrollLeft || 0,
         windowScrollX: window.scrollX,
@@ -11139,6 +11199,7 @@ function finishMonthTodoPointerDrag(event) {
       if (!drag || drag.pointerId !== event.pointerId) return;
       const wasActive = drag.active;
       const wasPanning = drag.panning;
+      if (wasActive) updateMonthTodoPointerDragTarget(drag, event.clientX, event.clientY);
       const targetDate = drag.targetDate;
       const todo = state.todos.find(item => item.id === drag.todo.id) || drag.todo;
       const originDate = drag.originDate || todo.date || targetDate;
@@ -11147,6 +11208,10 @@ function finishMonthTodoPointerDrag(event) {
       clearMonthTodoPointerDrag();
       if (!wasActive) return;
       lastMonthTodoDragAt = Date.now();
+      if (drag.action || drag.targetGroupId) {
+        void taskDragActions.commit(drag.action || "group-card", todo, drag.targetGroupId);
+        return;
+      }
       if (!targetDate || (todo.date && targetDate === originDate)) return;
       const dayShift = Math.round((parseDate(targetDate) - parseDate(originDate)) / 86400000);
       if (todo._taskGroup) {
@@ -11311,6 +11376,7 @@ function renderMonth() {
             const settlementIndicators = dayTodoSettlementIndicators(todo);
             const changeNotice = todoChangeNotice(todo);
             item.className = `day-todo todo-status-color ${todoStatusClass(todo.status)} ${todoAssigneeIds(todo).length > 1 ? 'multi-assignee' : ''} ${todo.done ? 'done' : ''} ${todo.urgent ? 'urgent' : ''} ${changeNotice ? 'has-change-notice' : ''} ${settlementIndicators ? 'has-settlements' : ''}`;
+            if (todo._taskGroup) item.dataset.calendarGroupId = todo.groupId;
             const time = todo.start && todo.end ? `<span class="day-todo-time-part">${escapeHtml(todo.start)}&ndash;</span><wbr><span class="day-todo-time-part">${escapeHtml(todo.end)}</span>` : '';
             const client = todo._absence || todo._taskGroup ? '' : todoClientCalendarName(todo, 'Brez stranke');
             if (todo._taskGroup) item.classList.add("task-group-cal");
@@ -11647,6 +11713,12 @@ function dayAllDayDropTarget(clientY) {
     }
 
 function refreshDayAllDayDropPreview(interaction) {
+      interaction.action = taskDragActions.hit(interaction, interaction.currentX, interaction.currentY);
+      if (interaction.action) {
+        interaction.target = null;
+        clearDayAllDayDropPreview(interaction);
+        return;
+      }
       const target = dayAllDayDropTarget(interaction.currentY);
       interaction.target = target;
       if (!target) {
@@ -11691,7 +11763,7 @@ function tickDayAllDayDragAutoScroll(timestamp) {
       const scroll = $("dayTimelineScroll");
       const elapsed = Math.min(48, Math.max(0, timestamp - (interaction.autoScrollAt || timestamp)));
       interaction.autoScrollAt = timestamp;
-      const velocity = dayAllDayDragAutoScrollVelocity(interaction.currentY);
+      const velocity = interaction.action ? 0 : dayAllDayDragAutoScrollVelocity(interaction.currentY);
       if (scroll && velocity) {
         const previousTop = scroll.scrollTop;
         scroll.scrollTop = Math.max(0, Math.min(scroll.scrollHeight - scroll.clientHeight, previousTop + velocity * elapsed / 1000));
@@ -11752,6 +11824,7 @@ function updateDayAllDayPointerDrag(event) {
       event.stopPropagation();
       if (!interaction.moved) {
         interaction.moved = true;
+        taskDragActions.show(interaction, interaction.todo, $("dayTimelineDialog"));
         interaction.autoScrollAt = performance.now();
         interaction.autoScrollFrame = requestAnimationFrame(tickDayAllDayDragAutoScroll);
       }
@@ -11766,12 +11839,15 @@ function finishDayAllDayPointerDrag(event, cancelled = false) {
       if (interaction.autoScrollFrame) cancelAnimationFrame(interaction.autoScrollFrame);
       interaction.element.classList.remove("is-drag-ready");
       const target = interaction.target;
+      const action = !cancelled && interaction.moved ? taskDragActions.hit(interaction, event.clientX, event.clientY) : "";
+      taskDragActions.clear(interaction);
       clearDayAllDayDropPreview(interaction);
       if (interaction.moved) {
         consumeDayTimelineActivationClick(event);
         state.dayTimelineSuppressClick = true;
         setTimeout(() => { state.dayTimelineSuppressClick = false; }, 250);
       }
+      if (action) { commitDayTimelineDragAction(action, interaction.todo); return; }
       if (cancelled || !interaction.moved || !target) return;
       event.preventDefault();
       event.stopPropagation();
@@ -12205,6 +12281,8 @@ function dayTimelineDragAutoScrollVelocity(clientY) {
     }
 
 function refreshDayTimelineEventPreview(interaction) {
+      interaction.action = taskDragActions.hit(interaction, interaction.currentX, interaction.currentY);
+      if (interaction.action) return;
       const rawDelta = ((interaction.currentY - interaction.startY) + interaction.scrollDeltaY) / state.dayTimelineMinuteHeight;
       const delta = Math.round(rawDelta / 15) * 15;
       const deltaX = interaction.currentX - interaction.startX;
@@ -12261,7 +12339,7 @@ function tickDayTimelineEventAutoScroll(timestamp) {
       const viewport = $("dayTimelineScroll");
       const elapsed = Math.min(48, Math.max(0, timestamp - (interaction.autoScrollAt || timestamp)));
       interaction.autoScrollAt = timestamp;
-      const velocity = interaction.dayOffset ? 0 : dayTimelineDragAutoScrollVelocity(interaction.currentY);
+      const velocity = interaction.action || interaction.dayOffset ? 0 : dayTimelineDragAutoScrollVelocity(interaction.currentY);
       if (viewport && velocity) {
         const previousTop = viewport.scrollTop;
         viewport.scrollTop = Math.max(0, Math.min(viewport.scrollHeight - viewport.clientHeight, previousTop + velocity * elapsed / 1000));
@@ -12297,10 +12375,19 @@ function updateDayTimelineEventPointer(event) {
       if (!interaction.moved) {
         interaction.moved = true;
         interaction.element.classList.add("is-moving");
+        if (interaction.mode === "move") taskDragActions.show(interaction, interaction.todo, $("dayTimelineDialog"));
         interaction.autoScrollAt = performance.now();
         interaction.autoScrollFrame = requestAnimationFrame(tickDayTimelineEventAutoScroll);
       }
       refreshDayTimelineEventPreview(interaction);
+    }
+function commitDayTimelineDragAction(action, todo) {
+      renderDayTimeline();
+      if (state.dayTimelineDrafts.size) {
+        showNotice("Najprej shrani ali prekliči spremembe dnevne časovnice.");
+        return;
+      }
+      void taskDragActions.commit(action, todo);
     }
 async function finishDayTimelineEventPointer(event, cancelled = false) {
       const interaction = state.dayTimelineInteraction;
@@ -12315,6 +12402,8 @@ async function finishDayTimelineEventPointer(event, cancelled = false) {
       interaction.element.style.transform = "";
       delete interaction.element.dataset.dayTarget;
       clearTimeout(interaction.holdTimer);
+      const action = !cancelled && interaction.moved ? taskDragActions.hit(interaction, event.clientX, event.clientY) : "";
+      taskDragActions.clear(interaction);
       if (cancelled) { if (interaction.moved) renderDayTimeline(); return; }
       const todo = state.todos.find((item) => item.id === interaction.todoId) || interaction.todo;
       consumeDayTimelineActivationClick(event);
@@ -12328,6 +12417,7 @@ async function finishDayTimelineEventPointer(event, cancelled = false) {
         return;
       }
       if (!todo) { renderDayTimeline(); return; }
+      if (action) { commitDayTimelineDragAction(action, todo); return; }
       saveDayTimelineDraft(
         todo,
         dayTimelineTime(interaction.startMinute),
@@ -13471,11 +13561,12 @@ function updateTodoPointerDragIndicator(drag) {
 function updateTodoPointerDragTarget(clientX, clientY) {
       const drag = todoPointerDrag;
       if (!drag) return;
-      const hit = document.elementFromPoint(clientX, clientY);
+      drag.action = taskDragActions.hit(drag, clientX, clientY);
+      const hit = drag.action ? null : document.elementFromPoint(clientX, clientY);
       const atPoint = drag.searchPanel && !hit?.closest("#todoItems") ? null : hit;
       const target = atPoint?.closest(".todo-item");
       const section = atPoint?.closest("[data-todo-drop-bucket]")
-        || ((!drag.searchPanel || atPoint) && todoTailDropZoneAtPoint(clientX, clientY));
+        || (!drag.action && (!drag.searchPanel || atPoint) && todoTailDropZoneAtPoint(clientX, clientY));
       const source = findTodoOrderItem(drag.sourceId);
       const group = atPoint?.closest(".task-group-card");
       const outside = atPoint?.closest(".task-group-outside");
@@ -13567,7 +13658,7 @@ function todoPointerDragScrollVelocity(clientY) {
 
 function tickTodoPointerDragAutoScroll(timestamp) {
       if (!todoPointerDrag) return;
-      const velocity = todoPointerDragScrollVelocity(todoPointerDrag.clientY);
+      const velocity = todoPointerDrag.action ? 0 : todoPointerDragScrollVelocity(todoPointerDrag.clientY);
       if (velocity) {
         const elapsed = Math.min(50, Math.max(0, timestamp - todoPointerDrag.autoScrollAt));
         const { currentTop, maxTop } = todoPointerDragScrollBounds();
@@ -13585,6 +13676,7 @@ function clearTodoPointerDrag() {
       if (!drag) return null;
       if (drag.holdTimer) clearTimeout(drag.holdTimer);
       if (drag.autoScrollFrame) cancelAnimationFrame(drag.autoScrollFrame);
+      taskDragActions.clear(drag);
       todoPointerDrag = null;
       if (drag.handle.hasPointerCapture?.(drag.pointerId)) drag.handle.releasePointerCapture(drag.pointerId);
       drag.handle.classList.remove("drag-armed");
@@ -13630,6 +13722,7 @@ function activateTodoPointerDrag() {
       drag.indicatorElement.className = "todo-drop-indicator";
       drag.indicatorElement.setAttribute("aria-hidden", "true");
       document.body.append(drag.ghostElement, drag.indicatorElement);
+      taskDragActions.show(drag, findTodoOrderItem(drag.sourceId));
       updateTodoPointerDragTarget(drag.clientX, drag.clientY);
       drag.autoScrollAt = performance.now();
       drag.autoScrollFrame = requestAnimationFrame(tickTodoPointerDragAutoScroll);
@@ -13701,10 +13794,14 @@ function finishTodoPointerDrag(event) {
           event.preventDefault(); clearTodoPointerDrag(); return;
         }
         drag.clientX = event.clientX; drag.clientY = event.clientY;
-        updateTodoPointerDragTarget(event.clientX, event.clientY);
       }
       event.preventDefault();
+      if (drag.active) updateTodoPointerDragTarget(event.clientX, event.clientY);
       const { sourceId, targetId, targetPlacement, targetBucket, targetGroupId, fromGroupId, active, hasDropTarget } = clearTodoPointerDrag();
+      if (active && drag.action) {
+        void taskDragActions.commit(drag.action, findTodoOrderItem(sourceId));
+        return;
+      }
       if (!active || !hasDropTarget) return;
       reorderTodos(sourceId, targetId, targetPlacement, targetBucket, targetGroupId === undefined ? {} : { targetGroupId, fromGroupId }).catch((error) => showNotice(error.message));
     }
@@ -13977,6 +14074,10 @@ function renderSearch() {
     }
 
 function renderSearchContent() {
+      if (monthTodoPointerDrag?.searchScrollHost) {
+        if (monthTodoPointerDrag.active || monthTodoPointerDrag.panning) lastMonthTodoDragAt = Date.now();
+        clearMonthTodoPointerDrag();
+      }
       if (todoPointerDrag?.searchPanel) {
         if (todoPointerDrag.active || todoPointerDrag.panning) lastSearchBoardDragAt = Date.now();
         clearTodoPointerDrag();
@@ -14077,6 +14178,12 @@ function renderSearchContent() {
           openButton.classList.add("search-result-board-drag");
           openButton.title = "Klikni za urejanje; povleci v skupino ali na mesto v seznamu. Na telefonu najprej pridrži.";
           bindTodoDragHandle(openButton, todo.id, openButton);
+        } else if (taskDragActions.canTrash(todo)) {
+          openButton.classList.add("search-result-calendar-drag");
+          openButton.title = "Klikni za urejanje; pridrži in povleci na dejanje.";
+          openButton.addEventListener("pointerdown", event => beginMonthTodoPointerDrag(event, openButton, todo));
+          openButton.addEventListener("lostpointercapture", cancelMonthTodoPointerDrag);
+          openButton.addEventListener("contextmenu", event => event.preventDefault());
         }
         openButton.addEventListener("click", event => {
           if (Date.now() - lastMonthTodoDragAt < 450) { event.preventDefault(); event.stopPropagation(); return; }
@@ -15308,10 +15415,12 @@ $("dayTimelineDialog").addEventListener("close", () => {
       state.dayTimelinePointers.clear();
       if (interaction?.holdTimer) clearTimeout(interaction.holdTimer);
       if (interaction?.autoScrollFrame) cancelAnimationFrame(interaction.autoScrollFrame);
+      taskDragActions.clear(interaction);
       const allDayInteraction = state.dayTimelineAllDayInteraction;
       state.dayTimelineAllDayInteraction = null;
       clearTimeout(allDayInteraction?.holdTimer);
       if (allDayInteraction?.autoScrollFrame) cancelAnimationFrame(allDayInteraction.autoScrollFrame);
+      taskDragActions.clear(allDayInteraction);
       clearDayAllDayDropPreview(allDayInteraction);
       state.dayTimelineGesture = null;
       $("dayTimelineScroll").classList.remove("is-panning");

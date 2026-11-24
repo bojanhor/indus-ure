@@ -19,7 +19,7 @@ const lanAuth = require("./lan-auth");
 const lanPasswordAttempts = lanAuth.createLimiter();
 const absences = require("./absence-model");
 const taskGroups = require("./task-groups");
-const { createTaskGroupHttp } = require("./task-group-http");
+const { createTaskGroupHttp, taskGroupRecord } = require("./task-group-http");
 const { createAbsenceHttp } = require("./absence-http");
 const { createCalendarSyncStore } = require("./calendar-sync-store");
 const { createGooglePlanningCalendar } = require("./google-planning-calendar");
@@ -6145,11 +6145,26 @@ async function handleApi(req, res) {
         return;
       }
       const db = await readRequestDb(req);
-      const result = applySharedManualTodoOrder(db, user, body);
+      let destination = null;
+      const previousTaskGroups = db.taskGroups;
+      if (Object.hasOwn(body, "newGroupTitle")) {
+        if (typeof body.newGroupTitle !== "string" || Object.hasOwn(body, "targetGroupId") || body.targetId) {
+          sendJson(res, 400, { error: "Za novo skupino vpiši ime brez drugega cilja." });
+          return;
+        }
+        let fields;
+        try { fields = taskGroups.clean({ title: body.newGroupTitle }); }
+        catch (error) { sendJson(res, 400, { error: error.message }); return; }
+        destination = taskGroupRecord(db, user, fields, sharedManualOrderBefore);
+        db.taskGroups = [...(previousTaskGroups || []), destination];
+      }
+      const result = applySharedManualTodoOrder(db, user, destination ? { ...body, targetGroupId: destination.id } : body);
       if (result.error) {
+        if (destination) db.taskGroups = previousTaskGroups;
         sendJson(res, result.status || 400, { error: result.error, ...(result.lock ? { lock: result.lock } : {}) });
         return;
       }
+      if (destination) recordAuditLog(db, { actor: user, action: "ustvarjena skupina", targetType: "task-group", targetId: destination.id });
       await writeDbAsync(db);
       sendJson(res, 200, { todos: visibleTodosForUser(db, user), taskGroups: taskGroups.visible(db, user) });
       return;
@@ -7995,7 +8010,7 @@ releaseTodoAssignmentEditLock(db, previousTodo, user, editLockToken);
         return;
       }
       if (isTrashedTodo(todo)) {
-        sendJson(res, 200, { todos: visibleTodosForUser(db, user), deletedTodos: visibleTrashedTodosForUser(db, user) });
+        sendJson(res, 200, { todos: visibleTodosForUser(db, user), deletedTodos: visibleTrashedTodosForUser(db, user), taskGroups: taskGroups.visible(db, user) });
         return;
       }
       const editLock = todoAssignmentEditLockConflict(db, todo, user, editLockToken);
@@ -8027,7 +8042,7 @@ releaseTodoAssignmentEditLock(db, previousTodo, user, editLockToken);
       await writeDbAsync(db);
       releaseTodoAssignmentEditLock(db, todo, user, editLockToken);
       if (lateTimeEntryReport) scheduleLateTimeEntryReportDelivery();
-      sendJson(res, 200, { todos: visibleTodosForUser(db, user), deletedTodos: visibleTrashedTodosForUser(db, user), lateTimeEntryReportsQueued: lateTimeEntryReport ? 1 : 0 });
+      sendJson(res, 200, { todos: visibleTodosForUser(db, user), deletedTodos: visibleTrashedTodosForUser(db, user), taskGroups: taskGroups.visible(db, user), lateTimeEntryReportsQueued: lateTimeEntryReport ? 1 : 0 });
       return;
     }
 

@@ -174,6 +174,7 @@ async function deleteTodoFromServer(id) {
         if (isCurrentTodoRevision(todoRevision)) {
           state.todos = data.todos;
           state.deletedTodos = data.deletedTodos || state.deletedTodos;
+          if (Array.isArray(data.taskGroups)) state.taskGroups = data.taskGroups;
           if ($("deletedTodosDialog")?.open) renderDeletedTodos();
           refreshClientList();
           render();

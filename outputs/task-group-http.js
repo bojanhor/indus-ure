@@ -2,6 +2,16 @@
 const { randomUUID } = require("node:crypto");
 const groups = require("./task-groups");
 
+function taskGroupRecord(db, user, fields, sharedManualOrderBefore, old = null) {
+  const now = new Date().toISOString();
+  const item = { ...(old || { id: randomUUID(), ownerId: user.id, createdAt: now }), ...fields, revision: randomUUID(), updatedAt: now };
+  if (!old || old.urgent !== item.urgent) {
+    item.sharedManualBucket = item.urgent ? "sorted" : "unsorted";
+    item.sharedManualOrder = sharedManualOrderBefore(db, { domain: item.urgent ? "urgent" : "active", bucket: item.sharedManualBucket });
+  }
+  return item;
+}
+
 function createTaskGroupHttp({ requireUser, readRequestDb, readBody, sendJson, writeDbAsync, recordAuditLog, sharedManualOrderBefore }) {
   return async (req, res, url) => {
     const match = /^\/api\/task-groups(?:\/([\w-]+))?$/.exec(url.pathname);
@@ -28,12 +38,7 @@ function createTaskGroupHttp({ requireUser, readRequestDb, readBody, sendJson, w
     let fields;
     try { fields = req.method === "DELETE" ? {} : groups.clean(body); }
     catch (error) { sendJson(res, 400, { error: error.message }); return true; }
-    const now = new Date().toISOString();
-    const item = { ...(old || { id: randomUUID(), ownerId: user.id, createdAt: now }), ...fields, revision: randomUUID(), updatedAt: now };
-    if (!old || old.urgent !== item.urgent) {
-      item.sharedManualBucket = item.urgent ? "sorted" : "unsorted";
-      item.sharedManualOrder = sharedManualOrderBefore(db, { domain: item.urgent ? "urgent" : "active", bucket: item.sharedManualBucket });
-    }
+    const item = taskGroupRecord(db, user, fields, sharedManualOrderBefore, old);
     db.taskGroups = (db.taskGroups || []).filter(group => group.id !== id);
     if (req.method !== "DELETE") db.taskGroups.push(item);
     recordAuditLog(db, { actor: user, action: req.method === "DELETE" ? "razpuščena skupina" : old ? "urejena skupina" : "ustvarjena skupina", targetType: "task-group", targetId: item.id });
@@ -42,4 +47,4 @@ function createTaskGroupHttp({ requireUser, readRequestDb, readBody, sendJson, w
     return true;
   };
 }
-module.exports = { createTaskGroupHttp };
+module.exports = { createTaskGroupHttp, taskGroupRecord };

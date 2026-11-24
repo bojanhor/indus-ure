@@ -357,6 +357,21 @@ async function main() {
       assert.equal(persisted.taskGroups.find(group => group.id === groupId).title, "Edited by member");
       assert.equal(persisted.taskGroupMembers.find(member => member.groupId === groupId).id, shared.assignmentGroupId || shared.id);
       check("http.org_groups_persist_with_private_initial_projection_and_stale_move_guard");
+      const createAndMove = { sourceId: ids[1], fromGroupId: groupId, newGroupTitle: "QA group from drop", placement: "after" };
+      const dropped = await request("/api/todos/reorder", { method: "POST", body: JSON.stringify(createAndMove) });
+      assert.equal(dropped.status, 200, await dropped.text());
+      assert.equal((await request("/api/todos/reorder", { method: "POST", body: JSON.stringify({
+        ...createAndMove, newGroupTitle: "QA must not be persisted"
+      }) })).status, 409);
+      const afterDrop = await other.load();
+      const destination = afterDrop.taskGroups.find(group => group.title === createAndMove.newGroupTitle);
+      assert.ok(destination);
+      assert.equal(afterDrop.taskGroups.some(group => group.title === "QA must not be persisted"), false);
+      assert.deepEqual(afterDrop.taskGroupMembers.filter(member => member.id === (shared.assignmentGroupId || shared.id))
+        .map(member => member.groupId), [destination.id]);
+      const afterTodo = afterDrop.todos.find(todo => todo.id === shared.id);
+      for (const key of ["date", "endDate", "start", "end", "syncUser"]) assert.equal(afterTodo[key], shared[key]);
+      check("http.group_from_drop_is_atomic_and_keeps_existing_event_schedule");
     }
     {
       const snap = await store.load();
