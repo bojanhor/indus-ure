@@ -3542,6 +3542,7 @@
 
     .search-result-locate svg { width: 19px; height: 19px; }
 
+    #calendar [data-calendar-group-id].search-result-highlight,
     .todo-item.search-result-highlight {
       position: relative;
       z-index: 2;
@@ -3553,6 +3554,7 @@
       14%, 58% { box-shadow: 0 0 0 4px rgba(22, 123, 150, 0.72), 0 0 0 9px rgba(22, 123, 150, 0.17); }
     }
     @media (prefers-reduced-motion: reduce) {
+      #calendar [data-calendar-group-id].search-result-highlight,
       .todo-item.search-result-highlight { animation: none; outline: 3px solid var(--accent); outline-offset: 2px; }
     }
 
@@ -6458,6 +6460,7 @@
         <button class="todo-creation-tab" type="button" role="tab" data-create-mode="material">Vpis materiala</button>
         <button class="todo-creation-tab" type="button" role="tab" data-create-mode="note">Zapisek</button>
         <button class="todo-creation-tab" type="button" id="todoCreationAbsence">Odsotnost</button>
+        <button class="todo-creation-tab" type="button" id="todoCreationGroup" hidden>Nova skupina</button>
       </div>
       <div class="modal-body">
         <input type="hidden" id="todoFormId">
@@ -11359,7 +11362,9 @@ function renderMonth() {
         add.type = 'button';
         add.textContent = '+';
         add.title = isAdminView() ? 'Dodaj opravilo' : `Dodaj opravilo za ${activeWorker()?.name || 'delavca'}`;
-        add.addEventListener('click', () => startTodoForDate(key));
+        add.addEventListener('click', () => openTodoDialog({
+          date: key, _adminCreate: isAdminView(), _monthGroupDate: key
+        }).catch(error => showNotice(error.message)));
         head.appendChild(add);
         day.appendChild(head);
         const singleUntimed = document.createElement('div');

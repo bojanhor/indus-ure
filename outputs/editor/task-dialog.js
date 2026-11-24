@@ -225,6 +225,8 @@ function syncReportTodoDialogNavigation(todoId, navigationIds = null) {
     }
 
 async function openTodoDialog(todo = {}, { reportNavigationIds = null } = {}) {
+      // This is the day clicked in the calendar, not the date of a restored task draft.
+      const monthGroupDate = String(todo._monthGroupDate || "");
       taskDialogGeneration++;
       projectHoursApproval = "";
       clearFormValidationError($("todoForm"));
@@ -277,6 +279,8 @@ async function openTodoDialog(todo = {}, { reportNavigationIds = null } = {}) {
       const creationTabs = $("todoCreationTabs");
       creationTabs.classList.toggle("hidden", !canChooseCreationMode);
       creationTabs.dataset.date = todo.date || "";
+      creationTabs.dataset.monthGroupDate = canChooseCreationMode ? monthGroupDate : "";
+      $("todoCreationGroup").hidden = !creationTabs.dataset.monthGroupDate;
       creationTabs.querySelectorAll("[data-create-mode]").forEach((button) => {
         const active = state.todoMealEntry ? button.dataset.createMode === "meal" : state.todoMaterialEntry ? button.dataset.createMode === "material" : state.todoNoteEntry ? button.dataset.createMode === "note" : state.todoStandaloneHours ? button.dataset.createMode === "hours" : button.dataset.createMode === "task";
         button.classList.toggle("active", active);
@@ -770,6 +774,7 @@ function installTaskCreationBindings1() {
       const tab = event.target.closest("[data-create-mode]");
       if (!tab) return;
       const draft = todoCreationDraftFromForm();
+      draft._monthGroupDate = $("todoCreationTabs").dataset.monthGroupDate;
       const date = draft.date || $("todoCreationTabs").dataset.date || dateKey(new Date());
       const mode = tab.dataset.createMode;
       const wantsHours = mode === "hours";

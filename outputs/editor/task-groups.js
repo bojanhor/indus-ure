@@ -70,6 +70,7 @@ function createTaskGroupUi() {
   $("editTaskGroup").innerHTML = taskActionIcons.edit;
   $("deleteTaskGroup").innerHTML = taskActionIcons.remove;
   let editing = null, dayReturn = null, suspended = false, saving = false, scrollTop = 0;
+  let monthCreation = false;
   const run = work => work().catch(error => showNotice(error.message));
   const groups = () => state.taskGroups || [];
   const members = group => contextTodos().filter(todo => group.eventIds.includes(todoEventId(todo)) && TaskGroups.active(todo));
@@ -106,6 +107,23 @@ function createTaskGroupUi() {
     requestAnimationFrame(() => {
       const head = document.querySelector(`#todoItems .task-group-card[data-task-group-id="${CSS.escape(id)}"] .task-group-head`);
       if (head) focusTodoSearchResult(head, head.querySelector(".task-group-toggle"));
+    });
+  }
+  function revealInMonth(group) {
+    const calendar = $("calendar");
+    if (!calendar.querySelector(`.day[data-date="${CSS.escape(group.date)}"]`)) {
+      state.current = parseDate(group.date);
+      state.calendarBrowseMonth = true;
+      renderMonth();
+    }
+    requestAnimationFrame(() => {
+      if (state.view !== "calendar") return;
+      const card = calendar.querySelector(`[data-calendar-group-id="${CSS.escape(group.id)}"]`);
+      if (!card) return;
+      card.classList.add("search-result-highlight");
+      card.scrollIntoView({ block: "nearest", inline: "nearest" });
+      card.focus({ preventScroll: true });
+      setTimeout(() => card.classList.remove("search-result-highlight"), 3400);
     });
   }
   function header(item, children) {
@@ -214,7 +232,7 @@ function createTaskGroupUi() {
     $("deleteTaskGroup").hidden = !editing || !show;
     $("editTaskGroup").setAttribute("aria-expanded", String(show));
   }
-  async function open(id = "", { resume = false, edit = false } = {}) {
+  async function open(id = "", { resume = false, edit = false, monthDate = "" } = {}) {
     if (saving) return;
     const group = groups().find(group => group.id === id);
     if (id && (!group || !inContext(group))) throw Error("Skupina ni na voljo.");
@@ -226,11 +244,13 @@ function createTaskGroupUi() {
       await closeModalBeforeTransition($("dayTimelineDialog"));
     }
     editing = group || null;
+    monthCreation = !group && isDateKey(monthDate);
     form.reset();
     $("taskGroupTitle").textContent = group ? "Skupina: " + group.title : "Nova skupina";
     $("editTaskGroup").hidden = !group;
     showFields(!group || edit);
     for (const key of ["title", "description", "date", "endDate", "start", "end"]) form.elements[key].value = group?.[key] || "";
+    if (monthCreation) dateFrom.value = dateTo.value = monthDate;
     form.elements.urgent.checked = Boolean(group?.urgent);
     syncSchedule({ resetPicker: true });
     refreshList();
@@ -250,7 +270,11 @@ function createTaskGroupUi() {
       if (isCurrentTodoRevision(mutation)) state.taskGroups = data.taskGroups;
       if (dialog.open) await closeModalBeforeTransition(dialog);
       render(); saveOfflineSnapshotSoon();
-      if (method === "POST" && data.id) reveal(data.id);
+      if (method === "POST" && data.id) {
+        const created = data.taskGroups?.find(group => group.id === data.id);
+        if (monthCreation && state.view === "calendar" && created?.date) revealInMonth(created);
+        else reveal(data.id);
+      }
     } finally {
       finishTodoMutation();
       saving = false;
@@ -258,6 +282,12 @@ function createTaskGroupUi() {
     }
   }
   $("newTaskGroup").onclick = () => run(() => open());
+  $("todoCreationGroup").onclick = () => run(async () => {
+    const monthDate = $("todoCreationTabs").dataset.monthGroupDate;
+    if (!isDateKey(monthDate) || !$("todoDialog").open || $("todoCreationGroup").hidden) return;
+    await closeModalBeforeTransition($("todoDialog"));
+    await open("", { monthDate });
+  });
   $("editTaskGroup").onclick = () => { showFields(form.hidden); if (!form.hidden) form.elements.title.focus(); };
   $("closeTaskGroup").onclick = () => dialog.close();
   $("deleteTaskGroup").onclick = () => run(async () => {

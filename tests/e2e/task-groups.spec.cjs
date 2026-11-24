@@ -65,6 +65,50 @@ async function drag(page, source, target, pointer) {
   }
 }
 
+for (const [worker, width] of [['bojan', 1280], ['ibro', 390]]) {
+  test(`month plus creates a group on the clicked day and stays in the calendar (${worker})`, async ({ page }, info) => {
+    const date = '2032-04-06';
+    const title = 'Skupina iz koledarja';
+    await page.setViewportSize({ width, height: 844 });
+    await login(page, worker);
+    await page.locator('#newTodoButton').click();
+    await expect(page.locator('#todoCreationGroup')).toBeHidden();
+    await page.locator('#closeTodoDialog').click();
+    await expect(page.locator('body')).not.toHaveClass(/\bmodal-open\b/);
+    await page.evaluate(date => {
+      state.current = parseDate(date);
+      state.calendarBrowseMonth = true;
+      setView('calendar');
+    }, date);
+    const day = page.locator(`#calendar .day[data-date="${date}"]`);
+    await day.locator('.quick-add').click();
+    await expect(page.locator('#todoCreationGroup')).toBeVisible();
+    if (worker === 'ibro') {
+      await page.locator('#todoCreationTabs [data-create-mode="hours"]').click();
+      await expect(page.locator('#todoCreationTabs [data-create-mode="hours"]')).toHaveAttribute('aria-selected', 'true');
+      await expect(page.locator('#todoCreationGroup')).toBeVisible();
+    }
+    await page.screenshot({ path: info.outputPath('month-plus-with-group.png') });
+    await page.locator('#todoCreationGroup').click();
+    await expect(page.locator('#todoDialog')).toBeHidden();
+    await expect(page.locator('#taskGroupTitle')).toHaveText('Nova skupina');
+    await expect(page.locator('#taskGroupDate')).toHaveValue(date);
+    await expect(page.locator('#taskGroupEndDate')).toHaveValue(date);
+    await expect(page.locator('#taskGroupQuickTimeStart')).toHaveText('Od ---');
+    await expect(page.locator('#taskGroupQuickTimeEnd')).toHaveText('Do ---');
+    await page.locator('#taskGroupForm [name="title"]').fill(title);
+    await page.locator('#saveTaskGroup').click();
+    await expect(page.locator('#taskGroupDialog')).toBeHidden();
+    await expect(page.locator('#calendarViewBtn')).toHaveClass(/active/);
+    await expect(day.locator('.task-group-cal').filter({ hasText: title })).toBeFocused();
+    const { result } = await api(page, '/api/task-groups');
+    expect(result.taskGroups.find(group => group.title === title)).toMatchObject({
+      date, endDate: date, start: '', end: '', ownerId: worker, eventIds: []
+    });
+    expect((await api(page, '/api/todos')).result.todos).toEqual([]);
+  });
+}
+
 for (const pointer of ['mouse', 'touch']) test(`${pointer}: drag into and out of a group, preserve priorities, and open a timed group in both calendars`, async ({ page, browserName }, info) => {
   test.skip(pointer === 'touch' && browserName !== 'chromium', 'Trusted touch dispatcher requires Chromium.');
   await page.setViewportSize({ width: pointer === 'touch' ? 390 : 1280, height: 950 });
