@@ -15445,7 +15445,7 @@ $("clientSearch").addEventListener("input", handleClientSearchInput);
 $("clientsSearch").addEventListener("input", renderClients);
 $("clearClientSearch").addEventListener("click", clearClientSearchAndRestoreView);
 document.addEventListener("click", (event) => {
-      if (!$("clientSearch").value.trim()) return;
+      if (!$("clientSearch").value.trim() || event.target.closest("dialog[open]")) return;
       if (Date.now() - lastMonthTodoDragAt < 450) { event.preventDefault(); event.stopPropagation(); return; }
       if (event.detail && Date.now() - lastSearchBoardDragAt < 450 && event.target.closest("#searchPanel, #todoItems")) {
         event.preventDefault(); event.stopPropagation(); return;

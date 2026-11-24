@@ -137,6 +137,17 @@ test('touch month: trash can be cancelled; confirmation moves the entire shared 
     .toEqual(['bojan', 'ibro']);
 });
 
+test('calendar search: dialog cancellation responds immediately after a drag', async ({ page }) => {
+  const { source } = await seed(page);
+  await openMonth(page);
+  await mouseDrop(page, await search(page), action(page, 'trash'));
+  await expect(page.locator('#appConfirmTitle')).toHaveText('Premik v koš');
+  // Cancel while the source result is still protected from a ghost click.
+  await page.evaluate(() => $("appConfirmCancel").click());
+  await expect(page.locator('#appConfirmDialog')).toBeHidden();
+  expect((await call(page, '/api/todos/' + source.id)).data.todo.title).toBe(title);
+});
+
 test('daily timed event: held drag opens the group chooser without generating a time draft', async ({ page }) => {
   const { source, id } = await seed(page);
   await page.evaluate(date => openDayTimeline(date), date);
