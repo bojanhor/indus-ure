@@ -49,7 +49,8 @@ test('search has independent client and worker icons; opening does not alter a c
   await page.evaluate(()=>setView('todos'));
   await page.locator('#writeHoursButton').click();
   await expect(page.locator('#todoFormStatus')).toHaveValue('execution');
-  await expect(page.locator('#writeHoursFromTodo, #todoFooterWriteHours')).toHaveCount(0);
+  await expect(page.locator('#writeHoursFromTodo')).toBeHidden();
+  await expect(page.locator('#todoFooterWriteHours')).toBeHidden();
 });
 
 test('PDF export opens options before making a request; cancellation is inert and downloads use current choices', async ({page},info) => {

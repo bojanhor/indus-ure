@@ -30,6 +30,16 @@ const CalendarDates = (() => {
     return { year, week: Math.ceil(((date - first) / DAY_MS + 1) / 7) };
   }
 
+  function monthWindowStart(monthKey, todayKey) {
+    const first = utcDate(monthKey);
+    if (!first) return null;
+    const today = utcDate(todayKey);
+    const isCurrent = today && todayKey.slice(0, 7) === monthKey.slice(0, 7);
+    const anchor = isCurrent ? today : first;
+    anchor.setUTCDate(anchor.getUTCDate() - (anchor.getUTCDay() + 6) % 7 - (isCurrent ? 14 : 0));
+    return anchor.toISOString().slice(0, 10);
+  }
+
   function easterSunday(year) {
     // Gregorian computus, calculated for the displayed year (not a fixed list).
     const a = year % 19, b = Math.floor(year / 100), c = year % 100;
@@ -56,7 +66,7 @@ const CalendarDates = (() => {
     return "";
   }
 
-  return { isoWeek, workFreeHoliday };
+  return { isoWeek, workFreeHoliday, monthWindowStart };
 })();
 
 if (typeof module !== "undefined") module.exports = CalendarDates;

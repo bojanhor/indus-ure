@@ -2854,7 +2854,7 @@
     }
 
     .day-multiday-slot {
-      min-height: 29px;
+      min-height: 35px;
     }
 
     .day-multiday-event {
@@ -2862,7 +2862,7 @@
       align-items: center;
       gap: 6px;
       width: 100%;
-      min-height: 29px;
+      min-height: 35px;
       padding: 5px 8px;
       border: 1px solid currentColor;
       border-radius: 0;
@@ -2904,12 +2904,21 @@
       border-left-color: #d93025 !important;
     }
 
+    .day-multiday-event-label {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .day-multiday-event-client,
     .day-multiday-event-title {
       display: block;
       min-width: 0;
       overflow: hidden;
       text-overflow: ellipsis;
     }
+
+    .day-multiday-event-client { font-weight: 600; }
+    .day-multiday-event-client + .day-multiday-event-title { margin-top: 2px; }
 
     .day-todo.month-drag-armed,
     .day-multiday-event.month-drag-armed { cursor: grab; }
@@ -2997,23 +3006,14 @@
 
     .calendar-shell {
       overflow: hidden;
-      min-height: 620px;
       display: grid;
-      grid-template-rows: auto auto 1fr;
+      grid-template-rows: auto 1fr;
     }
 
     .calendar-filters { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 24px; padding: 10px 12px 6px; }
     .month-grid-viewport { min-width: 0; }
     #monthGrid { display: grid; grid-template-rows: auto 1fr; }
-    .calendar-shell.month-fit { display: block; min-height: calc(100dvh - 12px); overflow: hidden; }
-    .calendar-shell.month-fit > .month-title { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 8px 12px; }
-    .calendar-shell.month-fit > .month-title h2 { font-size: 18px; margin: 0; }
-    .calendar-shell.month-fit > .month-title .today-calendar-btn { margin-left: auto; }
-    body:has(.calendar-shell.month-fit:not(.view-hidden)) .topbar { display: none; }
-    .month-fit .month-grid-viewport { position: relative; overflow: hidden; }
-    .month-fit #monthGrid { position: absolute; top: 0; transform-origin: top left; }
-    #monthFitToggle { margin-left: auto; white-space: nowrap; }
-    #monthFitToggle[aria-pressed="true"] { color: #fff; background: var(--accent); }
+    .calendar .day.calendar-empty-week { min-height: 64px; }
     .calendar-worker-filter { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; font-size: 13px; }
     .calendar-worker-picker { position: relative; min-width: 170px; max-width: min(280px, calc(100vw - 110px)); }
     .calendar-worker-picker summary { padding: 9px 12px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--ink); cursor: pointer; overflow-wrap: anywhere; }
@@ -3041,6 +3041,8 @@
     }
 
     .weekdays {
+      position: relative;
+      z-index: 8;
       border-bottom: 1px solid var(--line);
       background: #eef3ee;
     }
@@ -3052,7 +3054,6 @@
       font-weight: 700;
     }
 
-    .calendar { min-height: 540px; }
     .calendar-week-number {
       padding: 14px 2px;
       border-right: 1px solid var(--line);
@@ -5493,7 +5494,6 @@
         text-align: center;
         font-size: 10px;
       }
-      .calendar { min-height: 480px; }
       .day {
         min-width: 0;
         min-height: 100px;
@@ -5523,7 +5523,7 @@
       .quick-add-hours { font-size: 15px; }
       .day-multiday-lanes { margin-inline: -4px; margin-bottom: 4px; }
       .day-multiday-slot,
-      .day-multiday-event { min-height: 25px; }
+      .day-multiday-event { min-height: 30px; }
       .day-multiday-event { padding: 4px 3px; font-size: 9px; }
       .todo-item {
         padding: 8px;
@@ -6027,6 +6027,7 @@
             <button class="secondary" type="button" data-billing-range-preset="today">Danes</button>
             <button class="secondary" type="button" data-billing-range-preset="yesterday">Včeraj</button>
             <button class="secondary" type="button" data-billing-range-preset="open-to-yesterday">Vse odprto do včeraj</button>
+            <button class="secondary" type="button" data-billing-range-preset="open-to-today">Vse odprto do danes</button>
           </div>
         </div>
         <div class="billing-stale-draft hidden" id="billingStaleDraftNotice" role="status"></div>
@@ -6217,10 +6218,9 @@
           <div class="calendar-worker-filter hidden" id="calendarWorkerFilterField">Izvajalci
             <details id="calendarWorkerFilter" class="calendar-worker-picker"><summary aria-label="Izvajalci v koledarju">Vsi izvajalci</summary><div class="calendar-worker-choices"></div></details>
           </div>
-          <button class="secondary" type="button" id="monthFitToggle" aria-pressed="false" title="Pomanjšaj celoten mesec na en zaslon">Cel mesec</button>
         </div>
         <div class="month-grid-viewport" id="monthGridViewport"><div id="monthGrid">
-        <div class="weekdays">
+        <div class="weekdays" id="monthWeekdays">
           <div class="calendar-week-heading" title="Številka tedna (ISO)" aria-label="Teden">T</div>
           <div>Pon</div>
           <div>Tor</div>
@@ -6374,6 +6374,7 @@
           <button class="todo-modal-action secondary hidden" id="nextReportTodo" type="button" title="Naslednji vpis v poro&#269;ilu" aria-label="Naslednji vpis v poro&#269;ilu">&rsaquo;</button>
           <button class="todo-modal-action danger hidden" id="deleteTodoFromDialog" type="button" title="Izbriši opravilo" aria-label="Izbriši opravilo">&#128465;</button>
           <button class="todo-modal-action secondary hidden" id="duplicateTodoFromDialog" type="button" title="Podvoji opravilo" aria-label="Podvoji opravilo">&#10697;</button>
+          <button class="todo-modal-action secondary hidden" id="writeHoursFromTodo" type="button" title="Vpiši ure za danes" aria-label="Vpiši ure za danes"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 7v5l3 2"/></svg></button>
           <button class="todo-modal-action secondary hidden" id="shareTodoPdf" type="button" title="Deli dogodek" aria-label="Deli dogodek"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m8 11 8-5M8 13l8 5"/><circle cx="5" cy="12" r="3"/><circle cx="18" cy="5" r="3"/><circle cx="18" cy="19" r="3"/></svg></button>
           <button class="todo-modal-action secondary" id="saveTodoWithoutClosing" type="button" title="Shrani brez zapiranja" aria-label="Shrani brez zapiranja">&#128190;</button>
           <button class="todo-modal-action primary" id="saveTodoDialog" type="submit" title="Shrani in zapri" aria-label="Shrani in zapri">&#10003;</button>
@@ -6594,6 +6595,7 @@
         <div class="todo-form-footer-actions" id="todoFormFooterActions" aria-label="Dejanja opravila">
           <button class="danger hidden" id="todoFooterDelete" type="button">Izbri&#353;i opravilo</button>
           <button class="secondary hidden" id="todoFooterDuplicate" type="button">Podvoji opravilo</button>
+          <button class="secondary hidden" id="todoFooterWriteHours" type="button">Vpiši ure za danes</button>
           <button class="secondary hidden" id="requestTodoCompletion" type="button">Zahtevaj dopolnitev</button>
           <button class="secondary" id="todoFooterClose" type="button">Zapri brez shranjevanja</button>
           <button class="primary" id="todoFooterSave" type="submit">Shrani</button>
@@ -8543,6 +8545,7 @@ function rememberSessionRecoveryUiState() {
         view: validViews.has(state.view) ? state.view : "todos",
         workContext: String(state.workContext || ""),
         month: dateKey(state.current),
+        calendarBrowseMonth: Boolean(state.calendarBrowseMonth),
         selectedClient: String(state.selectedClient || ""),
         reportClient: String(state.reportClient || ""),
         reportClientId: String(state.reportClientId || ""),
@@ -8579,6 +8582,7 @@ function restoreSessionRecoveryUiState() {
       }
 
       if (isDateKey(snapshot.month)) state.current = parseDate(snapshot.month);
+      state.calendarBrowseMonth = Boolean(snapshot.calendarBrowseMonth);
       const allowedViews = new Set(["todos", "calendar", "billing", "clients", "report"]);
       state.view = allowedViews.has(snapshot.view) ? snapshot.view : "todos";
       if (!isAdminView() && state.view === "report") state.view = "todos";
@@ -10900,18 +10904,29 @@ function appendMonthMultiDayLanes(day, key, weekIndex, layout) {
           item.type = 'button';
           item.className = `day-multiday-event todo-status-color ${todoStatusClass(todo.status)} ${todo._taskGroup ? "task-group-cal" : ""} ${todoAssigneeIds(todo).length > 1 ? 'multi-assignee' : ''} ${todo.urgent ? 'urgent' : ''} ${todoChangeNotice(todo) ? 'has-change-notice' : ''} ${actualStart ? 'is-span-start' : 'is-span-continuation'} ${actualEnd ? 'is-span-end' : ''}`;
           const title = todo.title || 'Brez naslova';
-          item.setAttribute('aria-label', `${todo.urgent ? 'Nujno opravilo; ' : ''}${todoAssigneeNames(todo)}; ${title}; ${todoDateTimeLabel(todo)}`);
+          const client = todo._absence || todo._taskGroup ? "" : todoClientCalendarName(todo);
+          item.title = client ? client + " – " + title : title;
+          item.setAttribute('aria-label', `${todo.urgent ? 'Nujno opravilo; ' : ''}${todoAssigneeNames(todo)}; ${client ? client + "; " : ""}${title}; ${todoDateTimeLabel(todo)}`);
           // A span crosses the grid's weekly rows on Monday. Repeat its title
           // there even when Monday is its final day, so the continuation
           // never becomes an anonymous empty bar at the start of a row.
           const startsNewWeek = parseDate(key)?.getDay() === 1;
           if (actualStart || startsNewWeek) {
             item.appendChild(calendarTodoWorkers(todo));
+            const label = document.createElement('span');
+            label.className = 'day-multiday-event-label';
+            if (client) {
+              const clientElement = document.createElement('span');
+              clientElement.className = 'day-multiday-event-client';
+              clientElement.textContent = client;
+              label.appendChild(clientElement);
+            }
             const titleElement = document.createElement('span');
             titleElement.className = 'day-multiday-event-title';
             titleElement.textContent = title;
             if (todo._taskGroup) titleElement.insertAdjacentHTML("afterbegin", taskActionIcons.group);
-            item.appendChild(titleElement);
+            label.appendChild(titleElement);
+            item.appendChild(label);
           }
           item.addEventListener('pointerdown', (event) => beginMonthTodoPointerDrag(event, item, todo, key));
           item.addEventListener('lostpointercapture', cancelMonthTodoPointerDrag);
@@ -11130,10 +11145,7 @@ function cancelMonthTodoPointerDrag(event) {
       if (!monthTodoPointerDrag || monthTodoPointerDrag.pointerId !== event.pointerId) return;
       clearMonthTodoPointerDrag();
     }
-let monthFitFrame = 0;
-let monthFitReposition = false;
-const monthTitleHome = document.createComment("month title home");
-document.querySelector(".month-title").before(monthTitleHome);
+let monthAlignmentFrame = 0, weekdayFrame = 0, weekdayOffset = 0;
 function alignMonthUntimedRows() {
       // Measure once, then align each bar only across the dates it occupies.
       // Earlier overlapping bars add space only to their own columns.
@@ -11154,52 +11166,35 @@ function alignMonthUntimedRows() {
         }
       }
     }
-function updateMonthFit() {
-      monthFitFrame = 0;
-      const viewport = $("monthGridViewport"), grid = $("monthGrid");
-      const shell = viewport.closest(".calendar-shell");
-      shell.classList.toggle("month-fit", Boolean(state.monthFit));
-      $("monthFitToggle").setAttribute("aria-pressed", String(Boolean(state.monthFit)));
-      $("monthFitToggle").textContent = state.monthFit ? "Običajna velikost" : "Cel mesec";
-      const title = document.querySelector(".month-title");
-      if (!state.monthFit) {
-        if (title.parentElement === shell) monthTitleHome.after(title);
-        grid.style.width = grid.style.transform = grid.style.left = "";
-        viewport.style.height = "";
+// The calendar scrolls horizontally on narrow screens. Keep the real header
+// in that scroll container for column alignment, but pin it to the viewport
+// vertically (native sticky would be relative to the horizontal container).
+function updateMonthWeekdaysPosition() {
+      weekdayFrame = 0;
+      const header = $("monthWeekdays");
+      if (state.view !== "calendar" || !header.getClientRects().length) return;
+      const rect = header.getBoundingClientRect();
+      const naturalTop = rect.top - weekdayOffset;
+      const top = Math.max(0, document.querySelector(".topbar").getBoundingClientRect().bottom);
+      const maxOffset = $("calendar").getBoundingClientRect().bottom - naturalTop - rect.height;
+      weekdayOffset = Math.max(0, Math.min(top - naturalTop, maxOffset));
+      header.style.transform = weekdayOffset ? `translateY(${weekdayOffset}px)` : "";
+    }
+function queueMonthWeekdaysPosition() {
+      if (!weekdayFrame) weekdayFrame = requestAnimationFrame(updateMonthWeekdaysPosition);
+    }
+function queueMonthAlignment() {
+      if (monthAlignmentFrame) return;
+      monthAlignmentFrame = requestAnimationFrame(() => {
+        monthAlignmentFrame = 0;
+        if (state.view !== "calendar") return;
         alignMonthUntimedRows();
-        monthFitReposition = false;
-        return;
-      }
-      if (title.parentElement !== shell) shell.prepend(title);
-      if (!viewport.clientWidth || state.view !== "calendar") return;
-      shell.scrollLeft = 0;
-      if (monthFitReposition) shell.scrollIntoView({ block: "start" });
-      monthFitReposition = false;
-      const width = viewport.clientWidth;
-      // Keep normal readable card layout before scaling; do not crop days or
-      // collapse their contents just to meet a fixed row height.
-      const naturalWidth = Math.max(width, matchMedia("(max-width: 760px)").matches ? 760 : 872);
-      grid.style.width = naturalWidth + "px";
-      grid.style.transform = "none";
-      alignMonthUntimedRows();
-      const naturalHeight = grid.scrollHeight;
-      const bottom = (window.visualViewport?.offsetTop || 0) + (window.visualViewport?.height || innerHeight);
-      const availableHeight = Math.max(1, bottom - viewport.getBoundingClientRect().top - 12);
-      const scale = Math.min(1, width / naturalWidth, availableHeight / Math.max(1, naturalHeight));
-      grid.style.transform = `scale(${scale})`;
-      grid.style.left = Math.max(0, (width - naturalWidth * scale) / 2) + "px";
-      viewport.style.height = Math.ceil(naturalHeight * scale) + "px";
+        updateMonthWeekdaysPosition();
+      });
     }
-function queueMonthFit(reposition = false) {
-      monthFitReposition = monthFitReposition || reposition;
-      if (!monthFitFrame) monthFitFrame = requestAnimationFrame(updateMonthFit);
-    }
-$("monthFitToggle").addEventListener("click", () => {
-      state.monthFit = !state.monthFit;
-      queueMonthFit(true);
-    });
-window.addEventListener("resize", () => queueMonthFit(true));
-window.visualViewport?.addEventListener("resize", () => queueMonthFit(true));
+window.addEventListener("scroll", queueMonthWeekdaysPosition, { passive: true });
+window.addEventListener("resize", queueMonthAlignment);
+window.visualViewport?.addEventListener("resize", queueMonthAlignment);
 
 function renderMonth() {
       renderCalendarWorkerFilter();
@@ -11219,10 +11214,10 @@ function renderMonth() {
       $('monthTitle').textContent = `${monthNames[month]} ${year}`;
 
       const first = new Date(year, month, 1);
-      const startOffset = (first.getDay() + 6) % 7;
-      const gridStart = new Date(year, month, 1 - startOffset);
+      const today = dateKey(todayDate);
+      const gridStart = parseDate(CalendarDates.monthWindowStart(dateKey(first), state.calendarBrowseMonth ? "" : today));
       const multiDayLayout = monthMultiDayLayout(todos, gridStart);
-      const today = dateKey(new Date());
+      let weekCells = [];
 
       for (let i = 0; i < 42; i += 1) {
         const dayDate = new Date(gridStart);
@@ -11321,8 +11316,15 @@ function renderMonth() {
           });
 
         calendar.appendChild(day);
+        weekCells.push(day);
+        if (i % 7 === 6) {
+          if (!weekCells.some(cell => cell.matches(".has-vacation") || cell.querySelector(".day-todo, .day-multiday-event"))) {
+            weekCells.forEach(cell => cell.classList.add("calendar-empty-week"));
+          }
+          weekCells = [];
+        }
       }
-      queueMonthFit();
+      queueMonthAlignment();
     }
     /* @indus-module:time-entry-editor */
 const {
@@ -15107,6 +15109,7 @@ installReportFilterBindings1();
 const modalActionMirrors = [
       ["todoFooterDelete", "deleteTodoFromDialog"],
       ["todoFooterDuplicate", "duplicateTodoFromDialog"],
+      ["todoFooterWriteHours", "writeHoursFromTodo"],
       ["todoFooterClose", "closeTodoDialog"],
       ["photoEditorFooterClose", "photoEditorClose"],
       ["photoEditorFooterSave", "photoEditorSave"]
@@ -15230,14 +15233,17 @@ $("clientEditDialog").addEventListener("click", (event) => {
     });
 
 $("prevMonth").addEventListener("click", () => {
+      state.calendarBrowseMonth = true;
       state.current = new Date(state.current.getFullYear(), state.current.getMonth() - 1, 1);
       render();
     });
 $("nextMonth").addEventListener("click", () => {
+      state.calendarBrowseMonth = true;
       state.current = new Date(state.current.getFullYear(), state.current.getMonth() + 1, 1);
       render();
     });
 $("todayBtn").addEventListener("click", () => {
+      state.calendarBrowseMonth = false;
       state.current = new Date();
       render();
       requestAnimationFrame(() => $("calendar").querySelector(".day.today")?.scrollIntoView({ block: "center", inline: "nearest" }));

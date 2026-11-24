@@ -4,11 +4,11 @@ const { TEST_PASSWORD, startIsolatedTestApp } = require("./test-app.cjs");
 const allowed = ["open", "in_progress", "internal", "order", "order_car", "order_warehouse", "add_to_car", "return", "return_and_bill"];
 const excluded = ["bill", "execution", "meal", "drive", "purchase", "note", "material"];
 let app;
-test.beforeAll(async () => { app = await startIsolatedTestApp(); });
-test.afterAll(async () => { await app?.stop(); });
+test.beforeEach(async () => { app = await startIsolatedTestApp(); });
+test.afterEach(async () => { await app?.stop(); });
 
 for (const viewport of [{ width: 390, height: 844 }, { width: 1280, height: 900 }]) {
-  test(`legacy linked draft: working statuses keep source; removed shortcut stays absent (${viewport.width}px)`, async ({ browser }) => {
+  test(`project shortcut creates hours for today without altering the source (${viewport.width}px)`, async ({ browser }) => {
     test.setTimeout(120_000);
     const context = await browser.newContext({ viewport });
     const page = await context.newPage();
@@ -30,16 +30,19 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 1280, height: 900 
           return result.todos.find(todo => todo.title === title);
         }, { title, status, index, width: viewport.width });
         await page.locator(".todo-item").filter({ hasText: title }).locator(".edit-todo").click();
-        await expect(page.locator("#writeHoursFromTodo")).toHaveCount(0);
-        await expect(page.locator("#todoFooterWriteHours")).toHaveCount(0);
-        if (status === "order") await page.screenshot({ path: test.info().outputPath("project-without-hours-shortcut.png") });
-        // Existing linked drafts still need safe source handling after removal of the UI shortcut.
-        await page.evaluate(() => { void openHoursTodoFromCurrent(); });
+        await expect(page.locator("#todoFormDateTimeSection")).toHaveAttribute("open", "");
+        await expect(page.locator("#writeHoursFromTodo")).toBeVisible();
+        await expect(page.locator("#todoFooterWriteHours")).toBeVisible();
+        if (status === "order") await page.screenshot({ path: test.info().outputPath("project-hours-shortcut.png") });
+        await page.locator(status === "order" ? "#todoFooterWriteHours" : "#writeHoursFromTodo").click();
         await expect(page.locator("#todoFormStatus")).toHaveValue("execution");
         await expect(page.locator("#todoFormId")).toHaveValue("");
         await expect(page.locator("#todoFormTask")).toHaveValue(title);
-        await expect(page.locator("#todoFormDate")).toHaveValue(source.date);
+        const today = await page.evaluate(() => dateKey(new Date()));
+        await expect(page.locator("#todoFormDate")).toHaveValue(today);
+        await expect(page.locator("#todoFormClient")).toHaveValue(source.client);
         await expect(page.locator("#todoFormNotes")).toHaveValue("");
+        await expect(page.locator("#todoFormMaterial")).toHaveValue("");
         await expect(page.locator("#writeHoursFromTodo")).toBeHidden();
         await page.locator("#todoFormNotes").fill("Opravljeno delo za projekt");
         await page.locator("#todoFormClientKm").fill("1");
@@ -52,7 +55,7 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 1280, height: 900 
         const result = await response.json();
         expect(result.todos.find(todo => todo.id === source.id)).toMatchObject(source);
         const entry = result.todos.find(todo => todo.sourceProjectTodoId === source.id);
-        expect(entry).toMatchObject({ status: "execution", sourceProjectTitle: title, clientId: source.clientId, syncUser: "ibro", notes: "Opravljeno delo za projekt" });
+        expect(entry).toMatchObject({ date: today, status: "execution", sourceProjectTitle: title, clientId: source.clientId, syncUser: "ibro", notes: "Opravljeno delo za projekt" });
         expect(entry.id).not.toBe(source.id);
         await expect(page.locator("#projectCompletionDialog")).toBeVisible();
         await page.locator("#rescheduleProject").click();

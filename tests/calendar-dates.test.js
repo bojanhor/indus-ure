@@ -1,7 +1,15 @@
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { isoWeek, workFreeHoliday } = require("../outputs/calendar-dates");
+const { isoWeek, workFreeHoliday, monthWindowStart } = require("../outputs/calendar-dates");
+
+test("today-centered month windows span year and daylight-saving boundaries, while browsing stays month-aligned", () => {
+  assert.equal(monthWindowStart("2027-01-01", "2027-01-01"), "2026-12-14");
+  assert.equal(monthWindowStart("2026-03-01", "2026-03-30"), "2026-03-16");
+  assert.equal(monthWindowStart("2026-11-01", "2026-11-24"), "2026-11-09");
+  assert.equal(monthWindowStart("2026-11-01", "2026-10-24"), "2026-10-26");
+  assert.equal(monthWindowStart("2026-11-01", ""), "2026-10-26");
+});
 
 test("ISO weeks belong to their Thursday, including year boundaries and DST", () => {
   for (const [key, year, week] of [

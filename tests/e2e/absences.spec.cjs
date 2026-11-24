@@ -21,7 +21,11 @@ for (const user of ['bojan', 'ibro']) test(`${user}: month plus opens absence fo
   await page.setViewportSize({ width: 390, height: 844 });
   await login(page, user);
   const before = (await call(page, '/api/todos')).data.todos.length;
-  await page.evaluate(() => { state.current = new Date(2026, 9, 1); });
+  await page.evaluate(() => {
+    state.current = new Date(2026, 9, 1);
+    state.calendarOpened = true;
+    state.calendarBrowseMonth = true;
+  });
   await page.locator('#calendarViewBtn').click();
   await page.locator('.day[data-date="2026-10-26"] .quick-add').click();
   await expect(page.locator('#todoDialog')).toBeVisible();

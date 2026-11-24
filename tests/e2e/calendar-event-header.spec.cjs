@@ -48,6 +48,7 @@ test("calendar headers show profile then name on the left and time on the right,
   await expect(cards.filter({ hasText: "Dolgo ime QA" }).locator(".day-todo-worker")).toHaveAttribute("title", 'Dolgo ime <delavca> "QA"');
   const span = page.locator('.day-multiday-event.is-span-start').filter({ hasText: "Večdnevni obisk QA" });
   await expect(span.locator(".day-todo-worker-name")).toHaveText("Ibro");
+  await expect(span.locator(".day-multiday-event-client")).toHaveText("Stranka QA");
   await expect(span.locator(".day-multiday-event-title")).toHaveText("Večdnevni obisk QA");
   await expect(span).toHaveCSS("border-left-color", "rgb(217, 48, 37)");
   await page.locator("#calendarCompletedFilter").check();

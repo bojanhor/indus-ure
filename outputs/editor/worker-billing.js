@@ -441,16 +441,17 @@ function applyBillingQuickRange(preset, now = new Date()) {
       } else if (preset === "previous-month") {
         const previousMonthEnd = billingDateBefore(currentMonthStart);
         range = { from: billingMonthStart(previousMonthEnd), to: previousMonthEnd };
-      } else if (preset === "open-to-yesterday") {
-        const yesterday = billingDateBefore(today);
+      } else if (preset === "open-to-yesterday" || preset === "open-to-today") {
+        const throughToday = preset === "open-to-today";
+        const endDate = throughToday ? today : billingDateBefore(today);
         const previous = latestCompletedPayroll(workerId);
-        const availableDates = billingAvailableEntryDates(workerId, now).filter((date) => date <= yesterday);
-        const from = previous ? billingDateAfter(previous.to) : (availableDates[0] || billingMonthStart(yesterday));
-        if (from > yesterday) {
-          showNotice("Do včeraj ni odprtih dni za obračun.");
+        const availableDates = billingAvailableEntryDates(workerId, now).filter((date) => date <= endDate);
+        const from = previous ? billingDateAfter(previous.to) : (availableDates[0] || billingMonthStart(endDate));
+        if (from > endDate) {
+          showNotice(throughToday ? "Do danes ni odprtih dni za obračun." : "Do včeraj ni odprtih dni za obračun.");
           return;
         }
-        range = { from, to: yesterday };
+        range = { from, to: endDate };
       } else if (preset === "today" || preset === "yesterday") {
         const requestedDate = preset === "today" ? today : billingDateBefore(today);
         let selectedDate = requestedDate;
@@ -934,7 +935,8 @@ function renderBillingView() {
       const clientReceiptAmount = useSnapshot ? Number(payroll.clientReceiptAmount || 0) : Number(clientReceipts.reduce((sum, item) => sum + Number(item.amount || 0), 0).toFixed(2));
       const purchases = useSnapshot ? (payroll.personalPurchaseIds || []).map((id) => (state.personalPurchases || []).find((item) => item.id === id)).filter(Boolean) : billingPersonalPurchases(workerId, range);
       const personalPurchaseAmount = useSnapshot ? Number(payroll.personalPurchaseAmount || 0) : Number(purchases.reduce((sum, item) => sum + Number(item.amount || 0), 0).toFixed(2));
-      const payoutAmount = Math.max(0, Number((baseTotals.totalAmount + advanceAmount + clientReceiptAmount - personalPurchaseAmount).toFixed(2)));
+      const calculatedPayout = Number((baseTotals.totalAmount + advanceAmount + clientReceiptAmount - personalPurchaseAmount).toFixed(2));
+      const payoutAmount = useSnapshot ? Number(payroll.payoutAmount ?? calculatedPayout) : calculatedPayout;
       const paidAmount = payroll ? Number(payroll.paidAmount || 0) : 0;
       const remainingAmount = Number((payoutAmount - paidAmount).toFixed(2));
       const stateLabel = payrollStateLabel(payroll, admin);

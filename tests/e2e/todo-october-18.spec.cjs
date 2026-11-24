@@ -103,27 +103,25 @@ test('billing selection has an empty unchecked box and a high contrast white che
   await input.focus(); await input.press('Space'); await expect(input).toBeChecked();
 });
 
-test('whole month fits width AND height on phone/tablet/desktop and event still opens', async ({ page }, info) => {
+test('empty calendar weeks are compact, dense weeks still show all events', async ({ page }, info) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await login(page);
   await page.evaluate(async () => {
     for (let i = 0; i < 12; i++) {
       await api('/api/todos', { method: 'POST', body: JSON.stringify({ title: 'Month fit QA ' + i, client: 'QA client', assigneeIds: ['bojan'], status: 'open', date: '2026-10-15' }) });
     }
-    await loadAll(); state.current = new Date(2026, 9, 1); state.calendarOpened = true;
+    await loadAll(); state.current = new Date(2026, 9, 1); state.calendarOpened = true; state.calendarBrowseMonth = true;
   });
   await page.locator('#calendarViewBtn').click();
-  await page.locator('#monthFitToggle').click();
   for (const size of [{ width: 390, height: 844 }, { width: 768, height: 1024 }, { width: 1280, height: 900 }, { width: 844, height: 390 }]) {
     await page.setViewportSize(size);
-    await expect.poll(async () => page.evaluate(() => {
-      const box = $('monthGrid').getBoundingClientRect();
-      return box.left >= -1 && box.right <= innerWidth + 1 && box.top >= -1 && box.bottom <= innerHeight;
-    })).toBe(true);
     await expect(page.locator('#calendar .day')).toHaveCount(42);
-    await expect(page.locator('#monthTitle')).toBeInViewport();
-    await expect(page.locator('#monthFitToggle')).toBeInViewport();
-    await page.screenshot({ path: info.outputPath('month-fit-' + size.width + '.png') });
+    const busy = page.locator('#calendar .day[data-date="2026-10-15"]');
+    const quiet = page.locator('#calendar .day.calendar-empty-week').first();
+    await expect(quiet).toHaveCSS('min-height', '64px');
+    await expect(busy.locator('.day-todo')).toHaveCount(12);
+    expect((await busy.boundingBox()).height).toBeGreaterThan((await quiet.boundingBox()).height);
+    await page.screenshot({ path: info.outputPath('month-compact-' + size.width + '.png') });
   }
   await page.setViewportSize({ width: 390, height: 844 });
   await page.locator('.day-todo').filter({ hasText: 'Month fit QA 0' }).click();
@@ -131,7 +129,4 @@ test('whole month fits width AND height on phone/tablet/desktop and event still 
   await page.locator('#closeTodoDialog').click();
   await page.locator('#nextMonth').click();
   await expect(page.locator('#monthTitle')).toContainText('november');
-  await expect(page.locator('#monthFitToggle')).toHaveAttribute('aria-pressed', 'true');
-  await page.locator('#monthFitToggle').click();
-  await expect(page.locator('#monthGrid')).toHaveCSS('transform', 'none');
 });

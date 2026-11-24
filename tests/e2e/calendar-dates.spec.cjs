@@ -6,7 +6,7 @@ let app;
 test.beforeAll(async () => { app = await startIsolatedTestApp(); });
 test.afterAll(async () => { await app?.stop(); });
 async function openMonth(page, date) {
-  await page.evaluate(date => { state.current = parseDate(date); setView('calendar'); render(); }, date);
+  await page.evaluate(date => { state.calendarBrowseMonth = true; state.current = parseDate(date); setView('calendar'); render(); }, date);
 }
 test.beforeEach(async ({ page, context }) => {
   expect((await context.request.post(app.baseUrl + '/api/test-login', { data: { userId: 'bojan', password: TEST_PASSWORD } })).ok()).toBeTruthy();
@@ -40,7 +40,7 @@ test('monthly calendar labels statutory holidays and six ISO weeks, including ad
   await expect(page.locator('#dayTimelineTitle')).toContainText('24. maj');
 });
 
-test('week gutter aligns with all seven days at phone/tablet/desktop sizes and in whole-month fit', async ({ page }, info) => {
+test('week gutter aligns with all seven days at phone/tablet/desktop sizes', async ({ page }, info) => {
   await openMonth(page, '2026-10-01');
   for (const size of [{ width: 390, height: 844 }, { width: 900, height: 700 }, { width: 1440, height: 900 }]) {
     await page.setViewportSize(size);
@@ -55,12 +55,35 @@ test('week gutter aligns with all seven days at phone/tablet/desktop sizes and i
       });
     });
     expect(normal, `aligned week/date columns at ${size.width}px`).toBe(true);
-    await page.locator('#monthFitToggle').click();
-    await expect.poll(() => page.locator('#monthGrid').evaluate(el => {
-      const box = el.getBoundingClientRect();
-      return box.left >= -1 && box.right <= innerWidth + 1 && box.top >= -1 && box.bottom <= innerHeight + 1;
-    })).toBe(true);
-    await page.screenshot({ path: info.outputPath(`month-weeks-fit-${size.width}.png`) });
-    await page.locator('#monthFitToggle').click();
+    await page.screenshot({ path: info.outputPath(`month-weeks-aligned-${size.width}.png`) });
   }
+});
+
+test('today is in week three, weekday labels pin on scroll, and arrows can reach the whole month', async ({ page }, info) => {
+  await page.clock.setFixedTime(new Date('2026-11-24T12:00:00+01:00'));
+  await openMonth(page, '2026-11-01');
+  await page.locator('#todayBtn').click();
+  const days = page.locator('#calendar > .day');
+  await expect(days).toHaveCount(42);
+  await expect(days.first()).toHaveAttribute('data-date', '2026-11-09');
+  await expect(days.nth(14)).toHaveAttribute('data-date', '2026-11-23');
+  await expect(days.nth(15)).toHaveClass(/\btoday\b/);
+  await expect(days.last()).toHaveAttribute('data-date', '2026-12-20');
+  await expect(days.last()).toHaveClass(/\bother\b/);
+  for (const width of [390, 900, 1440]) {
+    await page.setViewportSize({ width, height: 360 });
+    await page.evaluate(() => window.scrollTo(0, 10000));
+    await expect.poll(() => page.evaluate(() => {
+      const title = document.querySelector('.topbar').getBoundingClientRect();
+      const header = document.querySelector('#monthWeekdays').getBoundingClientRect();
+      return scrollY > 0 && Math.abs(Math.max(0, title.bottom) - header.top) < 2;
+    }), { message: `weekday row remains visible at ${width}px` }).toBe(true);
+    await page.screenshot({ path: info.outputPath(`sticky-month-weekdays-${width}.png`) });
+  }
+  await page.locator('#prevMonth').click();
+  await page.locator('#nextMonth').click();
+  await expect(days.first()).toHaveAttribute('data-date', '2026-10-26');
+  await expect(days.first()).toHaveClass(/\bother\b/);
+  await expect(days.last()).toHaveClass(/\bother\b/);
+  await expect(page.locator('#monthFitToggle')).toHaveCount(0);
 });

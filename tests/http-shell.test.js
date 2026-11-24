@@ -1131,7 +1131,7 @@ test("calendar-only task controls are date-bound, unavailable for time entries, 
   assert.match(html, /<details class="todo-status-direct-field" id="todoFormStatusField">/);
   assert.match(html, /id="todoFormStatusSummary"/);
   assert.match(html, /function closeOtherTodoFormFoldouts\(opened\)/);
-  assert.match(html, /\$\("todoFormStatusField"\)\.open = false;\s*\$\("todoFormDateTimeSection"\)\.open = Boolean\(state\.todoHoursSourceId \|\| state\.todoStandaloneHours \|\| state\.todoNoteEntry \|\| moduleValues\.timeEntryStatusIds\.has\(requestedStatus\)\);/);
+  assert.match(html, /\$\("todoFormStatusField"\)\.open = false;\s*\$\("todoFormDateTimeSection"\)\.open = Boolean\(editing \|\| state\.todoHoursSourceId \|\| state\.todoStandaloneHours \|\| state\.todoNoteEntry \|\| moduleValues\.timeEntryStatusIds\.has\(requestedStatus\)\);/);
   assert.match(html, /#todoDialog \.todo-form-date-time-grid \{\s*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);/);
   assert.match(html, /id="todoFormWarrantyField"/);
   assert.match(html, /class="todo-form-option todo-form-warranty" id="todoFormWarrantyField"/);
@@ -1157,7 +1157,8 @@ test("vpis ur uporablja enak seznam izvornih statusov v brskalniku in strežniku
   const serverStatuses = JSON.parse(server.match(/const PROJECT_HOURS_SOURCE_STATUSES = new Set\((\[[^;]+?\])\);/)[1]);
   assert.deepEqual(browserStatuses, serverStatuses);
   assert.match(html, /projectHoursSourceStatuses\.has\(source\.status\)/);
-  assert.doesNotMatch(html, /id="(?:writeHoursFromTodo|todoFooterWriteHours)"/);
+  assert.match(html, /id="writeHoursFromTodo"/);
+  assert.match(html, /id="todoFooterWriteHours"/);
   assert.match(server, /!PROJECT_HOURS_SOURCE_STATUSES\.has\(source\.status\)/);
 });
 

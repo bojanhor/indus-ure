@@ -78,7 +78,7 @@ test('month aligns each multi-day bar only across its dates; isolated timed Mond
       ['Overlap Wed–Fri','2026-11-04','2026-11-06'],['Monday work','2026-11-02','','08:00','09:00','execution']]){
       await api('/api/todos',{method:'POST',body:JSON.stringify({title,date,endDate:endDate||date,start:start||'',end:end||'',status:status||'open',client:'QA',assigneeIds:['bojan']})});
     }
-    await loadAll();setWorkContext('admin');setView('calendar');state.current=new Date(2026,10,1);state.showCompletedCalendarTodos=true;renderMonth();
+    await loadAll();setWorkContext('admin');setView('calendar');state.current=new Date(2026,10,1);state.calendarBrowseMonth=true;state.showCompletedCalendarTodos=true;renderMonth();
   });
   for(const width of [1280,390]){
     await page.setViewportSize({width,height:900}); await page.evaluate(()=>new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done))));

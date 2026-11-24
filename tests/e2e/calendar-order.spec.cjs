@@ -18,7 +18,7 @@ test('multi-day bars repeat profiles and title every Monday, including the last 
       ['QA Previous month', '2026-10-29', '2026-11-23', ['bojan', 'ibro']]
     ]) await api('/api/todos', { method: 'POST', body: JSON.stringify({ title, status: 'open', date, endDate, assigneeIds }) });
     await loadAll(); setWorkContext('admin'); setView('calendar');
-    state.calendarWorkerIds = null; state.current = parseDate('2026-11-23'); renderMonth();
+    state.calendarWorkerIds = null; state.calendarBrowseMonth = true; state.current = parseDate('2026-11-23'); renderMonth();
   });
   for (const context of ['admin', 'worker:ibro']) {
     await page.evaluate(context => setWorkContext(context), context);

@@ -908,6 +908,11 @@ test.describe.serial("isolated worker time entry and boss payroll", () => {
       await expect(page.locator("#billingTo")).toHaveValue(today);
       await expect(page.locator("#billingTo")).toHaveAttribute("max", today);
 
+      await page.locator('[data-billing-range-preset="open-to-today"]').click();
+      await expect(page.locator("#billingTo")).toHaveValue(today);
+      await expect(page.locator("#billingSummary .billing-summary-row.is-payout")).toBeVisible();
+      await expect(page.locator('[data-billing-range-preset="open-to-yesterday"]')).toBeVisible();
+
       await page.locator('[data-billing-range-preset="yesterday"]').click();
       await expect(page.locator("#billingFrom")).toHaveValue(today);
       await expect(page.locator("#billingTo")).toHaveValue(today);

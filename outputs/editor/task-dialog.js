@@ -170,6 +170,7 @@ function syncTodoFormFooterActions() {
       const pairs = [
         ["deleteTodoFromDialog", "todoFooterDelete"],
         ["duplicateTodoFromDialog", "todoFooterDuplicate"],
+        ["writeHoursFromTodo", "todoFooterWriteHours"],
         ["saveTodoDialog", "todoFooterSave"],
         ["closeTodoDialog", "todoFooterClose"]
       ];
@@ -314,11 +315,10 @@ async function openTodoDialog(todo = {}, { reportNavigationIds = null } = {}) {
       $("todoFormWorkFromHome").checked = Boolean(todo.workFromHome);
       $("todoFormImported").checked = Boolean(todo.imported);
       $("todoFormCalendarOnly").checked = Boolean(!moduleValues.timeEntryStatusIds.has(todoStatus(todo.status || "open").id) && todo.calendarOnly && todo.date);
-      // Keep both optional sections compact when the form opens. Validation
-      // opens the relevant one automatically if a required date or time is
-      // missing, so a short form never hides the reason it cannot save.
+      // Existing tasks show their schedule without a second tap; new task
+      // forms keep their date section compact until needed.
       $("todoFormStatusField").open = false;
-      $("todoFormDateTimeSection").open = Boolean(state.todoHoursSourceId || state.todoStandaloneHours || state.todoNoteEntry || moduleValues.timeEntryStatusIds.has(requestedStatus));
+      $("todoFormDateTimeSection").open = Boolean(editing || state.todoHoursSourceId || state.todoStandaloneHours || state.todoNoteEntry || moduleValues.timeEntryStatusIds.has(requestedStatus));
       updateTodoFormStatus();
       syncTodoFormClientContacts({ preserve: true });
        autosizeTodoNarrativeFields();
@@ -500,12 +500,15 @@ async function openHoursTodoFromCurrent() {
       const sourceId = $("todoFormId").value;
       const source = state.todos.find((todo) => todo.id === sourceId);
       if (!source) return;
-      if (!moduleValues.projectHoursSourceStatuses.has(source.status)) throw new Error("Ta vrsta zapisa ni opravilo, na katero lahko vpišeš nove ure.");
+      if (!moduleValues.projectHoursSourceStatuses.has(source.status) || source.imported || source.trashedAt || source.archivedAt) {
+        throw new Error("Ta vrsta zapisa ni opravilo, na katero lahko vpišeš nove ure.");
+      }
       projectHoursOpening = true;
       try {
         const generation = taskDialogGeneration;
         const workerId = activeWorkerId() || source.syncUser || state.user?.id || "";
-        const choice = await chooseExistingProjectHours({ sourceProjectTodoId: sourceId, syncUser: workerId, date: source.date }, generation);
+        const today = dateKey(new Date());
+        const choice = await chooseExistingProjectHours({ sourceProjectTodoId: sourceId, syncUser: workerId, date: today }, generation);
         if (!$("todoDialog").open || generation !== taskDialogGeneration) return;
         if (choice.action === "edit") return await openExistingProjectHours(choice.id, generation);
         if (choice.action !== "new") return;
@@ -521,24 +524,15 @@ async function openHoursTodoFromCurrent() {
         await closeModalBeforeTransition($("todoDialog"));
         await openTodoDialog({
           _hoursSourceId: source.id,
+          _skipPersistedDraft: true,
           client: source.client,
           clientId: source.clientId,
           title: source.title,
-          date: source.date,
-          start: "",
-          end: "",
+          date: today,
           status: "execution",
-          urgent: false,
-          warranty: Boolean(source.warranty),
           syncUser: workerId,
           _hoursAssigneeIds: [workerId],
-          sourceProjectTitle: source.title || "",
-          photos: (source.photos || []).map((photo) => ({ ...photo })),
-          driveFiles: (source.driveFiles || []).map((file) => ({ ...file })),
-          billingHourlyRate: source.billingHourlyRate ?? null,
-          billingKm: 0,
-          clientKm: 0,
-          clientVehicle: "personal"
+          sourceProjectTitle: source.title || ""
         });
         state.todoDialogReturnDayDate = returnDay;
         state.todoDialogReturnDayView = returnView;
@@ -598,6 +592,8 @@ function syncTodoDialogEditActions(todo, editing = Boolean(todo?.id)) {
       $("duplicateTodoFromDialog").classList.toggle("hidden", !editing || Boolean(state.todoHoursSourceId));
       $("todoFormChangeActions").classList.toggle("hidden", !editing || !todoCanMarkChangedForOthers(todo));
       $("shareTodoPdf").classList.toggle("hidden", !editing);
+      $("writeHoursFromTodo").classList.toggle("hidden", !editing || Boolean(todo.imported || todo.trashedAt || todo.archivedAt)
+        || !moduleValues.projectHoursSourceStatuses.has(todoStatus(todo.status).id));
       const isExistingTimeEntry = editing && moduleValues.timeEntryStatusIds.has(todoStatus(todo.status).id);
       const showCompletionRequest = editing && state.user?.role === "boss";
       $("requestTodoCompletion").textContent = isExistingTimeEntry ? "Zahtevaj dopolnitev vnosa ur" : "Zahtevaj dopolnitev";
@@ -811,6 +807,7 @@ function installTaskCreationBindings1() {
 }
 
 function installTaskDialogBindings1() {
+    $("writeHoursFromTodo").addEventListener("click", () => openHoursTodoFromCurrent().catch(error => showNotice(error.message)));
     moduleValues.modalActionMirrors.forEach(([mirrorId, sourceId]) => {
       $(mirrorId).addEventListener("click", () => {
         const source = $(sourceId);
