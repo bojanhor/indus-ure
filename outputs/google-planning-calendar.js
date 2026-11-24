@@ -3,6 +3,7 @@
 const crypto = require("node:crypto");
 const planning = require("./planning-calendar");
 const absences = require("./absence-model");
+const taskGroups = require("./task-groups");
 const APP = "indus-planning-v1";
 const SCOPES = [
   "https://www.googleapis.com/auth/calendar.app.created",
@@ -15,15 +16,20 @@ const missing = error => [404, 410].includes(statusCode(error));
 
 function eventBody(todo, db, baseUrl, definitions) {
   const link = new URL("/", baseUrl);
-  link.searchParams.set(todo._absence ? "absence" : "todo", todo.id);
+  link.searchParams.set(todo._taskGroup ? "group" : todo._absence ? "absence" : "todo", todo.groupId || todo.id);
+  const memberLinks = (todo.members || []).map(member => {
+    const memberLink = new URL("/", baseUrl);
+    memberLink.searchParams.set("todo", member.id);
+    return `${member.title || "Opravilo"}: ${memberLink}`;
+  });
   const status = todo._absence ? { label: "Odsotnost", googleColorId: "8" } : definitions[todo.status] || { label: todo.status, googleColorId: "8" };
   const people = (todo.assigneeIds || []).map(id => db.users?.[id]?.name || id).join(", ");
   const endDate = todo.endDate && todo.endDate >= todo.date ? todo.endDate : todo.date;
   const timed = /^\d{2}:\d{2}$/.test(todo.start || "") && /^\d{2}:\d{2}$/.test(todo.end || "");
   return {
-    summary: `${todo.urgent ? "NUJNO: " : ""}${todo.title || "Opravilo"}${todo.client ? ` — ${todo.client}` : ""}`,
+    summary: `${todo._taskGroup ? "Skupina: " : ""}${todo.urgent ? "NUJNO: " : ""}${todo.title || "Opravilo"}${todo.client ? ` — ${todo.client}` : ""}`,
     description: [todo.client ? `Stranka: ${todo.client}` : "", people ? `Za: ${people}` : "",
-      `Status: ${status.label}`, todo.notes || "", `Odpri v INDUS Ure: ${link}`,
+      todo._taskGroup ? memberLinks.join("\n") : `Status: ${status.label}`, todo.notes || "", `Odpri v INDUS Ure: ${link}`,
       "Samo prikaz. Urejanje poteka v INDUS Ure."].filter(Boolean).join("\n\n"),
     start: timed ? { dateTime: `${todo.date}T${todo.start}:00`, timeZone: "Europe/Ljubljana" } : { date: todo.date },
     end: timed ? { dateTime: todo.end === "24:00" ? `${planning.nextDay(endDate)}T00:00:00` : `${endDate}T${todo.end}:00`, timeZone: "Europe/Ljubljana" } : { date: planning.nextDay(endDate) },
@@ -39,11 +45,11 @@ function calendarPlans(db, baseUrl, definitions) {
   const active = Object.values(db.users || {}).filter(user => user.active !== false);
   const bosses = active.filter(user => user.role === "boss" && user.email).map(user => user.email.toLowerCase());
   const plans = [{ key: "combined", title: "INDUS — Planiranje — Vsi delavci", readers: bosses,
-    todos: [...planning.select(db.todos, { combined: true }), ...absences.exported(db, { combined: true })] }];
+    todos: [...planning.select(db.todos, { combined: true }), ...absences.exported(db, { combined: true }), ...taskGroups.exported(db, { combined: true })] }];
   for (const user of active) {
     if (!user.email) continue;
     plans.push({ key: `worker:${user.id}`, title: `INDUS — Planiranje — ${user.name || user.id}`,
-      readers: [user.email.toLowerCase()], todos: [...planning.select(db.todos, { userId: user.id }), ...absences.exported(db, { userId: user.id })] });
+      readers: [user.email.toLowerCase()], todos: [...planning.select(db.todos, { userId: user.id }), ...absences.exported(db, { userId: user.id }), ...taskGroups.exported(db, { userId: user.id })] });
   }
   return plans.map(plan => ({ ...plan, events: Object.fromEntries(plan.todos.map(todo => {
     const body = eventBody(todo, db, baseUrl, definitions);

@@ -18,6 +18,8 @@ const { workerKmRateForUser, workerCommuteKmRateForUser } = require("./worker-bi
 const lanAuth = require("./lan-auth");
 const lanPasswordAttempts = lanAuth.createLimiter();
 const absences = require("./absence-model");
+const taskGroups = require("./task-groups");
+const { createTaskGroupHttp } = require("./task-group-http");
 const { createAbsenceHttp } = require("./absence-http");
 const { createCalendarSyncStore } = require("./calendar-sync-store");
 const { createGooglePlanningCalendar } = require("./google-planning-calendar");
@@ -115,7 +117,7 @@ const UNDO_MAX_PATCH_BYTES = 512 * 1024;
 let TODO_REVISION_HISTORY_LIMIT = config().history.eventVersions;
 const TODO_REVISION_TEXT_LIMIT = 12_000;
 const UNDO_ARRAY_SNAPSHOT_KEYS = [
-  "todos", "absences", "entries", "debts", "advances", "personalPurchases",
+  "todos", "absences", "taskGroups", "taskGroupMembers", "entries", "debts", "advances", "personalPurchases",
   "clients", "billingLocks", "payrolls", "clientBills", "settlementCorrections"
 ];
 const UNDO_VALUE_SNAPSHOT_KEYS = ["settings", "calendarToken"];
@@ -2479,15 +2481,20 @@ function todoManualOrderDomain(todo) {
   return "active";
 }
 
-function sharedManualTodoGroups(db, { domain = "" } = {}) {
+function sharedManualTodoGroups(db, { domain = "", scope = "" } = {}) {
   const groups = new Map();
+  const membership = new Map((db.taskGroupMembers || []).map(member => [member.id, member.groupId]));
   for (const todo of db.todos || []) {
     if (isTrashedTodo(todo)) continue;
     const groupId = String(todo.assignmentGroupId || todo.id || "");
-    if (!groupId) continue;
+    if (!groupId || (membership.get(groupId) || "") !== scope) continue;
     const current = groups.get(groupId) || { id: groupId, todos: [] };
     current.todos.push(todo);
     groups.set(groupId, current);
+  }
+  if (!scope) for (const entry of taskGroups.index(db).values()) {
+    const card = taskGroups.card(entry.group);
+    groups.set(card.id, { id: card.id, todos: [card], org: entry });
   }
   const records = [...groups.values()].map((group) => {
     group.todos.sort((left, right) => String(left.id || "").localeCompare(String(right.id || "")));
@@ -2507,6 +2514,7 @@ function sharedManualTodoGroups(db, { domain = "" } = {}) {
 }
 
 function userCanReorderSharedTodoGroup(user, group) {
+  if (group?.org) return taskGroups.maySeeGroup(group.org, user);
   return user?.role === "boss" || group?.todos?.some((todo) => cleanUserId(todo.syncUser || todo.createdBy) === user?.id);
 }
 
@@ -2524,26 +2532,42 @@ function applySharedManualTodoOrder(db, user, input = {}) {
   const placement = input.placement === "after" ? "after" : "before";
   const requestedBucket = input.targetBucket === "unsorted" ? "unsorted" : input.targetBucket === "sorted" ? "sorted" : "";
   const locks = input.editLockTokens && typeof input.editLockTokens === "object" ? input.editLockTokens : {};
-  const allGroups = sharedManualTodoGroups(db);
   const byTodoId = new Map((db.todos || []).map((todo) => [String(todo.id || ""), todo]));
-  const groupsById = new Map(allGroups.map((group) => [group.id, group]));
   const sourceTodo = byTodoId.get(sourceId);
-  const source = sourceTodo ? groupsById.get(String(sourceTodo.assignmentGroupId || sourceTodo.id || "")) : null;
+  const sourceEvent = sourceTodo ? taskGroups.eventId(sourceTodo) : sourceId;
+  const previousMembers = db.taskGroupMembers || [];
+  const fromGroupId = previousMembers.find(member => member.id === sourceEvent)?.groupId || "";
+  const isMove = Object.hasOwn(input, "targetGroupId");
+  const scope = isMove ? String(input.targetGroupId || "") : fromGroupId;
+  if (isMove) {
+    if (!taskGroups.active(sourceTodo) || !userCanReorderSharedTodoGroup(user, { todos: todoAssignmentItems(db, sourceTodo) })) {
+      return { status: 403, error: "V skupino lahko premakneš le aktivno opravilo, ki ga smeš razvrščati." };
+    }
+    if (String(input.fromGroupId || "") !== fromGroupId) return { status: 409, error: "Opravilo je medtem zamenjalo skupino. Osveži pogled." };
+    if (scope && !taskGroups.maySeeGroup(taskGroups.index(db).get(scope), user)) return { status: 404, error: "Ciljna skupina ni na voljo." };
+  }
+  const nextMembers = isMove && fromGroupId !== scope
+    ? [...previousMembers.filter(member => member.id !== sourceEvent), ...(scope ? [{ id: sourceEvent, groupId: scope }] : [])] : previousMembers;
+  const allGroups = sharedManualTodoGroups({ ...db, taskGroupMembers: nextMembers }, { scope });
+  const groupsById = new Map(allGroups.map(group => [group.id, group]));
+  const source = groupsById.get(sourceEvent);
   if (!source || !source.domain) return { error: "Izbranega opravila ni mogoče ročno razvrščati." };
   if (!userCanReorderSharedTodoGroup(user, source)) return { status: 403, error: "Tega vrstnega reda ne smeš spreminjati." };
   for (const todo of source.todos) {
+    if (source.org) continue;
     const lock = todoAssignmentEditLockConflict(db, todo, user, String(locks[todo.id] || ""));
     if (lock) return { status: 409, error: `Opravilo trenutno ureja ${lock.lockedByName || lock.lockedById}.`, lock };
   }
 
   const targetTodo = targetId ? byTodoId.get(targetId) : null;
-  const target = targetTodo ? groupsById.get(String(targetTodo.assignmentGroupId || targetTodo.id || "")) : null;
+  const target = groupsById.get(targetTodo ? taskGroups.eventId(targetTodo) : targetId);
   if (targetId && (!target || target.id === source.id || target.domain !== source.domain)) {
     return { status: 400, error: "Opravili nista v isti skupini ročnega vrstnega reda." };
   }
   if (target && !userCanReorderSharedTodoGroup(user, target)) return { status: 403, error: "Tega vrstnega reda ne smeš spreminjati." };
   if (target) {
     for (const todo of target.todos) {
+      if (target.org) continue;
       const lock = todoAssignmentEditLockConflict(db, todo, user, String(locks[todo.id] || ""));
       if (lock) return { status: 409, error: `Opravilo trenutno ureja ${lock.lockedByName || lock.lockedById}.`, lock };
     }
@@ -2598,15 +2622,22 @@ function applySharedManualTodoOrder(db, user, input = {}) {
   for (const bucket of buckets) if (!resultByBucket.has(bucket)) resultByBucket.set(bucket, groupsByBucket.get(bucket) || []);
 
   const now = new Date().toISOString();
+  if (nextMembers !== previousMembers) db.taskGroupMembers = nextMembers;
   for (const bucket of buckets) {
     const records = resultByBucket.get(bucket) || [];
     records.forEach((group, index) => {
+      if (group.org) {
+        group.org.group.sharedManualBucket = bucket;
+        group.org.group.sharedManualOrder = index + 1;
+        return;
+      }
       for (const todo of group.todos) {
         todo.sharedManualBucket = bucket;
         todo.sharedManualOrder = index + 1;
       }
     });
   }
+  if (source.org) return { changed: true, sourceGroupId: source.id };
   const sourceHistory = [...(source.todo.history || []), audit(user, "spremenjen skupni vrstni red")];
   for (const todo of source.todos) {
     todo.sharedManualOrderUpdatedAt = now;
@@ -4293,17 +4324,18 @@ function foldIcsLine(line) {
 function buildCalendarIcs(db, { userId = "", combined = false } = {}) {
   const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
   const todos = [...planningCalendar.select(db.todos, { userId, combined })
-    .filter(todo => !["order", "order_car", "order_warehouse"].includes(todo.status)), ...absences.exported(db, { userId, combined })];
+    .filter(todo => !["order", "order_car", "order_warehouse"].includes(todo.status)), ...absences.exported(db, { userId, combined }), ...taskGroups.exported(db, { userId, combined })];
   const calendarName = combined ? "INDUS URE - Planiranje - Vsi delavci"
     : `INDUS URE - Planiranje - ${db.users?.[userId]?.name || "Delovni koledar"}`;
   const lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//INDUS URE//Planiranje//SL",
     "CALSCALE:GREGORIAN", "METHOD:PUBLISH", `X-WR-CALNAME:${icsEscape(calendarName)}`, "X-WR-TIMEZONE:Europe/Ljubljana"];
   for (const todo of todos) {
-    const link = PUBLIC_BASE_URL ? `${PUBLIC_BASE_URL}/?${todo._absence ? "absence" : "todo"}=${encodeURIComponent(todo.id)}` : "";
+    const link = PUBLIC_BASE_URL ? `${PUBLIC_BASE_URL}/?${todo._taskGroup ? "group" : todo._absence ? "absence" : "todo"}=${encodeURIComponent(todo.groupId || todo.id)}` : "";
     const description = [
       todo.client ? `Stranka: ${todo.client}` : "",
-      `Za: ${todo.assigneeIds.map(id => db.users?.[id]?.name || id).join(", ")}`,
-      `Status: ${todo._absence ? "Odsotnost" : todoStatusDefinition(todo.status).label}`,
+      todo.assigneeIds.length ? `Za: ${todo.assigneeIds.map(id => db.users?.[id]?.name || id).join(", ")}` : "",
+      todo._taskGroup ? (todo.members || []).map(member => `${member.title}${PUBLIC_BASE_URL ? `: ${PUBLIC_BASE_URL}/?todo=${encodeURIComponent(member.id)}` : ""}`).join("\n")
+        : `Status: ${todo._absence ? "Odsotnost" : todoStatusDefinition(todo.status).label}`,
       todo.notes || "", link ? `Odpri v INDUS Ure: ${link}` : ""
     ].filter(Boolean).join("\n");
     lines.push("BEGIN:VEVENT", `UID:planning-${todo.assignmentGroupId}@indus-ure`, `DTSTAMP:${stamp}`);
@@ -4315,7 +4347,7 @@ function buildCalendarIcs(db, { userId = "", combined = false } = {}) {
     } else {
       lines.push(`DTSTART;VALUE=DATE:${icsDate(todo.date)}`, `DTEND;VALUE=DATE:${icsDate(planningCalendar.nextDay(endDate))}`);
     }
-    lines.push(`SUMMARY:${icsEscape(`${todo.urgent ? "!! " : ""}TODO: ${todo.title}`)}`, `DESCRIPTION:${icsEscape(description)}`);
+    lines.push(`SUMMARY:${icsEscape(`${todo.urgent ? "!! " : ""}${todo._taskGroup ? "Skupina" : "TODO"}: ${todo.title}`)}`, `DESCRIPTION:${icsEscape(description)}`);
     if (link) lines.push(`URL:${link}`);
     lines.push("END:VEVENT");
   }
@@ -4813,6 +4845,8 @@ function browserBackupState(db) {
       entries: db.entries || [],
       todos: db.todos || [],
       absences: db.absences || [],
+      taskGroups: db.taskGroups || [],
+      taskGroupMembers: db.taskGroupMembers || [],
       attachments,
       debts: db.debts || [],
       clients: db.clients || [],
@@ -4901,7 +4935,7 @@ async function extractBrowserRestoreZip(zipFile, directory) {
 
 function restoredBrowserState(current, metadata) {
   const snapshot = metadata.snapshot || {};
-  const arrays = ["entries", "todos", "absences", "debts", "clients", "billingLocks", "payrolls", "clientBills"];
+  const arrays = ["entries", "todos", "absences", "taskGroups", "taskGroupMembers", "debts", "clients", "billingLocks", "payrolls", "clientBills"];
   for (const key of arrays) if (snapshot[key] !== undefined && !Array.isArray(snapshot[key])) throw new Error(`Neveljavni podatki: ${key}.`);
   if (snapshot.attachments !== undefined && (typeof snapshot.attachments !== "object" || Array.isArray(snapshot.attachments))) throw new Error("Neveljavni podatki prilog.");
   const importedUsers = snapshot.users && typeof snapshot.users === "object" ? snapshot.users : {};
@@ -4922,6 +4956,8 @@ function restoredBrowserState(current, metadata) {
     entries: snapshot.entries || [],
     todos: snapshot.todos || [],
     absences: snapshot.absences || [],
+    taskGroups: snapshot.taskGroups || [],
+    taskGroupMembers: snapshot.taskGroupMembers || [],
     attachments: snapshot.attachments || {},
     debts: snapshot.debts || [],
     clients: snapshot.clients || [],
@@ -5443,6 +5479,7 @@ async function handleApi(req, res) {
 
     if (await handleUndoJournal(req, res, url)) return;
     if (await handleAbsences(req, res, url)) return;
+    if (await handleTaskGroups(req, res, url)) return;
     const notificationReadMatch = url.pathname.match(/^\/api\/notifications\/([^/]+)\/read$/);
     if (notificationReadMatch && req.method === "POST") {
       const user = await requireUser(req, res);
@@ -5706,6 +5743,7 @@ async function handleApi(req, res) {
         users: activeUsers.map(publicDirectoryUser),
         todos: visibleTodosForUser(db, user),
         absences: absences.visible(db, user),
+        taskGroups: taskGroups.visible(db, user),
         clients: db.clients || [],
         settings: db.settings || {},
         workers
@@ -6113,7 +6151,7 @@ async function handleApi(req, res) {
         return;
       }
       await writeDbAsync(db);
-      sendJson(res, 200, { todos: visibleTodosForUser(db, user) });
+      sendJson(res, 200, { todos: visibleTodosForUser(db, user), taskGroups: taskGroups.visible(db, user) });
       return;
     }
 
@@ -8462,6 +8500,7 @@ const googlePlanningCalendar = createGooglePlanningCalendar({
   }
 });
 const handleAbsences = createAbsenceHttp({ requireUser, readRequestDb, readBody, writeDbAsync, sendJson, recordAuditLog });
+const handleTaskGroups = createTaskGroupHttp({ requireUser, readRequestDb, readBody, writeDbAsync, sendJson, recordAuditLog, sharedManualOrderBefore });
 const calendarHttp = createCalendarHttp({
   service: googlePlanningCalendar, requireUser, sendJson, sendText, readBody, googleClient, googleReady,
   ownerEmail: GOOGLE_DRIVE_OWNER_EMAIL, baseUrl: PUBLIC_BASE_URL,

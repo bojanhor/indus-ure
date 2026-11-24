@@ -338,6 +338,27 @@ async function main() {
     }
     check("http.full_and_initial_bootstrap_keep_complete_assignees_without_private_rows");
     {
+      const created = await request("/api/task-groups", { method: "POST", body: JSON.stringify({ title: "QA organizational group", date: "2026-11-21", endDate: "2026-11-23" }) });
+      assert.equal(created.status, 201);
+      const groupId = (await created.json()).id;
+      const url = "/api/task-groups/" + groupId;
+      assert.equal((await request(url, { headers: worker })).status, 404);
+      const move = { sourceId: ids[1], targetGroupId: groupId, fromGroupId: "" };
+      const moved = await request("/api/todos/reorder", { method: "POST", body: JSON.stringify(move) });
+      assert.equal(moved.status, 200, await moved.text());
+      assert.equal((await request("/api/todos/reorder", { method: "POST", body: JSON.stringify(move) })).status, 409);
+      const read = (await (await request("/api/bootstrap?initial=1", { headers: worker })).json()).taskGroups;
+      const shared = (await store.load()).todos.find(todo => todo.id === ids[1]);
+      assert.deepEqual(read.find(group => group.id === groupId).eventIds, [shared.assignmentGroupId || shared.id]);
+      const revision = read.find(group => group.id === groupId).revision;
+      const edited = await request(url, { method: "PUT", headers: worker, body: JSON.stringify({ title: "Edited by member", revision }) });
+      assert.equal(edited.status, 200);
+      const persisted = await other.load();
+      assert.equal(persisted.taskGroups.find(group => group.id === groupId).title, "Edited by member");
+      assert.equal(persisted.taskGroupMembers.find(member => member.groupId === groupId).id, shared.assignmentGroupId || shared.id);
+      check("http.org_groups_persist_with_private_initial_projection_and_stale_move_guard");
+    }
+    {
       const snap = await store.load();
       const token = crypto.randomBytes(32).toString("base64url"), expired = crypto.randomUUID();
       const delegated = snap.todos.find(t => t.id === ids[2]);

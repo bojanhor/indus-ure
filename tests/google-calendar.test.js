@@ -88,6 +88,39 @@ test("koledar planiranja ne objavi vpisov ur, tudi če še niso obračunani", ()
   }, { combined: true });
   assert.doesNotMatch(ics, /TODO: Montaža/);
 });
+test("Google group entries include only the viewer's entitled titles and direct links", () => {
+  const { calendarPlans } = require("../outputs/google-planning-calendar");
+  const groups = require("../outputs/task-groups");
+  const users = {
+    bojan: { id: "bojan", role: "boss", email: "bojan@example.com" },
+    ibro: { id: "ibro", role: "worker", email: "ibro@example.com" },
+    other: { id: "other", role: "worker", email: "other@example.com" }
+  };
+  const db = { users, taskGroups: [
+    { id: "g", title: "Poljubna skupina", ownerId: "bojan", date: "2026-11-21", endDate: "2026-11-23" },
+    { id: "empty", title: "Zasebna", ownerId: "bojan", date: "2026-11-22" }
+  ], taskGroupMembers: [{ id: "a", groupId: "g" }, { id: "b", groupId: "g" }, { id: "c", groupId: "g" }],
+  todos: [
+    { id: "a1", assignmentGroupId: "a", title: "Ibrovo opravilo", status: "open", syncUser: "ibro", date: "2026-11-20" },
+    { id: "b1", assignmentGroupId: "b", title: "Bojanovo opravilo", status: "open", syncUser: "bojan", date: "2026-11-20" },
+    { id: "c1", assignmentGroupId: "c", title: "Vpis ur", status: "execution", syncUser: "ibro" }
+  ] };
+  const plans = calendarPlans(db, "https://example.com", {});
+  const body = key => Object.values(plans.find(plan => plan.key === key).events);
+  const workerGroup = body("worker:ibro").find(event => event.summary === "Skupina: Poljubna skupina");
+  assert.equal(workerGroup.end.date, "2026-11-24");
+  assert.match(workerGroup.description, /Ibrovo opravilo: https:\/\/example\.com\/\?todo=a1/);
+  assert.match(workerGroup.description, /\?group=g/);
+  assert.doesNotMatch(workerGroup.description, /Bojanovo|Vpis ur|todo=b1/);
+  assert.equal(body("worker:other").length, 0);
+  assert.equal(body("worker:ibro").some(event => event.summary.includes("Zasebna")), false);
+  assert.ok(body("combined").find(event => event.summary === "Skupina: Poljubna skupina").description.includes("?todo=b1"));
+  assert.equal(groups.visible(db, users.other).length, 0);
+  groups.prune(db);
+  assert.deepEqual(db.taskGroupMembers.map(item => item.id), ["a", "b"]);
+  assert.throws(() => groups.clean({ title: "Bad", date: "2026-11-21", endDate: "2026-11-23", start: "07:00", end: "08:30" }));
+});
+
 test("zunanje povezave dovolijo samo Google Dokumente in Preglednice", () => {
   const id = "1_z_1I_wX8-VR0K9rXj7BHRFwc--00Ul5";
   const sheetId = "1wsPGlRaN2M7biJK4zq3KnLSYRXzJX6S1";

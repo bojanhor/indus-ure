@@ -1746,6 +1746,24 @@
     .client-autocomplete-edit { flex: 0 0 44px; min-height: 44px; padding: 8px; border-radius: 6px; }
     .client-autocomplete-edit svg { width: 20px; height: 20px; }
     .day-todo.multi-assignee:not(.urgent):not(.has-change-notice), .day-multiday-event.multi-assignee.is-span-start:not(.urgent):not(.has-change-notice) { border-left: 7px solid #67716f; }
+    .task-group-card { background: #eef2f7; border-radius: 9px; border: 1px solid #bdccdd; margin-bottom: 8px; }
+    .task-group-head.todo-item { display: flex; align-items: center; gap: 8px; background: #e5edf7; margin: 0; }
+    .task-group-toggle { flex: 1; min-width: 0; text-align: left; background: transparent; color: inherit; border: 0; padding: 8px 0; overflow-wrap: anywhere; }
+    .task-group-toggle small { display: block; }
+    .task-group-body { padding: 5px 6px 5px 14px; }
+    .task-group-body .todo-item { margin-block: 3px; }
+    .task-group-card.todo-drop-target, .task-group-outside.todo-drop-target { outline: 3px solid var(--accent); outline-offset: -2px; }
+    .task-group-outside { border: 1px dashed #8da2b4; padding: 6px; border-radius: 7px; margin-block: 5px; color: var(--muted); font-size: .8rem; }
+    .todo-drag-active .task-group-outside { background: #eef2f7; }
+    .task-group-cal.todo-status-color { background: #e5edf7; color: #243b55; }
+    #taskGroupForm { padding: 14px; display: grid; gap: 10px; }
+    #taskGroupForm[hidden] { display: none; }
+    #taskGroupForm label { display: grid; gap: 4px; min-width: 0; }
+    #taskGroupForm label.task-group-urgent { display: flex; align-items: center; }
+    .task-group-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+    .task-group-fields input { width: 100%; min-width: 0; }
+    #taskGroupEvents { display: grid; gap: 5px; max-height: 35vh; overflow: auto; padding: 14px; }
+    .task-group-event-link { text-align: left; overflow-wrap: anywhere; }
     .todo-urgent-chip { background: #d93025; color: #fff; white-space: nowrap; }
     .todo-item.has-change-notice {
       border-left: 4px solid #2f9a57;
@@ -6078,6 +6096,7 @@
         <div class="todo-panel">
           <div class="todo-actions-bar">
             <button class="primary" id="newTodoButton" type="button">Dodaj opravilo</button>
+            <button class="secondary" id="newTaskGroup" type="button">Nova skupina</button>
             <button class="secondary" id="writeHoursButton" type="button">Vpis ur</button>
             <button class="secondary" id="materialEntryButton" type="button">Vpis materiala</button>
             <button class="secondary" id="absenceEntryButton" type="button">Odsotnost</button>
@@ -6235,6 +6254,24 @@
         <p class="todo-meta">Celodnevni zapis za planiranje. Ne vpliva na ure, plačilo ali obračune. V Google/ICS koledarju je prikazana samo odsotnost, brez razloga.</p>
       </div>
     </form>
+  </dialog>
+  <dialog id="taskGroupDialog" aria-labelledby="taskGroupTitle">
+    <div class="modal-head"><strong id="taskGroupTitle">Nova skupina</strong><button class="secondary" id="editTaskGroup" type="button" aria-label="Nastavitve skupine">✎</button><button class="secondary" id="closeTaskGroup" type="button" aria-label="Zapri skupino">×</button></div>
+    <form id="taskGroupForm">
+      <label>Ime skupine<input name="title" required maxlength="160"></label>
+      <label>Opis<textarea name="description" rows="2" maxlength="1000"></textarea></label>
+      <label class="task-group-urgent"><input type="checkbox" name="urgent"> Nujno</label>
+      <div class="task-group-fields">
+        <label>Od dne<input name="date" type="date"></label><label>Do dne<input name="endDate" type="date"></label>
+        <label>Od ure<input name="start" type="time"></label><label>Do ure<input name="end" type="time"></label>
+      </div>
+      <div class="modal-actions">
+        <button class="secondary" id="taskGroupAllDay" type="button">Cel dan</button>
+        <button class="danger" id="deleteTaskGroup" type="button" hidden>Razpusti skupino</button>
+        <button class="primary" id="saveTaskGroup" type="submit">Shrani</button>
+      </div>
+    </form>
+    <div id="taskGroupEvents"></div>
   </dialog>
   <dialog id="dayTimelineDialog">
     <form method="dialog">
@@ -8853,6 +8890,7 @@ async function saveOfflineSnapshot() {
         users: JSON.parse(JSON.stringify(state.users || [])),
         entries: JSON.parse(JSON.stringify(state.entries || [])),
         todos: (state.todos || []).map(offlineSnapshotTodo),
+        taskGroups: state.taskGroups || [],
         debts: JSON.parse(JSON.stringify(state.debts || [])),
         advances: JSON.parse(JSON.stringify(state.advances || [])),
         personalPurchases: JSON.parse(JSON.stringify(state.personalPurchases || [])),
@@ -8894,6 +8932,7 @@ async function activateOfflineSnapshot() {
       state.users = snapshot.users || [snapshot.user];
       state.entries = snapshot.entries || [];
       state.todos = snapshot.todos || [];
+      state.taskGroups = snapshot.taskGroups || [];
       state.todoSnapshotLoaded = true;
       state.debts = snapshot.debts || [];
       state.advances = snapshot.advances || [];
@@ -9233,6 +9272,7 @@ function applyBootstrapSnapshot(data, { preserveTodoMutations = false, todoRevis
       state.users = [...new Map([...(data.users || []), state.user].map((user) => [user.id, user])).values()];
       if (!preserveTodoMutations || canApplyTodoSnapshot(todoRevision, todoSnapshotWasStable)) {
         state.todos = data.todos || [];
+        state.taskGroups = data.taskGroups || [];
         state.absences = data.absences || [];
         state.absencesLoaded = true;
         state.todoSnapshotLoaded = true;
@@ -9848,6 +9888,7 @@ function applyOnlineCachedSnapshot(snapshot) {
         delete cached.changeNoticesByUser;
         return cached;
       });
+      state.taskGroups = snapshot.taskGroups || [];
       state.todoSnapshotLoaded = true;
       state.debts = snapshot.debts || [];
       state.advances = snapshot.advances || [];
@@ -9863,6 +9904,7 @@ function applyOnlineCachedSnapshot(snapshot) {
 function showLoginScreen() {
       $("startupFailure").classList.add("hidden");
       state.absences = []; state.absencesLoaded = false;
+      state.taskGroups = [];
       setStartupHydrating(false);
       document.body.classList.remove("booting");
       document.body.classList.add("login-ready");
@@ -10109,6 +10151,9 @@ function calendarTodos({ includeArchived = false, workerIds = state.calendarWork
 
 /* @indus-module:worker-access */
 /* @indus-module:absence-model */
+/* @indus-module:task-groups */
+/* @indus-module:editor/task-groups */
+const taskGroupUi = createTaskGroupUi();
 /* @indus-module:calendar-order */
 /* @indus-module:calendar-dates */
 /* @indus-module:editor/absences */
@@ -10118,7 +10163,8 @@ function calendarAbsences(workerIds = state.calendarWorkerIds) {
         .map(item => Absences.calendarItem(item)).filter(todo => calendarWorkerMatchesIds(todo, workerIds));
     }
 function openCalendarTodo(todo) {
-      if (todo._absence) absenceUi.open(state.absences.find(item => item.id === todo.id));
+      if (todo._taskGroup) taskGroupUi.open(todo.groupId);
+      else if (todo._absence) absenceUi.open(state.absences.find(item => item.id === todo.id));
       // Calendar projections are presentation data, not an editable assignment set.
       else openTodoDialog(state.todos.find(item => item.id === todo.id) || todo);
     }
@@ -10239,7 +10285,7 @@ async function loadAll() {
         ? api("/api/client-bills")
         : Promise.resolve({ clientBills: [] });
       const serverStatusRequest = state.user?.role === 'boss' ? api('/api/server-status', { recoverSession: false }).catch(() => null) : Promise.resolve(null);
-      const [entries, todos, debts, advances, personalPurchases, clients, settings, workerBilling, payrolls, clientBills, serverStatus, absenceData] = await Promise.all([
+      const [entries, todos, debts, advances, personalPurchases, clients, settings, workerBilling, payrolls, clientBills, serverStatus, absenceData, groupData] = await Promise.all([
         api("/api/entries"),
         api("/api/todos"),
         api("/api/debts"),
@@ -10251,11 +10297,12 @@ async function loadAll() {
         api("/api/payrolls"),
         clientBillsRequest,
         serverStatusRequest,
-        api("/api/absences")
+        api("/api/absences"), api("/api/task-groups")
       ]);
       state.entries = entries.entries || [];
       if (canApplyTodoSnapshot(todoRevision, todoSnapshotWasStable)) {
         state.todos = todos.todos || [];
+        state.taskGroups = groupData.taskGroups || [];
         state.absences = absenceData.absences || []; state.absencesLoaded = true;
         state.todoSnapshotLoaded = true;
       }
@@ -10741,6 +10788,7 @@ function todoDateTimeLabel(todo) {
 function render() {
       if ($("app").classList.contains("hidden")) return;
       absenceUi.resume();
+      void taskGroupUi.resumeLink();
       renderSearch();
       if (state.view === "calendar") renderMonth();
       if (state.view === "todos") renderTodos();
@@ -10816,8 +10864,8 @@ function appendMonthMultiDayLanes(day, key, weekIndex, layout) {
           const actualEnd = todoEndDate(todo) === key;
           const item = document.createElement('button');
           item.type = 'button';
-          item.className = `day-multiday-event todo-status-color ${todoStatusClass(todo.status)} ${todoAssigneeIds(todo).length > 1 ? 'multi-assignee' : ''} ${todo.urgent ? 'urgent' : ''} ${todoChangeNotice(todo) ? 'has-change-notice' : ''} ${actualStart ? 'is-span-start' : 'is-span-continuation'} ${actualEnd ? 'is-span-end' : ''}`;
-          const title = todo.title || 'Brez naslova';
+          item.className = `day-multiday-event todo-status-color ${todoStatusClass(todo.status)} ${todo._taskGroup ? "task-group-cal" : ""} ${todoAssigneeIds(todo).length > 1 ? 'multi-assignee' : ''} ${todo.urgent ? 'urgent' : ''} ${todoChangeNotice(todo) ? 'has-change-notice' : ''} ${actualStart ? 'is-span-start' : 'is-span-continuation'} ${actualEnd ? 'is-span-end' : ''}`;
+          const title = todo._taskGroup ? "▣ " + todo.title : todo.title || 'Brez naslova';
           item.setAttribute('aria-label', `${todo.urgent ? 'Nujno opravilo; ' : ''}${todoAssigneeNames(todo)}; ${title}; ${todoDateTimeLabel(todo)}`);
           // A span crosses the grid's weekly rows on Monday. Repeat its title
           // there even when Monday is its final day, so the continuation
@@ -11032,6 +11080,11 @@ function finishMonthTodoPointerDrag(event) {
       lastMonthTodoDragAt = Date.now();
       if (!targetDate || (todo.date && targetDate === originDate)) return;
       const dayShift = Math.round((parseDate(targetDate) - parseDate(originDate)) / 86400000);
+      if (todo._taskGroup) {
+        taskGroupUi.moveDate(todo, shiftDateKey(todo.date, dayShift), shiftDateKey(todoEndDate(todo), dayShift))
+          .catch(error => showNotice(error.message));
+        return;
+      }
       // Moving a card changes its schedule, never its participants. Omission
       // also preserves the server's complete assignment set after offline sync.
       const { assigneeIds, ...scheduleTodo } = todo;
@@ -11121,6 +11174,7 @@ function renderMonth() {
       // Google/ICS select() deliberately projects only the selected worker.
       // The interactive calendar must retain the API's complete assigneeIds.
       const todos = calendarTodos().filter(todo => state.showCompletedCalendarTodos || todo._absence || PlanningCalendar.eligible(todo));
+      todos.push(...taskGroupUi.calendarCards(state.calendarWorkerIds));
       const todayDate = new Date();
       $('todayDayNumber').textContent = todayDate.getDate();
       $('todayBtn').setAttribute('aria-label', `Danes, ${todayDate.toLocaleDateString('sl-SI')}`);
@@ -11209,8 +11263,9 @@ function renderMonth() {
             const changeNotice = todoChangeNotice(todo);
             item.className = `day-todo todo-status-color ${todoStatusClass(todo.status)} ${todoAssigneeIds(todo).length > 1 ? 'multi-assignee' : ''} ${todo.done ? 'done' : ''} ${todo.urgent ? 'urgent' : ''} ${changeNotice ? 'has-change-notice' : ''} ${settlementIndicators ? 'has-settlements' : ''}`;
             const time = todo.start && todo.end ? `<span class="day-todo-time-part">${escapeHtml(todo.start)}&ndash;</span><wbr><span class="day-todo-time-part">${escapeHtml(todo.end)}</span>` : '';
-            const client = todo._absence ? '' : todoClientCalendarName(todo, 'Brez stranke');
-            const title = todo.title || 'Brez naslova';
+            const client = todo._absence || todo._taskGroup ? '' : todoClientCalendarName(todo, 'Brez stranke');
+            if (todo._taskGroup) item.classList.add("task-group-cal");
+            const title = todo._taskGroup ? "▣ " + todo.title : todo.title || 'Brez naslova';
             if (changeNotice) item.title = todoChangeNoticeText(todo);
             const flags = `${settlementIndicators}${changeNotice ? `<span class="day-todo-change-mark" aria-label="${escapeHtml(todoChangeNoticeLabel(todo))}">&#9679;</span>` : ''}`;
             item.innerHTML = `<span class="day-todo-topline"><span class="day-todo-topline-end"><span class="day-todo-time">${time}</span>${flags ? `<span class="day-todo-flags">${flags}</span>` : ''}</span></span><span class="day-todo-client">${escapeHtml(client)}</span><span class="day-todo-title">${escapeHtml(title)}</span>`;
@@ -11476,7 +11531,7 @@ function rememberDayTimelineEditorReturn() {
 
 async function openTodoFromDayTimeline(todo) {
       if (!todo) return;
-      if (todo._absence) { openCalendarTodo(todo); return; }
+      if (todo._absence || todo._taskGroup) { openCalendarTodo(todo); return; }
       if (state.dayTimelineSaving) {
         showNotice("Dnevni pogled se \u0161e shranjuje.");
         return;
@@ -11713,9 +11768,11 @@ function renderDayTimeline() {
       syncDayTimelineActions();
 
       const todos = dayTimelineTodos();
+      const displayTodos = [...todos, ...taskGroupUi.calendarCards(state.dayTimelineWorkerFilter ? state.dayTimelineWorkerFilter.ids : state.calendarWorkerIds)
+        .filter(todo => todoOccursOnDate(todo, state.dayTimelineDate))];
       // Date ranges are all-day planning tasks. They never expose clock drag
       // handles in the daily timeline, even when an older import still has a time.
-      const allDay = todos.filter((todo) => todoIsMultiDayCalendarSpan(todo) || !todo.start || !todo.end)
+      const allDay = displayTodos.filter((todo) => todoIsMultiDayCalendarSpan(todo) || !todo.start || !todo.end)
         .sort(CalendarOrder.compareUntimed);
       const allDayShell = $("dayAllDay");
       const allDayItems = $("dayAllDayItems");
@@ -11725,16 +11782,17 @@ function renderDayTimeline() {
         const button = document.createElement("button");
         button.type = "button";
         button.className = "day-all-day-item todo-status-color " + todoStatusClass(todo.status);
+        if (todo._taskGroup) button.classList.add("task-group-cal");
         const client = todoClientCalendarName(todo);
         const heading = document.createElement("span");
         heading.className = "day-event-heading";
         const title = document.createElement("strong");
         title.className = "day-timeline-event-title";
-        title.textContent = todo.title + (client ? " - " + client : "");
+        title.textContent = (todo._taskGroup ? "▣ " : "") + todo.title + (client ? " - " + client : "");
         heading.append(calendarTodoWorkers(todo), title);
         button.appendChild(heading);
         const movableToTimeline = !todo._absence && !todoIsMultiDayCalendarSpan(todo);
-        if (movableToTimeline) {
+        if (movableToTimeline && !todo._taskGroup) {
           button.title = "Klikni za urejanje; pridrži in povleci v časovnico za enourni termin";
           const pointerOptions = { passive: false };
           button.addEventListener("pointerdown", (event) => beginDayAllDayPointerDrag(event, todo), pointerOptions);
@@ -11778,12 +11836,13 @@ function renderDayTimeline() {
       const eventsLayer = document.createElement("div");
       eventsLayer.className = "day-timeline-events";
       eventsLayer.id = "dayTimelineEvents";
-      const layouts = dayTimelineLayouts(todos.filter((todo) => !todoIsMultiDayCalendarSpan(todo) && todo.start && todo.end));
+      const layouts = dayTimelineLayouts(displayTodos.filter((todo) => !todoIsMultiDayCalendarSpan(todo) && todo.start && todo.end));
       layouts.forEach((layout) => {
         const { todo, startMinute, endMinute, lane, laneCount } = layout;
         const client = todoClientCalendarName(todo);
         const event = document.createElement("div");
         event.className = "day-timeline-event todo-status-color " + todoStatusClass(todo.status) + (todoChangeNotice(todo) ? " has-change-notice" : "");
+        if (todo._taskGroup) event.classList.add("task-group-cal");
         event.dataset.todoId = todo.id;
         event.dataset.start = dayTimelineTime(startMinute);
         event.dataset.end = dayTimelineTime(endMinute);
@@ -11807,7 +11866,7 @@ function renderDayTimeline() {
         heading.className = "day-event-heading";
         const title = document.createElement("strong");
         title.className = "day-timeline-event-title";
-        title.textContent = todo.title;
+        title.textContent = (todo._taskGroup ? "▣ " : "") + todo.title;
         if (isDayTimelineHoursWarning(todo)) {
           const warning = document.createElement("span");
           warning.className = "day-hours-warning";
@@ -11827,6 +11886,13 @@ function renderDayTimeline() {
         endHandle.title = "Podaljšaj ali skrajšaj konec";
         endHandle.setAttribute("aria-label", "Podaljšaj ali skrajšaj konec dogodka");
         event.append(startHandle, heading, meta, endHandle);
+        if (todo._taskGroup) {
+          startHandle.remove(); endHandle.remove();
+          event.onclick = () => taskGroupUi.open(todo.groupId);
+          event.onkeydown = key => { if (["Enter", " "].includes(key.key)) { key.preventDefault(); taskGroupUi.open(todo.groupId); } };
+          eventsLayer.appendChild(event);
+          return;
+        }
         const dayEventPointerOptions = { passive: false };
         event.addEventListener("pointerdown", (pointerEvent) => beginDayTimelineEventPointer(pointerEvent, todo), dayEventPointerOptions);
         event.addEventListener("pointermove", updateDayTimelineEventPointer, dayEventPointerOptions);
@@ -13095,26 +13161,38 @@ function renderTodoItems() {
       title.textContent = "Vsa opravila";
 
       const todos = sortedTodosForMode(contextTodos());
+      const showManualSections = isManualTodoMode();
+      const board = showManualSections ? taskGroupUi.board(todos) : null;
 
-      if (todos.length === 0) {
+      if (todos.length === 0 && !board?.cards.length) {
         items.innerHTML = `<p class="todo-meta">Ni opravil za ta izbor.</p>`;
         return;
       }
 
-      const showManualSections = isManualTodoMode();
-      const todoDisplayEntries = showManualSections ? todoManualDisplayEntries(todos) : todos.map((todo) => ({ todo, bucket: "", orderingReference: false }));
+      const roots = board ? [...todos.filter(todo => !board.byEvent.has(todoEventId(todo))), ...board.cards].sort(todoManualCategorySort) : todos;
+      const topEntries = showManualSections ? todoManualDisplayEntries(roots) : roots.map((todo) => ({ todo, bucket: "", orderingReference: false }));
+      const todoDisplayEntries = topEntries.flatMap(entry => entry.todo._taskGroup ? [
+        entry, ...board.childRows.get(entry.todo.groupId).map(todo => ({ todo, parentGroupId: entry.todo.groupId, orderingReference: false }))
+      ] : [entry]);
+      const groupBodies = new Map();
+      if (board?.cards.length) {
+        const outside = document.createElement("div");
+        outside.className = "task-group-outside";
+        outside.textContent = "Spusti za samostojno opravilo";
+        items.appendChild(outside);
+      }
       let completedGroupKey = "";
       let currentManualCategory = "";
       let manualTailTargetId = "";
       const collapsedManualSections = collapsedTodoSections();
       const manualCategoryCounts = new Map();
       if (showManualSections) {
-        todoDisplayEntries.forEach(({ bucket }) => {
+        topEntries.forEach(({ bucket }) => {
           manualCategoryCounts.set(bucket, (manualCategoryCounts.get(bucket) || 0) + 1);
         });
       }
 
-      todoDisplayEntries.forEach(({ todo, bucket, orderingReference }) => {
+      todoDisplayEntries.forEach(({ todo, bucket, orderingReference, parentGroupId }) => {
         const groupKey = todo.clientId || normalizeText(todo.client) || "__brez_stranke__";
         if (state.todoSortMode === "completed" && groupKey !== completedGroupKey) {
           completedGroupKey = groupKey;
@@ -13125,7 +13203,7 @@ function renderTodoItems() {
           items.appendChild(group);
         }
         let manualCategory = "";
-        if (showManualSections) {
+        if (showManualSections && !parentGroupId) {
           manualCategory = bucket;
           if (manualCategory !== currentManualCategory) {
             appendTodoOrderTailDropZone(items, currentManualCategory, manualTailTargetId);
@@ -13135,9 +13213,16 @@ function renderTodoItems() {
           }
           if (manualCategory === "ordering" && collapsedManualSections.has("ordering")) return;
         }
+        if (todo._taskGroup) {
+          const header = taskGroupUi.header(todo, board.childRows.get(todo.groupId));
+          groupBodies.set(todo.groupId, header.body);
+          items.appendChild(header.outer);
+          manualTailTargetId = todo.id;
+          return;
+        }
         const item = document.createElement("div");
         const reorderable = isManualTodoMode() && !orderingReference && todoCanManualReorder(todo);
-        if (showManualSections && reorderable) manualTailTargetId = todo.id;
+        if (showManualSections && reorderable && !parentGroupId) manualTailTargetId = todo.id;
         const hasExpandedDetails = todoHasExpandedDetails(todo);
         const detailsExpanded = state.expandedTodoIds.has(todo.id);
         const attachmentCount = todoAttachmentCount(todo);
@@ -13225,23 +13310,14 @@ function renderTodoItems() {
         });
         todoExpandedDetails?.addEventListener("click", (event) => event.stopPropagation());
         todoExpandedDetails?.addEventListener("keydown", (event) => event.stopPropagation());
-        const dragHandle = item.querySelector(".drag-handle");
-        if (reorderable) {
-          const dragPointerOptions = { passive: false };
-          dragHandle.addEventListener("pointerdown", (event) => beginTodoPointerDrag(event, item, todo.id), dragPointerOptions);
-          dragHandle.addEventListener("pointermove", updateTodoPointerDrag, dragPointerOptions);
-          dragHandle.addEventListener("pointerup", finishTodoPointerDrag, dragPointerOptions);
-          dragHandle.addEventListener("pointercancel", cancelTodoPointerDrag, dragPointerOptions);
-          dragHandle.addEventListener("lostpointercapture", cancelTodoPointerDrag);
-          dragHandle.addEventListener("contextmenu", (event) => event.preventDefault());
-        }
+        if (reorderable) bindTodoDragHandle(item, todo.id);
         item.querySelectorAll(".remove-photo").forEach((button) => {
           button.addEventListener("click", async () => {
             if (!await showAppConfirm("Izbrišem to prilogo?")) return;
             await saveTodoToServer({ ...todo, photos: (todo.photos || []).filter((photo) => photo.id !== button.dataset.photoId) });
           });
         });
-        items.appendChild(item);
+        (parentGroupId ? groupBodies.get(parentGroupId) : items)?.appendChild(item);
       });
       if (showManualSections) appendTodoOrderTailDropZone(items, currentManualCategory, manualTailTargetId);
       renderTodoReorderOrigin();
@@ -13267,10 +13343,28 @@ function todoCanManualReorder(todo) {
       return Boolean(todoManualOrderDomain(todo));
     }
 
+function bindTodoDragHandle(item, id) {
+      const handle = item.querySelector(".drag-handle");
+      const passive = { passive: false };
+      handle.addEventListener("pointerdown", event => beginTodoPointerDrag(event, item, id), passive);
+      handle.addEventListener("pointermove", updateTodoPointerDrag, passive);
+      handle.addEventListener("pointerup", finishTodoPointerDrag, passive);
+      handle.addEventListener("pointercancel", cancelTodoPointerDrag, passive);
+      handle.addEventListener("lostpointercapture", cancelTodoPointerDrag);
+      handle.addEventListener("contextmenu", event => event.preventDefault());
+    }
+
+function findTodoOrderItem(id) {
+      if (String(id).startsWith("org:")) {
+        const group = state.taskGroups?.find(group => TaskGroups.idForCard(group.id) === id);
+        return group ? taskGroupUi.card(group) : null;
+      }
+      return contextTodos().find(todo => todo.id === id);
+    }
+
 function todosCanReorderTogether(sourceId, targetId) {
-      const todos = contextTodos();
-      const source = todos.find((todo) => todo.id === sourceId);
-      const target = todos.find((todo) => todo.id === targetId);
+      const source = findTodoOrderItem(sourceId);
+      const target = findTodoOrderItem(targetId);
       return Boolean(todoManualOrderDomain(source) && todoManualOrderDomain(source) === todoManualOrderDomain(target));
     }
 
@@ -13281,7 +13375,7 @@ let todoPointerDrag = null;
 
 function clearTodoDragVisuals() {
       document.querySelectorAll(".todo-item.dragging").forEach((item) => item.classList.remove("dragging"));
-      document.querySelectorAll(".todo-order-drop-zone.todo-drop-target").forEach((zone) => zone.classList.remove("todo-drop-target"));
+      document.querySelectorAll(".todo-order-drop-zone.todo-drop-target, .task-group-card.todo-drop-target, .task-group-outside.todo-drop-target").forEach((zone) => zone.classList.remove("todo-drop-target"));
       document.querySelectorAll(".todo-drag-ghost, .todo-drop-indicator").forEach((element) => element.remove());
     }
 
@@ -13314,17 +13408,40 @@ function updateTodoPointerDragTarget(clientX, clientY) {
       const atPoint = document.elementFromPoint(clientX, clientY);
       const target = atPoint?.closest(".todo-item");
       const section = atPoint?.closest("[data-todo-drop-bucket]") || todoTailDropZoneAtPoint(clientX, clientY);
-      const source = contextTodos().find((todo) => todo.id === drag.sourceId);
+      const source = findTodoOrderItem(drag.sourceId);
+      const group = atPoint?.closest(".task-group-card");
+      const outside = atPoint?.closest(".task-group-outside");
+      const fromGroupId = taskGroupUi.currentGroupId(source);
+      let targetGroupId;
       let targetElement = null;
       let targetId = "";
       let targetPlacement = "before";
       let targetBucket = todoManualBucketForCurrentUser(source);
-      if (target && target.dataset.todoId !== drag.sourceId && todosCanReorderTogether(drag.sourceId, target.dataset.todoId)) {
+      if (target?.dataset.todoId === drag.sourceId) {
+        // Releasing on the original card is not a move.
+      } else if (group && !source?._taskGroup && TaskGroups.active(source)) {
+        targetGroupId = group.dataset.taskGroupId;
+        if (target && !target.classList.contains("task-group-head") && todosCanReorderTogether(drag.sourceId, target.dataset.todoId)) {
+          const rect = target.getBoundingClientRect();
+          targetPlacement = clientY < rect.top + rect.height / 2 ? "before" : "after";
+          targetId = target.dataset.todoId;
+          targetElement = target;
+          targetBucket = todoManualBucketForCurrentUser(findTodoOrderItem(targetId));
+        } else if (targetGroupId !== fromGroupId) {
+          targetPlacement = "after";
+          targetElement = group;
+        }
+      } else if (outside && fromGroupId) {
+        targetGroupId = "";
+        targetPlacement = "after";
+        targetElement = outside;
+      } else if (target && (!group || target.classList.contains("task-group-head")) && todosCanReorderTogether(drag.sourceId, target.dataset.todoId)) {
         const targetRect = target.getBoundingClientRect();
         targetPlacement = clientY < targetRect.top + targetRect.height / 2 ? "before" : "after";
         targetId = target.dataset.todoId;
         targetElement = target;
-        targetBucket = todoManualBucketForCurrentUser(contextTodos().find((todo) => todo.id === targetId));
+        targetBucket = todoManualBucketForCurrentUser(findTodoOrderItem(targetId));
+        if (fromGroupId) targetGroupId = "";
       } else if (section && todoCanManualReorder(source)) {
         const bucket = String(section.dataset.todoDropBucket || "");
         const anchorId = String(section.dataset.todoDropTargetId || "");
@@ -13335,16 +13452,19 @@ function updateTodoPointerDragTarget(clientX, clientY) {
           targetId = anchorId;
           targetPlacement = section.dataset.todoDropPlacement === "after" ? "after" : "before";
           targetElement = section;
+          if (fromGroupId) targetGroupId = "";
         }
       }
       if (drag.targetElement !== targetElement) {
         drag.targetElement?.classList.remove("todo-drop-target");
-        if (targetElement?.classList.contains("todo-order-drop-zone-end")) targetElement.classList.add("todo-drop-target");
+        if (targetElement?.matches(".todo-order-drop-zone-end, .task-group-card, .task-group-outside")) targetElement.classList.add("todo-drop-target");
       }
       drag.targetElement = targetElement;
       drag.targetId = targetId;
       drag.targetBucket = targetBucket;
       drag.targetPlacement = targetPlacement;
+      drag.targetGroupId = targetGroupId;
+      drag.fromGroupId = fromGroupId;
       drag.hasDropTarget = Boolean(targetElement);
       updateTodoPointerDragGhost(drag);
       updateTodoPointerDragIndicator(drag);
@@ -13465,9 +13585,9 @@ function updateTodoPointerDrag(event) {
 function finishTodoPointerDrag(event) {
       if (!todoPointerDrag || todoPointerDrag.pointerId !== event.pointerId) return;
       event.preventDefault();
-      const { sourceId, targetId, targetPlacement, targetBucket, active, hasDropTarget } = clearTodoPointerDrag();
+      const { sourceId, targetId, targetPlacement, targetBucket, targetGroupId, fromGroupId, active, hasDropTarget } = clearTodoPointerDrag();
       if (!active || !hasDropTarget) return;
-      reorderTodos(sourceId, targetId, targetPlacement, targetBucket).catch((error) => showNotice(error.message));
+      reorderTodos(sourceId, targetId, targetPlacement, targetBucket, targetGroupId === undefined ? {} : { targetGroupId, fromGroupId }).catch((error) => showNotice(error.message));
     }
 
 function cancelTodoPointerDrag(event) {
@@ -13475,11 +13595,10 @@ function cancelTodoPointerDrag(event) {
       clearTodoPointerDrag();
     }
 
-async function reorderTodos(sourceId, targetId = "", targetPlacement = "before", requestedBucket = "") {
+async function reorderTodos(sourceId, targetId = "", targetPlacement = "before", requestedBucket = "", groupMove = {}) {
       if (!sourceId) return;
-      const todos = contextTodos();
-      const source = todos.find((todo) => todo.id === sourceId);
-      const target = todos.find((todo) => todo.id === targetId);
+      const source = findTodoOrderItem(sourceId);
+      const target = findTodoOrderItem(targetId);
       if (!source || (target && !todosCanReorderTogether(sourceId, targetId))) return;
       const sourceRow = [...document.querySelectorAll('#todoItems .todo-item[data-todo-id]')]
         .find((row) => row.dataset.todoId === sourceId && !row.querySelector('.drag-handle:disabled'));
@@ -13498,11 +13617,13 @@ async function reorderTodos(sourceId, targetId = "", targetPlacement = "before",
             targetId: target?.id || "",
             placement: targetPlacement === "after" ? "after" : "before",
             targetBucket,
+            ...groupMove,
             editLockTokens
           })
         });
         if (isCurrentTodoRevision(todoRevision)) {
           state.todos = data.todos;
+          if (Array.isArray(data.taskGroups)) state.taskGroups = data.taskGroups;
           if (Array.isArray(data.debts)) state.debts = data.debts;
           refreshClientList();
           state.todoReorderOrigin = { previousId, nextId };
@@ -13829,6 +13950,7 @@ function revealTodoFromSearch(todo) {
           showNotice("Opravilo v trenutnem prikazu ni vidno. Odpri ga neposredno iz iskalnika.");
           return;
         }
+        if (target.closest(".task-group-body")?.hidden) target.closest(".task-group-card").querySelector(".task-group-toggle").click();
         if (state.todoSearchHighlightTimer) window.clearTimeout(state.todoSearchHighlightTimer);
         target.classList.remove("search-result-highlight");
         void target.offsetWidth;

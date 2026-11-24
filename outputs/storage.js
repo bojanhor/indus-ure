@@ -143,6 +143,7 @@ async function migratePostgresNormalization() {
 }
 
 async function writeDbAsync(db) {
+  require("./task-groups").prune(db);
   appendUndoJournalForMutation(db);
   db.syncRevision = Math.max(0, Number(db.syncRevision || 0)) + 1;
   if (!DATABASE_URL) {

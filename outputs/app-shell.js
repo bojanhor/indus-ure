@@ -8,6 +8,8 @@ const path = require("node:path");
 const browserModules = [
   ["worker-access", "worker-access.js"],
   ["absence-model", "absence-model.js"],
+  ["task-groups", "task-groups.js"],
+  ["editor/task-groups", "editor/task-groups.js"],
   ["calendar-order", "calendar-order.js"],
   ["calendar-dates", "calendar-dates.js"],
   ["payroll-travel", "payroll-travel.js"],

@@ -388,6 +388,33 @@ vizualno preverjeni računalniška in telefonska širina (ne fizični telefon).
 Fakture in skupni Nginx nista spremenjena. Devet moderate opozoril ob
 namestitvi nespremenjenih odvisnosti ostaja zunaj tega prikaznega popravka.
 
+## Organizacijske skupine opravil
+
+Skupine so neodvisne od strank in dodelitev. V pogledu »Ročno« imajo
+lastno nujnost in položaj; vrstni red znotraj skupine uporablja obstoječe
+prioritete posameznih dogodkov. Vlečenje deluje tudi na telefonu s
+pridržanjem. Včlanitev je vedno na ravni dogodka (vsi izvajalci), z največ
+eno skupino na dogodek; gnezdenje ni mogoče. Zaključevanje ali pretvorba v
+vpis ur odstrani članstvo. Koš ga ne razkrije; obnovitev vrne članstvo, če
+skupina še obstaja. Razpustitev ne izbriše ali odklene dogodkov.
+
+Šef, lastnik in delavec z vsaj enim aktivnim dodeljenim dogodkom lahko
+urejajo vidno skupino. Oglasi API in koledarska povezava vrnejo samo
+dovoljene dogodke. Relacije in metapodatki se shranijo v obstoječi
+PostgreSQL `indus_meta` posnetek (ločeni zbirki `taskGroups` in
+`taskGroupMembers`), brez spremembe SQL sheme. Revizijsko varovalo in
+obstoječi Undo pokrivata urejanje, razvrščanje in razpustitev; rollback
+kode skrije skupine, podatki ostanejo v metapodatkih. Nove skupinske
+postavke v Undo ob povratku na staro kodo niso podprte.
+
+Skupinski termin je ločen v mesečnem/dnevnem koledarju. V dnevnem
+pogledu ni ročajev za premik ur skupine; spremeni jih v njenem modalu.
+V mesečnem koledarju lahko premakneš samo termin skupine, ne njenih
+dogodkov. Google/ICS izvoz vključi lastni termin ter naslove in varovane
+povezave za dovoljene člane (brez opisa skupine ali tujih dogodkov).
+Ne vstopa v izračun dnevnih ur, obračunov ali v CSV vpisov ur. Celotni
+recovery in brskalniški backup vključita skupinske metapodatke in povezave.
+
 ## Obvezni postopek objave Ure
 
 ### Ločeni obračunski zaklepi (18. 11. 2026)

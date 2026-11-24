@@ -253,6 +253,10 @@ function undoActionLabel({ req, actor, beforeState, afterState }) {
     const item = undoChangedItem(beforeState.absences, afterState.absences);
     return prefix + (method === "DELETE" ? " izbrisal" : method === "POST" ? " dodal" : " spremenil") + " odsotnost: " + (item?.date || "") + " – " + (item?.endDate || "");
   }
+  if (pathname.startsWith("/api/task-groups")) {
+    const group = undoChangedItem(beforeState.taskGroups, afterState.taskGroups);
+    return prefix + (method === "DELETE" ? " razpustil" : method === "POST" ? " ustvaril" : " uredil") + " skupino »" + cleanAuditLogText(group?.title || "", 100) + "«";
+  }
   if (pathname.startsWith("/api/todos")) {
     const title = cleanAuditLogText(todo?.title || "brez naslova", 100);
     if (method === "POST" && pathname === "/api/todos") return prefix + " ustvaril dogodek \u00bb" + title + "\u00ab";
@@ -286,7 +290,7 @@ function undoEligibleRequest(req) {
   const pathname = new URL(req.url, "http://undo.local").pathname;
   if (/^\/api\/todos\/(?:video|image|pdf|drive-files|[^/]+\/(?:lock|completion-request|share-pdf-ticket))/.test(pathname)) return false;
   if (/^\/api\/(?:attachments|notifications|auth|google|login|logout|password|profile|billing-locks|undo-journal|backup)\b/.test(pathname)) return false;
-  return /^\/api\/(?:absences(?:\/|$)|todos(?:\/|$)|entries(?:\/|$)|clients(?:\/|$)|client-bills(?:\/|$)|payrolls(?:\/|$)|advances(?:\/|$)|personal-purchases(?:\/|$)|debts(?:\/|$)|settings\/billing$)/.test(pathname);
+  return /^\/api\/(?:task-groups(?:\/|$)|absences(?:\/|$)|todos(?:\/|$)|entries(?:\/|$)|clients(?:\/|$)|client-bills(?:\/|$)|payrolls(?:\/|$)|advances(?:\/|$)|personal-purchases(?:\/|$)|debts(?:\/|$)|settings\/billing$)/.test(pathname);
 }
 
 function appendUndoJournalForMutation(db) {
@@ -372,7 +376,8 @@ function restoreUndoPatch(db, patch) {
 function visibleUndoJournal(db, user) {
   const current = currentUndoRecord(db);
   return normalizeUndoJournal(db.undoJournal)
-    .filter(record => !record.patch?.arrays?.absences || user?.role === "boss" || record.actorId === user?.id)
+    .filter(record => user?.role === "boss" || record.actorId === user?.id
+      || !(record.patch?.arrays?.absences || record.patch?.arrays?.taskGroups || record.patch?.arrays?.taskGroupMembers))
     .map((record) => ({
     id: record.id,
     createdAt: record.createdAt,

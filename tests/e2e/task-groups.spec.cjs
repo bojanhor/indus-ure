@@ -1,0 +1,155 @@
+const { test, expect } = require('@playwright/test');
+const { TEST_PASSWORD, startIsolatedTestApp } = require('./test-app.cjs');
+test.use({ serviceWorkers: 'block', hasTouch: true });
+let app;
+test.beforeEach(async () => { app = await startIsolatedTestApp(); });
+test.afterEach(async () => { await app?.stop(); });
+async function login(page, worker = 'bojan') {
+  await page.goto(app.baseUrl);
+  await page.locator('#localTestUser').selectOption(worker);
+  await page.locator('#localTestPassword').fill(TEST_PASSWORD);
+  await page.locator('#localTestLoginBtn').click();
+  await expect(page.locator('#app')).toBeVisible();
+  await page.waitForLoadState('networkidle');
+}
+const api = (page, url, method = 'GET', data) => page.evaluate(async ({ url, method, data }) => {
+  try { return { result: await windowApi(), status: 200 }; }
+  catch (error) { return { status: error.status, error: error.message }; }
+  function windowApi() { return api(url, { method, ...(data && { body: JSON.stringify(data) }) }); }
+}, { url, method, data });
+const move = (page, sourceId, targetGroupId, fromGroupId = '') => api(page, '/api/todos/reorder', 'POST', { sourceId, targetGroupId, fromGroupId, placement: 'after' });
+async function seed(page) {
+  const { result } = await api(page, '/api/clients', 'POST', { name: 'Skupine preizkus' });
+  for (const todo of [
+    { title: 'Samo Bojan', assigneeIds: ['bojan'], date: '2026-11-20', urgent: true },
+    { title: 'Samo Ibro', assigneeIds: ['ibro'], date: '2026-11-20' },
+    { title: 'Samostojno', assigneeIds: ['bojan'] },
+    { title: 'Ne sodi v skupino', assigneeIds: ['ibro'], date: '2026-11-20', status: 'execution', syncUser: 'ibro', start: '08:00', end: '09:00' }
+  ]) {
+    const created = await api(page, '/api/todos', 'POST', { status: 'open', clientId: result.client.clientId, client: result.client.name, ...todo });
+    expect(created.status).toBe(200);
+  }
+  const snapshot = (await api(page, '/api/bootstrap')).result;
+  await page.evaluate(snapshot => { applyBootstrapSnapshot(snapshot); setWorkContext('admin'); setView('todos'); }, snapshot);
+  return Object.fromEntries(snapshot.todos.map(todo => [todo.title, todo]));
+}
+async function reload(page) {
+  const snapshot = (await api(page, '/api/bootstrap')).result;
+  await page.evaluate(snapshot => { applyBootstrapSnapshot(snapshot); render(); }, snapshot);
+}
+async function drag(page, source, target, pointer) {
+  await source.scrollIntoViewIfNeeded();
+  await target.scrollIntoViewIfNeeded();
+  const a = await source.boundingBox(), b = await target.boundingBox();
+  const from = { x: a.x + a.width / 2, y: a.y + a.height / 2 };
+  const to = { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+  if (pointer === 'mouse') {
+    await page.mouse.move(from.x, from.y); await page.mouse.down();
+    await page.mouse.move(to.x, to.y, { steps: 5 }); await page.mouse.up();
+  } else {
+    const session = await page.context().newCDPSession(page);
+    try {
+      await session.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [from] });
+      await expect(page.locator('html')).toHaveClass(/todo-drag-active/);
+      await session.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [to] });
+      await session.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    } finally { await session.detach(); }
+  }
+}
+
+for (const pointer of ['mouse', 'touch']) test(`${pointer}: drag into and out of a group, preserve priorities, and open a timed group in both calendars`, async ({ page, browserName }, info) => {
+  test.skip(pointer === 'touch' && browserName !== 'chromium', 'Trusted touch dispatcher requires Chromium.');
+  await page.setViewportSize({ width: pointer === 'touch' ? 390 : 1280, height: 950 });
+  await login(page); await seed(page);
+  await page.locator('#newTaskGroup').click();
+  await page.locator('#taskGroupForm [name="title"]').fill('Nepomembno');
+  await page.locator('#taskGroupForm [name="date"]').fill('2026-11-20');
+  await page.locator('#taskGroupForm [name="start"]').fill('10:00');
+  await page.locator('#taskGroupForm [name="end"]').fill('11:30');
+  await page.locator('#saveTaskGroup').click();
+  await expect(page.locator('#taskGroupDialog')).toBeHidden();
+  const group = page.locator('.task-group-card').filter({ hasText: 'Nepomembno' });
+  const row = page.locator('.todo-item').filter({ has: page.getByRole('button', { name: 'Uredi opravilo: Samo Ibro', exact: true }) });
+  await drag(page, row.locator('.drag-handle'), group.locator('.task-group-toggle'), pointer);
+  await expect(group.locator('.task-group-body')).toContainText('Samo Ibro');
+  await expect(group.locator('.task-group-toggle')).not.toContainText('Nujna skupina');
+  await group.locator('.task-group-toggle').click();
+  await expect(group.locator('.task-group-body')).toBeHidden();
+  await group.locator('.task-group-toggle').click();
+  await page.screenshot({ path: info.outputPath('task-group-board.png') });
+  await drag(page, group.locator('.task-group-body .drag-handle'), page.locator('.todo-item').filter({ has: page.getByRole('button', { name: 'Uredi opravilo: Samostojno', exact: true }) }), pointer);
+  await expect(group.locator('.task-group-body')).not.toContainText('Samo Ibro');
+  await drag(page, row.locator('.drag-handle'), group.locator('.task-group-toggle'), pointer);
+  await expect(group.locator('.task-group-body')).toContainText('Samo Ibro');
+  await page.evaluate(() => { state.current = parseDate('2026-11-20'); setView('calendar'); });
+  const day = page.locator('.day[data-date="2026-11-20"]');
+  await expect(day.locator('.day-todo').filter({ hasText: 'Samo Ibro' })).toHaveCount(1);
+  await day.locator('.task-group-cal').click();
+  await expect(page.locator('#taskGroupEvents')).toContainText('Samo Ibro');
+  await page.screenshot({ path: info.outputPath('task-group-calendar.png') });
+  await page.locator('#taskGroupEvents button').click();
+  await expect(page.locator('#todoFormTask')).toHaveValue('Samo Ibro');
+  await page.locator('#closeTodoDialog').click();
+  await expect(page.locator('#taskGroupDialog')).toBeVisible();
+  await page.locator('#closeTaskGroup').click();
+  await page.evaluate(() => openDayTimeline('2026-11-20'));
+  await expect(page.locator('.day-timeline-event.task-group-cal .day-resize-handle')).toHaveCount(0);
+  await page.locator('.day-timeline-event.task-group-cal').click();
+  await expect(page.locator('#taskGroupEvents')).toContainText('Samo Ibro');
+  await page.locator('#closeTaskGroup').click();
+  await expect(page.locator('#dayTimelineDialog')).toBeVisible();
+});
+
+test('shared group rights, stale moves, task completion, Google deep links and dissolve/Undo', async ({ page, browser }) => {
+  await login(page);
+  const todos = await seed(page);
+  const worker = await browser.newPage();
+  try {
+    await login(worker, 'ibro');
+    const first = (await api(page, '/api/task-groups', 'POST', { title: 'Mešana', date: '2026-11-21', endDate: '2026-11-23' })).result;
+    const second = (await api(page, '/api/task-groups', 'POST', { title: 'Zasebna' })).result;
+    const groupUrl = '/api/task-groups/' + first.id;
+    expect((await api(worker, groupUrl)).status).toBe(404);
+    expect((await move(page, todos['Ne sodi v skupino'].id, first.id)).status).toBe(403);
+    expect((await move(page, 'org:' + first.id, second.id)).status).toBe(403);
+    expect((await move(page, todos['Samo Bojan'].id, first.id)).status).toBe(200);
+    expect((await move(page, todos['Samo Ibro'].id, first.id)).status).toBe(200);
+    await reload(page);
+    const parent = page.locator(`.task-group-card[data-task-group-id="${first.id}"]`);
+    await expect(parent.locator('.task-group-toggle')).toContainText('Vsebuje nujno');
+    await expect(parent.locator('.task-group-toggle')).not.toContainText('Nujna skupina');
+    await expect(parent.locator('.task-group-body .todo-task-title, .task-group-body .todo-summary').first()).toContainText('Samo Bojan');
+    expect((await api(page, '/api/todos/reorder', 'POST', {
+      sourceId: 'org:' + first.id, targetId: todos.Samostojno.id, placement: 'after'
+    })).status).toBe(200);
+    await reload(page);
+    expect(await parent.evaluate(el => el.previousElementSibling?.querySelector('.todo-summary')?.getAttribute('aria-label'))).toBe('Uredi opravilo: Samostojno');
+    expect((await move(page, todos['Samo Ibro'].id, second.id)).status).toBe(409);
+    expect((await move(worker, todos['Samo Ibro'].id, second.id, first.id)).status).toBe(404);
+    expect((await move(worker, todos['Samo Bojan'].id, '', first.id)).status).toBe(403);
+    const group = (await api(worker, groupUrl)).result.group;
+    expect(group.eventIds).toEqual([todos['Samo Ibro'].assignmentGroupId]);
+    expect((await api(worker, groupUrl, 'PUT', { ...group, title: 'Ibro uredil' })).status).toBe(200);
+    expect((await api(page, groupUrl, 'PUT', group)).status).toBe(409);
+    await worker.goto(app.baseUrl + '/?group=' + first.id);
+    await expect(worker.locator('#taskGroupTitle')).toHaveText('Skupina: Ibro uredil');
+    await expect(worker.locator('#taskGroupEvents')).toContainText('Samo Ibro');
+    await expect(worker.locator('#taskGroupEvents')).not.toContainText('Samo Bojan');
+    const openBefore = (await api(page, '/api/todos/' + todos['Samo Ibro'].id)).result.todo;
+    const done = await api(page, '/api/todos/' + openBefore.id, 'PUT', {
+      ...openBefore, status: 'execution', start: '10:00', end: '11:00', syncUser: 'ibro'
+    });
+    expect(done.status, done.error).toBe(200);
+    expect((await api(worker, groupUrl)).status).toBe(404);
+    const current = (await api(page, groupUrl)).result.group;
+    expect(current.eventIds).toEqual([todos['Samo Bojan'].assignmentGroupId]);
+    expect((await api(page, groupUrl, 'DELETE', { revision: current.revision })).status).toBe(200);
+    expect((await api(page, '/api/todos/' + todos['Samo Bojan'].id)).status).toBe(200);
+    const journal = (await api(page, '/api/undo-journal')).result;
+    const undo = journal.actions.find(item => item.canUndo);
+    expect(undo.action).toContain('razpustil skupino');
+    expect((await api(page, '/api/undo-journal/' + undo.id, 'POST', { confirm: true })).status).toBe(200);
+    await reload(page);
+    expect((await api(page, groupUrl)).result.group.eventIds).toEqual(current.eventIds);
+  } finally { await worker.close(); }
+});
