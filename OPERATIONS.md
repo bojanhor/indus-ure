@@ -451,6 +451,31 @@ skok do obstoječe skupine za šefa. Obstoječa skupina in 118 potrjenih
 obračunov so nespremenjeni. Poslovnih zapisov v preizkusu ni bilo; oba
 health odziva uspešna.
 
+### Vlečenje iz iskalnika v opravila
+
+V Opravilih je mogoče povleči aktiven zadetek na glavo organizacijske
+skupine ali pred/za združljiv dogodek v ročnem vrstnem redu. Če je izbran
+drug prikaz Opravil, ga začetek vlečenja preklopi na »Ročno – vse«; navaden
+klik prikaza ne spreminja. Na telefonu je za začetek potrebno pridržanje;
+poteg pred pridržanjem še vedno drsi po zadetkih oziroma strani.
+
+Med vlečenjem iskalni panel ni lepljiv, zato ne zakriva ciljev. Preklic,
+izpust brez premika ali zunaj cilja ne shranijo spremembe. Uporablja se
+obstoječi `POST /api/todos/reorder` z obstoječimi pravicami, revizijo in
+Undo. Izpust ne spreminja datuma, časa, statusa ali izvajalcev. Prazna
+skupina nima pojasnjevalnega besedila; cilj je njena glava. V koledarju se
+vlečenje iz iskalnika še vedno uporabi za premik termina.
+
+Objavljeno 24. 11. 2026 kot `9f18d17`; povrnitev kode na `96b8de5` ne
+zahteva obnove baze. Chromium 146/146, Firefox 53 uspešnih in 5 namenskih
+preskokov dotika, strežniški `npm test` 359/359, PostgreSQL
+QA/restore/upgrade 39 + 1 + 2 + 4. Preverjena predobjavna kopija
+`indus-ure-recovery-20261124T090822Z.tar.gz` (209068499 B), SHA-256
+`3240d1c61e31fe468ff513e9ea182c329132fb2c0b6027d78fe3753700325a7d`.
+V produkciji je bil začetek in preklic vlečenja preverjen s šefovskim
+in delavskim računom brez poslovnih zapisov. Obstoječa skupina in 118
+potrjenih obračunov so nespremenjeni; oba health odziva sta uspešna.
+
 ## Obvezni postopek objave Ure
 
 ### Ločeni obračunski zaklepi (18. 11. 2026)
