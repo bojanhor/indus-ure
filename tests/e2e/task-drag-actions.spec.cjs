@@ -72,7 +72,8 @@ async function touchDrop(page, source, target, screenshot) {
   } finally { await session.detach(); }
 }
 async function search(page) {
-  await page.locator('#clientSearch').fill(title);
+  const input = page.locator('#clientSearch');
+  if (await input.inputValue() !== title) await input.fill(title);
   return page.locator('#searchPanel .search-result-open').filter({ hasText: title }).first();
 }
 async function groupMembers(page, id) {
@@ -101,6 +102,7 @@ test('search: choose an existing group or create a new one without leaving an em
   await page.locator('#todoGroupDropSave').click();
   await expect(picker(page)).toBeHidden();
   await expect.poll(() => groupMembers(page, id)).toEqual([source.assignmentGroupId]);
+  await expect(page.locator(`#searchPanel [data-search-group-id="${id}"] .search-result-open`).filter({ hasText: title })).toBeVisible();
   await mouseDrop(page, await search(page), action(page, 'group'));
   await page.locator('#todoGroupDropChoice').selectOption('new:');
   await page.locator('#todoGroupDropName').fill('Nova iz spusta');
