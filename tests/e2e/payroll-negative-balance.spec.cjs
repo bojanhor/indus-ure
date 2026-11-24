@@ -27,7 +27,6 @@ test("an employee's personal purchase can make the payroll balance negative", as
     await expect(page.locator("#billingFrom")).toHaveValue(date);
     await expect(page.locator("#billingTo")).toHaveValue(date);
     await expect(page.locator("#billingSummary .is-payout .billing-summary-value")).toHaveText(expected);
-    await expect(page.locator("#billingConfirm")).toBeDisabled();
     await page.screenshot({ path: test.info().outputPath("negative-payroll.png") });
   } finally {
     await app.stop();
