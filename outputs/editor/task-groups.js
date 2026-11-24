@@ -4,6 +4,8 @@ function createTaskGroupUi() {
   const dialog = $("taskGroupDialog");
   const form = $("taskGroupForm");
   const list = $("taskGroupEvents");
+  $("editTaskGroup").innerHTML = taskActionIcons.edit;
+  $("deleteTaskGroup").innerHTML = taskActionIcons.remove;
   let editing = null, dayReturn = null, suspended = false, saving = false, scrollTop = 0;
   const run = work => work().catch(error => showNotice(error.message));
   const groups = () => state.taskGroups || [];
@@ -29,6 +31,20 @@ function createTaskGroupUi() {
       group.id, todos.filter(todo => byEvent.get(todoEventId(todo)) === group.id)
     ])) };
   }
+  function searchGroups() {
+    return groups().filter(inContext);
+  }
+  function reveal(id) {
+    if (state.view !== "todos") setView("todos");
+    if (state.todoSortMode !== "manual") {
+      $("todoSortMode").value = "manual";
+      $("todoSortMode").dispatchEvent(new Event("change", { bubbles: true }));
+    }
+    requestAnimationFrame(() => {
+      const head = document.querySelector(`#todoItems .task-group-card[data-task-group-id="${CSS.escape(id)}"] .task-group-head`);
+      if (head) focusTodoSearchResult(head, head.querySelector(".task-group-toggle"));
+    });
+  }
   function header(item, children) {
     const group = groups().find(group => group.id === item.groupId);
     const folded = collapsed().has(group.id);
@@ -43,8 +59,8 @@ function createTaskGroupUi() {
     const summary = [todoDateTimeLabel(item), item.urgent ? "Nujna skupina" : "", countText,
       children.some(todo => todo.urgent) ? "Vsebuje nujno" : "", children.some(todoChangeNotice) ? "Spremenjeno" : ""].filter(Boolean).join(" · ");
     head.innerHTML = `<button class="drag-handle" type="button" aria-label="Povleci skupino">::</button>
-      <button type="button" class="task-group-toggle" aria-expanded="${!folded}"><span aria-hidden="true">${folded ? "▸" : "▾"} ▣</span> <strong>${escapeHtml(group.title)}</strong><small>${escapeHtml(summary)}</small></button>
-      <button type="button" class="secondary task-group-edit" aria-label="Uredi skupino">✎</button>`;
+      <button type="button" class="task-group-toggle" aria-expanded="${!folded}"><span class="task-group-chevron" aria-hidden="true">${folded ? "▸" : "▾"}</span> ${taskActionIcons.group} <strong>${escapeHtml(group.title)}</strong><small>${escapeHtml(summary)}</small></button>
+      <button type="button" class="todo-edit-icon task-group-edit" aria-label="Uredi skupino" title="Uredi skupino">${taskActionIcons.edit}</button>`;
     bindTodoDragHandle(head, item.id);
     const body = document.createElement("div");
     body.className = "task-group-body";
@@ -57,9 +73,9 @@ function createTaskGroupUi() {
       if (body.hidden) saved.add(group.id); else saved.delete(group.id);
       localStorage.setItem(collapseKey(), JSON.stringify([...saved]));
       toggle.setAttribute("aria-expanded", String(!body.hidden));
-      toggle.firstElementChild.textContent = body.hidden ? "▸ ▣" : "▾ ▣";
+      toggle.firstElementChild.textContent = body.hidden ? "▸" : "▾";
     });
-    head.querySelector(".task-group-edit").onclick = () => run(() => open(group.id));
+    head.querySelector(".task-group-edit").onclick = () => run(() => open(group.id, { edit: true }));
     outer.append(head, body);
     return { outer, body };
   }
@@ -109,6 +125,12 @@ function createTaskGroupUi() {
     dayReturn = null;
     void waitForModalHistoryTraversal().then(() => openDayTimeline(snapshot.date, { viewSnapshot: snapshot }));
   }
+  function showFields(show) {
+    form.hidden = !show;
+    $("saveTaskGroup").hidden = !show;
+    $("deleteTaskGroup").hidden = !editing || !show;
+    $("editTaskGroup").setAttribute("aria-expanded", String(show));
+  }
   async function open(id = "", { resume = false, edit = false } = {}) {
     if (saving) return;
     const group = groups().find(group => group.id === id);
@@ -124,8 +146,7 @@ function createTaskGroupUi() {
     form.reset();
     $("taskGroupTitle").textContent = group ? "Skupina: " + group.title : "Nova skupina";
     $("editTaskGroup").hidden = !group;
-    form.hidden = Boolean(group && !edit);
-    $("deleteTaskGroup").hidden = !group;
+    showFields(!group || edit);
     for (const key of ["title", "description", "date", "endDate", "start", "end"]) form.elements[key].value = group?.[key] || "";
     form.elements.urgent.checked = Boolean(group?.urgent);
     refreshList();
@@ -143,12 +164,9 @@ function createTaskGroupUi() {
         method, body: JSON.stringify({ ...values, revision: editing?.revision })
       });
       if (isCurrentTodoRevision(mutation)) state.taskGroups = data.taskGroups;
-      if (method === "POST" && state.view === "todos" && state.todoSortMode !== "manual") {
-        $("todoSortMode").value = "manual";
-        $("todoSortMode").dispatchEvent(new Event("change", { bubbles: true }));
-      }
-      if (dialog.open) dialog.close();
+      if (dialog.open) await closeModalBeforeTransition(dialog);
       render(); saveOfflineSnapshotSoon();
+      if (method === "POST" && data.id) reveal(data.id);
     } finally {
       finishTodoMutation();
       saving = false;
@@ -156,7 +174,7 @@ function createTaskGroupUi() {
     }
   }
   $("newTaskGroup").onclick = () => run(() => open());
-  $("editTaskGroup").onclick = () => { form.hidden = !form.hidden; };
+  $("editTaskGroup").onclick = () => { showFields(form.hidden); if (!form.hidden) form.elements.title.focus(); };
   $("closeTaskGroup").onclick = () => dialog.close();
   $("deleteTaskGroup").onclick = () => run(async () => {
     if (await showAppConfirm("Razpustim skupino? Dogodki ostanejo med samostojnimi opravili.")) await change("DELETE");
@@ -186,5 +204,5 @@ function createTaskGroupUi() {
       render(); saveOfflineSnapshotSoon();
     } finally { finishTodoMutation(); }
   }
-  return { board, header, card, currentGroupId, calendarCards, moveDate, open: id => run(() => open(id)), resumeLink };
+  return { board, header, card, currentGroupId, calendarCards, moveDate, searchGroups, reveal, open: id => run(() => open(id)), resumeLink };
 }

@@ -38,8 +38,11 @@ async function reload(page) {
   await page.evaluate(snapshot => { applyBootstrapSnapshot(snapshot); render(); }, snapshot);
 }
 async function drag(page, source, target, pointer) {
-  await source.scrollIntoViewIfNeeded();
-  await target.scrollIntoViewIfNeeded();
+  // A read-only sync can replace rows before the gesture has even begun.
+  await expect(async () => {
+    await source.scrollIntoViewIfNeeded({ timeout: 1500 });
+    await target.scrollIntoViewIfNeeded({ timeout: 1500 });
+  }).toPass({ timeout: 5000 });
   const a = await source.boundingBox(), b = await target.boundingBox();
   const from = { x: a.x + a.width / 2, y: a.y + a.height / 2 };
   const to = { x: b.x + b.width / 2, y: b.y + b.height / 2 };
@@ -151,5 +154,74 @@ test('shared group rights, stale moves, task completion, Google deep links and d
     expect((await api(page, '/api/undo-journal/' + undo.id, 'POST', { confirm: true })).status).toBe(200);
     await reload(page);
     expect((await api(page, groupUrl)).result.group.eventIds).toEqual(current.eventIds);
+  } finally { await worker.close(); }
+});
+
+test('themed group form, new group location and searchable headings with matching members only', async ({ page, browser }, info) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await login(page);
+  const todos = await seed(page);
+  await page.locator('#todoSortMode').selectOption('client');
+  await page.locator('#newTaskGroup').click();
+  const title = page.locator('#taskGroupForm [name="title"]');
+  await expect(title).toHaveCSS('border-radius', '8px');
+  await expect(title).toHaveCSS('min-height', '42px');
+  await expect(page.locator('#saveTaskGroup')).toHaveText('✓');
+  await title.fill('Skupina Nabrano');
+  await page.screenshot({ path: info.outputPath('themed-group-form.png') });
+  await page.locator('#saveTaskGroup').click();
+  const card = page.locator('.task-group-card').filter({ hasText: 'Skupina Nabrano' });
+  await expect(page.locator('#taskGroupDialog')).toBeHidden();
+  await expect(page.locator('#todoSortMode')).toHaveValue('manual');
+  await expect(card.locator('.task-group-head')).toHaveClass(/search-result-highlight/);
+  await expect(card.locator('.task-group-toggle')).toBeFocused();
+  await expect(card.locator('.task-group-head')).toBeInViewport();
+  await reload(page);
+  await expect(card.locator('.task-group-head')).toHaveClass(/search-result-highlight/);
+  await expect(card.locator('.task-group-toggle')).toBeFocused();
+  const id = await card.getAttribute('data-task-group-id');
+  expect((await move(page, todos['Samo Ibro'].id, id)).status).toBe(200);
+  expect((await move(page, todos['Samo Bojan'].id, id)).status).toBe(200);
+  await reload(page);
+  const search = page.locator('#clientSearch');
+  const groupResult = page.locator('#searchPanel .search-task-group');
+  const child = groupResult.locator('.search-task-group-members .result');
+  await search.fill('Nabrano');
+  await expect(groupResult).toHaveCount(1);
+  await expect(child).toHaveCount(0);
+  await search.fill('Samo Ibro');
+  await expect(groupResult.locator('.search-task-group-header')).toContainText('Skupina Nabrano');
+  await expect(child).toHaveCount(1);
+  await expect(child.first()).toContainText('Samo Ibro');
+  await expect(groupResult).not.toContainText('Samo Bojan');
+  const placement = await groupResult.evaluate(group => {
+    const head = group.querySelector('.search-task-group-header').getBoundingClientRect();
+    const row = group.querySelector('.search-task-group-members .result').getBoundingClientRect();
+    return { indented: row.left > head.left + 8, below: row.top >= head.bottom - 1 };
+  });
+  expect(placement).toEqual({ indented: true, below: true });
+  await page.screenshot({ path: info.outputPath('group-search-mobile.png') });
+  await groupResult.getByRole('button', { name: 'Pokaži skupino v seznamu: Skupina Nabrano' }).click();
+  await expect(search).toBeEmpty();
+  await expect(card.locator('.task-group-toggle')).toBeFocused();
+  await search.fill('Nabrano');
+  await groupResult.getByRole('button', { name: 'Odpri skupino: Skupina Nabrano' }).click();
+  await expect(page.locator('#taskGroupEvents')).toContainText('Samo Ibro');
+  await expect(page.locator('#saveTaskGroup')).toBeHidden();
+  await page.locator('#editTaskGroup').click();
+  await expect(title).toBeFocused();
+  await expect(page.locator('#saveTaskGroup')).toBeVisible();
+  await page.locator('#closeTaskGroup').click();
+
+  const worker = await browser.newPage();
+  try {
+    await login(worker, 'ibro');
+    await worker.locator('#clientSearch').fill('Samo');
+    const visibleGroup = worker.locator('#searchPanel .search-task-group');
+    await expect(visibleGroup).toContainText('Samo Ibro');
+    await expect(visibleGroup).not.toContainText('Samo Bojan');
+    await worker.locator('#clientSearch').fill('Samo Bojan');
+    await expect(worker.locator('#searchPanel .result')).toHaveCount(0);
   } finally { await worker.close(); }
 });

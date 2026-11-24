@@ -1116,7 +1116,7 @@ test("iskanje omogo\u010da skok do opravila z za\u010dasno poudaritvijo", async 
   const html = await readAppHtml();
   assert.match(html, /class="search-result-locate icon-btn"/);
   assert.match(html, /function revealTodoFromSearch\(todo\)/);
-  assert.match(html, /target\.scrollIntoView\(\{ behavior: "smooth", block: "center", inline: "nearest" \}\)/);
+  assert.match(html, /target\.scrollIntoView\(\{ behavior: matchMedia\("\(prefers-reduced-motion: reduce\)"\)\.matches \? "instant" : "smooth", block: "center", inline: "nearest" \}\)/);
   assert.match(html, /target\.classList\.add\("search-result-highlight"\)/);
   assert.match(html, /@keyframes search-result-highlight/);
 });

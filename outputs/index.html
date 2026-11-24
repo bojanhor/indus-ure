@@ -1750,19 +1750,20 @@
     .task-group-head.todo-item { display: flex; align-items: center; gap: 8px; background: #e5edf7; margin: 0; }
     .task-group-toggle { flex: 1; min-width: 0; text-align: left; background: transparent; color: inherit; border: 0; padding: 8px 0; overflow-wrap: anywhere; }
     .task-group-toggle small { display: block; }
+    .task-group-toggle svg { width: 16px; height: 16px; vertical-align: text-bottom; }
     .task-group-body { padding: 5px 6px 5px 14px; }
     .task-group-body .todo-item { margin-block: 3px; }
     .task-group-card.todo-drop-target, .task-group-outside.todo-drop-target { outline: 3px solid var(--accent); outline-offset: -2px; }
     .task-group-outside { border: 1px dashed #8da2b4; padding: 6px; border-radius: 7px; margin-block: 5px; color: var(--muted); font-size: .8rem; }
     .todo-drag-active .task-group-outside { background: #eef2f7; }
     .task-group-cal.todo-status-color { background: #e5edf7; color: #243b55; }
-    #taskGroupForm { padding: 14px; display: grid; gap: 10px; }
-    #taskGroupForm[hidden] { display: none; }
-    #taskGroupForm label { display: grid; gap: 4px; min-width: 0; }
-    #taskGroupForm label.task-group-urgent { display: flex; align-items: center; }
-    .task-group-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-    .task-group-fields input { width: 100%; min-width: 0; }
-    #taskGroupEvents { display: grid; gap: 5px; max-height: 35vh; overflow: auto; padding: 14px; }
+    .task-group-cal .task-group-folder { width: 1.2em; height: 1.2em; vertical-align: text-bottom; margin-inline-end: 3px; }
+    #taskGroupDialog [hidden], #taskGroupEvents:empty { display: none; }
+    #taskGroupForm .modal-grid > *, #taskGroupForm .modal-grid input { min-width: 0; }
+    #taskGroupForm input:not([type="checkbox"]) { min-height: 42px; }
+    #taskGroupForm .todo-form-option { margin: 0; }
+    #taskGroupDialog .modal-head-actions svg { width: 19px; height: 19px; }
+    #taskGroupEvents { display: grid; gap: 5px; max-height: 35vh; overflow: auto; padding: 14px 20px; }
     .task-group-event-link { text-align: left; overflow-wrap: anywhere; }
     .todo-urgent-chip { background: #d93025; color: #fff; white-space: nowrap; }
     .todo-item.has-change-notice {
@@ -3454,6 +3455,12 @@
     .search-result-open:focus-visible strong { color: var(--accent-dark); }
     .search-result-status { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
     .search-result-status .day-todo-settlements { position: static; color: var(--ink); }
+    .search-task-group { border: 1px solid var(--line); border-radius: 8px; margin-bottom: 5px; }
+    .search-task-group-header.result { padding: 7px 8px; background: var(--soft); border-radius: 8px; }
+    .search-task-group-header .search-result-open { display: flex; flex-wrap: wrap; gap: 5px 10px; overflow-wrap: anywhere; }
+    .search-task-group-header .search-result-open svg { width: 17px; height: 17px; flex-shrink: 0; }
+    .search-task-group-members { margin-inline: 12px 6px; padding-inline-start: 8px; border-inline-start: 2px solid var(--line); }
+    .search-task-group-members .result:last-child { border-bottom: 0; }
     .search-result-calendar-drag { touch-action: none; user-select: none; -webkit-user-select: none; }
     .search-result-calendar-drag.month-dragging { opacity: .42; outline: 2px dashed var(--accent); }
     .search-result-calendar-drag.month-todo-drag-ghost { display: grid; grid-template-columns: 1fr; padding: 10px; border-radius: 8px; background: var(--panel); }
@@ -3479,6 +3486,9 @@
     @keyframes search-result-highlight {
       0%, 100% { box-shadow: 0 0 0 0 rgba(22, 123, 150, 0); }
       14%, 58% { box-shadow: 0 0 0 4px rgba(22, 123, 150, 0.72), 0 0 0 9px rgba(22, 123, 150, 0.17); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .todo-item.search-result-highlight { animation: none; outline: 3px solid var(--accent); outline-offset: 2px; }
     }
 
     .badge {
@@ -6256,19 +6266,25 @@
     </form>
   </dialog>
   <dialog id="taskGroupDialog" aria-labelledby="taskGroupTitle">
-    <div class="modal-head"><strong id="taskGroupTitle">Nova skupina</strong><button class="secondary" id="editTaskGroup" type="button" aria-label="Nastavitve skupine">✎</button><button class="secondary" id="closeTaskGroup" type="button" aria-label="Zapri skupino">×</button></div>
-    <form id="taskGroupForm">
-      <label>Ime skupine<input name="title" required maxlength="160"></label>
-      <label>Opis<textarea name="description" rows="2" maxlength="1000"></textarea></label>
-      <label class="task-group-urgent"><input type="checkbox" name="urgent"> Nujno</label>
-      <div class="task-group-fields">
-        <label>Od dne<input name="date" type="date"></label><label>Do dne<input name="endDate" type="date"></label>
-        <label>Od ure<input name="start" type="time"></label><label>Do ure<input name="end" type="time"></label>
+    <div class="modal-head">
+      <h3 id="taskGroupTitle">Nova skupina</h3>
+      <div class="modal-head-actions" aria-label="Dejanja skupine">
+        <button class="icon-btn" id="editTaskGroup" type="button" aria-label="Nastavitve skupine" title="Nastavitve skupine" aria-expanded="false" aria-controls="taskGroupForm" hidden></button>
+        <button class="todo-modal-action danger" id="deleteTaskGroup" type="button" aria-label="Razpusti skupino" title="Razpusti skupino" hidden></button>
+        <button class="todo-modal-action primary" id="saveTaskGroup" type="submit" form="taskGroupForm" aria-label="Shrani in zapri" title="Shrani in zapri">&#10003;</button>
+        <button class="icon-btn" id="closeTaskGroup" type="button" aria-label="Zapri skupino" title="Zapri skupino">&times;</button>
       </div>
-      <div class="modal-actions">
-        <button class="secondary" id="taskGroupAllDay" type="button">Cel dan</button>
-        <button class="danger" id="deleteTaskGroup" type="button" hidden>Razpusti skupino</button>
-        <button class="primary" id="saveTaskGroup" type="submit">Shrani</button>
+    </div>
+    <form id="taskGroupForm">
+      <div class="modal-body">
+        <label>Ime skupine<input name="title" type="text" required maxlength="160" placeholder="Ime skupine"></label>
+        <label>Opis<textarea name="description" rows="2" maxlength="1000" placeholder="Neobvezno"></textarea></label>
+        <label class="todo-form-option todo-form-urgent"><input type="checkbox" name="urgent"><span>NUJNO</span></label>
+        <div class="modal-grid">
+          <label>Od dne<input name="date" type="date"></label><label>Do dne<input name="endDate" type="date"></label>
+          <label>Od ure<input name="start" type="time"></label><label>Do ure<input name="end" type="time"></label>
+        </div>
+        <div class="actions"><button class="secondary" id="taskGroupAllDay" type="button">Cel dan</button></div>
       </div>
     </form>
     <div id="taskGroupEvents"></div>
@@ -10152,6 +10168,12 @@ function calendarTodos({ includeArchived = false, workerIds = state.calendarWork
 /* @indus-module:worker-access */
 /* @indus-module:absence-model */
 /* @indus-module:task-groups */
+const taskActionIcons = {
+  edit: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 14.5V17h2.5L15.8 7.7l-2.5-2.5L4 14.5zM12.4 6.1l2.5 2.5M13.3 5.2l1.2-1.2a1.4 1.4 0 012 0l.5.5a1.4 1.4 0 010 2l-1.2 1.2"></path></svg>',
+  remove: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 5.5h14M7.5 5.5V3.5h5v2M5.5 5.5l1 11h7l1-11M8.5 8.5v5M11.5 8.5v5"></path></svg>',
+  locate: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8.5" cy="8.5" r="4.75"></circle><path d="m12 12 4.25 4.25"></path><path d="M8.5 6.5v4M6.5 8.5h4"></path></svg>',
+  group: '<svg class="task-group-folder" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 6V5a1 1 0 0 1 1-1H8l2 2h6.5a1 1 0 0 1 1 1v7.5a1 1 0 0 1-1 1h-13a1 1 0 0 1-1-1V6z"></path></svg>'
+};
 /* @indus-module:editor/task-groups */
 const taskGroupUi = createTaskGroupUi();
 /* @indus-module:calendar-order */
@@ -10327,7 +10349,7 @@ function uiIsBeingEdited() {
       const active = document.activeElement;
       const blockingDialog = [...document.querySelectorAll("dialog[open]")].some(dialog => dialog.id !== "dayTimelineDialog");
       return Boolean(blockingDialog || state.todoMutationPending || state.dayTimelineSaving
-        || state.dayTimelineInteraction || state.dayTimelineGesture || state.dayTimelineDrafts.size
+        || state.dayTimelineInteraction || state.dayTimelineGesture || state.dayTimelineDrafts.size || todoPointerDrag
         || (active?.matches('input, textarea, [contenteditable="true"]')
           && !active.matches('input[type="search"], #clientSearch, #reportClient, #clientsSearch')));
     }
@@ -10865,7 +10887,7 @@ function appendMonthMultiDayLanes(day, key, weekIndex, layout) {
           const item = document.createElement('button');
           item.type = 'button';
           item.className = `day-multiday-event todo-status-color ${todoStatusClass(todo.status)} ${todo._taskGroup ? "task-group-cal" : ""} ${todoAssigneeIds(todo).length > 1 ? 'multi-assignee' : ''} ${todo.urgent ? 'urgent' : ''} ${todoChangeNotice(todo) ? 'has-change-notice' : ''} ${actualStart ? 'is-span-start' : 'is-span-continuation'} ${actualEnd ? 'is-span-end' : ''}`;
-          const title = todo._taskGroup ? "▣ " + todo.title : todo.title || 'Brez naslova';
+          const title = todo.title || 'Brez naslova';
           item.setAttribute('aria-label', `${todo.urgent ? 'Nujno opravilo; ' : ''}${todoAssigneeNames(todo)}; ${title}; ${todoDateTimeLabel(todo)}`);
           // A span crosses the grid's weekly rows on Monday. Repeat its title
           // there even when Monday is its final day, so the continuation
@@ -10876,6 +10898,7 @@ function appendMonthMultiDayLanes(day, key, weekIndex, layout) {
             const titleElement = document.createElement('span');
             titleElement.className = 'day-multiday-event-title';
             titleElement.textContent = title;
+            if (todo._taskGroup) titleElement.insertAdjacentHTML("afterbegin", taskActionIcons.group);
             item.appendChild(titleElement);
           }
           item.addEventListener('pointerdown', (event) => beginMonthTodoPointerDrag(event, item, todo, key));
@@ -11265,11 +11288,12 @@ function renderMonth() {
             const time = todo.start && todo.end ? `<span class="day-todo-time-part">${escapeHtml(todo.start)}&ndash;</span><wbr><span class="day-todo-time-part">${escapeHtml(todo.end)}</span>` : '';
             const client = todo._absence || todo._taskGroup ? '' : todoClientCalendarName(todo, 'Brez stranke');
             if (todo._taskGroup) item.classList.add("task-group-cal");
-            const title = todo._taskGroup ? "▣ " + todo.title : todo.title || 'Brez naslova';
+            const title = todo.title || 'Brez naslova';
             if (changeNotice) item.title = todoChangeNoticeText(todo);
             const flags = `${settlementIndicators}${changeNotice ? `<span class="day-todo-change-mark" aria-label="${escapeHtml(todoChangeNoticeLabel(todo))}">&#9679;</span>` : ''}`;
             item.innerHTML = `<span class="day-todo-topline"><span class="day-todo-topline-end"><span class="day-todo-time">${time}</span>${flags ? `<span class="day-todo-flags">${flags}</span>` : ''}</span></span><span class="day-todo-client">${escapeHtml(client)}</span><span class="day-todo-title">${escapeHtml(title)}</span>`;
             item.querySelector('.day-todo-topline').prepend(calendarTodoWorkers(todo));
+            if (todo._taskGroup) item.querySelector(".day-todo-title").insertAdjacentHTML("afterbegin", taskActionIcons.group);
             item.setAttribute('aria-label', `${todo.urgent ? 'Nujno opravilo; ' : ''}${todo.status === 'material' ? 'Dostava materiala' : todoAssigneeNames(todo)}; ${todo.start && todo.end ? `${todo.start}–${todo.end}` : 'Brez ure'}; ${client}; ${title}${changeNotice ? `; ${todoChangeNoticeLabel(todo)}` : ''}`);
             item.addEventListener('pointerdown', (event) => beginMonthTodoPointerDrag(event, item, todo, key));
             item.addEventListener('lostpointercapture', cancelMonthTodoPointerDrag);
@@ -11788,7 +11812,8 @@ function renderDayTimeline() {
         heading.className = "day-event-heading";
         const title = document.createElement("strong");
         title.className = "day-timeline-event-title";
-        title.textContent = (todo._taskGroup ? "▣ " : "") + todo.title + (client ? " - " + client : "");
+        title.textContent = todo.title + (client ? " - " + client : "");
+        if (todo._taskGroup) title.insertAdjacentHTML("afterbegin", taskActionIcons.group);
         heading.append(calendarTodoWorkers(todo), title);
         button.appendChild(heading);
         const movableToTimeline = !todo._absence && !todoIsMultiDayCalendarSpan(todo);
@@ -11866,7 +11891,8 @@ function renderDayTimeline() {
         heading.className = "day-event-heading";
         const title = document.createElement("strong");
         title.className = "day-timeline-event-title";
-        title.textContent = (todo._taskGroup ? "▣ " : "") + todo.title;
+        title.textContent = todo.title;
+        if (todo._taskGroup) title.insertAdjacentHTML("afterbegin", taskActionIcons.group);
         if (isDayTimelineHoursWarning(todo)) {
           const warning = document.createElement("span");
           warning.className = "day-hours-warning";
@@ -13152,6 +13178,7 @@ function renderClientTodoItems(items, title) {
 function renderTodoItems() {
       const items = $("todoItems");
       const title = $("todoPanelTitle");
+      const focusedGroupId = document.activeElement?.closest(".task-group-head.search-result-highlight")?.dataset.todoId;
       items.innerHTML = "";
       items.classList.remove("client-todo-groups");
       if (state.todoSortMode === "client") {
@@ -13254,10 +13281,10 @@ function renderTodoItems() {
               ${hasExpandedDetails ? `<button class="todo-details-toggle${attachmentCount ? " has-attachments" : ""}" type="button" aria-expanded="${detailsExpanded}" aria-controls="todo-details-${escapeHtml(todo.id)}" title="${todoDetailsToggleLabel(detailsExpanded, attachmentCount)}" aria-label="${todoDetailsToggleLabel(detailsExpanded, attachmentCount)}">${attachmentCount ? '<span class="todo-attachment-indicator" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7.2 10.8 5.5-5.5a3.1 3.1 0 1 1 4.4 4.4l-7.4 7.4a4.5 4.5 0 0 1-6.4-6.4l7-7"></path></svg></span>' : ""}<svg class="todo-details-chevron" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 7 6 6 6-6"></path></svg></button>` : ""}
               <div class="todo-tools">
                 <button class="todo-edit-icon edit-todo" type="button" title="Uredi opravilo" aria-label="Uredi opravilo">
-                  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 14.5V17h2.5L15.8 7.7l-2.5-2.5L4 14.5zM12.4 6.1l2.5 2.5M13.3 5.2l1.2-1.2a1.4 1.4 0 012 0l.5.5a1.4 1.4 0 010 2l-1.2 1.2"></path></svg>
+                  ${taskActionIcons.edit}
                 </button>
                 <button class="todo-delete-icon delete-todo" type="button" title="Izbri&#353;i opravilo" aria-label="Izbri&#353;i opravilo">
-                  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 5.5h14M7.5 5.5V3.5h5v2M5.5 5.5l1 11h7l1-11M8.5 8.5v5M11.5 8.5v5"></path></svg>
+                  ${taskActionIcons.remove}
                 </button>
               </div>
               <div class="todo-title">${todo.urgent ? '<span class="todo-chip todo-urgent-chip">NUJNO</span> ' : ""}${linkifyText(todo.title)}</div>
@@ -13321,6 +13348,11 @@ function renderTodoItems() {
       });
       if (showManualSections) appendTodoOrderTailDropZone(items, currentManualCategory, manualTailTargetId);
       renderTodoReorderOrigin();
+      if (state.todoSearchHighlightId?.startsWith("org:")) {
+        const head = items.querySelector(`.task-group-head[data-todo-id="${CSS.escape(state.todoSearchHighlightId)}"]`);
+        head?.classList.add("search-result-highlight");
+        if (head && focusedGroupId === state.todoSearchHighlightId) head.querySelector(".task-group-toggle")?.focus({ preventScroll: true });
+      }
     }
 
     // Pointer events arrive independently for both fingers.  Coalescing them
@@ -13866,18 +13898,25 @@ function renderSearchContent() {
         return;
       }
       syncSearchPanelStickyOffset();
+      const needle = normalizeText(query);
       const matches = contextTodos()
-        .filter((todo) => normalizeText([todoClientSearchText(todo), todo.title, todo.notes, todo.createdByName].join(" ")).includes(normalizeText(query)))
+        .filter((todo) => normalizeText([todoClientSearchText(todo), todo.title, todo.notes, todo.createdByName].join(" ")).includes(needle))
         .sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")) || todoSort(a, b));
       const results = matches.filter(todo => (!state.searchHideDated || !todo.date) && (reportTodoIsCompleted(todo)
         ? state.searchIncludeCompleted : state.searchIncludeOther));
+      // Only groups from the authorized/current context participate. Matching
+      // the title of a group never widens the query to its unrelated members.
+      const groups = taskGroupUi.searchGroups();
+      const directGroups = groups.filter(group => normalizeText([group.title, group.description].join(" ")).includes(needle));
+      const groupMatches = directGroups.filter(group => state.searchIncludeOther && (!state.searchHideDated || !group.date));
+      const groupByEvent = new Map(groups.flatMap(group => group.eventIds.map(id => [id, group])));
       panel.classList.add("active");
       panel.innerHTML = `
         <div class="search-filter-bar" role="group" aria-label="Prikaz zadetkov iskanja">
           <label><input type="checkbox" data-search-filter="completed" ${state.searchIncludeCompleted ? "checked" : ""}> Zaključeno</label>
           <label><input type="checkbox" data-search-filter="other" ${state.searchIncludeOther ? "checked" : ""}> Ostali dogodki</label>
           <label><input type="checkbox" data-search-filter="undated" ${state.searchHideDated ? "checked" : ""}> Skrij dogodke z datumom</label>
-          <span class="search-filter-count">${results.length} / ${matches.length} zadetkov</span>
+          <span class="search-filter-count">${results.length + groupMatches.length} / ${matches.length + directGroups.length} zadetkov</span>
           <button type="button" data-close-search aria-label="Zapri iskanje">×</button>
         </div>
       `;
@@ -13888,12 +13927,39 @@ function renderSearchContent() {
         if (input.dataset.searchFilter === "undated") state.searchHideDated = input.checked;
         renderSearch();
       }));
-      if (!results.length) {
+      if (!results.length && !groupMatches.length) {
         const empty = document.createElement("p");
-        empty.textContent = matches.length ? "Za izbrane filtre ni dogodkov." : "Ni dogodkov za to iskanje.";
+        empty.textContent = matches.length || directGroups.length ? "Za izbrane filtre ni dogodkov." : "Ni dogodkov za to iskanje.";
         panel.appendChild(empty);
         return;
       }
+      const renderedGroups = new Map();
+      function groupResult(group) {
+        if (renderedGroups.has(group.id)) return renderedGroups.get(group.id);
+        const section = document.createElement("section");
+        section.className = "search-task-group";
+        section.dataset.searchGroupId = group.id;
+        section.innerHTML = `
+          <div class="result search-task-group-header">
+            <button class="search-result-open" type="button" aria-label="Odpri skupino: ${escapeHtml(group.title)}">
+              ${taskActionIcons.group}<strong>${escapeHtml(group.title)}</strong>
+              <span class="todo-meta">${escapeHtml(["Skupina", todoDateTimeLabel(group)].filter(Boolean).join(" · "))}</span>
+            </button>
+            <button class="search-result-locate icon-btn" type="button" title="Pokaži v seznamu" aria-label="Pokaži skupino v seznamu: ${escapeHtml(group.title)}">${taskActionIcons.locate}</button>
+          </div>`;
+        section.querySelector(".search-result-open").onclick = () => {
+          clearClientSearchAndRestoreView(); taskGroupUi.open(group.id);
+        };
+        section.querySelector(".search-result-locate").onclick = () => {
+          clearClientSearchAndRestoreView(); taskGroupUi.reveal(group.id);
+        };
+        const children = document.createElement("div");
+        children.className = "search-task-group-members";
+        section.appendChild(children); panel.appendChild(section);
+        renderedGroups.set(group.id, children);
+        return children;
+      }
+      groupMatches.forEach(groupResult);
       results.forEach((todo) => {
         const item = document.createElement("div");
         item.className = "result";
@@ -13905,7 +13971,7 @@ function renderSearchContent() {
             <span class="search-result-status"><span class="todo-chip todo-status-color ${todoStatusClass(todo.status)}">${todoStatus(todo.status).label}</span>${dayTodoSettlementIndicators(todo)}</span>
           </button>
           <button class="search-result-locate icon-btn" type="button" title="Pokaži v seznamu" aria-label="Pokaži v seznamu: ${escapeHtml(todo.title || "Brez naslova")}">
-            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8.5" cy="8.5" r="4.75"></circle><path d="m12 12 4.25 4.25"></path><path d="M8.5 6.5v4M6.5 8.5h4"></path></svg>
+            ${taskActionIcons.locate}
           </button>
         `;
         const openButton = item.querySelector(".search-result-open");
@@ -13925,13 +13991,29 @@ function renderSearchContent() {
           clearClientSearchAndRestoreView();
           revealTodoFromSearch(todo);
         });
-        panel.appendChild(item);
+        const group = TaskGroups.active(todo) && groupByEvent.get(todoEventId(todo));
+        (group ? groupResult(group) : panel).appendChild(item);
       });
     }
 
 window.addEventListener("resize", () => {
       if ($("clientSearch")?.value.trim()) syncSearchPanelStickyOffset();
     });
+
+function focusTodoSearchResult(target, control) {
+      window.clearTimeout(state.todoSearchHighlightTimer);
+      $("todoItems").querySelectorAll(".search-result-highlight").forEach(item => item.classList.remove("search-result-highlight"));
+      void target.offsetWidth;
+      target.classList.add("search-result-highlight");
+      state.todoSearchHighlightId = target.dataset.todoId;
+      target.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth", block: "center", inline: "nearest" });
+      control?.focus({ preventScroll: true });
+      state.todoSearchHighlightTimer = window.setTimeout(() => {
+        $("todoItems").querySelectorAll(".search-result-highlight").forEach(item => item.classList.remove("search-result-highlight"));
+        state.todoSearchHighlightId = "";
+        state.todoSearchHighlightTimer = null;
+      }, 3400);
+    }
 
 function revealTodoFromSearch(todo) {
       if (!todo?.id) return;
@@ -13951,16 +14033,7 @@ function revealTodoFromSearch(todo) {
           return;
         }
         if (target.closest(".task-group-body")?.hidden) target.closest(".task-group-card").querySelector(".task-group-toggle").click();
-        if (state.todoSearchHighlightTimer) window.clearTimeout(state.todoSearchHighlightTimer);
-        target.classList.remove("search-result-highlight");
-        void target.offsetWidth;
-        target.classList.add("search-result-highlight");
-        target.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
-        target.querySelector(".todo-summary")?.focus({ preventScroll: true });
-        state.todoSearchHighlightTimer = window.setTimeout(() => {
-          target.classList.remove("search-result-highlight");
-          state.todoSearchHighlightTimer = null;
-        }, 3400);
+        focusTodoSearchResult(target, target.querySelector(".todo-summary"));
       });
     }
 function refreshClientList() {
