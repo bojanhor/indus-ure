@@ -431,6 +431,26 @@ Vseh 118 potrjenih obračunov je ostalo nespremenjenih (`946f1a61c4f1a7f544e34ae
 Storitev, backup timer in oba health odziva so uspešni. Fakture in skupni
 Nginx nista bila spreminjana.
 
+### Obrazec, fokus in iskanje skupin
+
+Izdaja `96b8de5` z dne 24. 11. 2026 uporablja slog modalnega
+urejevalnika ter skupne ikone za enaka dejanja. Po ustvarjanju se ročni
+seznam pomakne do skupine, fokusira njen gumb in jo začasno poudari.
+Iskanje najde skupino po imenu ali opisu ter pod njo zamakne samo dogodke,
+ki ustrezajo poizvedbi in aktivnim filtrom. Povezava do skupine ne širi
+pravic na njene dogodke. Ni spremembe podatkovnega modela; povrnitev kode
+na `3cf1105` ohrani skupine in dogodke.
+
+Chromium 144/144, Firefox 52 uspešnih in 4 namenski preskoki, končni
+ciljni Chromium 7/7, strežniški `npm test` 359/359 ter PostgreSQL
+QA/restore/upgrade 39 + 1 + 2 + 4. Preverjena predobjavna kopija
+`indus-ure-recovery-20261124T085853Z.tar.gz` (209066237 B), SHA-256
+`f221e3707a35e9e925e0091331dbcda4646d85d365692dd4d92788c438268edc`.
+V produkciji preverjena obrazec in koledar za šefa in Ibra ter iskanje in
+skok do obstoječe skupine za šefa. Obstoječa skupina in 118 potrjenih
+obračunov so nespremenjeni. Poslovnih zapisov v preizkusu ni bilo; oba
+health odziva uspešna.
+
 ## Obvezni postopek objave Ure
 
 ### Ločeni obračunski zaklepi (18. 11. 2026)
