@@ -79,6 +79,34 @@ async function search(page) {
 async function groupMembers(page, id) {
   return (await call(page, '/api/task-groups/' + id)).data.group.eventIds;
 }
+test('bottom drop panel leaves the last calendar row reachable during a drag', async ({ page }, info) => {
+  await page.setViewportSize({ width: 1100, height: 630 });
+  const { source } = await seed(page, { undated: true });
+  await openMonth(page);
+  const result = await search(page);
+  const lastRow = page.locator('#calendar .day').last();
+  await lastRow.evaluate(el => el.scrollIntoView({ block: 'end' }));
+  const from = await center(result);
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move(from.x + 18, from.y + 12, { steps: 3 });
+  const tray = page.locator('#todoDragActions');
+  await expect(tray).toBeVisible();
+  const trayBox = await tray.boundingBox();
+  expect(Math.abs(trayBox.x + trayBox.width / 2 - 550)).toBeLessThan(18);
+  const initialBottom = (await lastRow.boundingBox()).y + (await lastRow.boundingBox()).height;
+  // Hold the pointer just above the action bar to scroll the underlying month.
+  await page.mouse.move(1010, trayBox.y - 12, { steps: 5 });
+  await expect.poll(async () => {
+    const box = await lastRow.boundingBox(); return box.y + box.height;
+  }).toBeLessThanOrEqual(Math.min(trayBox.y, initialBottom - 10));
+  await page.screenshot({ path: info.outputPath('bottom-drop-panel-and-last-row.png') });
+  const to = await center(lastRow);
+  await page.mouse.move(to.x, to.y, { steps: 4 });
+  const targetDate = await lastRow.getAttribute('data-date');
+  await page.mouse.up();
+  await expect.poll(async () => (await call(page, '/api/todos/' + source.id)).data.todo.date).toBe(targetDate);
+});
 
 test('month: dropping on the calendar group changes membership, never date, time or coworkers', async ({ page }) => {
   const { source, id } = await seed(page);

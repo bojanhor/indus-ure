@@ -19,7 +19,7 @@ const lanAuth = require("./lan-auth");
 const lanPasswordAttempts = lanAuth.createLimiter();
 const absences = require("./absence-model");
 const taskGroups = require("./task-groups");
-const { createTaskGroupHttp, taskGroupRecord } = require("./task-group-http");
+const { createTaskGroupHttp, taskGroupRecord, newTaskGroupOwner } = require("./task-group-http");
 const { createAbsenceHttp } = require("./absence-http");
 const { createCalendarSyncStore } = require("./calendar-sync-store");
 const { createGooglePlanningCalendar } = require("./google-planning-calendar");
@@ -2546,8 +2546,10 @@ function applySharedManualTodoOrder(db, user, input = {}) {
     if (String(input.fromGroupId || "") !== fromGroupId) return { status: 409, error: "Opravilo je medtem zamenjalo skupino. Osveži pogled." };
     if (scope && !taskGroups.maySeeGroup(taskGroups.index(db).get(scope), user)) return { status: 404, error: "Ciljna skupina ni na voljo." };
   }
+  const destinationGroup = scope && (db.taskGroups || []).find(group => group.id === scope);
   const nextMembers = isMove && fromGroupId !== scope
-    ? [...previousMembers.filter(member => member.id !== sourceEvent), ...(scope ? [{ id: sourceEvent, groupId: scope }] : [])] : previousMembers;
+    ? [...previousMembers.filter(member => member.id !== sourceEvent), ...(destinationGroup
+      ? [{ id: sourceEvent, groupId: scope, inheritDate: taskGroups.followsDate(null, sourceTodo, destinationGroup) }] : [])] : previousMembers;
   const allGroups = sharedManualTodoGroups({ ...db, taskGroupMembers: nextMembers }, { scope });
   const groupsById = new Map(allGroups.map(group => [group.id, group]));
   const source = groupsById.get(sourceEvent);
@@ -4323,7 +4325,7 @@ function foldIcsLine(line) {
 
 function buildCalendarIcs(db, { userId = "", combined = false } = {}) {
   const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
-  const todos = [...planningCalendar.select(db.todos, { userId, combined })
+  const todos = [...planningCalendar.select(taskGroups.calendarTodos(db), { userId, combined })
     .filter(todo => !["order", "order_car", "order_warehouse"].includes(todo.status)), ...absences.exported(db, { userId, combined }), ...taskGroups.exported(db, { userId, combined })];
   const calendarName = combined ? "INDUS URE - Planiranje - Vsi delavci"
     : `INDUS URE - Planiranje - ${db.users?.[userId]?.name || "Delovni koledar"}`;
@@ -6153,8 +6155,9 @@ async function handleApi(req, res) {
           return;
         }
         let fields;
-        try { fields = taskGroups.clean({ title: body.newGroupTitle }); }
-        catch (error) { sendJson(res, 400, { error: error.message }); return; }
+        try {
+          fields = { ...taskGroups.clean({ title: body.newGroupTitle }), ownerId: newTaskGroupOwner(db, user, body.newGroupOwnerId) };
+        } catch (error) { sendJson(res, error.status || 400, { error: error.message }); return; }
         destination = taskGroupRecord(db, user, fields, sharedManualOrderBefore);
         db.taskGroups = [...(previousTaskGroups || []), destination];
       }
@@ -6166,7 +6169,8 @@ async function handleApi(req, res) {
       }
       if (destination) recordAuditLog(db, { actor: user, action: "ustvarjena skupina", targetType: "task-group", targetId: destination.id });
       await writeDbAsync(db);
-      sendJson(res, 200, { todos: visibleTodosForUser(db, user), taskGroups: taskGroups.visible(db, user) });
+      sendJson(res, 200, { todos: visibleTodosForUser(db, user), taskGroups: taskGroups.visible(db, user),
+        ...(destination ? { createdGroupId: destination.id } : {}) });
       return;
     }
 
@@ -7449,10 +7453,12 @@ async function handleApi(req, res) {
         }
         const start = roundTimeToQuarterHour(requested.start);
         const end = roundTimeToQuarterHour(requested.end, true);
-        const date = isDateKey(requested.date) ? String(requested.date) : previousTodo.date;
-        const previousDate = String(previousTodo.date || "");
-        const dayShift = previousDate && date ? Math.round((new Date(`${date}T00:00:00`) - new Date(`${previousDate}T00:00:00`)) / 86400000) : 0;
-        const endDate = shiftDateKey(todoEndDate(previousTodo), dayShift) || date;
+        const schedule = taskGroups.effectiveTodo(previousTodo, taskGroups.scheduleIndex(db));
+        const target = isDateKey(requested.date) ? String(requested.date) : schedule.date;
+        const dateChanged = target !== schedule.date;
+        const date = dateChanged || (!previousTodo.date && (start || end)) ? target : previousTodo.date;
+        const dayShift = schedule.date && target ? Math.round((Date.parse(target) - Date.parse(schedule.date)) / 86400000) : 0;
+        const endDate = dateChanged ? shiftDateKey(todoEndDate(schedule), dayShift) || date : todoEndDate(previousTodo) || date;
         const validation = validateTodo({ ...previousTodo, date, endDate, start, end }, { requireClientId: true, db });
         if (validation) {
           sendJson(res, 400, { error: validation });
@@ -7475,7 +7481,7 @@ async function handleApi(req, res) {
           return;
         }
         if (!overlapping) {
-          const operation = { previousTodo, beforeTodos: assignmentItems.map((item) => ({ ...item })), assignmentIds, start, end, date, endDate };
+          const operation = { previousTodo, beforeTodos: assignmentItems.map((item) => ({ ...item })), assignmentIds, start, end, date, endDate, dateChanged };
           operations.push(operation);
           assignmentIds.forEach((id) => operationByAssignmentId.set(id, operation));
         }
@@ -7500,6 +7506,9 @@ async function handleApi(req, res) {
         updatedTodo.revisionHistory = appendTodoRevision(item, updatedTodo, user, action, now);
         return updatedTodo;
       });
+      for (const operation of operations) {
+        if (operation.dateChanged) taskGroups.updateMembershipDate(db, operation.previousTodo, { ...operation.previousTodo, ...operation }, true);
+      }
       const settlementChanges = operations.map((operation) => upsertSettlementCorrections(
         db,
         todoAssignmentItems(db, operation.previousTodo).map((item) => ({ ...item, start: operation.previousTodo.start, end: operation.previousTodo.end, date: operation.previousTodo.date, endDate: operation.previousTodo.endDate })),
@@ -7523,6 +7532,7 @@ async function handleApi(req, res) {
       if (lateTimeEntryReports.length) scheduleLateTimeEntryReportDelivery();
       sendJson(res, 200, {
         todos: visibleTodosForUser(db, user),
+        taskGroups: taskGroups.visible(db, user),
         lateTimeEntryReportsQueued: lateTimeEntryReports.length,
         clientBillableHoursWarnings
       });
@@ -7555,10 +7565,12 @@ async function handleApi(req, res) {
       }
       const start = roundTimeToQuarterHour(body.start);
       const end = roundTimeToQuarterHour(body.end);
-      const date = isDateKey(body.date) ? String(body.date) : previousTodo.date;
-      const previousDate = String(previousTodo.date || "");
-      const dayShift = previousDate && date ? Math.round((new Date(`${date}T00:00:00`) - new Date(`${previousDate}T00:00:00`)) / 86400000) : 0;
-      const endDate = shiftDateKey(todoEndDate(previousTodo), dayShift) || date;
+      const schedule = taskGroups.effectiveTodo(previousTodo, taskGroups.scheduleIndex(db));
+      const target = isDateKey(body.date) ? String(body.date) : schedule.date;
+      const dateChanged = target !== schedule.date;
+      const date = dateChanged || (!previousTodo.date && (start || end)) ? target : previousTodo.date;
+      const dayShift = schedule.date && target ? Math.round((Date.parse(target) - Date.parse(schedule.date)) / 86400000) : 0;
+      const endDate = dateChanged ? shiftDateKey(todoEndDate(schedule), dayShift) || date : todoEndDate(previousTodo) || date;
       const validation = validateTodo({ ...previousTodo, date, endDate, start, end }, { requireClientId: true, db });
       if (validation) {
         sendJson(res, 400, { error: validation });
@@ -7591,6 +7603,7 @@ async function handleApi(req, res) {
         updatedTodo.revisionHistory = appendTodoRevision(item, updatedTodo, user, action, now);
         return updatedTodo;
       });
+      if (dateChanged) taskGroups.updateMembershipDate(db, previousTodo, { ...previousTodo, start, end, date, endDate }, true);
       const settlementChange = upsertSettlementCorrections(
         db,
         assignmentItems.map((item) => ({ ...item })),
@@ -7611,6 +7624,7 @@ async function handleApi(req, res) {
       if (lateTimeEntryReport) scheduleLateTimeEntryReportDelivery();
       sendJson(res, 200, {
         todos: visibleTodosForUser(db, user),
+        taskGroups: taskGroups.visible(db, user),
         lateTimeEntryReportsQueued: lateTimeEntryReport ? 1 : 0,
         clientBillableHoursWarning: clientBillableHoursWarningForMove
       });
@@ -7937,6 +7951,7 @@ releaseTodoAssignmentEditLock(db, previousTodo, user, editLockToken);
         || updatedGroup.find((item) => item.syncUser === previousTodo.syncUser)
         || updatedGroup[0]
         || null;
+      if (updatedOpenedTodo) taskGroups.updateMembershipDate(db, previousTodo, updatedOpenedTodo, body.planningDateEdited === true);
       // A normal save stays quiet. When the author explicitly selects the
       // checkbox, send the real fields that changed; an unchanged save is a
       // deliberate "please review" signal and remains a manual marker.
@@ -7991,6 +8006,7 @@ releaseTodoAssignmentEditLock(db, previousTodo, user, editLockToken);
       sendJson(res, 200, {
         todos: visibleTodosForUser(db, user),
         debts: visibleDebtsForUser(db, user),
+        taskGroups: taskGroups.visible(db, user),
         lateTimeEntryReportsQueued: lateTimeEntryReport ? 1 : 0,
         clientBillableHoursWarning: clientBillableHoursWarningForUpdate
       });

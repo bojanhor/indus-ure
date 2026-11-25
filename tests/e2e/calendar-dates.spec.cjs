@@ -8,6 +8,39 @@ test.afterAll(async () => { await app?.stop(); });
 async function openMonth(page, date) {
   await page.evaluate(date => { state.calendarBrowseMonth = true; state.current = parseDate(date); setView('calendar'); render(); }, date);
 }
+test('ordinary and completed monthly filters work independently and survive a reload', async ({ page }) => {
+  await page.evaluate(async () => {
+    for (const done of [false, true]) {
+      await api('/api/todos', { method: 'POST', body: JSON.stringify({
+        title: done ? 'Zaključeno za filter' : 'Navadno za filter', status: done ? 'execution' : 'open',
+        assigneeIds: ['bojan'], done, date: '2032-04-09', start: '08:00', end: '09:00', client: 'Stranka za filter'
+      }) });
+    }
+    await loadAll();
+  });
+  await openMonth(page, '2032-04-09');
+  const day = page.locator('#calendar .day[data-date="2032-04-09"]');
+  const ordinaryTask = day.locator('.day-todo').filter({ hasText: 'Navadno za filter' });
+  const completeTask = day.locator('.day-todo').filter({ hasText: 'Zaključeno za filter' });
+  const ordinary = page.locator('#calendarOrdinaryFilter'), completed = page.locator('#calendarCompletedFilter');
+  await expect(ordinaryTask).toBeVisible();
+  await expect(completeTask).toHaveCount(0);
+  await completed.check();
+  await expect(ordinaryTask).toBeVisible();
+  await expect(completeTask).toBeVisible();
+  await ordinary.uncheck();
+  await expect(ordinaryTask).toHaveCount(0);
+  await expect(completeTask).toBeVisible();
+  await page.reload();
+  await expect(page.locator('#app')).toBeVisible();
+  await openMonth(page, '2032-04-09');
+  await expect(ordinary).not.toBeChecked();
+  await expect(completed).toBeChecked();
+  await expect(ordinaryTask).toHaveCount(0);
+  await expect(completeTask).toBeVisible();
+  await ordinary.check();
+  await completed.uncheck();
+});
 test.beforeEach(async ({ page, context }) => {
   expect((await context.request.post(app.baseUrl + '/api/test-login', { data: { userId: 'bojan', password: TEST_PASSWORD } })).ok()).toBeTruthy();
   await page.goto(app.baseUrl);

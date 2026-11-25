@@ -44,12 +44,13 @@ function eventBody(todo, db, baseUrl, definitions) {
 function calendarPlans(db, baseUrl, definitions) {
   const active = Object.values(db.users || {}).filter(user => user.active !== false);
   const bosses = active.filter(user => user.role === "boss" && user.email).map(user => user.email.toLowerCase());
+  const todos = taskGroups.calendarTodos(db);
   const plans = [{ key: "combined", title: "INDUS — Planiranje — Vsi delavci", readers: bosses,
-    todos: [...planning.select(db.todos, { combined: true }), ...absences.exported(db, { combined: true }), ...taskGroups.exported(db, { combined: true })] }];
+    todos: [...planning.select(todos, { combined: true }), ...absences.exported(db, { combined: true }), ...taskGroups.exported(db, { combined: true })] }];
   for (const user of active) {
     if (!user.email) continue;
     plans.push({ key: `worker:${user.id}`, title: `INDUS — Planiranje — ${user.name || user.id}`,
-      readers: [user.email.toLowerCase()], todos: [...planning.select(db.todos, { userId: user.id }), ...absences.exported(db, { userId: user.id }), ...taskGroups.exported(db, { userId: user.id })] });
+      readers: [user.email.toLowerCase()], todos: [...planning.select(todos, { userId: user.id }), ...absences.exported(db, { userId: user.id }), ...taskGroups.exported(db, { userId: user.id })] });
   }
   return plans.map(plan => ({ ...plan, events: Object.fromEntries(plan.todos.map(todo => {
     const body = eventBody(todo, db, baseUrl, definitions);

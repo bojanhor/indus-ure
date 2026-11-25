@@ -1770,8 +1770,9 @@
     #taskGroupDialog [hidden], #taskGroupEvents:empty { display: none; }
     #todoDragActions {
       position: fixed;
-      right: max(12px, env(safe-area-inset-right));
-      top: max(12px, env(safe-area-inset-top));
+      inset-inline: 0;
+      bottom: max(12px, env(safe-area-inset-bottom));
+      margin-inline: auto;
       z-index: 2600;
       display: flex;
       width: max-content;
@@ -1784,7 +1785,13 @@
       box-shadow: 0 8px 25px #16262e44;
     }
     #todoDragActions[hidden], #todoDragActions [hidden], #todoGroupDropDialog [hidden] { display: none; }
-    #dayTimelineDialog > #todoDragActions { position: absolute; top: 70px; }
+    #dayTimelineDialog > #todoDragActions { position: absolute; bottom: 12px; }
+    body.todo-drag-host #app { padding-bottom: var(--todo-drag-space, 0px); }
+    #dayTimelineDialog.todo-drag-host .day-timeline-scroll::after {
+      content: "";
+      display: block;
+      height: var(--todo-drag-space, 0px);
+    }
     [data-todo-drag-action] {
       display: inline-flex;
       align-items: center;
@@ -1802,6 +1809,9 @@
     [data-todo-drag-action].is-drop-target { outline: 2px solid currentColor; outline-offset: -2px; }
     [data-todo-drag-action] svg { width: 22px; height: 22px; flex: 0 0 22px; pointer-events: none; }
     #todoGroupDropEvent { overflow-wrap: anywhere; }
+    #todoGroupDropDialog { width: min(500px, calc(100vw - 26px)); }
+    #todoGroupEditorAction { display: flex; align-items: center; gap: 8px 12px; flex-wrap: wrap; }
+    #todoGroupEditorAction[hidden] { display: none; }
     #taskGroupForm .modal-grid > *, #taskGroupForm .modal-grid input { min-width: 0; }
     #taskGroupForm input:not([type="checkbox"]) { min-height: 42px; }
     #taskGroupForm .todo-form-option { margin: 0; }
@@ -3073,18 +3083,24 @@
     .calendar-worker-choices label { display: flex; align-items: center; gap: 9px; padding: 10px; font-size: 14px; cursor: pointer; }
     .calendar-worker-choices input { width: 19px; height: 19px; min-height: 0; margin: 0; flex: 0 0 19px; }
 
-    .calendar-completed-filter {
+    .calendar-entry-filter {
       display: inline-flex;
       align-items: center;
-      gap: 8px;
+      gap: 7px;
       width: max-content;
       margin: 0;
       color: var(--muted);
       font-size: 13px;
       font-weight: 700;
+      padding: 4px 8px;
+      border-radius: 7px;
     }
 
-    .calendar-completed-filter input { width: 18px; height: 18px; }
+    .calendar-entry-filter input { width: 18px; height: 18px; margin: 0; }
+    .calendar-entry-filter.ordinary { background: #eceef0; color: #475156; }
+    .calendar-entry-filter.ordinary input { accent-color: #626d74; }
+    .calendar-entry-filter.completed { background: #e8f5ef; color: #235e39; }
+    .calendar-entry-filter.completed input { accent-color: #28794b; }
 
     .weekdays,
     .calendar {
@@ -6273,7 +6289,8 @@
 
       <section class="panel calendar-shell calendar-view">
         <div class="calendar-filters">
-          <label class="calendar-completed-filter"><input id="calendarCompletedFilter" type="checkbox">Prikazuj tudi zaključene</label>
+          <label class="calendar-entry-filter ordinary"><input id="calendarOrdinaryFilter" type="checkbox" checked>Prikazuj navadna opravila</label>
+          <label class="calendar-entry-filter completed"><input id="calendarCompletedFilter" type="checkbox">Prikazuj zaključena opravila</label>
           <div class="calendar-worker-filter hidden" id="calendarWorkerFilterField">Izvajalci
             <details id="calendarWorkerFilter" class="calendar-worker-picker"><summary aria-label="Izvajalci v koledarju">Vsi izvajalci</summary><div class="calendar-worker-choices"></div></details>
           </div>
@@ -6340,6 +6357,7 @@
     <div class="modal-head">
       <h3 id="taskGroupTitle">Nova skupina</h3>
       <div class="modal-head-actions" aria-label="Dejanja skupine">
+        <button class="icon-btn" id="addTaskGroupMember" type="button" aria-label="Dodaj opravilo v skupino" title="Dodaj opravilo v skupino" hidden>+</button>
         <button class="icon-btn" id="editTaskGroup" type="button" aria-label="Nastavitve skupine" title="Nastavitve skupine" aria-expanded="false" aria-controls="taskGroupForm" hidden></button>
         <button class="todo-modal-action danger" id="deleteTaskGroup" type="button" aria-label="Razpusti skupino" title="Razpusti skupino" hidden></button>
         <button class="todo-modal-action primary" id="saveTaskGroup" type="submit" form="taskGroupForm" aria-label="Shrani in zapri" title="Shrani in zapri">&#10003;</button>
@@ -6349,6 +6367,7 @@
     <form id="taskGroupForm">
       <div class="modal-body">
         <label>Ime skupine<input name="title" type="text" required maxlength="160" placeholder="Ime skupine"></label>
+        <label id="taskGroupOwnerField" hidden>Lastnik skupine<select name="ownerId" id="taskGroupOwner" disabled></select></label>
         <label>Opis<textarea name="description" rows="2" maxlength="1000" placeholder="Neobvezno"></textarea></label>
         <label class="todo-form-option todo-form-urgent"><input type="checkbox" name="urgent"><span>NUJNO</span></label>
         <div class="todo-form-date-time-fields" id="taskGroupSchedule" role="group" aria-label="Datum in ura">
@@ -6362,17 +6381,6 @@
     <div data-todo-drag-action="trash">V koš</div>
     <div data-todo-drag-action="group">V skupino</div>
   </div>
-  <dialog id="todoGroupDropDialog" aria-labelledby="todoGroupDropTitle">
-    <div class="modal-head"><h3 id="todoGroupDropTitle">Dodaj v skupino</h3><button class="icon-btn" type="button" id="todoGroupDropClose" aria-label="Zapri izbiro skupine">&times;</button></div>
-    <form id="todoGroupDropForm">
-      <div class="modal-body">
-        <strong id="todoGroupDropEvent"></strong>
-        <label>Skupina<select id="todoGroupDropChoice" required></select></label>
-        <label hidden>Ime nove skupine<input id="todoGroupDropName" type="text" maxlength="160"></label>
-        <div class="actions"><button class="primary" type="submit" id="todoGroupDropSave">Dodaj</button></div>
-      </div>
-    </form>
-  </dialog>
   <dialog id="dayTimelineDialog">
     <form method="dialog">
       <div class="modal-head">
@@ -6508,6 +6516,10 @@
           <input id="todoFormTask" type="text" placeholder="Ime opravila" list="todoFormTaskSuggestions">
           <datalist id="todoFormTaskSuggestions"></datalist>
         </label>
+        <div id="todoGroupEditorAction" hidden>
+          <button class="secondary" type="button" id="todoGroupEditorButton">Dodaj v skupino</button>
+          <small class="todo-meta" id="todoGroupEditorCurrent"></small>
+        </div>
         <label><span id="todoFormNotesLabel">Opis del</span>
           <textarea id="todoFormNotes" placeholder="Opi&#353;i, kaj se bo delalo"></textarea>
         </label>
@@ -7085,6 +7097,22 @@
     <span class="app-notice-message" id="appNoticeMessage"></span>
     <button class="app-notice-close" id="closeAppNotice" type="button" aria-label="Zapri obvestilo">&times;</button>
   </div>
+  <dialog id="todoGroupDropDialog" aria-labelledby="todoGroupDropTitle">
+    <div class="modal-head"><h3 id="todoGroupDropTitle">Dodaj v skupino</h3><button class="icon-btn" type="button" id="todoGroupDropClose" aria-label="Zapri izbiro">&times;</button></div>
+    <form id="todoGroupDropForm">
+      <div class="modal-body">
+        <strong id="todoGroupDropEvent"></strong>
+        <label><span id="todoGroupDropSearchLabel">Išči skupino</span><input type="search" id="todoGroupDropSearch" autocomplete="off"></label>
+        <label><span id="todoGroupDropChoiceLabel">Skupina</span><select id="todoGroupDropChoice" required></select></label>
+        <label hidden>Ime nove skupine<input id="todoGroupDropName" type="text" maxlength="160"></label>
+        <label hidden>Lastnik skupine<select id="todoGroupDropOwner"></select></label>
+        <div class="actions">
+          <button class="danger" type="button" id="todoGroupDropRemove" hidden>Odstrani iz skupine</button>
+          <button class="primary" type="submit" id="todoGroupDropSave">Dodaj v skupino</button>
+        </div>
+      </div>
+    </form>
+  </dialog>
   <dialog id="appConfirmDialog">
     <form method="dialog">
       <div class="modal-head"><h3 id="appConfirmTitle">Potrditev</h3><button class="icon-btn" id="appConfirmClose" type="button" title="Zapri">&times;</button></div>
@@ -7453,6 +7481,7 @@ const state = {
       showBilledCompletedTodos: false,
       showUnbilledCompletedTodos: true,
       showCompletedCalendarTodos: false,
+      showOrdinaryCalendarTodos: true,
       calendarWorkerIds: null,
       searchReturnState: null,
       searchIncludeCompleted: false,
@@ -7736,6 +7765,8 @@ const {
     autosizeTodoNarrativeFieldsAfterLayout: (...args) => autosizeTodoNarrativeFieldsAfterLayout(...args),
     clearFormValidationError: (...args) => clearFormValidationError(...args),
     clearTodoChangeNoticeAfterOpen: (...args) => clearTodoChangeNoticeAfterOpen(...args),
+    syncTodoGroupEditor: (...args) => taskDragActions.syncEditor(...args),
+    taskGroupCalendarProjection: (...args) => taskGroupUi.calendarProjection(...args),
     clearTodoCreationDraft: (...args) => clearTodoCreationDraft(...args),
     clearTodoEditLockState: (...args) => clearTodoEditLockState(...args),
     dateKey: (...args) => dateKey(...args),
@@ -8176,7 +8207,9 @@ function calendarCompletedFilterStorageKey() {
 
 function loadCalendarCompletedFilter() {
       state.showCompletedCalendarTodos = localStorage.getItem(calendarCompletedFilterStorageKey()) === "true";
+      state.showOrdinaryCalendarTodos = localStorage.getItem(calendarCompletedFilterStorageKey() + ":ordinary") !== "false";
       if ($("calendarCompletedFilter")) $("calendarCompletedFilter").checked = state.showCompletedCalendarTodos;
+      if ($("calendarOrdinaryFilter")) $("calendarOrdinaryFilter").checked = state.showOrdinaryCalendarTodos;
       const saved = localStorage.getItem(calendarWorkerFilterStorageKey()) || "";
       try { const parsed = JSON.parse(saved); state.calendarWorkerIds = Array.isArray(parsed) ? [...new Set(parsed.filter(id => typeof id === "string" && id))] : null; }
       catch { state.calendarWorkerIds = saved ? [saved] : null; }
@@ -10250,7 +10283,8 @@ function isImportedTodo(todo) {
     }
 
 function calendarTodos({ includeArchived = false, workerIds = state.calendarWorkerIds } = {}) {
-      return [...uniqueTodosByEventId(contextTodos()).filter((todo) => !isImportedTodo(todo) && (includeArchived || !todo.archivedAt) && calendarWorkerMatchesIds(todo, workerIds)), ...calendarAbsences(workerIds)];
+      const todos = uniqueTodosByEventId(contextTodos()).filter((todo) => !isImportedTodo(todo) && (includeArchived || !todo.archivedAt) && calendarWorkerMatchesIds(todo, workerIds));
+      return [...taskGroupUi.projectCalendarTodos(todos), ...calendarAbsences(workerIds)];
     }
 
 /* @indus-module:worker-access */
@@ -11056,10 +11090,10 @@ function panMonthTodoPointerGesture(drag, event) {
       }
     }
 
-function monthTodoAutoScrollSpeed(position, size) {
+function monthTodoAutoScrollSpeed(position, size, bottom = size) {
       const edge = Math.min(MONTH_TODO_AUTO_SCROLL_EDGE, Math.max(32, size / 3));
       if (position < edge) return -Math.pow((edge - position) / edge, 1.45) * MONTH_TODO_AUTO_SCROLL_MAX_PX_PER_MS;
-      if (position > size - edge) return Math.pow((position - (size - edge)) / edge, 1.45) * MONTH_TODO_AUTO_SCROLL_MAX_PX_PER_MS;
+      if (position > bottom - edge) return Math.pow(Math.min(1, (position - (bottom - edge)) / edge), 1.45) * MONTH_TODO_AUTO_SCROLL_MAX_PX_PER_MS;
       return 0;
     }
 function tickMonthTodoPointerDragAutoScroll(timestamp) {
@@ -11068,7 +11102,7 @@ function tickMonthTodoPointerDragAutoScroll(timestamp) {
       const elapsed = Math.min(50, Math.max(0, timestamp - (drag.autoScrollAt || timestamp)));
       drag.autoScrollAt = timestamp;
       const dx = drag.action || drag.actionsOnly ? 0 : monthTodoAutoScrollSpeed(drag.clientX, window.innerWidth) * elapsed;
-      const dy = drag.action || drag.actionsOnly ? 0 : monthTodoAutoScrollSpeed(drag.clientY, window.innerHeight) * elapsed;
+      const dy = drag.action || drag.actionsOnly ? 0 : monthTodoAutoScrollSpeed(drag.clientY, window.innerHeight, taskDragActions.scrollBottom(window.innerHeight)) * elapsed;
       if (dx && drag.scrollHost) drag.scrollHost.scrollLeft += dx;
       if (dy) window.scrollBy(0, dy);
       if (dx || dy) updateMonthTodoPointerDragTarget(drag, drag.clientX, drag.clientY);
@@ -11215,7 +11249,7 @@ function finishMonthTodoPointerDrag(event) {
         void taskDragActions.commit(drag.action || "group-card", todo, drag.targetGroupId);
         return;
       }
-      if (!targetDate || (todo.date && targetDate === originDate)) return;
+      if (!targetDate || (drag.todo.date && targetDate === originDate)) return;
       const dayShift = Math.round((parseDate(targetDate) - parseDate(originDate)) / 86400000);
       if (todo._taskGroup) {
         taskGroupUi.moveDate(todo, shiftDateKey(todo.date, dayShift), shiftDateKey(todoEndDate(todo), dayShift))
@@ -11225,7 +11259,7 @@ function finishMonthTodoPointerDrag(event) {
       // Moving a card changes its schedule, never its participants. Omission
       // also preserves the server's complete assignment set after offline sync.
       const { assigneeIds, ...scheduleTodo } = todo;
-      saveTodoToServer({ ...scheduleTodo, date: targetDate, endDate: shiftDateKey(todoEndDate(todo), dayShift) || targetDate }).catch((error) => showNotice(error.message));
+      saveTodoToServer({ ...scheduleTodo, date: targetDate, endDate: shiftDateKey(todoEndDate(drag.todo), dayShift) || targetDate, planningDateEdited: true }).catch((error) => showNotice(error.message));
     }
 
 function cancelMonthTodoPointerDrag(event) {
@@ -11290,8 +11324,9 @@ function renderMonth() {
       const entries = contextEntries().filter(calendarWorkerMatches);
       // Google/ICS select() deliberately projects only the selected worker.
       // The interactive calendar must retain the API's complete assigneeIds.
-      const todos = calendarTodos().filter(todo => state.showCompletedCalendarTodos || todo._absence || PlanningCalendar.eligible(todo));
-      todos.push(...taskGroupUi.calendarCards(state.calendarWorkerIds));
+      const todos = calendarTodos().filter(todo => todo._absence || (PlanningCalendar.eligible(todo) && !todo.done
+        ? state.showOrdinaryCalendarTodos : state.showCompletedCalendarTodos));
+      if (state.showOrdinaryCalendarTodos) todos.push(...taskGroupUi.calendarCards(state.calendarWorkerIds));
       const todayDate = new Date();
       $('todayDayNumber').textContent = todayDate.getDate();
       $('todayBtn').setAttribute('aria-label', `Danes, ${todayDate.toLocaleDateString('sl-SI')}`);
@@ -11594,6 +11629,7 @@ async function saveDayTimelineDrafts({ announce = true, closeAfterSave = false }
           body: JSON.stringify({ items, editLockTokens, editorWorkContext: state.workContext || "" })
         });
         state.todos = data.todos || state.todos;
+        if (Array.isArray(data.taskGroups)) state.taskGroups = data.taskGroups;
         state.todoRevision += 1;
         // Remove precisely the submitted drafts. New changes are blocked while
         // saving, but this also keeps the operation correct if that changes.
@@ -12278,8 +12314,9 @@ function dayTimelineDragAutoScrollVelocity(clientY) {
         const proximity = Math.min(1, Math.max(0, (bounds.top + edge - clientY) / edge));
         return -maxSpeed * (0.15 + 0.85 * proximity * proximity);
       }
-      if (clientY > bounds.bottom - edge) {
-        const proximity = Math.min(1, Math.max(0, (clientY - (bounds.bottom - edge)) / edge));
+      const bottom = taskDragActions.scrollBottom(bounds.bottom);
+      if (clientY > bottom - edge) {
+        const proximity = Math.min(1, Math.max(0, (clientY - (bottom - edge)) / edge));
         return maxSpeed * (0.15 + 0.85 * proximity * proximity);
       }
       return 0;
@@ -13652,7 +13689,7 @@ function todoPointerDragScrollBounds() {
 function todoPointerDragScrollVelocity(clientY) {
       const edge = Math.min(180, Math.max(120, window.innerHeight * 0.18));
       const topDistance = Math.max(0, edge - clientY);
-      const bottomDistance = Math.max(0, clientY - (window.innerHeight - edge));
+      const bottomDistance = Math.max(0, clientY - (taskDragActions.scrollBottom(window.innerHeight) - edge));
       const direction = topDistance ? -1 : bottomDistance ? 1 : 0;
       const proximity = Math.min(1, Math.max(topDistance, bottomDistance) / edge);
       const { currentTop, maxTop } = todoPointerDragScrollBounds();
@@ -13843,6 +13880,7 @@ async function reorderTodos(sourceId, targetId = "", targetPlacement = "before",
             editLockTokens
           })
         });
+        taskDragActions.rememberGroup(data.createdGroupId || groupMove.targetGroupId);
         if (isCurrentTodoRevision(todoRevision)) {
           state.todos = data.todos;
           if (Array.isArray(data.taskGroups)) state.taskGroups = data.taskGroups;
@@ -13851,6 +13889,7 @@ async function reorderTodos(sourceId, targetId = "", targetPlacement = "before",
           state.todoReorderOrigin = { previousId, nextId };
           render();
         }
+        return data;
       } catch (error) {
         if (isNetworkError(error)) {
           throw new Error("Za skupni ročni vrstni red je potrebna povezava s strežnikom.");
@@ -14176,7 +14215,7 @@ function renderSearchContent() {
         if (state.view === "calendar" && !todo.imported && !todo.archivedAt && !todo.trashedAt) {
           openButton.classList.add("search-result-calendar-drag");
           openButton.title = "Klikni za urejanje; pridrži in povleci na dan v koledarju. Ura ostane nespremenjena.";
-          openButton.addEventListener("pointerdown", event => beginMonthTodoPointerDrag(event, openButton, todo));
+          openButton.addEventListener("pointerdown", event => beginMonthTodoPointerDrag(event, openButton, taskGroupUi.calendarProjection(todo)));
           openButton.addEventListener("lostpointercapture", cancelMonthTodoPointerDrag);
           openButton.addEventListener("contextmenu", event => event.preventDefault());
         } else if (state.view === "todos" && TaskGroups.active(todo) && !todo.calendarOnly && todoCanManualReorder(todo)) {
@@ -15144,6 +15183,11 @@ $("todoSortMode").addEventListener("change", (event) => {
 $("calendarCompletedFilter").addEventListener("change", (event) => {
       state.showCompletedCalendarTodos = Boolean(event.target.checked);
       localStorage.setItem(calendarCompletedFilterStorageKey(), String(state.showCompletedCalendarTodos));
+      renderMonth();
+    });
+$("calendarOrdinaryFilter").addEventListener("change", (event) => {
+      state.showOrdinaryCalendarTodos = Boolean(event.target.checked);
+      localStorage.setItem(calendarCompletedFilterStorageKey() + ":ordinary", String(state.showOrdinaryCalendarTodos));
       renderMonth();
     });
 $("calendarWorkerFilter").addEventListener("change", changeCalendarWorkerFilter);

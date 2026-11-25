@@ -22,10 +22,57 @@ const TaskGroups = (() => {
   function maySeeGroup(entry, user) {
     return Boolean(entry && user && (user.role === "boss" || entry.group.ownerId === user.id || entry.todos.some(todo => assigned(todo, user.id))));
   }
+  const endDate = item => item.date ? (item.endDate || item.date) : "";
+  const sameDates = (a, b) => (a.date || "") === (b.date || "") && endDate(a) === endDate(b);
+  const followsDate = (member, todo, group) => member?.inheritDate ?? (!todo.date || sameDates(todo, group));
+  function withGroupDate(todo, group) {
+    if (!group?.date) return todo;
+    // A timed task stays on one day. The group supplies dates, never hours.
+    return { ...todo, date: group.date, endDate: todo.start || todo.end ? group.date : endDate(group) };
+  }
+  function scheduleIndex(db) {
+    const groups = new Map((db.taskGroups || []).map(group => [group.id, group]));
+    return new Map((db.taskGroupMembers || []).map(member => [member.id, { member, group: groups.get(member.groupId) }]));
+  }
+  function effectiveTodo(todo, schedules) {
+    const schedule = active(todo) && schedules.get(eventId(todo));
+    return schedule?.group && followsDate(schedule.member, todo, schedule.group) ? withGroupDate(todo, schedule.group) : todo;
+  }
+  function calendarTodos(db) {
+    const schedules = scheduleIndex(db);
+    return (db.todos || []).map(todo => effectiveTodo(todo, schedules));
+  }
+  function freezeFollowers(db, { group, todos }) {
+    const byId = new Map(todos.map(todo => [eventId(todo), todo]));
+    db.taskGroupMembers = (db.taskGroupMembers || []).map(member => {
+      const todo = byId.get(member.id);
+      return member.groupId === group.id && member.inheritDate == null && todo
+        ? { ...member, inheritDate: followsDate(member, todo, group) } : member;
+    });
+  }
+  // Apply only after the task mutation has passed its edit and billing locks.
+  function updateMembershipDate(db, previous, next, explicit = false) {
+    if (!active(previous) || !active(next)) return;
+    const schedules = scheduleIndex(db);
+    const { member, group } = schedules.get(eventId(previous)) || {};
+    if (!group) return;
+    const effective = effectiveTodo(previous, schedules);
+    if (sameDates(next, effective) || (!explicit && sameDates(next, previous))) return;
+    if (!group.date || !sameDates(next, withGroupDate(next, group))) {
+      db.taskGroupMembers = db.taskGroupMembers.filter(item => item.id !== member.id);
+    } else if (member.inheritDate !== true) {
+      db.taskGroupMembers = db.taskGroupMembers.map(item => item.id === member.id ? { ...item, inheritDate: true } : item);
+    }
+  }
   function visible(db, user) {
-    return [...index(db).values()].filter(entry => maySeeGroup(entry, user)).map(({ group, todos }) => ({
-      ...group, eventIds: [...new Set(todos.filter(todo => maySeeTodo(todo, user)).map(eventId))]
-    }));
+    const schedules = scheduleIndex(db);
+    return [...index(db).values()].filter(entry => maySeeGroup(entry, user)).map(({ group, todos }) => {
+      const visibleTodos = todos.filter(todo => maySeeTodo(todo, user));
+      return {
+        ...group, eventIds: [...new Set(visibleTodos.map(eventId))],
+        dateFollowerIds: [...new Set(visibleTodos.filter(todo => followsDate(schedules.get(eventId(todo))?.member, todo, group)).map(eventId))]
+      };
+    });
   }
   function clean(input) {
     const title = String(input.title || "").trim().slice(0, 160);
@@ -59,6 +106,7 @@ const TaskGroups = (() => {
           .map(todo => ({ id: todo.id, title: todo.title })) };
     });
   }
-  return { eventId, eligible, active, idForCard, index, maySeeGroup, maySeeTodo, visible, clean, prune, card, exported };
+  return { eventId, eligible, active, idForCard, index, maySeeGroup, maySeeTodo, visible, clean, prune, card, exported,
+    sameDates, followsDate, withGroupDate, scheduleIndex, effectiveTodo, calendarTodos, freezeFollowers, updateMembershipDate };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = TaskGroups;

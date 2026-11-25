@@ -163,6 +163,16 @@ function createTaskGroupUi() {
     if (!todo || todo._taskGroup) return "";
     return groups().find(group => group.eventIds.includes(todoEventId(todo)))?.id || "";
   }
+  function calendarProjection(todo, followers = null) {
+    if (!TaskGroups.active(todo)) return todo;
+    const id = todoEventId(todo);
+    const group = followers ? followers.get(id) : groups().find(group => group.dateFollowerIds?.includes(id));
+    return TaskGroups.withGroupDate(todo, group);
+  }
+  function projectCalendarTodos(todos) {
+    const followers = new Map(groups().flatMap(group => (group.dateFollowerIds || []).map(id => [id, group])));
+    return todos.map(todo => calendarProjection(todo, followers));
+  }
   function refreshList() {
     list.replaceChildren();
     if (!editing) return;
@@ -182,7 +192,7 @@ function createTaskGroupUi() {
       title.textContent = todo.title;
       heading.append(calendarTodoWorkers(todo), title);
       row.appendChild(heading);
-      const when = todoDateTimeLabel(todo);
+      const when = todoDateTimeLabel(calendarProjection(todo));
       const client = todoClientCalendarName(todo);
       if (when || client) {
         const meta = document.createElement("span");
@@ -232,6 +242,12 @@ function createTaskGroupUi() {
     $("deleteTaskGroup").hidden = !editing || !show;
     $("editTaskGroup").setAttribute("aria-expanded", String(show));
   }
+  function fillOwners(select) {
+    const people = [...new Map([...(state.users || []), state.user].filter(user => user?.id && user.active !== false)
+      .map(user => [user.id, user])).values()].sort((a, b) => a.name.localeCompare(b.name, "sl"));
+    select.replaceChildren(...people.map(user => new Option(user.name, user.id)));
+    select.value = state.user?.id || "";
+  }
   async function open(id = "", { resume = false, edit = false, monthDate = "" } = {}) {
     if (saving) return;
     const group = groups().find(group => group.id === id);
@@ -246,8 +262,13 @@ function createTaskGroupUi() {
     editing = group || null;
     monthCreation = !group && isDateKey(monthDate);
     form.reset();
+    const chooseOwner = !group && state.user?.role === "boss";
+    $("taskGroupOwnerField").hidden = !chooseOwner;
+    $("taskGroupOwner").disabled = !chooseOwner;
+    if (chooseOwner) fillOwners($("taskGroupOwner"));
     $("taskGroupTitle").textContent = group ? "Skupina: " + group.title : "Nova skupina";
     $("editTaskGroup").hidden = !group;
+    $("addTaskGroupMember").hidden = !group || state.offlineMode;
     showFields(!group || edit);
     for (const key of ["title", "description", "date", "endDate", "start", "end"]) form.elements[key].value = group?.[key] || "";
     if (monthCreation) dateFrom.value = dateTo.value = monthDate;
@@ -289,6 +310,10 @@ function createTaskGroupUi() {
     await open("", { monthDate });
   });
   $("editTaskGroup").onclick = () => { showFields(form.hidden); if (!form.hidden) form.elements.title.focus(); };
+  $("addTaskGroupMember").onclick = () => {
+    const group = groups().find(item => item.id === editing?.id);
+    if (group && inContext(group)) taskDragActions.chooseTodo(group);
+  };
   $("closeTaskGroup").onclick = () => dialog.close();
   $("deleteTaskGroup").onclick = () => run(async () => {
     if (await showAppConfirm("Razpustim skupino? Dogodki ostanejo med samostojnimi opravili.")) await change("DELETE");
@@ -317,5 +342,5 @@ function createTaskGroupUi() {
       render(); saveOfflineSnapshotSoon();
     } finally { finishTodoMutation(); }
   }
-  return { board, header, card, currentGroupId, calendarCards, moveDate, searchGroups, reveal, open: id => run(() => open(id)), resumeLink };
+  return { board, header, card, currentGroupId, calendarProjection, projectCalendarTodos, calendarCards, moveDate, searchGroups, fillOwners, refreshList, reveal, open: id => run(() => open(id)), resumeLink };
 }

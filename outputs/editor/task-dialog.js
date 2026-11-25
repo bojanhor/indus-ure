@@ -13,6 +13,8 @@ function createTaskDialog({
   autosizeTodoNarrativeFieldsAfterLayout,
   clearFormValidationError,
   clearTodoChangeNoticeAfterOpen,
+  syncTodoGroupEditor,
+  taskGroupCalendarProjection,
   clearTodoCreationDraft,
   clearTodoEditLockState,
   dateKey,
@@ -296,9 +298,11 @@ async function openTodoDialog(todo = {}, { reportNavigationIds = null } = {}) {
       $("todoFormEnd").value = todo.end || suggestedTimes?.end || noteTimeSuggestion?.end || "";
       $("todoFormEnd").dataset.autoSuggested = String(!editing && !todo.end && Boolean(suggestedTimes || noteTimeSuggestion));
       state.todoTimeShiftDuration = null;
-      $("todoFormDate").value = todo.date || (needsTimeSuggestion ? dateKey(new Date()) : noteTimeSuggestion?.date || "");
-      $("todoFormEndDate").value = todo.date ? todoEndDate(todo) : "";
-      $("todoFormEndDate").dataset.auto = String(!todo.date || todoEndDate(todo) === todo.date);
+      const schedule = editing ? taskGroupCalendarProjection(todo) : todo;
+      $("todoFormDate").value = schedule.date || (needsTimeSuggestion ? dateKey(new Date()) : noteTimeSuggestion?.date || "");
+      $("todoFormEndDate").value = schedule.date ? todoEndDate(schedule) : "";
+      $("todoFormEndDate").dataset.auto = String(!schedule.date || todoEndDate(schedule) === schedule.date);
+      state.todoFormPlanningDates = { date: $("todoFormDate").value, endDate: $("todoFormEndDate").value };
       $("todoFormClient").value = client?.search || todo.client || "";
       state.todoDialogClientContactClientId = String(client?.clientId || client?.id || "");
       state.todoDialogClientContactIds = Array.isArray(todo.clientContactIds)
@@ -592,6 +596,7 @@ async function openMaterialEntryDialog(date = dateKey(new Date()), { draft = {} 
     }
 
 function syncTodoDialogEditActions(todo, editing = Boolean(todo?.id)) {
+      syncTodoGroupEditor(editing ? todo : null);
       $("deleteTodoFromDialog").classList.toggle("hidden", !editing);
       $("duplicateTodoFromDialog").classList.toggle("hidden", !editing || Boolean(state.todoHoursSourceId));
       $("todoFormChangeActions").classList.toggle("hidden", !editing || !todoCanMarkChangedForOthers(todo));

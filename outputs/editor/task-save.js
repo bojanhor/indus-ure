@@ -93,6 +93,7 @@ async function saveTodoToServer(todo) {
         const data = await api(path, { method, body: JSON.stringify({ ...payload, baseUpdatedAt: requestTodo.updatedAt || "" }) });
         if (isCurrentTodoRevision(todoRevision)) {
           state.todos = data.todos;
+          if (Array.isArray(data.taskGroups)) state.taskGroups = data.taskGroups;
           if (Array.isArray(data.debts)) state.debts = data.debts;
           refreshClientList();
           render();
@@ -224,6 +225,7 @@ async function keepTodoDialogOpenAfterSave(data, todo, wasCreating) {
         return;
       }
       $("todoFormId").value = saved.id;
+      state.todoFormPlanningDates = { date: $("todoFormDate").value, endDate: $("todoFormEndDate").value };
       state.todoCreationDraftCommitted = true;
       state.todoCreationDraftRestored = false;
       $("todoCreationTabs").classList.add("hidden");
@@ -321,13 +323,22 @@ async function saveTodoFromDialog({ closeAfterSave = true, handover = false } = 
       const sourceProjectTitle = sourceProjectTodoId
         ? String(existing?.sourceProjectTitle || state.todoDraftSourceProjectTitle || "").trim().slice(0, 300)
         : "";
+      const shownDates = { date: $("todoFormDate").value, endDate: $("todoFormEndDate").value };
+      const initialDates = state.todoFormPlanningDates;
+      const planningDateEdited = Boolean(existing && initialDates
+        && (shownDates.date !== initialDates.date || shownDates.endDate !== initialDates.endDate));
+      // Keep derived dates out of storage on unrelated edits. A newly timed
+      // planning task needs an underlying date for its clock interval.
+      const dates = existing && !planningDateEdited && !isHoursEntry
+        && (existing.date || !($("todoFormStart").value || $("todoFormEnd").value))
+        ? { date: existing.date || "", endDate: existing.endDate || "" } : shownDates;
       const todo = {
         ...(existing || {}),
         id: id || undefined,
         start: $("todoFormStart").value,
         end: $("todoFormEnd").value,
-        date: $("todoFormDate").value,
-        endDate: $("todoFormEndDate").value,
+        ...dates,
+        planningDateEdited,
         client: meal ? "" : client?.name || normalizeClientName($("todoFormClient").value),
         clientId: meal ? "" : client?.clientId || client?.id || "",
         title,

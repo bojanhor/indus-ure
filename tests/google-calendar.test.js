@@ -121,6 +121,38 @@ test("Google group entries include only the viewer's entitled titles and direct 
   assert.throws(() => groups.clean({ title: "Bad", date: "2026-11-21", endDate: "2026-11-23", start: "07:00", end: "08:30" }));
 });
 
+test("group dates follow for undated and matching tasks, without moving distinct or financial records", () => {
+  const g = require("../outputs/task-groups");
+  const { calendarPlans } = require("../outputs/google-planning-calendar");
+  const worker = { id: "w", role: "worker", email: "worker@example.com" };
+  const group = { id: "g", title: "Skupina", ownerId: "w", date: "2026-11-20", endDate: "2026-11-20" };
+  const todos = [
+    { id: "undated", title: "Brez datuma" },
+    { id: "equal", title: "Enak termin", date: "2026-11-20", start: "08:00", end: "09:00" },
+    { id: "own", title: "Svoj termin", date: "2026-11-23" },
+    { id: "hours", title: "Vpis ur", status: "execution" }
+  ].map(todo => ({ status: "open", syncUser: worker.id, ...todo }));
+  const db = { users: { w: worker }, taskGroups: [group], todos, taskGroupMembers: todos.map(todo => ({ id: todo.id, groupId: "g" })) };
+  g.freezeFollowers(db, g.index(db).get(group.id));
+  Object.assign(group, { date: "2026-11-25", endDate: "2026-11-27" });
+  const [undated, equal, own, hours] = g.calendarTodos(db);
+  assert.deepEqual([undated.date, undated.endDate], ["2026-11-25", "2026-11-27"]);
+  assert.deepEqual([equal.date, equal.endDate, equal.start], ["2026-11-25", "2026-11-25", "08:00"]);
+  assert.equal(own, todos[2]);
+  assert.equal(hours, todos[3]);
+  assert.equal(db.todos[0].date, undefined);
+  assert.deepEqual(g.visible(db, worker)[0].dateFollowerIds, ["undated", "equal"]);
+  const events = Object.values(calendarPlans(db, "https://example.com", {}).find(plan => plan.key === "worker:w").events);
+  assert.equal(events.find(event => event.summary === "Brez datuma").end.date, "2026-11-28");
+  assert.equal(events.some(event => event.summary === "Vpis ur"), false);
+  g.updateMembershipDate(db, todos[1], { ...todos[1], title: "Spremenjeno" });
+  assert.ok(db.taskGroupMembers.some(member => member.id === "equal"));
+  g.updateMembershipDate(db, todos[1], todos[1], true);
+  assert.equal(db.taskGroupMembers.some(member => member.id === "equal"), false);
+  g.updateMembershipDate(db, todos[2], { ...todos[2], date: group.date, endDate: group.endDate }, true);
+  assert.equal(db.taskGroupMembers.find(member => member.id === "own").inheritDate, true);
+});
+
 test("zunanje povezave dovolijo samo Google Dokumente in Preglednice", () => {
   const id = "1_z_1I_wX8-VR0K9rXj7BHRFwc--00Ul5";
   const sheetId = "1wsPGlRaN2M7biJK4zq3KnLSYRXzJX6S1";

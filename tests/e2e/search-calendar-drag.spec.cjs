@@ -34,7 +34,9 @@ for (const pointer of ['mouse', 'touch']) test(`${pointer}: search result drops 
       const result = page.locator('#searchPanel .search-result-open').filter({ hasText: todo.title }).first();
       await expect(result).toHaveClass(/search-result-calendar-drag/);
       const target = page.locator('.day[data-date="2026-10-19"]');
-      await target.evaluate(el => el.scrollIntoView({ block: 'end' }));
+      // This tests the date move itself. A separate test reaches the last
+      // row while the bottom drop panel is visible.
+      await target.evaluate(el => el.scrollIntoView({ block: 'center' }));
       const from = await result.boundingBox(), to = await target.boundingBox();
       const x = from.x + Math.min(40, from.width / 2), y = from.y + from.height / 2;
       const tx = to.x + to.width / 2, ty = to.y + to.height - 30;

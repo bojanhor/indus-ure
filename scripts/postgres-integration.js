@@ -350,14 +350,21 @@ async function main() {
       const read = (await (await request("/api/bootstrap?initial=1", { headers: worker })).json()).taskGroups;
       const shared = (await store.load()).todos.find(todo => todo.id === ids[1]);
       assert.deepEqual(read.find(group => group.id === groupId).eventIds, [shared.assignmentGroupId || shared.id]);
+      assert.deepEqual(read.find(group => group.id === groupId).dateFollowerIds, [shared.assignmentGroupId || shared.id]);
       const revision = read.find(group => group.id === groupId).revision;
-      const edited = await request(url, { method: "PUT", headers: worker, body: JSON.stringify({ title: "Edited by member", revision }) });
+      const edited = await request(url, { method: "PUT", headers: worker, body: JSON.stringify({ title: "Edited by member", revision, date: "2026-11-26" }) });
       assert.equal(edited.status, 200);
       const persisted = await other.load();
       assert.equal(persisted.taskGroups.find(group => group.id === groupId).title, "Edited by member");
       assert.equal(persisted.taskGroupMembers.find(member => member.groupId === groupId).id, shared.assignmentGroupId || shared.id);
+      assert.equal(persisted.taskGroupMembers.find(member => member.groupId === groupId).inheritDate, true);
+      assert.equal(persisted.todos.find(todo => todo.id === shared.id).date, shared.date);
+      assert.equal(require("../outputs/task-groups").calendarTodos(persisted).find(todo => todo.id === shared.id).date, "2026-11-26");
       check("http.org_groups_persist_with_private_initial_projection_and_stale_move_guard");
-      const createAndMove = { sourceId: ids[1], fromGroupId: groupId, newGroupTitle: "QA group from drop", placement: "after" };
+      const createAndMove = { sourceId: ids[1], fromGroupId: groupId, newGroupTitle: "QA group from drop", newGroupOwnerId: "ibro", placement: "after" };
+      assert.equal((await request("/api/todos/reorder", { method: "POST", headers: worker, body: JSON.stringify({
+        ...createAndMove, newGroupOwnerId: "bojan"
+      }) })).status, 403);
       const dropped = await request("/api/todos/reorder", { method: "POST", body: JSON.stringify(createAndMove) });
       assert.equal(dropped.status, 200, await dropped.text());
       assert.equal((await request("/api/todos/reorder", { method: "POST", body: JSON.stringify({
@@ -366,6 +373,7 @@ async function main() {
       const afterDrop = await other.load();
       const destination = afterDrop.taskGroups.find(group => group.title === createAndMove.newGroupTitle);
       assert.ok(destination);
+      assert.equal(destination.ownerId, "ibro");
       assert.equal(afterDrop.taskGroups.some(group => group.title === "QA must not be persisted"), false);
       assert.deepEqual(afterDrop.taskGroupMembers.filter(member => member.id === (shared.assignmentGroupId || shared.id))
         .map(member => member.groupId), [destination.id]);

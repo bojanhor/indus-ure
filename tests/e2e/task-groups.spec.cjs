@@ -42,11 +42,92 @@ async function chooseGroupTime(page, hour, minute) {
   await picker.locator(`[data-time-picker-hour="${hour}"]`).click();
   await picker.locator(`[data-time-picker-minute="${minute}"]`).click();
 }
+test('chooser remembers five groups, keeps editor changes and lets the boss choose a group owner', async ({ page, context }) => {
+  await login(page);
+  const todos = await seed(page);
+  const groups = [];
+  for (const name of ['Žito', 'Brez', 'Cesta', 'Delo', 'Elektrika', 'Franc']) {
+    const res = await api(page, '/api/task-groups', 'POST', { title: name });
+    expect(res.status, res.error).toBe(200);
+    groups.push(res.result.id);
+  }
+  const denied = await context.request.post(app.baseUrl + '/api/test-login', { data: { userId: 'ibro', password: TEST_PASSWORD } });
+  expect(denied.ok()).toBeTruthy();
+  expect((await api(page, '/api/task-groups', 'POST', { title: 'Ne sme uspeti', ownerId: 'bojan' })).status).toBe(403);
+  expect((await context.request.post(app.baseUrl + '/api/test-login', { data: { userId: 'bojan', password: TEST_PASSWORD } })).ok()).toBeTruthy();
+  await reload(page);
+  await page.getByRole('button', { name: 'Uredi opravilo: Samostojno', exact: true }).click();
+  await expect(page.locator('#todoGroupEditorButton')).toBeEnabled();
+  await page.locator('#todoFormNotes').fill('Neshranjen opis');
+  for (const id of [...groups, '']) {
+    await page.locator('#todoGroupEditorButton').click();
+    const chooser = page.locator('#todoGroupDropDialog');
+    await expect(chooser).toBeVisible();
+    if (id) {
+      await page.locator('#todoGroupDropChoice').selectOption(id);
+      await page.locator('#todoGroupDropSave').click();
+    } else {
+      const recent = chooser.locator('optgroup[label="Nazadnje uporabljene"] option');
+      // The current group is omitted; already five used, including it.
+      await expect(recent).toHaveText(['Elektrika', 'Delo', 'Cesta', 'Brez']);
+      await page.locator('#todoGroupDropSearch').fill('zito');
+      await expect(chooser.locator('select option').filter({ hasText: 'Žito' })).toHaveCount(1);
+      await page.locator('#todoGroupDropRemove').click();
+    }
+    await expect(chooser).toBeHidden();
+    await expect(page.locator('#todoFormNotes')).toHaveValue('Neshranjen opis');
+  }
+  await page.locator('#closeTodoDialog').click();
+  if (await page.locator('#appConfirmDialog').isVisible()) await page.locator('#appConfirmAccept').click();
+  await page.locator('#newTaskGroup').click();
+  await page.locator('#taskGroupOwner').selectOption('ibro');
+  await page.locator('#taskGroupForm [name="title"]').fill('Ibrova prazna skupina');
+  await page.locator('#saveTaskGroup').click();
+  await expect(page.locator('#taskGroupDialog')).toBeHidden();
+  const snapshot = (await api(page, '/api/task-groups')).result;
+  expect(snapshot.taskGroups.find(g => g.title === 'Ibrova prazna skupina')).toMatchObject({ ownerId: 'ibro', eventIds: [] });
+  expect(snapshot.taskGroups.find(g => g.id === groups.at(-1)).eventIds).not.toContain(todos.Samostojno.assignmentGroupId);
+});
+
+test('add from an open group, verify inherited dates and detach by changing the date in the editor', async ({ page }) => {
+  const date = '2026-11-25', next = '2026-11-26', separate = '2026-11-27';
+  await login(page);
+  const todos = await seed(page);
+  const { result: created } = await api(page, '/api/task-groups', 'POST', { title: 'Termin preizkus', date });
+  await move(page, todos['Samo Ibro'].id, created.id);
+  await reload(page);
+  await page.evaluate(id => taskGroupUi.open(id), created.id);
+  await page.locator('#addTaskGroupMember').click();
+  await page.locator('#todoGroupDropSearch').fill('samostojno');
+  await page.locator('#todoGroupDropChoice').selectOption(todos.Samostojno.id);
+  await page.locator('#todoGroupDropSave').click();
+  await expect(page.locator('#taskGroupEvents button').filter({ hasText: 'Samostojno' })).toContainText('25. 11. 2026');
+  await expect(page.locator('#taskGroupEvents button').filter({ hasText: 'Samo Ibro' })).toContainText('20. 11. 2026');
+  await page.locator('#closeTaskGroup').click();
+  const group = (await api(page, '/api/task-groups/' + created.id)).result.group;
+  expect((await api(page, '/api/task-groups/' + created.id, 'PUT', { ...group, date: next, endDate: next })).status).toBe(200);
+  await reload(page);
+  await page.evaluate(date => { state.current = parseDate(date); state.calendarBrowseMonth = true; setView('calendar'); }, next);
+  const event = page.locator(`.day[data-date="${next}"] .day-todo`).filter({ hasText: 'Samostojno' });
+  await expect(event).toBeVisible();
+  await page.evaluate(date => openDayTimeline(date), next);
+  await expect(page.locator('#dayTimelineDialog .day-all-day-item').getByText('Samostojno')).toBeVisible();
+  await page.locator('#closeDayTimeline').click();
+  await event.click();
+  await expect(page.locator('#todoFormDate')).toHaveValue(next);
+  expect((await api(page, '/api/todos/' + todos.Samostojno.id)).result.todo.date).toBe('');
+  await page.locator('#todoFormDate').fill(separate);
+  await page.locator('#todoFormDate').dispatchEvent('change');
+  await page.locator('#saveTodoDialog').click();
+  await expect(page.locator('#todoDialog')).toBeHidden();
+  expect((await api(page, '/api/task-groups/' + created.id)).result.group.eventIds).not.toContain(todos.Samostojno.assignmentGroupId);
+  await expect(page.locator(`.day[data-date="${separate}"] .day-todo`).filter({ hasText: 'Samostojno' })).toBeVisible();
+});
 async function drag(page, source, target, pointer) {
   // A read-only sync can replace rows before the gesture has even begun.
   await expect(async () => {
     await source.scrollIntoViewIfNeeded({ timeout: 1500 });
-    await target.scrollIntoViewIfNeeded({ timeout: 1500 });
+    await target.evaluate(el => el.scrollIntoView({ block: 'center' }));
   }).toPass({ timeout: 5000 });
   const a = await source.boundingBox(), b = await target.boundingBox();
   const from = { x: a.x + a.width / 2, y: a.y + a.height / 2 };
