@@ -1768,7 +1768,7 @@
     .task-group-cal.todo-status-color { border-left-color: var(--accent) !important; }
     .task-group-cal .task-group-folder { width: 1.2em; height: 1.2em; vertical-align: text-bottom; margin-inline-end: 3px; }
     .month-group { min-width: 0; }
-    .month-group-head { position: relative; }
+    .month-group-head { position: relative; min-width: 0; }
     .month-group-head > .task-group-cal { padding-inline-end: 34px; min-height: 34px; }
     .month-group-head > .month-group-toggle {
       position: absolute;
@@ -2944,12 +2944,14 @@
     .day-single-untimed:empty:not([style]) { display: none; }
     .day-multiday-lanes {
       display: grid;
+      grid-template-columns: minmax(0, 1fr);
       gap: 3px;
       margin: 0 -9px 7px;
     }
 
     .day-multiday-slot {
       min-height: 35px;
+      min-width: 0;
     }
 
     .day-multiday-event {
