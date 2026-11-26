@@ -108,12 +108,18 @@ test('add from an open group, verify inherited dates and detach by changing the 
   expect((await api(page, '/api/task-groups/' + created.id, 'PUT', { ...group, date: next, endDate: next })).status).toBe(200);
   await reload(page);
   await page.evaluate(date => { state.current = parseDate(date); state.calendarBrowseMonth = true; setView('calendar'); }, next);
-  const event = page.locator(`.day[data-date="${next}"] .day-todo`).filter({ hasText: 'Samostojno' });
-  await expect(event).toBeVisible();
+  const groupCard = page.locator(`.day[data-date="${next}"] [data-calendar-group-id="${created.id}"]`);
+  await expect(groupCard).toBeVisible();
+  await expect(page.locator('#calendar .day-todo').filter({ hasText: 'Samostojno' })).toHaveCount(0);
+  await expect(page.locator('#calendar .day-todo').filter({ hasText: 'Samo Ibro' })).toHaveCount(0);
+  await expect(page.locator('#calendar .day-todo').filter({ hasText: 'Samo Bojan' })).toBeVisible();
   await page.evaluate(date => openDayTimeline(date), next);
   await expect(page.locator('#dayTimelineDialog .day-all-day-item').getByText('Samostojno')).toBeVisible();
   await page.locator('#closeDayTimeline').click();
-  await event.click();
+  await groupCard.click();
+  const groupEvent = page.locator('#taskGroupEvents button').filter({ hasText: 'Samostojno' });
+  await expect(groupEvent).toContainText('26. 11. 2026');
+  await groupEvent.click();
   await expect(page.locator('#todoFormDate')).toHaveValue(next);
   expect((await api(page, '/api/todos/' + todos.Samostojno.id)).result.todo.date).toBe('');
   await page.locator('#todoFormDate').fill(separate);
@@ -121,7 +127,23 @@ test('add from an open group, verify inherited dates and detach by changing the 
   await page.locator('#saveTodoDialog').click();
   await expect(page.locator('#todoDialog')).toBeHidden();
   expect((await api(page, '/api/task-groups/' + created.id)).result.group.eventIds).not.toContain(todos.Samostojno.assignmentGroupId);
+  await page.locator('#closeTaskGroup').click();
   await expect(page.locator(`.day[data-date="${separate}"] .day-todo`).filter({ hasText: 'Samostojno' })).toBeVisible();
+});
+
+test('undated groups keep dated members out of the month until they leave the group', async ({ page }) => {
+  await login(page);
+  const todo = (await seed(page))['Samo Ibro'];
+  const { result: group } = await api(page, '/api/task-groups', 'POST', { title: 'Skupina brez datuma' });
+  expect((await move(page, todo.id, group.id)).status).toBe(200);
+  await reload(page);
+  await page.evaluate(() => { state.current = parseDate('2026-11-20'); state.calendarBrowseMonth = true; setView('calendar'); });
+  const task = page.locator('.day[data-date="2026-11-20"] .day-todo').filter({ hasText: todo.title });
+  await expect(task).toHaveCount(0);
+  await expect(page.locator(`#calendar [data-calendar-group-id="${group.id}"]`)).toHaveCount(0);
+  expect((await move(page, todo.id, '', group.id)).status).toBe(200);
+  await reload(page);
+  await expect(task).toBeVisible();
 });
 async function drag(page, source, target, pointer) {
   // A read-only sync can replace rows before the gesture has even begun.
@@ -217,7 +239,7 @@ for (const pointer of ['mouse', 'touch']) test(`${pointer}: drag into and out of
   await expect(group.locator('.task-group-body')).toContainText('Samo Ibro');
   await page.evaluate(() => { state.current = parseDate('2026-11-20'); setView('calendar'); });
   const day = page.locator('.day[data-date="2026-11-20"]');
-  await expect(day.locator('.day-todo').filter({ hasText: 'Samo Ibro' })).toHaveCount(1);
+  await expect(day.locator('.day-todo').filter({ hasText: 'Samo Ibro' })).toHaveCount(0);
   await expect(day.locator('.task-group-cal')).toHaveCSS('border-left-color', 'rgb(31, 111, 139)');
   await day.locator('.task-group-cal').click();
   await expect(page.locator('#taskGroupEvents')).toContainText('Samo Ibro');

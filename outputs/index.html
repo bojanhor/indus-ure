@@ -11324,8 +11324,14 @@ function renderMonth() {
       const entries = contextEntries().filter(calendarWorkerMatches);
       // Google/ICS select() deliberately projects only the selected worker.
       // The interactive calendar must retain the API's complete assigneeIds.
-      const todos = calendarTodos().filter(todo => todo._absence || (PlanningCalendar.eligible(todo) && !todo.done
-        ? state.showOrdinaryCalendarTodos : state.showCompletedCalendarTodos));
+      // Month view shows group members inside the group, not as separate cards.
+      const groupedEvents = new Set((state.taskGroups || []).flatMap(group => group.eventIds));
+      const todos = calendarTodos().filter(todo => {
+        if (todo._absence) return true;
+        if (TaskGroups.active(todo) && groupedEvents.has(todoEventId(todo))) return false;
+        return PlanningCalendar.eligible(todo) && !todo.done
+          ? state.showOrdinaryCalendarTodos : state.showCompletedCalendarTodos;
+      });
       if (state.showOrdinaryCalendarTodos) todos.push(...taskGroupUi.calendarCards(state.calendarWorkerIds));
       const todayDate = new Date();
       $('todayDayNumber').textContent = todayDate.getDate();
