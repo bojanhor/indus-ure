@@ -145,6 +145,73 @@ test('undated groups keep dated members out of the month until they leave the gr
   await reload(page);
   await expect(task).toBeVisible();
 });
+
+test('month group arrow opens an inline list, separate from the modal, with clickable members', async ({ page }, info) => {
+  const date = '2026-11-20';
+  await page.setViewportSize({ width: 390, height: 844 });
+  await login(page);
+  const todos = await seed(page);
+  const { result: group } = await api(page, '/api/task-groups', 'POST', { title: 'Razširljiva skupina', date, start: '10:30', end: '11:30' });
+  for (const todo of [todos.Samostojno, todos['Samo Ibro']]) expect((await move(page, todo.id, group.id)).status).toBe(200);
+  await reload(page);
+  await page.evaluate(date => { state.current = parseDate(date); state.calendarBrowseMonth = true; setView('calendar'); }, date);
+  const day = page.locator(`.day[data-date="${date}"]`);
+  const card = day.locator(`[data-calendar-group-id="${group.id}"]`);
+  const toggle = day.getByRole('button', { name: 'Prikaži opravila v skupini: Razširljiva skupina' });
+  const panel = day.locator('.month-group-members');
+  await expect(panel).toBeHidden();
+  await toggle.tap();
+  const expanded = day.getByRole('button', { name: 'Skrij opravila v skupini: Razširljiva skupina' });
+  await expect(expanded).toHaveAttribute('aria-expanded', 'true');
+  await expect(panel.locator('.task-group-event-link')).toHaveCount(2);
+  await expect(page.locator('#taskGroupDialog')).toBeHidden();
+  await expect(page.locator('#calendar .day-todo').filter({ hasText: 'Samo Ibro' })).toHaveCount(0);
+  const [buttonBox, cardBox, panelBox] = await Promise.all([expanded.boundingBox(), card.boundingBox(), panel.boundingBox()]);
+  expect(buttonBox.x + buttonBox.width).toBeGreaterThan(cardBox.x + cardBox.width - 8);
+  expect(panelBox.y).toBeGreaterThanOrEqual(cardBox.y + cardBox.height);
+  expect(panelBox.x).toBeGreaterThan(cardBox.x);
+  await page.screenshot({ path: info.outputPath('month-group-inline-phone.png') });
+  await card.click({ position: { x: 12, y: 10 } });
+  await expect(page.locator('#taskGroupDialog')).toBeVisible();
+  expect(await panel.locator('.day-timeline-event-title').allTextContents())
+    .toEqual(await page.locator('#taskGroupEvents .day-timeline-event-title').allTextContents());
+  await page.locator('#closeTaskGroup').click();
+  await panel.getByRole('button', { name: /Samo Ibro/ }).tap();
+  await expect(page.locator('#todoFormTask')).toHaveValue('Samo Ibro');
+  await page.locator('#closeTodoDialog').click();
+  await expect(panel).toBeVisible();
+  await page.evaluate(() => { state.calendarWorkerIds = ['ibro']; renderMonth(); });
+  await expect(panel.locator('.day-timeline-event-title')).toHaveText(['Samo Ibro']);
+  await expanded.press('Enter');
+  await expect(panel).toBeHidden();
+});
+
+test('multi-day group can expand again on Monday without duplicating its list', async ({ page }, info) => {
+  const date = '2026-11-20';
+  await login(page);
+  const todo = (await seed(page))['Samo Ibro'];
+  const { result: group } = await api(page, '/api/task-groups', 'POST', { title: 'Večdnevna skupina', date, endDate: '2026-11-24' });
+  expect((await move(page, todo.id, group.id)).status).toBe(200);
+  await reload(page);
+  await page.evaluate(date => { state.current = parseDate(date); state.calendarBrowseMonth = true; setView('calendar'); }, date);
+  const start = page.locator('.day[data-date="2026-11-20"]');
+  const monday = page.locator('.day[data-date="2026-11-23"]');
+  const tuesday = page.locator('.day[data-date="2026-11-24"]');
+  const open = day => day.getByRole('button', { name: 'Prikaži opravila v skupini: Večdnevna skupina' });
+  await open(start).click();
+  await expect(start.locator('.month-group-members')).toBeVisible();
+  await open(monday).click();
+  await expect(start.locator('.month-group-members')).toBeHidden();
+  const panel = monday.locator('.month-group-members');
+  await expect(panel.getByRole('button', { name: /Samo Ibro/ })).toBeVisible();
+  await expect(page.locator('#calendar .month-group-members:not([hidden])')).toHaveCount(1);
+  const segment = day => day.locator(`[data-calendar-group-id="${group.id}"]`);
+  await expect.poll(async () => Math.abs((await segment(monday).boundingBox()).y - (await segment(tuesday).boundingBox()).y)).toBeLessThan(1);
+  expect(await start.evaluate(day => day.scrollLeft)).toBe(0);
+  expect(await monday.evaluate(day => day.scrollLeft)).toBe(0);
+  await page.screenshot({ path: info.outputPath('month-group-inline-span.png') });
+});
+
 async function drag(page, source, target, pointer) {
   // A read-only sync can replace rows before the gesture has even begun.
   await expect(async () => {

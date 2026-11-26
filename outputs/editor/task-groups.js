@@ -173,40 +173,48 @@ function createTaskGroupUi() {
     const followers = new Map(groups().flatMap(group => (group.dateFollowerIds || []).map(id => [id, group])));
     return todos.map(todo => calendarProjection(todo, followers));
   }
+  function sortedMembers(todos) {
+    todos.sort(todoManualCategorySort);
+    const preferred = sortedTodosForMode(todos);
+    const chosen = new Set(preferred.map(todo => todo.id));
+    return [...preferred, ...todos.filter(todo => !chosen.has(todo.id))];
+  }
+  function memberRow(todo) {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = `task-group-event-link day-all-day-item todo-status-color ${todoStatusClass(todo.status)}${todo.urgent ? " urgent" : ""}`;
+    const heading = document.createElement("span");
+    heading.className = "day-event-heading task-group-event-heading";
+    const title = document.createElement("strong");
+    title.className = "day-timeline-event-title";
+    title.textContent = todo.title;
+    heading.append(calendarTodoWorkers(todo), title);
+    row.appendChild(heading);
+    const when = todoDateTimeLabel(calendarProjection(todo));
+    const client = todoClientCalendarName(todo);
+    if (when || client) {
+      const meta = document.createElement("span");
+      meta.className = "day-timeline-event-meta task-group-event-meta";
+      for (const [name, value] of [["when", when], ["client", client]]) {
+        if (!value) continue;
+        const item = document.createElement("span");
+        item.className = "task-group-event-" + name;
+        item.textContent = value;
+        meta.appendChild(item);
+      }
+      row.appendChild(meta);
+    }
+    if (todo.urgent) row.setAttribute("aria-label", ["Nujno", todoAssigneeNames(todo), todo.title, when, client].filter(Boolean).join(", "));
+    return row;
+  }
   function refreshList() {
     list.replaceChildren();
     if (!editing) return;
     const group = groups().find(item => item.id === editing.id);
     if (!group || !inContext(group)) return;
-    const todos = members(group).sort(todoManualCategorySort);
-    const preferred = sortedTodosForMode(todos);
-    const chosen = new Set(preferred.map(todo => todo.id));
-    for (const todo of [...preferred, ...todos.filter(todo => !chosen.has(todo.id))]) {
-      const row = document.createElement("button");
-      row.type = "button";
-      row.className = `task-group-event-link day-all-day-item todo-status-color ${todoStatusClass(todo.status)}${todo.urgent ? " urgent" : ""}`;
-      const heading = document.createElement("span");
-      heading.className = "day-event-heading task-group-event-heading";
-      const title = document.createElement("strong");
-      title.className = "day-timeline-event-title";
-      title.textContent = todo.title;
-      heading.append(calendarTodoWorkers(todo), title);
-      row.appendChild(heading);
-      const when = todoDateTimeLabel(calendarProjection(todo));
-      const client = todoClientCalendarName(todo);
-      if (when || client) {
-        const meta = document.createElement("span");
-        meta.className = "day-timeline-event-meta task-group-event-meta";
-        for (const [name, value] of [["when", when], ["client", client]]) {
-          if (!value) continue;
-          const item = document.createElement("span");
-          item.className = "task-group-event-" + name;
-          item.textContent = value;
-          meta.appendChild(item);
-        }
-        row.appendChild(meta);
-      }
-      if (todo.urgent) row.setAttribute("aria-label", ["Nujno", todoAssigneeNames(todo), todo.title, when, client].filter(Boolean).join(", "));
+    const todos = sortedMembers(members(group));
+    for (const todo of todos) {
+      const row = memberRow(todo);
       row.onclick = () => run(async () => {
         scrollTop = list.scrollTop;
         suspended = true;
@@ -229,6 +237,68 @@ function createTaskGroupUi() {
       list.append(row);
     }
     if (!todos.length) list.textContent = "V skupini ni dogodkov za tvoj pogled.";
+  }
+  const openMonthLists = new Map();
+  function setMonthDisclosure(toggle, panel, title, expanded) {
+    const label = `${expanded ? "Skrij" : "Prikaži"} opravila v skupini: ${title}`;
+    panel.hidden = !expanded;
+    toggle.setAttribute("aria-expanded", String(expanded));
+    toggle.setAttribute("aria-label", label);
+    toggle.title = label;
+  }
+  function appendMonthCard(host, card, todo, day) {
+    const groupId = todo.groupId;
+    const group = groups().find(item => item.id === groupId);
+    if (!group) { host.append(card); return; }
+    const section = document.createElement("div");
+    section.className = "month-group";
+    const head = document.createElement("div");
+    head.className = "month-group-head";
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "icon-btn month-group-toggle";
+    toggle.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+    const panel = document.createElement("div");
+    panel.className = "month-group-members";
+    const panelId = key => `month-group-members-${groupId}-${key}`;
+    panel.id = panelId(day);
+    panel.setAttribute("role", "group");
+    panel.setAttribute("aria-label", `Opravila v skupini: ${todo.title}`);
+    toggle.setAttribute("aria-controls", panel.id);
+    function setExpanded(expanded) {
+      setMonthDisclosure(toggle, panel, todo.title, expanded);
+      if (!expanded || panel.childNodes.length) return;
+      const visible = sortedMembers(members(group).filter(item => calendarWorkerMatchesIds(item, state.calendarWorkerIds)));
+      for (const item of visible) {
+        const row = memberRow(item);
+        row.onclick = () => run(() => openTodoDialog(item));
+        panel.append(row);
+      }
+      if (!visible.length) {
+        const empty = document.createElement("span");
+        empty.className = "month-group-empty";
+        empty.textContent = "Ni opravil za ta pogled.";
+        panel.append(empty);
+      }
+    }
+    toggle.onclick = () => {
+      const previous = openMonthLists.get(groupId);
+      if (previous && previous !== day) {
+        // A multi-day group can be shown at the start of several weeks.
+        // Close the previous list before expanding the new position.
+        const previousPanel = $(panelId(previous));
+        const previousToggle = previousPanel?.previousElementSibling?.querySelector(".month-group-toggle");
+        if (previousToggle) setMonthDisclosure(previousToggle, previousPanel, todo.title, false);
+      }
+      if (previous === day) openMonthLists.delete(groupId);
+      else openMonthLists.set(groupId, day);
+      setExpanded(previous !== day);
+      queueMonthAlignment();
+    };
+    setExpanded(openMonthLists.get(groupId) === day);
+    head.append(card, toggle);
+    section.append(head, panel);
+    host.append(section);
   }
   function restoreDay() {
     if (!dayReturn) return;
@@ -342,5 +412,5 @@ function createTaskGroupUi() {
       render(); saveOfflineSnapshotSoon();
     } finally { finishTodoMutation(); }
   }
-  return { board, header, card, currentGroupId, calendarProjection, projectCalendarTodos, calendarCards, moveDate, searchGroups, fillOwners, refreshList, reveal, open: id => run(() => open(id)), resumeLink };
+  return { board, header, card, currentGroupId, calendarProjection, projectCalendarTodos, calendarCards, appendMonthCard, moveDate, searchGroups, fillOwners, refreshList, reveal, open: id => run(() => open(id)), resumeLink };
 }

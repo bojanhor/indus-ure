@@ -1767,6 +1767,40 @@
     .todo-drag-active .task-group-outside { background: #eef2f7; }
     .task-group-cal.todo-status-color { border-left-color: var(--accent) !important; }
     .task-group-cal .task-group-folder { width: 1.2em; height: 1.2em; vertical-align: text-bottom; margin-inline-end: 3px; }
+    .month-group { min-width: 0; }
+    .month-group-head { position: relative; }
+    .month-group-head > .task-group-cal { padding-inline-end: 34px; min-height: 34px; }
+    .month-group-head > .month-group-toggle {
+      position: absolute;
+      inset-block: 2px;
+      inset-inline-end: 3px;
+      width: 28px;
+      height: auto;
+      min-height: 0;
+      padding: 0;
+      color: var(--accent-dark);
+      background: #edf4f4;
+      border-radius: 5px;
+    }
+    .month-group-toggle svg { width: 15px; height: 15px; }
+    .month-group-toggle[aria-expanded="true"] svg { transform: rotate(180deg); }
+    .month-group-toggle:hover, .month-group-toggle[aria-expanded="true"] { background: #dcebec; }
+    .month-group-members {
+      display: grid;
+      gap: 3px;
+      margin-block-start: 4px;
+      margin-inline-start: 5px;
+      padding-inline-start: 5px;
+      border-inline-start: 2px solid #9abeca;
+      min-width: 0;
+    }
+    .month-group-members[hidden] { display: none; }
+    .day-multiday-slot .month-group-members { margin-inline: 8px; }
+    .month-group-members .task-group-event-link { min-width: 0; padding: 4px 5px; font-size: 11px; line-height: 1.2; cursor: pointer; }
+    .month-group-members .task-group-event-heading, .month-group-members .task-group-event-meta { overflow-wrap: anywhere; }
+    .month-group-members .day-timeline-event-title { font-size: 11px; }
+    .month-group-members .task-group-event-meta, .month-group-empty { font-size: 10px; }
+    .month-group-empty { padding: 4px; color: var(--muted); }
     #taskGroupDialog [hidden], #taskGroupEvents:empty { display: none; }
     #todoDragActions {
       position: fixed;
@@ -3146,6 +3180,9 @@
       flex-direction: column;
       gap: 7px;
       overflow: hidden;
+      /* The week scrolls, not an individual day. Focusing a full-width span
+         or its right-hand toggle must not scroll the date and cards away. */
+      overflow: clip;
     }
 
     /* Compact event cards depend on their actual day-column width, not just
@@ -11047,7 +11084,8 @@ function appendMonthMultiDayLanes(day, key, weekIndex, layout) {
             }
             openCalendarTodo(todo);
           });
-          slot.appendChild(item);
+          if (todo._taskGroup && (actualStart || startsNewWeek)) taskGroupUi.appendMonthCard(slot, item, todo, key);
+          else slot.appendChild(item);
         }
         lanes.appendChild(slot);
       }
@@ -11111,7 +11149,8 @@ function tickMonthTodoPointerDragAutoScroll(timestamp) {
 function updateMonthTodoPointerDragTarget(drag, clientX, clientY) {
       drag.action = taskDragActions.hit(drag, clientX, clientY);
       const hit = drag.action || drag.actionsOnly ? null : document.elementFromPoint(clientX, clientY);
-      const group = hit?.closest("[data-calendar-group-id]");
+      const group = hit?.closest("[data-calendar-group-id]")
+        || hit?.closest(".month-group")?.querySelector("[data-calendar-group-id]");
       drag.targetGroupId = group && taskDragActions.canGroup(drag.todo) ? group.dataset.calendarGroupId : "";
       const target = group ? (drag.targetGroupId ? group : null) : hit?.closest(".day");
       const targetDate = String(target?.dataset.date || "");
@@ -11443,7 +11482,9 @@ function renderMonth() {
               }
               openCalendarTodo(todo);
             });
-            (todo.start && todo.end ? day : singleUntimed).appendChild(item);
+            const host = todo.start && todo.end ? day : singleUntimed;
+            if (todo._taskGroup) taskGroupUi.appendMonthCard(host, item, todo, key);
+            else host.appendChild(item);
           });
 
         calendar.appendChild(day);
