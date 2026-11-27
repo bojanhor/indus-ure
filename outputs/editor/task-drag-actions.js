@@ -103,7 +103,6 @@ function createTaskDragActions() {
         state.todoFormPlanningDates = { date: from.value, endDate: to.value };
       }
     }
-    if ($("taskGroupDialog").open) taskGroupUi.refreshList();
   }
   function updateForm() {
     const create = selection?.kind === "group" && select.value === NEW_GROUP;

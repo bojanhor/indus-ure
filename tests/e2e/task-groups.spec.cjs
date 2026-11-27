@@ -101,8 +101,9 @@ test('add from an open group, verify inherited dates and detach by changing the 
   await page.locator('#todoGroupDropSearch').fill('samostojno');
   await page.locator('#todoGroupDropChoice').selectOption(todos.Samostojno.id);
   await page.locator('#todoGroupDropSave').click();
-  await expect(page.locator('#taskGroupEvents button').filter({ hasText: 'Samostojno' })).toContainText('25. 11. 2026');
-  await expect(page.locator('#taskGroupEvents button').filter({ hasText: 'Samo Ibro' })).toContainText('20. 11. 2026');
+  await expect(page.locator('#todoGroupDropDialog')).toBeHidden();
+  await expect(page.locator('#taskGroupForm [name="title"]')).toHaveValue('Termin preizkus');
+  expect((await api(page, '/api/task-groups/' + created.id)).result.group.eventIds).toContain(todos.Samostojno.assignmentGroupId);
   await page.locator('#closeTaskGroup').click();
   const group = (await api(page, '/api/task-groups/' + created.id)).result.group;
   expect((await api(page, '/api/task-groups/' + created.id, 'PUT', { ...group, date: next, endDate: next })).status).toBe(200);
@@ -116,9 +117,11 @@ test('add from an open group, verify inherited dates and detach by changing the 
   await page.evaluate(date => openDayTimeline(date), next);
   await expect(page.locator('#dayTimelineDialog .day-all-day-item').getByText('Samostojno')).toBeVisible();
   await page.locator('#closeDayTimeline').click();
-  await groupCard.click();
-  const groupEvent = page.locator('#taskGroupEvents button').filter({ hasText: 'Samostojno' });
+  const day = page.locator(`#calendar .day[data-date="${next}"]`);
+  await day.locator('.month-group-toggle').click();
+  const groupEvent = day.locator('.month-group-members button').filter({ hasText: 'Samostojno' });
   await expect(groupEvent).toContainText('26. 11. 2026');
+  await expect(day.locator('.month-group-members button').filter({ hasText: 'Samo Ibro' })).toContainText('20. 11. 2026');
   await groupEvent.click();
   await expect(page.locator('#todoFormDate')).toHaveValue(next);
   expect((await api(page, '/api/todos/' + todos.Samostojno.id)).result.todo.date).toBe('');
@@ -127,7 +130,6 @@ test('add from an open group, verify inherited dates and detach by changing the 
   await page.locator('#saveTodoDialog').click();
   await expect(page.locator('#todoDialog')).toBeHidden();
   expect((await api(page, '/api/task-groups/' + created.id)).result.group.eventIds).not.toContain(todos.Samostojno.assignmentGroupId);
-  await page.locator('#closeTaskGroup').click();
   await expect(page.locator(`.day[data-date="${separate}"] .day-todo`).filter({ hasText: 'Samostojno' })).toBeVisible();
 });
 
@@ -187,7 +189,7 @@ test('duplicate group names are rejected on creation, rename and atomic create-a
   expect((await api(page, '/api/task-groups')).result.taskGroups).toHaveLength(2);
 });
 
-test('month group arrow opens an inline list, separate from the modal, with clickable members', async ({ page }, info) => {
+test('month group opens the attribute form directly and the separate arrow shows clickable members', async ({ page }, info) => {
   const date = '2026-11-20';
   await page.setViewportSize({ width: 390, height: 844 });
   await login(page);
@@ -214,8 +216,12 @@ test('month group arrow opens an inline list, separate from the modal, with clic
   await page.screenshot({ path: info.outputPath('month-group-inline-phone.png') });
   await card.click({ position: { x: 12, y: 10 } });
   await expect(page.locator('#taskGroupDialog')).toBeVisible();
-  expect(await panel.locator('.day-timeline-event-title').allTextContents())
-    .toEqual(await page.locator('#taskGroupEvents .day-timeline-event-title').allTextContents());
+  await expect(page.locator('#taskGroupForm [name="title"]')).toHaveValue('Razširljiva skupina');
+  await expect(page.locator('#taskGroupDate')).toHaveValue(date);
+  await expect(page.locator('#taskGroupQuickTimeStart')).toHaveText('Od 10:30');
+  await expect(page.locator('#saveTaskGroup')).toBeVisible();
+  await expect(page.locator('#taskGroupDialog .task-group-event-link, #editTaskGroup')).toHaveCount(0);
+  await page.screenshot({ path: info.outputPath('month-group-direct-editor.png') });
   await page.locator('#closeTaskGroup').click();
   await panel.getByRole('button', { name: /Samo Ibro/ }).tap();
   await expect(page.locator('#todoFormTask')).toHaveValue('Samo Ibro');
@@ -351,19 +357,22 @@ for (const pointer of ['mouse', 'touch']) test(`${pointer}: drag into and out of
   await expect(day.locator('.day-todo').filter({ hasText: 'Samo Ibro' })).toHaveCount(0);
   await expect(day.locator('.task-group-cal')).toHaveCSS('border-left-color', 'rgb(31, 111, 139)');
   await day.locator('.task-group-cal').click();
-  await expect(page.locator('#taskGroupEvents')).toContainText('Samo Ibro');
-  await expect(page.locator('#taskGroupEvents .day-todo-worker-name')).toHaveText('Ibro');
+  await expect(page.locator('#taskGroupForm [name="title"]')).toHaveValue('Nepomembno');
+  await page.locator('#closeTaskGroup').click();
+  await day.locator('.month-group-toggle').click();
+  const list = day.locator('.month-group-members');
+  await expect(list).toContainText('Samo Ibro');
+  await expect(list.locator('.day-todo-worker-name')).toHaveText('Ibro');
   await page.screenshot({ path: info.outputPath('task-group-calendar.png') });
-  await page.locator('#taskGroupEvents button').click();
+  await list.locator('button').click();
   await expect(page.locator('#todoFormTask')).toHaveValue('Samo Ibro');
   await page.locator('#closeTodoDialog').click();
-  await expect(page.locator('#taskGroupDialog')).toBeVisible();
-  await page.locator('#closeTaskGroup').click();
+  await expect(list).toBeVisible();
   await page.evaluate(() => openDayTimeline('2026-11-20'));
   await expect(page.locator('.day-timeline-event.task-group-cal .day-resize-handle')).toHaveCount(0);
   await expect(page.locator('.day-timeline-event.task-group-cal')).toHaveCSS('border-left-color', 'rgb(31, 111, 139)');
   await page.locator('.day-timeline-event.task-group-cal').click();
-  await expect(page.locator('#taskGroupEvents')).toContainText('Samo Ibro');
+  await expect(page.locator('#taskGroupForm [name="title"]')).toHaveValue('Nepomembno');
   await page.locator('#closeTaskGroup').click();
   await expect(page.locator('#dayTimelineDialog')).toBeVisible();
 });
@@ -413,38 +422,33 @@ test('group editor reuses date shortcuts and clock; multi-day and all-day clear 
   await expect(page.locator('#taskGroupQuickTimeStart')).toHaveText('Od ---');
 });
 
-test('group uses daily cards with real coworkers and aligned date columns', async ({ page }, info) => {
+test('a group link opens its editable attributes without listing or changing its member tasks', async ({ page }, info) => {
   await login(page);
   const todos = await seed(page);
   const shared = (await api(page, '/api/todos', 'POST', {
     title: 'Skupno popravilo zelo dolgega naziva <QA>', status: 'open',
     assigneeIds: ['bojan', 'ibro'], date: '2026-11-22', endDate: '2026-11-24'
   })).result.todos.find(todo => todo.title.startsWith('Skupno popravilo'));
-  const group = (await api(page, '/api/task-groups', 'POST', { title: 'Tabela QA' })).result;
+  const group = (await api(page, '/api/task-groups', 'POST', { title: 'Tabela QA', description: 'Izvirni opis', date: '2026-11-22', endDate: '2026-11-24' })).result;
   for (const item of [todos['Samo Ibro'], shared, todos.Samostojno]) {
     expect((await move(page, item.id, group.id)).status).toBe(200);
   }
   await page.goto(app.baseUrl + '/?group=' + group.id);
-  const list = page.locator('#taskGroupEvents');
-  const rows = list.locator('.task-group-event-link.day-all-day-item');
-  await expect(rows).toHaveCount(3);
-  const together = rows.filter({ hasText: 'Skupno popravilo' });
-  await expect(together.locator('.day-todo-worker-name')).toHaveText(['Bojan', 'Ibro']);
-  await expect(together.locator('.avatar')).toHaveCount(2);
-  await expect(together.locator('.task-group-event-when')).toHaveText('22. 11. 2026 – 24. 11. 2026');
-  await expect(rows.filter({ hasText: 'Samostojno' }).locator('.task-group-event-when')).toHaveCount(0);
-  const dates = list.locator('.task-group-event-when');
-  await expect(dates).toHaveCount(2);
-  expect(Math.abs((await dates.nth(0).boundingBox()).x - (await dates.nth(1).boundingBox()).x)).toBeLessThan(1);
-  await page.screenshot({ path: info.outputPath('group-daily-rows-desktop.png') });
-  await page.setViewportSize({ width: 390, height: 844 });
-  const title = await together.locator('.day-event-heading').boundingBox();
-  const timing = await together.locator('.task-group-event-when').boundingBox();
-  expect(timing.y).toBeGreaterThanOrEqual(title.y + title.height);
-  expect(timing.x + timing.width).toBeLessThanOrEqual(390);
-  await page.screenshot({ path: info.outputPath('group-daily-rows-mobile.png') });
-  await together.press('Enter');
-  await expect(page.locator('#todoFormTask')).toHaveValue('Skupno popravilo zelo dolgega naziva <QA>');
+  const dialog = page.locator('#taskGroupDialog');
+  await expect(dialog).toBeVisible();
+  await expect(dialog.locator('[name="title"]')).toHaveValue('Tabela QA');
+  await expect(dialog.locator('[name="description"]')).toHaveValue('Izvirni opis');
+  await expect(dialog.locator('#taskGroupDate')).toHaveValue('2026-11-22');
+  await expect(dialog.locator('#taskGroupEndDate')).toHaveValue('2026-11-24');
+  await expect(dialog.locator('.task-group-event-link, #taskGroupEvents')).toHaveCount(0);
+  await page.screenshot({ path: info.outputPath('group-link-direct-editor.png') });
+  await dialog.locator('[name="description"]').fill('Popravljen opis');
+  await dialog.locator('[name="urgent"]').check();
+  await dialog.locator('#saveTaskGroup').click();
+  await expect(dialog).toBeHidden();
+  const saved = (await api(page, '/api/task-groups/' + group.id)).result.group;
+  expect(saved).toMatchObject({ title: 'Tabela QA', description: 'Popravljen opis', date: '2026-11-22', endDate: '2026-11-24', urgent: true });
+  expect(new Set(saved.eventIds)).toEqual(new Set([todos['Samo Ibro'], shared, todos.Samostojno].map(todo => todo.assignmentGroupId)));
 });
 
 test('shared group rights, stale moves, task completion, Google deep links and dissolve/Undo', async ({ page, browser }) => {
@@ -479,9 +483,9 @@ test('shared group rights, stale moves, task completion, Google deep links and d
     expect((await api(worker, groupUrl, 'PUT', { ...group, title: 'Ibro uredil' })).status).toBe(200);
     expect((await api(page, groupUrl, 'PUT', group)).status).toBe(409);
     await worker.goto(app.baseUrl + '/?group=' + first.id);
-    await expect(worker.locator('#taskGroupTitle')).toHaveText('Skupina: Ibro uredil');
-    await expect(worker.locator('#taskGroupEvents')).toContainText('Samo Ibro');
-    await expect(worker.locator('#taskGroupEvents')).not.toContainText('Samo Bojan');
+    await expect(worker.locator('#taskGroupTitle')).toHaveText('Uredi skupino');
+    await expect(worker.locator('#taskGroupForm [name="title"]')).toHaveValue('Ibro uredil');
+    await expect(worker.locator('#taskGroupDialog .task-group-event-link')).toHaveCount(0);
     const openBefore = (await api(page, '/api/todos/' + todos['Samo Ibro'].id)).result.todo;
     const done = await api(page, '/api/todos/' + openBefore.id, 'PUT', {
       ...openBefore, status: 'execution', start: '10:00', end: '11:00', syncUser: 'ibro'
@@ -551,10 +555,8 @@ test('themed group form, new group location and searchable headings with matchin
   await expect(card.locator('.task-group-toggle')).toBeFocused();
   await search.fill('Nabrano');
   await groupResult.getByRole('button', { name: 'Odpri skupino: Skupina Nabrano' }).click();
-  await expect(page.locator('#taskGroupEvents')).toContainText('Samo Ibro');
-  await expect(page.locator('#saveTaskGroup')).toBeHidden();
-  await page.locator('#editTaskGroup').click();
-  await expect(title).toBeFocused();
+  await expect(title).toHaveValue('Skupina Nabrano');
+  await expect(page.locator('#taskGroupDialog .task-group-event-link')).toHaveCount(0);
   await expect(page.locator('#saveTaskGroup')).toBeVisible();
   await page.locator('#closeTaskGroup').click();
 

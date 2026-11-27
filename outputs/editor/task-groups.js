@@ -3,7 +3,6 @@
 function createTaskGroupUi() {
   const dialog = $("taskGroupDialog");
   const form = $("taskGroupForm");
-  const list = $("taskGroupEvents");
   const schedule = $("taskGroupSchedule");
   const groupControlId = id => id.replace(/^todoForm/, "taskGroup").replace("TodoForm", "TaskGroup");
   const scheduleControl = id => id === "todoForm" ? form : $(groupControlId(id));
@@ -67,9 +66,8 @@ function createTaskGroupUi() {
   }
   $("setTaskGroupEndDateTomorrow").onclick = () => shiftEndDate(false);
   $("advanceTaskGroupEndDate").onclick = () => shiftEndDate(true);
-  $("editTaskGroup").innerHTML = taskActionIcons.edit;
   $("deleteTaskGroup").innerHTML = taskActionIcons.remove;
-  let editing = null, dayReturn = null, suspended = false, saving = false, scrollTop = 0;
+  let editing = null, dayReturn = null, saving = false;
   let monthCreation = false;
   const run = work => work().catch(error => showNotice(error.message));
   const groups = () => state.taskGroups || [];
@@ -155,7 +153,7 @@ function createTaskGroupUi() {
       toggle.setAttribute("aria-expanded", String(!body.hidden));
       toggle.firstElementChild.textContent = body.hidden ? "▸" : "▾";
     });
-    head.querySelector(".task-group-edit").onclick = () => run(() => open(group.id, { edit: true }));
+    head.querySelector(".task-group-edit").onclick = () => run(() => open(group.id));
     outer.append(head, body);
     return { outer, body };
   }
@@ -206,37 +204,6 @@ function createTaskGroupUi() {
     }
     if (todo.urgent) row.setAttribute("aria-label", ["Nujno", todoAssigneeNames(todo), todo.title, when, client].filter(Boolean).join(", "));
     return row;
-  }
-  function refreshList() {
-    list.replaceChildren();
-    if (!editing) return;
-    const group = groups().find(item => item.id === editing.id);
-    if (!group || !inContext(group)) return;
-    const todos = sortedMembers(members(group));
-    for (const todo of todos) {
-      const row = memberRow(todo);
-      row.onclick = () => run(async () => {
-        scrollTop = list.scrollTop;
-        suspended = true;
-        await closeModalBeforeTransition(dialog);
-        const returned = async () => {
-          suspended = false;
-          await waitForModalHistoryTraversal();
-          if (groups().some(item => item.id === group.id && inContext(item))) await open(group.id, { resume: true });
-          else restoreDay();
-        };
-        $("todoDialog").addEventListener("close", returned, { once: true });
-        try { await openTodoDialog(todo); }
-        finally {
-          if (!$("todoDialog").open) {
-            $("todoDialog").removeEventListener("close", returned);
-            if (suspended) await returned();
-          }
-        }
-      });
-      list.append(row);
-    }
-    if (!todos.length) list.textContent = "V skupini ni dogodkov za tvoj pogled.";
   }
   const openMonthLists = new Map();
   function setMonthDisclosure(toggle, panel, title, expanded) {
@@ -306,19 +273,13 @@ function createTaskGroupUi() {
     dayReturn = null;
     void waitForModalHistoryTraversal().then(() => openDayTimeline(snapshot.date, { viewSnapshot: snapshot }));
   }
-  function showFields(show) {
-    form.hidden = !show;
-    $("saveTaskGroup").hidden = !show;
-    $("deleteTaskGroup").hidden = !editing || !show;
-    $("editTaskGroup").setAttribute("aria-expanded", String(show));
-  }
   function fillOwners(select) {
     const people = [...new Map([...(state.users || []), state.user].filter(user => user?.id && user.active !== false)
       .map(user => [user.id, user])).values()].sort((a, b) => a.name.localeCompare(b.name, "sl"));
     select.replaceChildren(...people.map(user => new Option(user.name, user.id)));
     select.value = state.user?.id || "";
   }
-  async function open(id = "", { resume = false, edit = false, monthDate = "" } = {}) {
+  async function open(id = "", { monthDate = "" } = {}) {
     if (saving) return;
     const group = groups().find(group => group.id === id);
     if (id && (!group || !inContext(group))) throw Error("Skupina ni na voljo.");
@@ -336,17 +297,14 @@ function createTaskGroupUi() {
     $("taskGroupOwnerField").hidden = !chooseOwner;
     $("taskGroupOwner").disabled = !chooseOwner;
     if (chooseOwner) fillOwners($("taskGroupOwner"));
-    $("taskGroupTitle").textContent = group ? "Skupina: " + group.title : "Nova skupina";
-    $("editTaskGroup").hidden = !group;
+    $("taskGroupTitle").textContent = group ? "Uredi skupino" : "Nova skupina";
     $("addTaskGroupMember").hidden = !group || state.offlineMode;
-    showFields(!group || edit);
+    $("deleteTaskGroup").hidden = !group;
     for (const key of ["title", "description", "date", "endDate", "start", "end"]) form.elements[key].value = group?.[key] || "";
     if (monthCreation) dateFrom.value = dateTo.value = monthDate;
     form.elements.urgent.checked = Boolean(group?.urgent);
     syncSchedule({ resetPicker: true });
-    refreshList();
     if (!dialog.open) dialog.showModal();
-    list.scrollTop = resume ? scrollTop : 0;
   }
   async function change(method, values = {}) {
     if (saving) return;
@@ -379,7 +337,6 @@ function createTaskGroupUi() {
     await closeModalBeforeTransition($("todoDialog"));
     await open("", { monthDate });
   });
-  $("editTaskGroup").onclick = () => { showFields(form.hidden); if (!form.hidden) form.elements.title.focus(); };
   $("addTaskGroupMember").onclick = () => {
     const group = groups().find(item => item.id === editing?.id);
     if (group && inContext(group)) taskDragActions.chooseTodo(group);
@@ -393,7 +350,7 @@ function createTaskGroupUi() {
     const values = Object.fromEntries(new FormData(form));
     return run(() => change(editing ? "PUT" : "POST", { ...values, urgent: form.elements.urgent.checked }));
   };
-  dialog.addEventListener("close", () => { if (!suspended) restoreDay(); });
+  dialog.addEventListener("close", restoreDay);
   async function resumeLink() {
     const url = new URL(location.href);
     const id = url.searchParams.get("group");
@@ -412,5 +369,5 @@ function createTaskGroupUi() {
       render(); saveOfflineSnapshotSoon();
     } finally { finishTodoMutation(); }
   }
-  return { board, header, card, currentGroupId, calendarProjection, projectCalendarTodos, calendarCards, appendMonthCard, moveDate, searchGroups, fillOwners, refreshList, reveal, open: id => run(() => open(id)), resumeLink };
+  return { board, header, card, currentGroupId, calendarProjection, projectCalendarTodos, calendarCards, appendMonthCard, moveDate, searchGroups, fillOwners, reveal, open: id => run(() => open(id)), resumeLink };
 }

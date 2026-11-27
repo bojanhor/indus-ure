@@ -1801,7 +1801,7 @@
     .month-group-members .day-timeline-event-title { font-size: 11px; }
     .month-group-members .task-group-event-meta, .month-group-empty { font-size: 10px; }
     .month-group-empty { padding: 4px; color: var(--muted); }
-    #taskGroupDialog [hidden], #taskGroupEvents:empty { display: none; }
+    #taskGroupDialog [hidden] { display: none; }
     #todoDragActions {
       position: fixed;
       inset-inline: 0;
@@ -1850,25 +1850,9 @@
     #taskGroupForm input:not([type="checkbox"]) { min-height: 42px; }
     #taskGroupForm .todo-form-option { margin: 0; }
     #taskGroupDialog .modal-head-actions svg { width: 19px; height: 19px; }
-    #taskGroupEvents { display: grid; gap: 5px; max-height: 35vh; overflow: auto; padding: 14px 20px; }
-    #taskGroupEvents .task-group-event-link {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) min(44%, 13rem);
-      align-items: start;
-      column-gap: 18px;
-      padding: 9px 12px;
-      min-height: 42px;
-      cursor: pointer;
-    }
-    #taskGroupEvents .task-group-event-link.urgent { border-left-color: #d93025 !important; }
-    .task-group-event-heading:only-child { grid-column: 1 / -1; }
-    #taskGroupEvents .task-group-event-meta { margin: 0; }
+    .month-group-members .task-group-event-link.urgent { border-left-color: #d93025 !important; }
     .task-group-event-when { display: block; font-variant-numeric: tabular-nums; }
     .task-group-event-client { display: block; }
-    @media (max-width: 400px) {
-      #taskGroupEvents { padding-inline: 12px; }
-      #taskGroupEvents .task-group-event-link { grid-template-columns: minmax(0, 1fr); row-gap: 3px; }
-    }
     .todo-urgent-chip { background: #d93025; color: #fff; white-space: nowrap; }
     .todo-item.has-change-notice {
       border-left: 4px solid #2f9a57;
@@ -6408,7 +6392,6 @@
       <h3 id="taskGroupTitle">Nova skupina</h3>
       <div class="modal-head-actions" aria-label="Dejanja skupine">
         <button class="icon-btn" id="addTaskGroupMember" type="button" aria-label="Dodaj opravilo v skupino" title="Dodaj opravilo v skupino" hidden>+</button>
-        <button class="icon-btn" id="editTaskGroup" type="button" aria-label="Nastavitve skupine" title="Nastavitve skupine" aria-expanded="false" aria-controls="taskGroupForm" hidden></button>
         <button class="todo-modal-action danger" id="deleteTaskGroup" type="button" aria-label="Razpusti skupino" title="Razpusti skupino" hidden></button>
         <button class="todo-modal-action primary" id="saveTaskGroup" type="submit" form="taskGroupForm" aria-label="Shrani in zapri" title="Shrani in zapri">&#10003;</button>
         <button class="icon-btn" id="closeTaskGroup" type="button" aria-label="Zapri skupino" title="Zapri skupino">&times;</button>
@@ -6425,7 +6408,6 @@
         </div>
       </div>
     </form>
-    <div id="taskGroupEvents"></div>
   </dialog>
   <div id="todoDragActions" aria-hidden="true" hidden>
     <div data-todo-drag-action="trash">V koš</div>
