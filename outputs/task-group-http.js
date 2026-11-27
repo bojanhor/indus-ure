@@ -10,7 +10,15 @@ function newTaskGroupOwner(db, actor, rawOwnerId) {
   return worker.id;
 }
 
+const titleKey = title => String(title ?? "").normalize("NFC").trim().replace(/\s+/gu, " ").toLocaleLowerCase("sl");
+
 function taskGroupRecord(db, user, fields, sharedManualOrderBefore, old = null) {
+  const key = titleKey(fields.title ?? old?.title);
+  // Legacy duplicates can still be edited without renaming or be dissolved.
+  // Never create another duplicate, including via the atomic drop action.
+  if ((!old || titleKey(old.title) !== key) && (db.taskGroups || []).some(group => titleKey(group.title) === key)) {
+    throw Object.assign(new Error("Skupina s tem imenom že obstaja. Izberi drugo ime."), { status: 409 });
+  }
   const now = new Date().toISOString();
   const item = { ...(old || { id: randomUUID(), ownerId: user.id, createdAt: now }), ...fields, revision: randomUUID(), updatedAt: now };
   if (!old || old.urgent !== item.urgent) {
@@ -43,12 +51,12 @@ function createTaskGroupHttp({ requireUser, readRequestDb, readBody, sendJson, w
     if (old && body.revision !== old.revision) {
       sendJson(res, 409, { error: "Skupina se je medtem spremenila. Zapri in ponovno odpri skupino." }); return true;
     }
-    let fields;
+    let item;
     try {
-      fields = req.method === "DELETE" ? {} : groups.clean(body);
+      const fields = req.method === "DELETE" ? {} : groups.clean(body);
       if (!old && req.method === "POST") fields.ownerId = newTaskGroupOwner(db, user, body.ownerId);
+      item = taskGroupRecord(db, user, fields, sharedManualOrderBefore, old);
     } catch (error) { sendJson(res, error.status || 400, { error: error.message }); return true; }
-    const item = taskGroupRecord(db, user, fields, sharedManualOrderBefore, old);
     if (req.method === "PUT" && !groups.sameDates(old, item)) groups.freezeFollowers(db, entry);
     db.taskGroups = (db.taskGroups || []).filter(group => group.id !== id);
     if (req.method !== "DELETE") db.taskGroups.push(item);

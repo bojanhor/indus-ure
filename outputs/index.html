@@ -1763,8 +1763,8 @@
     .task-group-body:empty { display: none; }
     .task-group-body .todo-item { margin-block: 3px; }
     .task-group-card.todo-drop-target, .task-group-outside.todo-drop-target { outline: 3px solid var(--accent); outline-offset: -2px; }
-    .task-group-outside { border: 1px dashed #8da2b4; padding: 6px; border-radius: 7px; margin-block: 5px; color: var(--muted); font-size: .8rem; }
-    .todo-drag-active .task-group-outside { background: #eef2f7; }
+    .task-group-outside { display: none; border: 1px dashed #8da2b4; padding: 6px; border-radius: 7px; margin-block: 5px; color: var(--muted); font-size: .8rem; }
+    .todo-drag-from-group .task-group-outside { display: block; background: #eef2f7; }
     .task-group-cal.todo-status-color { border-left-color: var(--accent) !important; }
     .task-group-cal .task-group-folder { width: 1.2em; height: 1.2em; vertical-align: text-bottom; margin-inline-end: 3px; }
     .month-group { min-width: 0; }
@@ -4951,14 +4951,20 @@
     }
 
     .client-billing-controls {
-      grid-template-columns: minmax(120px, .65fr) minmax(120px, .65fr) minmax(180px, 1.25fr) minmax(155px, .9fr) auto;
+      grid-template-columns: minmax(12rem, 1fr) max-content minmax(9rem, 13rem) max-content;
     }
 
     .client-billing-controls > button { min-height: 42px; }
-    .report-billing-filter-options { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; }
-    .report-billing-filter-options > span { color: var(--muted); font-size: 13px; font-weight: 800; }
+    .client-billing-client, .report-billing-filter-options { display: grid; gap: 6px; min-width: 0; }
+    .report-client-search-field { position: relative; min-width: 0; }
+    .report-client-search-field input { padding-inline-end: 44px; }
+    .report-client-search-field input::-webkit-search-cancel-button { -webkit-appearance: none; }
+    .report-client-search-field .report-search-clear { position: absolute; inset-block: 3px; inset-inline-end: 3px; width: 36px; height: auto; padding: 0; }
+    .report-search-clear[hidden] { display: none; }
+    .report-billing-filter-options > span { color: var(--muted); font-size: 12px; font-weight: 700; }
+    .report-billing-filter-checks { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 14px; min-height: 42px; }
     .report-billing-filter-options label { display: inline-flex; align-items: center; gap: 5px; margin: 0; white-space: nowrap; color: var(--ink); font-size: 13px; font-weight: 750; }
-    .report-billing-filter-options input { width: 18px; height: 18px; margin: 0; accent-color: var(--accent); }
+    .report-billing-filter-options input { width: 18px; height: 18px; margin: 0; padding: 0; accent-color: var(--accent); }
 
     .client-billing-notice {
       margin: -5px 2px 0;
@@ -5825,11 +5831,11 @@
       .client-billing-intro-actions { display: flex; flex-wrap: wrap; gap: 8px; }
       .client-billing-intro .secondary { width: 100%; }
       .client-billing-intro-actions .secondary { width: auto; flex: 1 1 140px; }
-      .client-billing-controls { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+      .client-billing-controls { grid-template-columns: minmax(0, 1fr) auto; }
       .client-billing-controls .client-billing-client,
-      .client-billing-controls .client-billing-sort-control,
-      .client-billing-controls > button { grid-column: 1 / -1; }
-      .client-billing-controls .report-billing-filter-options { align-items: flex-start; }
+      .client-billing-controls .report-billing-filter-options { grid-column: 1 / -1; }
+      .client-billing-controls .report-billing-filter-checks { min-height: 32px; }
+      .client-billing-controls > #reportExportSettings { padding-inline: 9px; font-size: 13px; }
       .client-billing-client-card-head { display: grid; gap: 3px; }
       .client-billing-client-travel { grid-template-columns: 1fr; }
       .client-billing-row { grid-template-columns: 34px minmax(0, 1fr); gap: 8px; padding: 16px 0 22px; }
@@ -6287,13 +6293,19 @@
           <label class="client-billing-range-control hidden">Do
             <input id="reportTo" type="date">
           </label>
-          <label class="client-billing-client" id="reportClientControl">I&#353;&#269;i stranko
-            <input id="reportClient" type="search" autocomplete="off" placeholder="Vse stranke">
-          </label>
-          <div class="client-billing-sort-control report-billing-filter-options" id="reportBillingFilterControl">
-            <span>Prika&#382;i</span>
-            <label><input id="reportShowPending" type="checkbox"> Za obra&#269;un</label>
-            <label><input id="reportShowBilled" type="checkbox"> Prika&#382;i obra&#269;unano</label>
+          <div class="client-billing-client" id="reportClientControl">
+            <label for="reportClient">I&#353;&#269;i stranko</label>
+            <div class="report-client-search-field">
+              <input id="reportClient" type="search" autocomplete="off" placeholder="Vse stranke">
+              <button class="icon-btn report-search-clear" id="clearReportClient" type="button" aria-label="Počisti iskanje" title="Počisti iskanje" hidden>&times;</button>
+            </div>
+          </div>
+          <div class="report-billing-filter-options" id="reportBillingFilterControl" role="group" aria-labelledby="reportBillingFilterLabel">
+            <span id="reportBillingFilterLabel">Prika&#382;i</span>
+            <div class="report-billing-filter-checks">
+              <label><input id="reportShowPending" type="checkbox"> Za obra&#269;un</label>
+              <label><input id="reportShowBilled" type="checkbox"> Prika&#382;i obra&#269;unano</label>
+            </div>
           </div>
           <label class="client-billing-sort-control" id="reportClientSortControl">Razvrsti stranke
             <select id="reportClientSort">
@@ -6305,7 +6317,6 @@
               <option value="name_desc">&#381;&#8211;A</option>
             </select>
           </label>
-          <button class="secondary" id="clearReportClient" type="button">Po&#269;isti iskanje</button>
           <button class="secondary" id="reportExportSettings" type="button">Nastavitve PDF</button>
         </div>
         <p class="todo-meta client-billing-notice" id="reportBillingNotice"></p>
@@ -8109,6 +8120,7 @@ const {
     todoAssigneeIds: (...args) => todoAssigneeIds(...args),
     todoClientBillableHours: (...args) => todoClientBillableHours(...args),
     todoEventId: (...args) => todoEventId(...args),
+    waitForModalHistoryTraversal: (...args) => waitForModalHistoryTraversal(...args),
     uniqueTodosByEventId: (...args) => uniqueTodosByEventId(...args),
     withClientLookupSnapshot: (...args) => withClientLookupSnapshot(...args),
     moduleValues: {
@@ -11365,8 +11377,9 @@ function renderMonth() {
       const entries = contextEntries().filter(calendarWorkerMatches);
       // Google/ICS select() deliberately projects only the selected worker.
       // The interactive calendar must retain the API's complete assigneeIds.
-      // Month view shows group members inside the group, not as separate cards.
-      const groupedEvents = new Set((state.taskGroups || []).flatMap(group => group.eventIds));
+      // Only dated groups have a calendar card. Members of an undated group
+      // still need their own cards on the dates they are scheduled.
+      const groupedEvents = new Set((state.taskGroups || []).filter(group => group.date).flatMap(group => group.eventIds));
       const todos = calendarTodos().filter(todo => {
         if (todo._absence) return true;
         if (TaskGroups.active(todo) && groupedEvents.has(todoEventId(todo))) return false;
@@ -13419,7 +13432,7 @@ function renderTodoItems() {
       if (board?.cards.length) {
         const outside = document.createElement("div");
         outside.className = "task-group-outside";
-        outside.textContent = "Spusti za samostojno opravilo";
+        outside.textContent = "Odstrani iz skupine";
         items.appendChild(outside);
       }
       let completedGroupKey = "";
@@ -13773,7 +13786,7 @@ function clearTodoPointerDrag() {
       drag.handle.classList.remove("drag-armed");
       drag.searchPanel?.classList.remove("search-board-drag-active");
       drag.handle.classList.remove("dragging");
-      document.documentElement.classList.remove("todo-drag-active");
+      document.documentElement.classList.remove("todo-drag-active", "todo-drag-from-group");
       clearTodoDragVisuals();
       return drag;
     }
@@ -13796,6 +13809,7 @@ function activateTodoPointerDrag() {
       }
       document.documentElement.classList.add("todo-drag-active");
       const sourceRect = drag.item.getBoundingClientRect();
+      document.documentElement.classList.toggle("todo-drag-from-group", Boolean(taskGroupUi.currentGroupId(findTodoOrderItem(drag.sourceId))));
       drag.ghostElement = document.createElement("div");
       drag.ghostElement.className = "todo-drag-ghost";
       drag.ghostElement.setAttribute("aria-hidden", "true");

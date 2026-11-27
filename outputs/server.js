@@ -6154,11 +6154,10 @@ async function handleApi(req, res) {
           sendJson(res, 400, { error: "Za novo skupino vpiši ime brez drugega cilja." });
           return;
         }
-        let fields;
         try {
-          fields = { ...taskGroups.clean({ title: body.newGroupTitle }), ownerId: newTaskGroupOwner(db, user, body.newGroupOwnerId) };
+          const fields = { ...taskGroups.clean({ title: body.newGroupTitle }), ownerId: newTaskGroupOwner(db, user, body.newGroupOwnerId) };
+          destination = taskGroupRecord(db, user, fields, sharedManualOrderBefore);
         } catch (error) { sendJson(res, error.status || 400, { error: error.message }); return; }
-        destination = taskGroupRecord(db, user, fields, sharedManualOrderBefore);
         db.taskGroups = [...(previousTaskGroups || []), destination];
       }
       const result = applySharedManualTodoOrder(db, user, destination ? { ...body, targetGroupId: destination.id } : body);

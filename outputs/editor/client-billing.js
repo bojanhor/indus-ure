@@ -44,6 +44,7 @@ function createClientBilling({
   todoAssigneeIds,
   todoClientBillableHours,
   todoEventId,
+  waitForModalHistoryTraversal,
   uniqueTodosByEventId,
   withClientLookupSnapshot,
   moduleValues
@@ -524,7 +525,7 @@ function renderClientBillingRow(line) {
       const workerFields = inlineEditable && todo.status === "execution" && reportWorkerTodos(todo).length === 1
         ? `<div class="client-billing-inline-fields report-worker-labels" title="Samo za ta dogodek. Prazno polje obnovi privzeto vrednost delavca."><label>Vzdevek izvajalca<input type="text" maxlength="120" data-client-billing-inline-field="reportWorkerName" data-todo-id="${escapeHtml(todo.id)}" value="${escapeHtml(workerName || "")}"></label><label>Naziv izvajalca<input type="text" maxlength="120" data-client-billing-inline-field="reportWorkerTitle" data-todo-id="${escapeHtml(todo.id)}" value="${escapeHtml(workerTitle)}"></label></div>`
         : `<span>${escapeHtml(reportAssigneeLabel(todo))}</span>`;
-      return `<article class="client-billing-row${state.reportMovedEventIds?.has(eventId) ? " is-reassigned" : ""}">
+      return `<article class="client-billing-row${state.reportMovedEventIds?.has(eventId) ? " is-reassigned" : ""}" data-report-row-event="${escapeHtml(eventId)}">
         <div class="client-billing-selection-slot">${billSelection}${confirmOne}</div>
         <div class="client-billing-when"><strong>${todo.date ? formatDate(todo.date) : "Brez datuma"}</strong><span>${escapeHtml(time)}</span></div>
         <div class="client-billing-main">
@@ -558,7 +559,7 @@ function renderReportContent() {
       $("reportBillingFilterControl").classList.toggle("hidden", detail);
       $("reportClientSortControl").classList.toggle("hidden", detail);
       $("reportClientControl").classList.toggle("hidden", detail);
-      $("clearReportClient").classList.toggle("hidden", detail);
+      $("clearReportClient").hidden = detail || !$("reportClient").value;
       $("reportClientSort").value = reportClientSortMode();
       const summaries = detail ? [] : reportClientSummaries();
       const lines = detail ? reportTodos().map(reportTodoLine) : summaries.flatMap((summary) => summary.lines);
@@ -606,7 +607,6 @@ function renderReportContent() {
       const hasClientEmail = Boolean(String(reportClient?.email || "").trim());
       $("createReportGmailDraft").disabled = !selectedClientBillLines.length || !hasClientEmail;
       $("createReportGmailDraft").title = !selectedClientBillLines.length ? "Označi vsaj en vpis za poročilo." : (hasClientEmail ? "Ustvari Gmail osnutek brez pošiljanja." : "Za stranko v bazi ni e-poštnega naslova.");
-      $("clearReportClient").textContent = detail ? "Počisti izbor" : "Počisti iskanje";
       const summaryRows = detail ? [
         ["Zaklju\u010dene storitve", `${totals.count}`],
         [reportHoursModeLabel(), `${reportNumber(totals.hours)} h`],
@@ -1033,15 +1033,25 @@ function installReportFilterBindings1() {
     });
 }
 
+function clearReportClientQuery() {
+      window.clearTimeout(moduleValues.reportSearchRenderTimer);
+      $("reportClient").value = "";
+      state.reportOverviewFocusKey = "";
+      state.reportOverviewReturnKeys = [];
+      renderReport();
+      $("reportClient").focus({ preventScroll: true });
+    }
+
 function installClientBillingBindings1() {
     $("reportClient").addEventListener("input", () => {
       state.reportClient = "";
       state.reportClientId = "";
+      $("clearReportClient").hidden = !$("reportClient").value;
       window.clearTimeout(moduleValues.reportSearchRenderTimer);
       moduleValues.reportSearchRenderTimer = window.setTimeout(renderReport, 100);
     });
     $("reportClient").addEventListener("keydown", (event) => {
-      if (event.key === "Escape") clearClientReportSelection();
+      if (event.key === "Escape") clearReportClientQuery();
       if (event.key === "Enter") {
         event.preventDefault();
         window.clearTimeout(moduleValues.reportSearchRenderTimer);
@@ -1050,7 +1060,7 @@ function installClientBillingBindings1() {
         if (cards.length === 1) cards[0].click();
       }
     });
-    $("clearReportClient").addEventListener("click", clearClientReportSelection);
+    $("clearReportClient").addEventListener("click", clearReportClientQuery);
     $("reportBackToClients").addEventListener("click", clearClientReportSelection);
     $("reportNewEntry").addEventListener("click", () => {
       const client = reportClientSelection();
@@ -1158,7 +1168,31 @@ function installClientReportBindings1() {
         const todo = state.todos.find((item) => item.id === todoButton.dataset.todoId);
         if (!todo) return;
         const navigationIds = reportTodos().map((item) => item.id).filter(Boolean);
-        openTodoDialog(todo, { reportNavigationIds: navigationIds }).catch((error) => showNotice(error.message));
+        const eventId = todoButton.closest("[data-report-row-event]")?.dataset.reportRowEvent || todoEventId(todo);
+        const selectionKey = reportClientBillSelectionKey(reportClientSelection());
+        const selector = `[data-report-row-event="${CSS.escape(eventId)}"]`;
+        const offset = todoButton.closest(selector)?.getBoundingClientRect().top;
+        const position = window.scrollY;
+        const editor = $("todoDialog");
+        const restore = () => {
+          // Saving can replace every report row, and closing the editor also
+          // traverses its browser history entry. Restore after both.
+          void waitForModalHistoryTraversal().then(() => requestAnimationFrame(() => requestAnimationFrame(() => {
+            if (editor.open) { editor.addEventListener("close", restore, { once: true }); return; }
+            if (state.view !== "report" || reportClientBillSelectionKey(reportClientSelection()) !== selectionKey
+              || document.querySelector("dialog[open]")) return;
+            const row = $("clientDetailList").querySelector(selector);
+            const top = row && Number.isFinite(offset) ? window.scrollY + row.getBoundingClientRect().top - offset : position;
+            window.scrollTo({ top, behavior: "instant" });
+          })));
+        };
+        editor.addEventListener("close", restore, { once: true });
+        openTodoDialog(todo, { reportNavigationIds: navigationIds }).then(opened => {
+          if (!opened) editor.removeEventListener("close", restore);
+        }).catch(error => {
+          if (!editor.open) editor.removeEventListener("close", restore);
+          showNotice(error.message);
+        });
       }
     });
     $("clientDetailList").addEventListener("input", (event) => {

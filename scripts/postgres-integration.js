@@ -343,6 +343,9 @@ async function main() {
       const groupId = (await created.json()).id;
       const url = "/api/task-groups/" + groupId;
       assert.equal((await request(url, { headers: worker })).status, 404);
+      const duplicateName = await request("/api/task-groups", { method: "POST", headers: worker,
+        body: JSON.stringify({ title: " QA   ORGANIZATIONAL group " }) });
+      assert.equal(duplicateName.status, 409);
       const move = { sourceId: ids[1], targetGroupId: groupId, fromGroupId: "" };
       const moved = await request("/api/todos/reorder", { method: "POST", body: JSON.stringify(move) });
       assert.equal(moved.status, 200, await moved.text());
@@ -365,6 +368,11 @@ async function main() {
       assert.equal((await request("/api/todos/reorder", { method: "POST", headers: worker, body: JSON.stringify({
         ...createAndMove, newGroupOwnerId: "bojan"
       }) })).status, 403);
+      assert.equal((await request("/api/todos/reorder", { method: "POST", body: JSON.stringify({
+        ...createAndMove, newGroupTitle: "edited  BY member"
+      }) })).status, 409);
+      assert.equal((await other.load()).taskGroupMembers.find(member => member.id === (shared.assignmentGroupId || shared.id)).groupId, groupId);
+      check("http.duplicate_group_names_rejected_across_owners_without_moving_members");
       const dropped = await request("/api/todos/reorder", { method: "POST", body: JSON.stringify(createAndMove) });
       assert.equal(dropped.status, 200, await dropped.text());
       assert.equal((await request("/api/todos/reorder", { method: "POST", body: JSON.stringify({

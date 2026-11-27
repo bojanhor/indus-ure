@@ -131,19 +131,60 @@ test('add from an open group, verify inherited dates and detach by changing the 
   await expect(page.locator(`.day[data-date="${separate}"] .day-todo`).filter({ hasText: 'Samostojno' })).toBeVisible();
 });
 
-test('undated groups keep dated members out of the month until they leave the group', async ({ page }) => {
+test('dated members of an undated group have their own month cards and stay grouped on the board', async ({ page }) => {
+  const firstDate = '2026-11-20', secondDate = '2026-11-27';
   await login(page);
-  const todo = (await seed(page))['Samo Ibro'];
+  const todos = await seed(page);
+  const { result } = await api(page, '/api/todos', 'POST', {
+    title: 'Drug datum v skupini', status: 'open', date: secondDate, assigneeIds: ['bojan']
+  });
+  const second = result.todos.find(todo => todo.title === 'Drug datum v skupini');
   const { result: group } = await api(page, '/api/task-groups', 'POST', { title: 'Skupina brez datuma' });
-  expect((await move(page, todo.id, group.id)).status).toBe(200);
+  const members = [todos['Samo Ibro'], second, todos.Samostojno];
+  for (const todo of members) expect((await move(page, todo.id, group.id)).status).toBe(200);
   await reload(page);
-  await page.evaluate(() => { state.current = parseDate('2026-11-20'); state.calendarBrowseMonth = true; setView('calendar'); });
-  const task = page.locator('.day[data-date="2026-11-20"] .day-todo').filter({ hasText: todo.title });
-  await expect(task).toHaveCount(0);
-  await expect(page.locator(`#calendar [data-calendar-group-id="${group.id}"]`)).toHaveCount(0);
-  expect((await move(page, todo.id, '', group.id)).status).toBe(200);
+  const openMonth = () => page.evaluate(date => { state.current = parseDate(date); state.calendarBrowseMonth = true; setView('calendar'); }, firstDate);
+  await openMonth();
+  const firstCard = page.locator(`.day[data-date="${firstDate}"] .day-todo`).filter({ hasText: members[0].title });
+  const secondCard = page.locator(`.day[data-date="${secondDate}"] .day-todo`).filter({ hasText: second.title });
+  const groupCard = page.locator(`#calendar [data-calendar-group-id="${group.id}"]`);
+  await expect(firstCard).toBeVisible();
+  await expect(secondCard).toBeVisible();
+  await expect(groupCard).toHaveCount(0);
+  await expect(page.locator('#calendar .day-todo').filter({ hasText: todos.Samostojno.title })).toHaveCount(0);
+  await page.evaluate(() => { state.todoSortMode = 'manual'; setView('todos'); });
+  const boardGroup = page.locator(`.task-group-card[data-task-group-id="${group.id}"] .task-group-body`);
+  for (const todo of members) await expect(boardGroup.getByText(todo.title, { exact: true })).toBeVisible();
+  const savedGroup = (await api(page, '/api/task-groups/' + group.id)).result.group;
+  expect(new Set(savedGroup.eventIds)).toEqual(new Set(members.map(todo => todo.assignmentGroupId)));
+  expect((await api(page, '/api/task-groups/' + group.id, 'PUT', { ...savedGroup, date: firstDate, endDate: firstDate })).status).toBe(200);
   await reload(page);
-  await expect(task).toBeVisible();
+  await openMonth();
+  await expect(groupCard).toBeVisible();
+  await expect(firstCard).toHaveCount(0);
+  await expect(secondCard).toHaveCount(0);
+});
+
+test('duplicate group names are rejected on creation, rename and atomic create-and-move', async ({ page }) => {
+  await login(page);
+  const todos = await seed(page);
+  const create = (title, ownerId) => api(page, '/api/task-groups', 'POST', { title, ownerId });
+  const responses = await Promise.all([create('Žito SK', 'bojan'), create('Z\u030CITO   sk', 'ibro')]);
+  expect(responses.map(response => response.status).sort()).toEqual([200, 409]);
+  const original = responses.find(response => response.status === 200).result.id;
+  const other = (await create('Druga skupina', 'bojan')).result.id;
+  const record = id => api(page, '/api/task-groups/' + id);
+  const { result: { group } } = await record(other);
+  const rejectedRename = await api(page, '/api/task-groups/' + other, 'PUT', { ...group, title: 'žito sk' });
+  expect(rejectedRename.status).toBe(409);
+  expect((await record(other)).result.group.title).toBe('Druga skupina');
+  const source = todos.Samostojno;
+  const rejectedMove = await api(page, '/api/todos/reorder', 'POST', {
+    sourceId: source.id, fromGroupId: '', newGroupTitle: '  Žito sk  ', placement: 'after'
+  });
+  expect(rejectedMove.status).toBe(409);
+  expect((await record(original)).result.group.eventIds).toEqual([]);
+  expect((await api(page, '/api/task-groups')).result.taskGroups).toHaveLength(2);
 });
 
 test('month group arrow opens an inline list, separate from the modal, with clickable members', async ({ page }, info) => {
@@ -299,6 +340,7 @@ for (const pointer of ['mouse', 'touch']) test(`${pointer}: drag into and out of
   await group.locator('.task-group-toggle').click();
   await expect(group.locator('.task-group-body')).toBeHidden();
   await group.locator('.task-group-toggle').click();
+  await expect(page.locator('.task-group-outside')).toBeHidden();
   await page.screenshot({ path: info.outputPath('task-group-board.png') });
   await drag(page, group.locator('.task-group-body .drag-handle'), page.locator('.todo-item').filter({ has: page.getByRole('button', { name: 'Uredi opravilo: Samostojno', exact: true }) }), pointer);
   await expect(group.locator('.task-group-body')).not.toContainText('Samo Ibro');

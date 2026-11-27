@@ -58,6 +58,68 @@ test("billing search builds the directory once, keeps exact matches in overview 
   await expect(page.locator(".open-client-report")).toHaveCount(1);
 });
 
+test("billing filters give search more space and its clear icon only clears the query", async ({ page }, info) => {
+  await openFixture(page);
+  const search = page.getByRole("searchbox", { name: "Išči stranko" });
+  const sort = page.getByLabel("Razvrsti stranke");
+  const billed = page.getByRole("checkbox", { name: "Prikaži obračunano" });
+  const clear = page.getByRole("button", { name: "Počisti iskanje" });
+  expect((await search.boundingBox()).width).toBeGreaterThan((await sort.boundingBox()).width);
+  await expect(clear).toBeHidden();
+  await sort.selectOption("oldest");
+  await billed.check();
+  await search.fill("QA stranka 249");
+  await expect(page.locator(".open-client-report")).toHaveCount(1);
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    const [field, icon] = await Promise.all([search.boundingBox(), clear.boundingBox()]);
+    expect(icon.x).toBeGreaterThan(field.x);
+    expect(icon.x + icon.width).toBeLessThanOrEqual(field.x + field.width);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBeTruthy();
+    await page.screenshot({ path: info.outputPath(`billing-filters-${width}.png`) });
+  }
+  await clear.click();
+  await expect(search).toBeFocused();
+  await expect(search).toHaveValue("");
+  await expect(sort).toHaveValue("oldest");
+  await expect(billed).toBeChecked();
+  await expect(page.locator(".open-client-report")).toHaveCount(250);
+});
+
+test("saving from the client report pencil keeps the edited row at the same scroll position", async ({ page }) => {
+  await openFixture(page);
+  const id = await page.evaluate(async () => {
+    const clientName = "QA dolg obračun stranke";
+    const { client } = await api("/api/clients", { method: "POST", body: JSON.stringify({ name: clientName }) });
+    let target;
+    for (let i = 0; i < 12; i++) {
+      const title = `Preskus položaja ${String(i).padStart(2, "0")}`;
+      const { todos } = await api("/api/todos", { method: "POST", body: JSON.stringify({
+        client: clientName, clientId: client.clientId, title, status: "execution", done: true,
+        date: shiftDateKey(dateKey(new Date()), -12 + i), start: "08:00", end: "09:00", assigneeIds: ["bojan"],
+        clientKm: 2, billingKm: 2
+      }) });
+      if (i === 7) target = todos.find(todo => todo.title === title);
+    }
+    await loadAll();
+    openClientReport(clientName, client.clientId);
+    return target.id;
+  });
+  const button = page.locator(`.client-billing-edit-button[data-todo-id="${id}"]`);
+  const row = button.locator("xpath=ancestor::article");
+  await button.evaluate(button => button.scrollIntoView({ block: "center" }));
+  const offset = await row.evaluate(row => row.getBoundingClientRect().top);
+  expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(500);
+  await button.click();
+  await expect(page.locator("#todoFormTask")).toHaveValue("Preskus položaja 07");
+  await page.locator("#todoFormNotes").fill("Posodobljen opis pri preskusu položaja.");
+  await page.locator("#saveTodoDialog").click();
+  await expect(page.locator("#todoDialog")).toBeHidden();
+  await expect(row.getByRole("textbox", { name: "Opis del" })).toHaveValue("Posodobljen opis pri preskusu položaja.");
+  await expect.poll(() => row.evaluate((row, top) => Math.abs(row.getBoundingClientRect().top - top), offset)).toBeLessThan(4);
+  await expect(page.locator("#clientDetailTitle")).toHaveText("Poročilo: QA dolg obračun stranke");
+});
+
 test("search closes on blank panel space, outside clicks and Escape without swallowing results", async ({ page }) => {
   await openFixture(page);
   await page.locator("#clientSearch").fill("Menjava");

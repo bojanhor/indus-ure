@@ -70,6 +70,19 @@ test("ICS ostane samo za branje in ne zahteva Google Calendar", () => {
   assert.doesNotMatch(ics, /googleapis/i);
 });
 
+test("ICS uporablja !! za nujna opravila in skupine, brez besede NUJNO", () => {
+  const date = "2026-11-27";
+  const ics = buildCalendarIcs({
+    users: { ibro: { id: "ibro", name: "Ibro", role: "worker" } },
+    entries: [],
+    todos: [{ id: "a", assignmentGroupId: "a", title: "Servis", date, urgent: true, status: "open", syncUser: "ibro" }],
+    taskGroups: [{ id: "g", title: "Preizkus", date, urgent: true, ownerId: "ibro" }]
+  }, { userId: "ibro", combined: false });
+  assert.match(ics, /^SUMMARY:!! TODO: Servis\r?$/m);
+  assert.match(ics, /^SUMMARY:!! Skupina: Preizkus\r?$/m);
+  assert.doesNotMatch(ics, /NUJNO/i);
+});
+
 test("uvoženi dogodki niso v ICS koledarju", () => {
   const ics = buildCalendarIcs({
     entries: [],
